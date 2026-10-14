@@ -1773,6 +1773,11 @@ CWeapon::FireShotgun(CEntity *shooter, CVector *fireSource)
 		default:
 			break;
 	}
+#ifdef FIRST_PERSON
+	// Third person aim down the sights: the pellets stay tighter
+	if(shooter == FindPlayerPed() && TheCamera.UsingThirdPersonAds())
+		angleRange *= 0.6f;
+#endif
 	bool statUpdated = false;
 	float halfAngleRange = angleRange / 2.f;
 	float angleBetweenTwoShot = angleRange / (shootsAtOnce - 1.f);

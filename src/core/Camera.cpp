@@ -4096,6 +4096,13 @@ CCamera::Using1stPersonView(void)
 	return FirstPersonViewEnabled() &&
 		(Cams[ActiveCam].Mode == CCam::MODE_1STPERSON || Cams[ActiveCam].Mode == CCam::MODE_M16_1STPERSON);
 }
+
+bool
+CCamera::UsingThirdPersonAds(void)
+{
+	// Third person aim down the sights on the plain mouse camera
+	return Cams[ActiveCam].Using3rdPersonMouseCam() && Cams[ActiveCam].m_fAdsAmount > 0.5f;
+}
 #endif
 
 

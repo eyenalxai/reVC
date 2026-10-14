@@ -111,6 +111,11 @@ public:
 	float	f_rollSpeed;
 	float   m_fSyphonModeTargetZOffSet;
 	float   m_fAmountFractionObscured;
+#ifdef FIRST_PERSON
+	// Third person aim down the sights: 0.0 is stock, 1.0 is fully pulled in
+	float   m_fAdsAmount;
+	float   m_fAdsAmountSpeed;
+#endif
 	float   m_fAlphaSpeedOverOneFrame;
 	float   m_fBetaSpeedOverOneFrame;
 	float   m_fBufferedTargetBeta;
@@ -636,6 +641,7 @@ public:
 	bool UsingFirstPersonSights(void);
 	float GetFirstPersonSightsFOV(void);
 	bool Using1stPersonView(void);
+	bool UsingThirdPersonAds(void);
 #endif
 
 	// Physical camera
