@@ -46,7 +46,11 @@ an angle but is not arcade enough, and the map's narrow roads and straight
   wheel axes carry over from the left wheel to the right one exactly as before,
   and the grip request defaults to identity (scale 1.0, no slide). A drifting
   wheel skips the static entirely, so the drift never depends on it.
-- This refines ADR 0001: the drift layer is two modules now (`DriftControl`
-  for the model, `DriftFeedback` for the presentation), and the rear grip is a
-  slip-shaped curve instead of a constant cut.
+- This refines ADR 0001: the drift layer is three modules now (`DriftControl`
+  for the model, `DriftFeedback` for the presentation, `DriftTelemetry` for
+  the debug file log), and the rear grip is a slip-shaped curve instead of a
+  constant cut.
+- The debug log (`drift-telemetry.csv`) is written only while `[Drift] Debug`
+  is on. One writer thread owns the file; the frame thread only appends to a
+  buffer under a short mutex, so a capture never costs frames.
 - The feature stays off by default.

@@ -5,12 +5,12 @@
 #include "Vehicle.h"
 #include "Automobile.h"
 #include "DriftControl.h"
+#include "DriftTelemetry.h"
 
 // All drift tuning lives in this block. Times are real seconds, angles are
 // degrees, speeds are a fraction of the handling top speed (fMaxVelocity).
 #define DRIFT_ENTRY_SPEED	0.10f	// entry speed, below this the handbrake turns the car
 #define DRIFT_MIN_SPEED		0.05f	// below this the car blends back to normal grip
-#define DRIFT_ENTRY_STEER	0.15f	// steering input needed to start a drift
 #define DRIFT_TURN_YAW		45.0f	// yaw kick of a low-speed handbrake turn, degrees/s
 #define DRIFT_TURN_ENGAGE	0.1f	// rear grip ramp in of a handbrake turn
 #define DRIFT_GRIP_CUTOFF	0.22f	// rear grip at full effect, 1.0 = original handling
@@ -41,7 +41,6 @@
 #define DRIFT_BOOST_MAX		0.25f	// stacked boosts stop at 1.25x top speed
 #define DRIFT_BOOST_PUSH	0.8f	// boost acceleration, fraction of top speed per second
 #define DRIFT_BOOST_DRAIN	0.04f	// boost level that drains per second
-#define DRIFT_TICK_RATE		50.0f	// game ticks per second; turn speed is per tick
 
 // The readout mirrors the player's drift for the debug menu (see re3.cpp).
 float gDriftDebugSlip;	// slip angle, degrees
@@ -136,6 +135,7 @@ CDriftControl::UpdateTargetAngle(CAutomobile *car, float dt)
 			return true;
 		}
 		m_bHandbrakeTurn = false;
+		CDriftTelemetry::Event(car, this, "PROMOTE");
 	}
 
 	// Torque balancing: the drift holds a target slip angle. Steering
@@ -239,23 +239,48 @@ CDriftControl::StartRecover(void)
 	m_fDriftTime = 0.0f;
 }
 
+const char *
+CDriftControl::GetPhaseName(eDriftPhase phase)
+{
+	static const char *names[] = { "INACTIVE", "ENGAGE", "DRIFT", "RECOVER" };
+	return names[phase];
+}
+
+float
+CDriftControl::GetSlipAngleDeg(void)
+{
+	return RADTODEG(m_fSlipAngle);
+}
+
+float
+CDriftControl::GetTargetSlipDeg(void)
+{
+	return RADTODEG(m_fTargetSlip);
+}
+
+float
+CDriftControl::GetYawRateDeg(CAutomobile *car)
+{
+	return RADTODEG(DotProduct(car->m_vecTurnSpeed, car->GetUp()) * DRIFT_TICK_RATE);
+}
+
 void
 CDriftControl::PrintDebugState(CAutomobile *car)
 {
-	static const char *phases[] = { "INACTIVE", "ENGAGE", "DRIFT", "RECOVER" };
 	char buf[128];
 
 	float fMaxVelocity = GetMaxSpeed(car);
 
-	gDriftDebugSlip = RADTODEG(m_fSlipAngle);
-	gDriftDebugTarget = RADTODEG(m_fTargetSlip);
-	gDriftDebugYaw = RADTODEG(DotProduct(car->m_vecTurnSpeed, car->GetUp()) * DRIFT_TICK_RATE);
+	gDriftDebugSlip = GetSlipAngleDeg();
+	gDriftDebugTarget = GetTargetSlipDeg();
+	gDriftDebugYaw = GetYawRateDeg(car);
 	gDriftDebugCharge = m_fDriftTime;
 	gDriftDebugBoost = m_fBoostLevel;
 	gDriftDebugSpeed = (car->m_vecMoveSpeed.Magnitude() - m_fEntrySpeed)/fMaxVelocity;
 
 	sprintf(buf, "Drift %-8s%s slip %.1f/%.1f yaw %.0f charge %.2f boost %.2f speed %+.2f",
-		phases[m_Phase], m_bHandbrakeTurn ? " turn" : "",
+		GetPhaseName(m_Phase), m_bHandbrakeTurn ? " turn" : "",
+
 		gDriftDebugSlip, gDriftDebugTarget, gDriftDebugYaw, gDriftDebugCharge, gDriftDebugBoost, gDriftDebugSpeed);
 	CDebug::PrintAt(buf, 2, 5);
 }
@@ -282,9 +307,12 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 	// pushing after the handbrake is released.
 	ApplyBoost(car, dt);
 
-	// The readout shows the live drift state while it is on (see re3.cpp).
-	if(gDriftDebug)
+	// The readout shows the live drift state while it is on (see re3.cpp);
+	// the telemetry records it to a file (see DriftTelemetry.h).
+	if(gDriftDebug){
 		PrintDebugState(car);
+		CDriftTelemetry::Tick(car, this);
+	}
 
 	// The drift pauses while the car is in the air.
 	if(!onGround && m_Phase != DRIFT_PHASE_INACTIVE)
@@ -348,8 +376,16 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 		bool tooSlow = !m_bHandbrakeTurn && fwdSpeed < DRIFT_MIN_SPEED*fMaxVelocity;
 		if(!handbrake || tooSlow || deadStop){
 			// A charged drift gives its boost when the handbrake is released.
-			if(!handbrake)
+			if(!handbrake){
+				char event[32];
 				EndDrift();
+				sprintf(event, "RELEASE %.2f", m_fDriftTime);
+				CDriftTelemetry::Event(car, this, event);
+			}else if(tooSlow){
+				CDriftTelemetry::Event(car, this, "SLOW");
+			}else{
+				CDriftTelemetry::Event(car, this, "STOP");
+			}
 			StartRecover();
 		}else{
 			// Only a real slide charges the boost.
@@ -357,6 +393,7 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 				m_fDriftTime += dt;
 			if(!UpdateTargetAngle(car, dt)){
 				// The counter flick unwound the angle: the drift is over.
+				CDriftTelemetry::Event(car, this, "FLICK");
 				EndDrift();
 				StartRecover();
 			}else{
