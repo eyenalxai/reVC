@@ -77,10 +77,10 @@
 #define DISTANCE_BETWEEN_CAR_AND_DEAD_PED (6.0f)
 #define PROBABILITY_OF_PASSENGER_IN_VEHICLE (0.125f)
 
-#define ONSCREEN_DESPAWN_RANGE (200.0f)
-#define MINIMAL_DISTANCE_TO_SPAWN_ONSCREEN (160.0f)
+#define ONSCREEN_DESPAWN_RANGE (280.0f)
+#define MINIMAL_DISTANCE_TO_SPAWN_ONSCREEN (220.0f)
 #define REQUEST_ONSCREEN_DISTANCE ((ONSCREEN_DESPAWN_RANGE + MINIMAL_DISTANCE_TO_SPAWN_ONSCREEN) / 2)
-#define OFFSCREEN_DESPAWN_RANGE (80.0f)
+#define OFFSCREEN_DESPAWN_RANGE (120.0f)
 #define EXTENDED_RANGE_DESPAWN_MULTIPLIER (1.5f)
 
 bool CCarCtrl::bMadDriversCheat;
@@ -116,7 +116,7 @@ CCarCtrl::GenerateRandomCars()
 		CountDownToCarsAtStart = 2;
 		return;
 	}
-	if (NumRandomCars < 45){
+	if (NumRandomCars < 80){
 		if (CountDownToCarsAtStart == 0)
 			GenerateOneRandomCar();
 		else if (--CountDownToCarsAtStart == 0) {

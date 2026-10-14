@@ -633,8 +633,8 @@ bool LoadINISettings()
 	// Fetched in above block, but needs evaluation
 #ifdef PED_CAR_DENSITY_SLIDERS
 	// A stale reVC.ini value above the new slider tops would keep the old pool pressure
-	CIniFile::PedNumberMultiplier = Clamp(CIniFile::PedNumberMultiplier, 0.2f, 2.76f);
-	CIniFile::CarNumberMultiplier = Clamp(CIniFile::CarNumberMultiplier, 0.2f, 2.6f);
+	CIniFile::PedNumberMultiplier = Clamp(CIniFile::PedNumberMultiplier, 0.2f, 3.4f);
+	CIniFile::CarNumberMultiplier = Clamp(CIniFile::CarNumberMultiplier, 0.2f, 3.4f);
 	CPopulation::MaxNumberOfPedsInUse = DEFAULT_MAX_NUMBER_OF_PEDS * CIniFile::PedNumberMultiplier;
 	CPopulation::MaxNumberOfPedsInUseInterior = DEFAULT_MAX_NUMBER_OF_PEDS_INTERIOR * CIniFile::PedNumberMultiplier;
 	CCarCtrl::MaxNumberOfCarsInUse = DEFAULT_MAX_NUMBER_OF_CARS * CIniFile::CarNumberMultiplier;
