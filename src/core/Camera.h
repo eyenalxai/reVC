@@ -345,6 +345,9 @@ public:
 	bool m_bJustCameOutOfGarage;
 	bool m_bJustInitalised;
 	bool m_bJust_Switched;
+#ifdef FIRST_PERSON
+	bool m_bLastTargetWasVehicle;
+#endif
 	bool m_bLookingAtPlayer;
 	bool m_bLookingAtVector;
 	bool m_bMoveCamToAvoidGeom;

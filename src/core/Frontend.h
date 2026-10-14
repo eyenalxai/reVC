@@ -640,6 +640,11 @@ public:
 	uint8 m_PrefsAllowNastyGame;
 	int8 m_PrefsMP3BoostVolume;
 	int8 m_ControlMethod;
+#ifdef FIRST_PERSON
+	// Kept in the menu manager; CCamera::Init memsets the camera.
+	bool m_bFirstPersonView;
+	int8 m_nFirstPersonFOV;
+#endif
 	int32 m_nPrefsVideoMode;
 	int32 m_nDisplayVideoMode;
 	int32 m_nMouseTempPosX;

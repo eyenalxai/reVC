@@ -1471,6 +1471,9 @@ Correr
 [FEC_FPC]
 Cámara en primera persona
 
+[FEC_FOV]
+Campo de visión
+
 [FEC_LL]
 Mirar a la izquierda
 
