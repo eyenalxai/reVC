@@ -1238,6 +1238,9 @@ CPed::ClearAimFlag(void)
 #ifdef FREE_CAM
 		((CPlayerPed*)this)->m_bFreeAimActive = false;
 #endif
+#ifdef FIRST_PERSON
+		((CPlayerPed*)this)->m_bFirstPersonAimActive = false;
+#endif
 	}
 }
 
