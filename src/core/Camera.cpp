@@ -4026,6 +4026,16 @@ CCamera::Using1stPersonWeaponMode(void)
 	return false;
 }
 
+#ifdef FIRST_PERSON
+bool
+CCamera::Using1stPersonView(void)
+{
+	// First person view: the plain on-foot view or the view down the sights
+	return FrontEndMenuManager.m_bFirstPersonView &&
+		(Cams[ActiveCam].Mode == CCam::MODE_1STPERSON || Cams[ActiveCam].Mode == CCam::MODE_M16_1STPERSON);
+}
+#endif
+
 
 void
 CCamera::SetRwCamera(RwCamera *cam)

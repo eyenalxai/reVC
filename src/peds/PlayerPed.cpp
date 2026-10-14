@@ -1807,7 +1807,11 @@ CPlayerPed::ProcessControl(void)
 					if (padUsed)
 						PlayerControlSniper(padUsed);
 
-				} else if (TheCamera.Cams[0].Using3rdPersonMouseCam()
+				} else if ((TheCamera.Cams[0].Using3rdPersonMouseCam()
+#ifdef FIRST_PERSON
+					|| TheCamera.Using1stPersonView()
+#endif
+					)
 #ifdef FREE_CAM
 					&& !CCamera::bFreeCam
 #endif

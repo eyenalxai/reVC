@@ -1447,7 +1447,11 @@ CPed::CalculateNewVelocity(void)
 		m_moved = m_moved * (1 / 100.0f);
 	}
 
-	if ((!TheCamera.Cams[TheCamera.ActiveCam].GetWeaponFirstPersonOn() && !TheCamera.Cams[0].Using3rdPersonMouseCam())
+	if ((!TheCamera.Cams[TheCamera.ActiveCam].GetWeaponFirstPersonOn() && !TheCamera.Cams[0].Using3rdPersonMouseCam()
+#ifdef FIRST_PERSON
+		&& !TheCamera.Using1stPersonView()
+#endif
+		)
 		|| FindPlayerPed() != this || !CanStrafeOrMouseControl()) {
 
 		if (FindPlayerPed() == this)
@@ -3908,6 +3912,11 @@ CPed::CanStrafeOrMouseControl(void)
 #ifdef FREE_CAM
 	if (CCamera::bFreeCam)
 		return false;
+#endif
+#ifdef FIRST_PERSON
+	// First person view: the player walks in the first person weapon mode
+	if (TheCamera.Using1stPersonView() && m_nPedState == PED_SNIPER_MODE)
+		return true;
 #endif
 	return m_nPedState == PED_NONE || m_nPedState == PED_IDLE || m_nPedState == PED_FLEE_POS || m_nPedState == PED_FLEE_ENTITY ||
 		m_nPedState == PED_ATTACK || m_nPedState == PED_FIGHT || m_nPedState == PED_AIM_GUN || m_nPedState == PED_JUMP || m_nPedState == PED_ANSWER_MOBILE;
