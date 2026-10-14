@@ -27,6 +27,15 @@ street speed and not only at high speed. On exit, the same rotation bleeds the
 slip that is left towards zero. It rotates the velocity and never changes its
 length.
 
+## Drift turn
+
+The drift's own turn of the whole car. While a drift grips, the nose and the
+direction of travel rotate together, so the path curves and the slip stays at
+the hold angle. The rate follows the target angle (60 degrees per second at the
+full angle), is signed by the entry direction, and fades with the grip cut. A
+faster drift takes a wider corner: the path radius is the speed over the turn
+rate.
+
 ## Handbrake turn
 
 A turn on the handbrake below the entry speed. The rear grip is cut hard and a

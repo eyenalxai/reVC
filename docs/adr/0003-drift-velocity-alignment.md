@@ -53,3 +53,7 @@ rotating.
   boost charge ends at the release, so the window does not change the boost.
 - The log's km/h column now multiplies the per-tick velocity by the tick rate
   (VICE-52), so the next capture can pair a real speed with its frac value.
+- ADR 0004 adds the drift's own turn rate, the path turn. It replaces the
+  angle-only statement of Decision 1 about the direction of travel: the nose
+  and the velocity now turn together while the alignment holds the slip at the
+  target, so the drift carries the corner instead of only holding the angle.
