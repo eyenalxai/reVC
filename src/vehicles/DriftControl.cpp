@@ -17,7 +17,7 @@
 #define DRIFT_GRIP_STICKY	5.0f	// below this slip angle the rear tyre is sticky
 #define DRIFT_GRIP_SLIDE	15.0f	// above this slip angle the rear tyre is let go
 #define DRIFT_ENGAGE_TIME	0.3f	// rear grip ramp in
-#define DRIFT_RELEASE_TIME	0.4f	// rear grip ramp out
+#define DRIFT_RELEASE_TIME	0.6f	// rear grip ramp out
 #define DRIFT_BLEND_TIME	0.5f	// ramp out when the drift got too slow
 #define DRIFT_HOLD_ANGLE	20.0f	// drift angle the model holds on entry
 #define DRIFT_ANGLE_RATE	90.0f	// steering integration of the hold angle, degrees/s
@@ -28,11 +28,15 @@
 #define DRIFT_YAW_MAX		1.5f	// maximum yaw rate, rad/s
 #define DRIFT_YAW_ACCEL		6.0f	// yaw rate ramp, rad/s^2
 #define DRIFT_ALIGN_GAIN	2.0f	// aligning pull past the slip cap, 1/s
+#define DRIFT_VEL_ALIGN_GAIN	3.0f	// slip error to velocity alignment, 1/s
+#define DRIFT_VEL_ALIGN_RATE	120.0f	// cap on the velocity alignment, degrees/s
 #define DRIFT_STEERLOCK_MULT	1.3f	// front wheel lock while drifting
 #define DRIFT_SPEED_HOLD	1.0f	// fraction of the lost speed given back per second
-#define DRIFT_RECOVER_TIME	0.3f	// seconds of exit alignment after the handbrake
+#define DRIFT_RECOVER_TIME	0.6f	// seconds of exit alignment after the handbrake
 #define DRIFT_RECOVER_ALIGN	4.0f	// exit counter-yaw per radian of slip, 1/s
 #define DRIFT_RECOVER_SLIP	2.0f	// below this remaining slip the assist stops
+#define DRIFT_BLEED_GAIN	4.0f	// remaining slip to the exit bleed, 1/s
+#define DRIFT_BLEED_RATE	90.0f	// cap on the exit bleed, degrees/s
 #define DRIFT_SLIP_MIN		10.0f	// degrees of slide that charge the boost
 #define DRIFT_TIER1_TIME	0.6f	// drift seconds for boost tier 1
 #define DRIFT_TIER2_TIME	1.2f	// drift seconds for boost tier 2
@@ -186,6 +190,55 @@ CDriftControl::UpdateYawControl(CAutomobile *car, float dt)
 	yawTargetRate -= DRIFT_ALIGN_GAIN*gDriftAssist * slipOverCap;
 
 	ApplyYawRate(car, yawTargetRate, dt);
+}
+
+// Rotates the car's velocity by angle radians around its up axis. The part of
+// the velocity along the up axis does not turn, so the length is exact: the
+// drift steers the direction of travel and never pays speed for it.
+void
+CDriftControl::RotateVelocity(CAutomobile *car, float angle)
+{
+	CVector up = car->GetUp();
+	CVector v = car->m_vecMoveSpeed;
+	CVector alongUp = DotProduct(v, up) * up;
+	float c = Cos(angle);
+	float s = Sin(angle);
+
+	v -= alongUp;
+	car->m_vecMoveSpeed = alongUp + v*c + CrossProduct(up, v)*s;
+}
+
+// Steers the velocity towards the slip angle the drift holds. The yaw
+// controller turns the nose; this turns the velocity, so the hold angle is
+// reached at street speed and not only at the top end.
+void
+CDriftControl::AlignVelocity(CAutomobile *car, float dt)
+{
+	// A handbrake turn only turns the car; the angle model is off.
+	if(m_bHandbrakeTurn)
+		return;
+
+	SteerVelocity(car, m_fSlipAngle - m_fTargetSlip,
+	              DRIFT_VEL_ALIGN_GAIN, DEGTORAD(DRIFT_VEL_ALIGN_RATE), dt);
+}
+
+// Bleeds the slip that is left towards zero during the exit, on top of the
+// counter-yaw. It keeps a normal release from growing the slide and hooks the
+// car up inside the recovery window.
+void
+CDriftControl::BleedSlip(CAutomobile *car, float dt)
+{
+	SteerVelocity(car, m_fSlipAngle, DRIFT_BLEED_GAIN, DEGTORAD(DRIFT_BLEED_RATE), dt);
+}
+
+// One bounded velocity rotation from an error. The rate follows the error with
+// a cap and fades with the strength and the grip cut, so the entry and the
+// exit stay smooth; a wild release can still spin.
+void
+CDriftControl::SteerVelocity(CAutomobile *car, float error, float gain, float rateCap, float dt)
+{
+	float rate = Clamp(error*gain, -rateCap, rateCap);
+	RotateVelocity(car, rate*gDriftStrength*m_fGripCut*dt);
 }
 
 void
@@ -356,9 +409,13 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 		else
 			m_fGripCut -= dt/DRIFT_RELEASE_TIME;
 		// Exit alignment: a counter-yaw proportional to the slip that is left,
-		// over the first moments of the recovery, on top of the grip ramp.
-		if(m_fPhaseTimer < DRIFT_RECOVER_TIME && Abs(m_fSlipAngle) > DEGTORAD(DRIFT_RECOVER_SLIP))
-			ApplyYawRate(car, -DRIFT_RECOVER_ALIGN*gDriftAssist*m_fSlipAngle, dt);
+		// plus the velocity bleed that brings the direction of travel back to
+		// the nose, over the first moments of the recovery.
+		if(m_fPhaseTimer < DRIFT_RECOVER_TIME){
+			if(Abs(m_fSlipAngle) > DEGTORAD(DRIFT_RECOVER_SLIP))
+				ApplyYawRate(car, -DRIFT_RECOVER_ALIGN*gDriftAssist*m_fSlipAngle, dt);
+			BleedSlip(car, dt);
+		}
 		if(m_fGripCut <= 0.0f){
 			m_fGripCut = 0.0f;
 			m_bHandbrakeTurn = false;
@@ -398,6 +455,7 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 				StartRecover();
 			}else{
 				UpdateYawControl(car, dt);
+				AlignVelocity(car, dt);
 				HoldDriftSpeed(car, dt);
 			}
 		}
