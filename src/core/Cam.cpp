@@ -88,6 +88,10 @@ CCam::Init(void)
 	m_fBufferedTargetBeta = 0.0f;
 	m_fBufferedTargetOrientation = 0.0f;
 	m_fBufferedTargetOrientationSpeed = 0.0f;
+#ifdef FIRST_PERSON
+	m_fAdsAmount = 0.0f;
+	m_fAdsAmountSpeed = 0.0f;
+#endif
 	m_fDimensionOfHighestNearCar = 0.0f;
 }
 
@@ -1343,6 +1347,13 @@ int16 nFadeControlThreshhold = 45;
 float fDefaultAlphaOrient = -0.22f;
 float fMouseAvoidGeomReturnRate = 0.92f;
 
+#ifdef FIRST_PERSON
+// Third person aim down the sights: while the player aims, the camera pulls
+// in and the view zooms in a little, like a modern third person shooter
+float fAdsDistanceScale = 0.6f;
+float fAdsFOVScale = 0.8f;
+#endif
+
 #ifdef GTA_PC_CONTROLS
 void
 CCam::Process_FollowPedWithMouse(const CVector &CameraTarget, float TargetOrientation, float, float)
@@ -1356,13 +1367,39 @@ CCam::Process_FollowPedWithMouse(const CVector &CameraTarget, float TargetOrient
 	float CamDist;
 	CColPoint colPoint;
 	CEntity *entity;
+#ifdef FIRST_PERSON
+	float AdsDistScale = 1.0f;
+	float AdsFOVScale = 1.0f;
+#endif
 
 	if(ResetStatics){
 		Rotating = false;
 		m_bCollisionChecksOn = true;
 		CPad::GetPad(0)->ClearMouseHistory();
+#ifdef FIRST_PERSON
+		m_fAdsAmount = 0.0f;
+		m_fAdsAmountSpeed = 0.0f;
+#endif
 		ResetStatics = false;
 	}
+
+#ifdef FIRST_PERSON
+	// Third person aim down the sights: Target pulls the camera in and zooms
+	// the view a little. The first person view and the weapon cameras have
+	// their own sights, and the stock lock-on camera modes do not change.
+	bool AdsAiming = false;
+	if(Mode == MODE_FOLLOWPED && !TheCamera.FirstPersonViewEnabled() &&
+	   !TheCamera.Using1stPersonView() && !TheCamera.Using1stPersonWeaponMode() &&
+	   CPad::GetPad(0)->GetTarget()){
+		CPed *TargetPed = (CPed*)CamTargetEntity;
+		AdsAiming = TargetPed->m_nMoveState != PEDMOVE_SPRINT &&
+			CWeaponInfo::GetWeaponInfo(TargetPed->GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_CANAIM);
+	}
+	WellBufferMe(AdsAiming ? 1.0f : 0.0f, &m_fAdsAmount, &m_fAdsAmountSpeed, 0.02f, 0.005f, false);
+	AdsDistScale = 1.0f - (1.0f - fAdsDistanceScale)*m_fAdsAmount;
+	AdsFOVScale = 1.0f - (1.0f - fAdsFOVScale)*m_fAdsAmount;
+	FOV *= AdsFOVScale;
+#endif
 
 	bool OnTrain = FindPlayerVehicle() && FindPlayerVehicle()->IsTrain();
 
@@ -1433,6 +1470,9 @@ CCam::Process_FollowPedWithMouse(const CVector &CameraTarget, float TargetOrient
 		CamDist = fBaseDist + Cos(Min(Alpha*fFalloff, HALFPI))*fAngleDist;
 	else
 		CamDist = fBaseDist + Cos(Alpha)*fAngleDist;
+#ifdef FIRST_PERSON
+	CamDist *= AdsDistScale;
+#endif
 
 	if(TheCamera.m_bUseTransitionBeta)
 		Beta = m_fTransitionBeta;
