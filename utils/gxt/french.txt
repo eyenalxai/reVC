@@ -1733,6 +1733,9 @@ Courir
 [FEC_FPC]
 Vue subjective
 
+[FEC_FOV]
+Champ de vision
+
 [FEC_LL]
 Rergarder à gauche
 
