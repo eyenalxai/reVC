@@ -45,7 +45,8 @@ sem_t*
 re3_sem_open(void)
 {
 	sem_t* sem = (sem_t*)malloc(sizeof(sem_t));
-	if (sem_init(sem, 0, 1) == -1) {
+	if (sem == nil || sem_init(sem, 0, 1) == -1) {
+		free(sem);
 		sem = SEM_FAILED;
 	}
 
