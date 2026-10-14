@@ -20,6 +20,7 @@
 #include "Glass.h"
 #include "Antennas.h"
 #include "Skidmarks.h"
+#include "DriftFeedback.h"
 #include "WindModifiers.h"
 #include "Shadows.h"
 #include "PointLights.h"
@@ -1761,6 +1762,10 @@ CAutomobile::PreRender(void)
 	int i, j, n;
 	CVehicleModelInfo *mi = (CVehicleModelInfo*)CModelInfo::GetModelInfo(GetModelIndex());
 
+	// Drift feedback is player-only, like the drift itself.
+	if(GetStatus() == STATUS_PLAYER)
+		CDriftFeedback::Update(this, CTimer::GetTimeStepInSeconds());
+
 	if(GetModelIndex() == MI_RHINO && m_aCarNodes[CAR_WINDSCREEN]){
 		// Rotate Rhino turret
 		CMatrix m;
@@ -3026,6 +3031,10 @@ CAutomobile::Render(void)
 		}
 	}
 
+	// The drift lean turns the rendered model only; the physics matrix comes
+	// back right after the draw call.
+	bool bDriftLean = CDriftFeedback::BeginLean(this);
+
 	if(CVehicle::bWheelsOnlyCheat){
 		RpAtomicRender((RpAtomic*)GetFirstObject(m_aCarNodes[CAR_WHEEL_RB]));
 		RpAtomicRender((RpAtomic*)GetFirstObject(m_aCarNodes[CAR_WHEEL_LB]));
@@ -3037,6 +3046,9 @@ CAutomobile::Render(void)
 			RpAtomicRender((RpAtomic*)GetFirstObject(m_aCarNodes[CAR_WHEEL_LM]));
 	}else
 		CEntity::Render();
+
+	if(bDriftLean)
+		CDriftFeedback::EndLean();
 }
 
 int32
