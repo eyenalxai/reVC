@@ -901,6 +901,10 @@ CAutomobile::ProcessControl(void)
 			}
 		}
 
+		// Drift handling is player-only (see DriftControl.h)
+		if(FindPlayerVehicle() == this)
+			m_DriftControl.Update(this, CTimer::GetTimeStep());
+
 		float traction;
 		if(GetStatus() == STATUS_PHYSICS)
 			traction = 0.004f * m_fTraction;
@@ -1064,12 +1068,16 @@ CAutomobile::ProcessControl(void)
 			float rearBrake = brake;
 			float rearTraction = traction;
 			if(bIsHandbrakeOn){
+				// In a drift the rear grip cutoff takes over; the handbrake's
+				// lock must not act as a brake anymore.
+				if(!m_DriftControl.IsDrifting()){
 #ifdef FIX_BUGS
-				// Not sure if this is needed, but brake usually has timestep as a factor
-				rearBrake = 20000.0f * CTimer::GetTimeStepFix();
+					// Not sure if this is needed, but brake usually has timestep as a factor
+					rearBrake = 20000.0f * CTimer::GetTimeStepFix();
 #else
-				rearBrake = 20000.0f;
+					rearBrake = 20000.0f;
 #endif
+				}
 				if(fwdSpeed > 0.1f && pHandling->Flags & HANDLING_HANDBRAKE_TYRE){
 					m_fTireTemperature += 0.005*CTimer::GetTimeStep();
 					if(m_fTireTemperature > 2.0f)
@@ -1083,6 +1091,9 @@ CAutomobile::ProcessControl(void)
 			}else if(m_fTireTemperature > 1.0f){
 				rearTraction *= m_fTireTemperature;
 			}
+
+			float rearGripScale = m_DriftControl.GetRearGripScale();
+			bool bDrifting = m_DriftControl.IsDrifting();
 
 			if(m_aWheelTimer[CARWHEEL_REAR_LEFT] > 0.0f){
 				if(mod_HandlingManager.HasRearWheelDrive(pHandling->nIdentifier))
@@ -1106,21 +1117,21 @@ CAutomobile::ProcessControl(void)
 						contactSpeeds[CARWHEEL_REAR_LEFT], contactPoints[CARWHEEL_REAR_LEFT],
 						m_nWheelsOnGround, fThrust,
 						rearBrake*brakeBiasRear,
-						adhesion*tractionBiasRear*Damage.m_fWheelDamageEffect,
+						adhesion*tractionBiasRear*rearGripScale*Damage.m_fWheelDamageEffect,
 						CARWHEEL_REAR_LEFT,
 						&m_aWheelSpeed[CARWHEEL_REAR_LEFT],
 						&WheelState[CARWHEEL_REAR_LEFT],
-						WHEEL_STATUS_BURST);
+						WHEEL_STATUS_BURST, bDrifting);
 				else
 					ProcessWheel(wheelFwd, wheelRight,
 						contactSpeeds[CARWHEEL_REAR_LEFT], contactPoints[CARWHEEL_REAR_LEFT],
 						m_nWheelsOnGround, fThrust,
 						rearBrake*brakeBiasRear,
-						adhesion*tractionBiasRear,
+						adhesion*tractionBiasRear*rearGripScale,
 						CARWHEEL_REAR_LEFT,
 						&m_aWheelSpeed[CARWHEEL_REAR_LEFT],
 						&WheelState[CARWHEEL_REAR_LEFT],
-						WHEEL_STATUS_OK);
+						WHEEL_STATUS_OK, bDrifting);
 			}
 
 #ifdef FIX_BUGS
@@ -1151,21 +1162,21 @@ CAutomobile::ProcessControl(void)
 						contactSpeeds[CARWHEEL_REAR_RIGHT], contactPoints[CARWHEEL_REAR_RIGHT],
 						m_nWheelsOnGround, fThrust,
 						rearBrake*brakeBiasRear,
-						adhesion*tractionBiasRear*Damage.m_fWheelDamageEffect,
+						adhesion*tractionBiasRear*rearGripScale*Damage.m_fWheelDamageEffect,
 						CARWHEEL_REAR_RIGHT,
 						&m_aWheelSpeed[CARWHEEL_REAR_RIGHT],
 						&WheelState[CARWHEEL_REAR_RIGHT],
-						WHEEL_STATUS_BURST);
+						WHEEL_STATUS_BURST, bDrifting);
 				else
 					ProcessWheel(wheelFwd, wheelRight,
 						contactSpeeds[CARWHEEL_REAR_RIGHT], contactPoints[CARWHEEL_REAR_RIGHT],
 						m_nWheelsOnGround, fThrust,
 						rearBrake*brakeBiasRear,
-						adhesion*tractionBiasRear,
+						adhesion*tractionBiasRear*rearGripScale,
 						CARWHEEL_REAR_RIGHT,
 						&m_aWheelSpeed[CARWHEEL_REAR_RIGHT],
 						&WheelState[CARWHEEL_REAR_RIGHT],
-						WHEEL_STATUS_OK);
+						WHEEL_STATUS_OK, bDrifting);
 			}
 		}
 

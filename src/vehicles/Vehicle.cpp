@@ -777,7 +777,7 @@ float fBurstTyreMod = 0.13f;
 
 void
 CVehicle::ProcessWheel(CVector &wheelFwd, CVector &wheelRight, CVector &wheelContactSpeed, CVector &wheelContactPoint,
-	int32 wheelsOnGround, float thrust, float brake, float adhesion, int8 wheelId, float *wheelSpeed, tWheelState *wheelState, uint16 wheelStatus)
+	int32 wheelsOnGround, float thrust, float brake, float adhesion, int8 wheelId, float *wheelSpeed, tWheelState *wheelState, uint16 wheelStatus, bool driftSlide)
 {
 	// BUG: using statics here is probably a bad idea
 	static bool bAlreadySkidding = false;	// this is never reset
@@ -885,9 +885,16 @@ CVehicle::ProcessWheel(CVector &wheelFwd, CVector &wheelRight, CVector &wheelCon
 		}
 
 		float l = Sqrt(speedSq);
-		float tractionLoss = bAlreadySkidding ? 1.0f : pHandling->fTractionLoss;
-		right *= adhesion * tractionLoss / l;
-		fwd *= adhesion * tractionLoss / l;
+		if(driftSlide){
+			// A drifting wheel slides sideways: the sideways demand is scaled
+			// down to the tyre budget, while the forward force keeps its value,
+			// so the slide does not eat forward speed.
+			right *= adhesion / l;
+		}else{
+			float tractionLoss = bAlreadySkidding ? 1.0f : pHandling->fTractionLoss;
+			right *= adhesion * tractionLoss / l;
+			fwd *= adhesion * tractionLoss / l;
+		}
 	}
 
 	if(fwd != 0.0f || right != 0.0f){

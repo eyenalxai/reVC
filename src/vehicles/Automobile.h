@@ -5,6 +5,7 @@
 #include "DamageManager.h"
 #include "Door.h"
 #include "Skidmarks.h"
+#include "DriftControl.h"
 
 class CObject;
 
@@ -78,6 +79,7 @@ public:
 	uint8 m_nDriveWheelsOnGroundPrev;
 	float m_fGasPedalAudio;
 	tWheelState m_aWheelState[4];
+	CDriftControl m_DriftControl;	// player-only arcade drift handling
 
 	static bool m_sAllTaxiLights;
 
