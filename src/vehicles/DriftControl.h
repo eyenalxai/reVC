@@ -3,8 +3,9 @@
 
 class CAutomobile;
 
-// Arcade drift handling for the player's car. See docs/adr/0001-arcade-drift-handling.md.
-// The controller is a member of CAutomobile, but only the player's car steps it.
+// Arcade drift handling for the player's car. See docs/adr/ for the drift
+// decision records. The controller is a member of CAutomobile, but only the
+// player's car steps it.
 class CDriftControl
 {
 public:
