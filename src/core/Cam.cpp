@@ -2512,6 +2512,11 @@ CCam::Process_M16_1stPerson(const CVector &CameraTarget, float, float, float)
 
 		if(FailedTestTwelveFramesAgo)
 			RwCameraSetNearClipPlane(Scene.camera, 0.4f);
+#ifdef FIRST_PERSON
+		// The player's own body must not be clipped away by the near plane
+		if(TheCamera.Using1stPersonView())
+			RwCameraSetNearClipPlane(Scene.camera, FIRST_PERSON_BODY_NEAR_CLIP);
+#endif
 		Source -= Front*0.4f;
 
 		GetVectorsReadyForRW();
@@ -2660,6 +2665,11 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 
 		if(FailedTestTwelveFramesAgo)
 			RwCameraSetNearClipPlane(Scene.camera, 0.4f);
+#ifdef FIRST_PERSON
+		// The player's own body must not be clipped away by the near plane
+		if(TheCamera.Using1stPersonView())
+			RwCameraSetNearClipPlane(Scene.camera, FIRST_PERSON_BODY_NEAR_CLIP);
+#endif
 		Source -= Front*0.4f;
 
 		GetVectorsReadyForRW();
