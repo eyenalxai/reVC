@@ -3,6 +3,11 @@
 
 class CAutomobile;
 
+// The tick rate and the entry gate are shared with the telemetry layer (see
+// DriftTelemetry.h), so one value serves both.
+#define DRIFT_TICK_RATE		50.0f	// game ticks per second; turn speed is per tick
+#define DRIFT_ENTRY_STEER	0.15f	// steering input needed to start a drift
+
 // Arcade drift handling for the player's car. See docs/adr/ for the drift
 // decision records. The controller is a member of CAutomobile, but only the
 // player's car steps it.
@@ -37,6 +42,11 @@ public:
 	bool IsActive(void) { return m_Phase != DRIFT_PHASE_INACTIVE; }
 	float GetRearGripScale(void);
 	float GetSteerAngleMult(void);
+	// Readouts that the on-screen debug state and the telemetry file share.
+	static const char *GetPhaseName(eDriftPhase phase);
+	float GetSlipAngleDeg(void);
+	float GetTargetSlipDeg(void);
+	float GetYawRateDeg(CAutomobile *car);
 	void PrintDebugState(CAutomobile *car);
 
 private:

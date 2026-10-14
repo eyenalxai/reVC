@@ -20,8 +20,9 @@ public:
 	// rows: drift entry and exit, boost, air pause and resume, denied entry.
 	static void Tick(CAutomobile *car, CDriftControl *ctrl);
 
-	// A row with an explicit event reason, written immediately. The event
-	// text must be a token and must not contain a comma.
+	// A row with an explicit event reason, queued at once (the writer thread
+	// flushes it within the flush period). The event text is a short token
+	// with an optional detail; it must not contain a comma.
 	static void Event(CAutomobile *car, CDriftControl *ctrl, const char *event);
 };
 

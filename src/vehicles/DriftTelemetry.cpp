@@ -14,11 +14,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <time.h>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
 #include <chrono>
 #include <string>
+
+#ifdef _WIN32
+#include <direct.h>
+#define DriftTelemetryGetCwd _getcwd
+#else
+#include <unistd.h>
+#define DriftTelemetryGetCwd getcwd
+#endif
 
 // All telemetry tuning lives in this block.
 #define DRIFT_TELEMETRY_FILE		"drift-telemetry.csv"
@@ -26,8 +35,7 @@
 #define DRIFT_TELEMETRY_FLUSH_MS	250	// writer wake and flush period
 #define DRIFT_TELEMETRY_BACKLOG		(128*1024)	// backlog cap, bytes
 #define DRIFT_TELEMETRY_LINE		256	// one CSV row fits here
-#define DRIFT_TELEMETRY_TICK_RATE	50.0f	// game ticks per second, matches DRIFT_TICK_RATE
-#define DRIFT_TELEMETRY_ENTRY_STEER	0.15f	// steering gate, matches DRIFT_ENTRY_STEER
+// DRIFT_TICK_RATE and DRIFT_ENTRY_STEER come from DriftControl.h.
 
 // The two sides of the telemetry meet in one block: the game thread fills the
 // backlog, the writer thread owns the file and drains it. The block is
@@ -65,22 +73,46 @@ DriftTelemetryRevision(void)
 #endif
 }
 
-// The header block, one line at a time. The column order is fixed; the reader
-// script and the owner both depend on it.
+// The header block, one line at a time. The column order is fixed; every
+// reader of the log depends on it.
 static std::string
 DriftTelemetryHeaders(void)
 {
 	char line[DRIFT_TELEMETRY_LINE];
 	std::string headers;
+	time_t now = time(nil);
+	struct tm *local = localtime(&now);
 
 	headers += "# reVC drift telemetry\n";
-	sprintf(line, "# build %s %s %s\n", DriftTelemetryRevision(), __DATE__, __TIME__);
+	sprintf(line, "# build %s\n", DriftTelemetryRevision());
 	headers += line;
+	if(local != nil){
+		strftime(line, sizeof(line), "# session %Y-%m-%d %H:%M:%S\n", local);
+		headers += line;
+	}
 	sprintf(line, "# drift enabled=%d strength=%.2f assist=%.2f\n",
 		gDriftEnabled ? 1 : 0, gDriftStrength, gDriftAssist);
 	headers += line;
-	headers += "ms,phase,event,turn,air,hb,steer,kph,frac,slip,target,yaw,grip_cut,grip_scale,charge,boost,wheels\n";
+	headers += "ms,phase,turn,ground,handbrake,steer,kph,frac,slip,target,yaw,grip_cut,grip_scale,charge,boost,event\n";
 	return headers;
+}
+
+// The game changes its working directory during play (loading, replay saves),
+// so the file is resolved against the directory the game started in, not
+// against whatever the directory is when the first drift runs.
+static std::string
+DriftTelemetryFilePath(void)
+{
+	char cwd[512];
+
+	if(DriftTelemetryGetCwd(cwd, sizeof(cwd)) != nil){
+		std::string path(cwd);
+		if(!path.empty() && path[path.size()-1] != '/' && path[path.size()-1] != '\\')
+			path += '/';
+		path += DRIFT_TELEMETRY_FILE;
+		return path;
+	}
+	return DRIFT_TELEMETRY_FILE;
 }
 
 // Appends one finished line to the backlog. This is the only place the game
@@ -123,42 +155,38 @@ DriftTelemetryFormat(const char *format, ...)
 }
 
 // Writes one row of the current state, with the event token when there is one.
-// The angles and the speed fraction are computed exactly as PrintDebugState
-// does (see DriftControl.cpp).
+// The angles come from the model's accessors, the same ones the on-screen
+// readout uses (see DriftControl.cpp).
 static void
 DriftTelemetryRow(CAutomobile *car, CDriftControl *ctrl, const char *event)
 {
-	static const char *phases[] = { "INACTIVE", "ENGAGE", "DRIFT", "RECOVER" };
 	tDriftTelemetry *state = ms_pTelemetry;
 	float fMaxVelocity;
 	float fSpeed;
-	float fwdSpeed;
 
 	if(state == nil)
 		return;
 
 	fMaxVelocity = car->pHandling->Transmission.fMaxVelocity;
 	fSpeed = car->m_vecMoveSpeed.Magnitude();
-	fwdSpeed = DotProduct(car->m_vecMoveSpeed, car->GetForward());
 
-	DriftTelemetryFormat("%u,%s,%s,%d,%d,%d,%.3f,%.1f,%.3f,%.1f,%.1f,%.1f,%.2f,%.3f,%.2f,%.3f,%d",
+	DriftTelemetryFormat("%u,%s,%d,%d,%d,%.3f,%.1f,%.3f,%.1f,%.1f,%.1f,%.2f,%.3f,%.2f,%.3f,%s",
 		(uint32)CTimer::GetTimeInMilliseconds(),
-		phases[ctrl->m_Phase],
-		event != nil ? event : "",
+		CDriftControl::GetPhaseName(ctrl->m_Phase),
 		ctrl->m_bHandbrakeTurn ? 1 : 0,
-		car->m_nWheelsOnGround < 2 ? 1 : 0,
+		car->m_nWheelsOnGround >= 2 ? 1 : 0,
 		car->bIsHandbrakeOn ? 1 : 0,
 		car->m_fSteerInput,
 		fSpeed*3.6f,
-		fwdSpeed/fMaxVelocity,
-		RADTODEG(ctrl->m_fSlipAngle),
-		RADTODEG(ctrl->m_fTargetSlip),
-		RADTODEG(DotProduct(car->m_vecTurnSpeed, car->GetUp())*DRIFT_TELEMETRY_TICK_RATE),
+		fSpeed/fMaxVelocity,
+		ctrl->GetSlipAngleDeg(),
+		ctrl->GetTargetSlipDeg(),
+		ctrl->GetYawRateDeg(car),
 		ctrl->m_fGripCut,
 		ctrl->GetRearGripScale(),
 		ctrl->m_fDriftTime,
 		ctrl->m_fBoostLevel,
-		(int)car->m_nWheelsOnGround);
+		event != nil ? event : "");
 
 	state->nNextRowMs = (uint32)CTimer::GetTimeInMilliseconds() + DRIFT_TELEMETRY_ROW_MS;
 }
@@ -167,12 +195,14 @@ DriftTelemetryRow(CAutomobile *car, CDriftControl *ctrl, const char *event)
 // every 250 ms, takes the backlog out under the lock, then writes and flushes
 // it outside the lock, so the game thread never waits on the disk.
 static void
-DriftTelemetryWriter(tDriftTelemetry *state, std::string headers)
+DriftTelemetryWriter(tDriftTelemetry *state, std::string headers, std::string path)
 {
-	FILE *file = fopen(DRIFT_TELEMETRY_FILE, "w");
+	FILE *file = fopen(path.c_str(), "w");
 	if(file == nil){
-		// No file: stop the game thread from filling a backlog that nobody
-		// drains.
+		// No file: turn the game thread off instead of filling a backlog
+		// that nobody drains. With no file there is nowhere to note dropped
+		// rows, so the reason goes to the debug output.
+		fprintf(stderr, "drift telemetry: cannot open %s, telemetry off\n", path.c_str());
 		std::lock_guard<std::mutex> lock(state->mutex);
 		state->bDisabled = true;
 		state->backlog.clear();
@@ -212,8 +242,9 @@ DriftTelemetryWriter(tDriftTelemetry *state, std::string headers)
 	fclose(file);
 }
 
-// Stops the writer at process exit. The writer drains the backlog, flushes and
-// closes the file before it returns, so this side only waits on it.
+// Stops the writer at a normal process exit (an assert aborts through _exit
+// and skips this, losing the last rows). The writer drains the backlog,
+// flushes and closes the file before it returns, so this side only waits.
 static void
 DriftTelemetryShutdown(void)
 {
@@ -243,14 +274,14 @@ DriftTelemetryInit(CAutomobile *car, CDriftControl *ctrl)
 	state->bTerminate = false;
 	state->bDisabled = false;
 	state->bFirstCall = true;
-	state->ePrevPhase = ctrl != nil ? ctrl->m_Phase : CDriftControl::DRIFT_PHASE_INACTIVE;
-	state->bPrevAir = car != nil && car->m_nWheelsOnGround < 2;
-	state->bPrevHandbrake = car != nil && !!car->bIsHandbrakeOn;
-	state->fPrevBoost = ctrl != nil ? ctrl->m_fBoostLevel : 0.0f;
+	state->ePrevPhase = ctrl->m_Phase;
+	state->bPrevAir = car->m_nWheelsOnGround < 2;
+	state->bPrevHandbrake = !!car->bIsHandbrakeOn;
+	state->fPrevBoost = ctrl->m_fBoostLevel;
 
 	ms_pTelemetry = state;
 	atexit(DriftTelemetryShutdown);
-	state->writer = std::thread(DriftTelemetryWriter, state, DriftTelemetryHeaders());
+	state->writer = std::thread(DriftTelemetryWriter, state, DriftTelemetryHeaders(), DriftTelemetryFilePath());
 	return state;
 }
 
@@ -306,7 +337,7 @@ CDriftTelemetry::Tick(CAutomobile *car, CDriftControl *ctrl)
 				DriftTelemetryRow(car, ctrl, "DENY:air");
 			else if(fwdSpeed <= 0.0f)
 				DriftTelemetryRow(car, ctrl, "DENY:rev");
-			else if(Abs(car->m_fSteerInput) <= DRIFT_TELEMETRY_ENTRY_STEER)
+			else if(Abs(car->m_fSteerInput) <= DRIFT_ENTRY_STEER)
 				DriftTelemetryRow(car, ctrl, "DENY:steer");
 		}
 	}
