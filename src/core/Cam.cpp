@@ -2543,6 +2543,12 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		static bool FailedTestTwelveFramesAgo = false;
 		RwV3d HeadPos;
 
+#ifdef FIRST_PERSON
+		// The first person view setting overrides the default FOV
+		if(FrontEndMenuManager.m_bFirstPersonView)
+			FOV = Clamp(FrontEndMenuManager.m_nFirstPersonFOV, 50, 90);
+#endif
+
 		TargetCoors = CameraTarget;
 
 		if(ResetStatics){
@@ -2553,6 +2559,10 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 			// static DPadVertical unused
 			// static DPadHorizontal unused
 			m_bCollisionChecksOn = true;
+#ifdef FIRST_PERSON
+			if(FrontEndMenuManager.m_bFirstPersonView)
+				CPad::GetPad(0)->ClearMouseHistory();
+#endif
 			ResetStatics = false;
 		}
 
@@ -2573,13 +2583,31 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 			Source.y -= BackOffset*CamTargetEntity->GetForward().y;
 		}
 
+		// Look around
 		float LookLeftRight, LookUpDown;
-		LookLeftRight = -CPad::GetPad(0)->LookAroundLeftRight();
-		LookUpDown = CPad::GetPad(0)->LookAroundUpDown();
-		float xdir = LookLeftRight < 0.0f ? -1.0f : 1.0f;
-		float ydir = LookUpDown < 0.0f ? -1.0f : 1.0f;
-		Beta += SQR(LookLeftRight/100.0f)*xdir*0.8f/14.0f * FOV/80.0f * CTimer::GetTimeStep();
-		Alpha += SQR(LookUpDown/150.0f)*ydir*1.0f/14.0f * FOV/80.0f * CTimer::GetTimeStep();
+#ifdef FIRST_PERSON
+		bool UseMouse = false;
+		float MouseX = CPad::GetPad(0)->GetMouseX();
+		float MouseY = CPad::GetPad(0)->GetMouseY();
+		if(FrontEndMenuManager.m_bFirstPersonView && (MouseX != 0.0f || MouseY != 0.0f)){
+			UseMouse = true;
+			LookLeftRight = -3.0f*MouseX;
+			LookUpDown = 4.0f*MouseY;
+		}
+		if(UseMouse){
+			Beta += TheCamera.m_fMouseAccelHorzntl * LookLeftRight * FOV/80.0f;
+			Alpha += TheCamera.m_fMouseAccelVertical * LookUpDown * FOV/80.0f;
+		}else{
+#endif
+			LookLeftRight = -CPad::GetPad(0)->LookAroundLeftRight();
+			LookUpDown = CPad::GetPad(0)->LookAroundUpDown();
+			float xdir = LookLeftRight < 0.0f ? -1.0f : 1.0f;
+			float ydir = LookUpDown < 0.0f ? -1.0f : 1.0f;
+			Beta += SQR(LookLeftRight/100.0f)*xdir*0.8f/14.0f * FOV/80.0f * CTimer::GetTimeStep();
+			Alpha += SQR(LookUpDown/150.0f)*ydir*1.0f/14.0f * FOV/80.0f * CTimer::GetTimeStep();
+#ifdef FIRST_PERSON
+		}
+#endif
 		while(Beta >= PI) Beta -= 2*PI;
 		while(Beta < -PI) Beta += 2*PI;
 		if(Alpha > DEGTORAD(60.0f)) Alpha = DEGTORAD(60.0f);
