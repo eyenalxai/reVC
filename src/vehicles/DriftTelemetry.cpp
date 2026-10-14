@@ -177,7 +177,7 @@ DriftTelemetryRow(CAutomobile *car, CDriftControl *ctrl, const char *event)
 		car->m_nWheelsOnGround >= 2 ? 1 : 0,
 		car->bIsHandbrakeOn ? 1 : 0,
 		car->m_fSteerInput,
-		fSpeed*3.6f,
+		fSpeed*DRIFT_TICK_RATE*3.6f,	// m_vecMoveSpeed is per tick
 		fSpeed/fMaxVelocity,
 		ctrl->GetSlipAngleDeg(),
 		ctrl->GetTargetSlipDeg(),
