@@ -191,7 +191,7 @@ CStreaming::Init2(void)
 	for(i = 0; i < MAXVEHICLESLOADED; i++)
 		ms_vehiclesLoaded[i] = -1;
 	ms_numVehiclesLoaded = 0;
-	ms_numPedsLoaded = 8;
+	ms_numPedsLoaded = MAXZONEPEDSLOADED;
 
 	for(i = 0; i < ARRAY_SIZE(ms_bIsPedFromPedGroupLoaded); i++)
 		ms_bIsPedFromPedGroupLoaded[i] = false;
@@ -229,7 +229,7 @@ CStreaming::Init2(void)
 	ms_memoryAvailable = (_dwMemAvailPhys - 10*MB)/2;
 	if(ms_memoryAvailable < 65*MB)
 		ms_memoryAvailable = 65*MB;
-	desiredNumVehiclesLoaded = (int32)((ms_memoryAvailable / MB - 65) / 3 + 12);
+	desiredNumVehiclesLoaded = (int32)((ms_memoryAvailable / MB - 65) / 3 + 24);
 	if(desiredNumVehiclesLoaded > MAXVEHICLESLOADED)
 		desiredNumVehiclesLoaded = MAXVEHICLESLOADED;
 #else
@@ -1738,7 +1738,7 @@ CStreaming::StreamVehiclesAndPeds(void)
 		model = CCarCtrl::ChooseCarModelToLoad(mostRequestedRating);
 		if(!HasModelLoaded(model)){
 			RequestModel(model, STREAMFLAGS_DEPENDENCY);
-			timeBeforeNextLoad = 350;
+			timeBeforeNextLoad = 100;
 		}
 		CCarCtrl::NumRequestsOfCarRating[mostRequestedRating] = 0;
 	}
@@ -1793,7 +1793,10 @@ CStreaming::StreamZoneModels(const CVector &pos)
 					break;
 			}
 		// And load a new one
-		if(i != NUMMODELSPERPEDGROUP || ms_numPedsLoaded < MAXZONEPEDSLOADED){
+		// Only if a model of the group is still unrequested; with
+		// MAXZONEPEDSLOADED == NUMMODELSPERPEDGROUP there is no free slot to swap in.
+		if((i != NUMMODELSPERPEDGROUP || ms_numPedsLoaded < MAXZONEPEDSLOADED) &&
+		   ms_numPedsLoaded < NUMMODELSPERPEDGROUP){
 			do
 				j = CGeneral::GetRandomNumberInRange(0, NUMMODELSPERPEDGROUP);
 			while(ms_bIsPedFromPedGroupLoaded[j]);
@@ -3124,7 +3127,7 @@ CStreaming::LoadScene(const CVector &pos)
 	CRadar::StreamRadarSections(pos);
 
 	if (!CGame::IsInInterior()) {
-		for (int i = 0; i < 5; i++) {
+		for (int i = 0; i < 10; i++) {
 			CZoneInfo zone;
 			CTheZones::GetZoneInfoForTimeOfDay(&pos, &zone);
 			int32 model = CCarCtrl::ChooseCarModelToLoad(CCarCtrl::ChooseCarRating(&zone));
