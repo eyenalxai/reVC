@@ -1,5 +1,8 @@
 #include "common.h"
 
+// TRAFFIC DIAG: temporary.
+#include <stdio.h>
+
 #include "CarCtrl.h"
 
 #include "Accident.h"
@@ -109,6 +112,89 @@ int32 CCarCtrl::LoadedCarsArray[TOTAL_CUSTOM_CLASSES][MAX_CAR_MODELS_IN_ARRAY];
 CVehicle* apCarsToKeep[MAX_CARS_TO_KEEP];
 uint32 aCarsToKeepTime[MAX_CARS_TO_KEEP];
 
+// TRAFFIC DIAG: temporary diagnostics for the empty-street investigation.
+// Remove this whole block and every line marked with "TRAFFIC DIAG" before merge.
+extern int32 desiredNumVehiclesLoaded; // Defined in Streaming.cpp; no header declares it.
+
+// TRAFFIC DIAG: temporary. Static counters filled by ChooseModel/ChooseCarModel,
+// logged and reset once per second by Update().
+class CTrafficDiag
+{
+public:
+	static uint32 ms_nLastLogTime;
+	static int32 ms_nChooseModelCalls;
+	static int32 ms_nChooseModelNotLoaded;
+	static int32 ms_nChooseModelGaveUp;
+	static int32 ms_nChooseCarModelCalls;
+	static int32 ms_nChooseCarModelNoRating;
+	static void Update(void);
+};
+
+// TRAFFIC DIAG: temporary.
+uint32 CTrafficDiag::ms_nLastLogTime;
+int32 CTrafficDiag::ms_nChooseModelCalls;
+int32 CTrafficDiag::ms_nChooseModelNotLoaded;
+int32 CTrafficDiag::ms_nChooseModelGaveUp;
+int32 CTrafficDiag::ms_nChooseCarModelCalls;
+int32 CTrafficDiag::ms_nChooseCarModelNoRating;
+
+// TRAFFIC DIAG: temporary. Writes one line per second to reVC_traffic.log
+// in the process working directory. Opens with "a" and closes every time,
+// so a crash never loses more than the current line.
+void
+CTrafficDiag::Update(void)
+{
+	uint32 now = CTimer::GetTimeInMilliseconds();
+	if (now - ms_nLastLogTime < 1000)
+		return;
+	ms_nLastLogTime = now;
+
+	FILE* f = fopen("reVC_traffic.log", "a");
+	if (f == nil)
+		return;
+
+	CVector pos = FindPlayerCentreOfWorld(CWorld::PlayerInFocus);
+	CZoneInfo zone;
+	CTheZones::GetZoneInfoForTimeOfDay(&pos, &zone);
+	CPlayerInfo* pPlayer = &CWorld::Players[CWorld::PlayerInFocus];
+	float fGate = pPlayer->m_nTrafficMultiplier * CCarCtrl::CarDensityMultiplier * CIniFile::CarNumberMultiplier;
+
+	fprintf(f,
+		"t=%u pos=%.1f,%.1f,%.1f inVeh=%d interior=%d"
+		" | zoneCarD=%d zonePedD=%d zoneGrp=%d"
+		" | cars rand=%d parked=%d law=%d miss=%d fire=%d amb=%d"
+		" | player trafMul=%d roadDens=%.2f gate=%.2f maxCars=%d carMul=%.2f pedMul=%.2f"
+		" | peds max=%d maxInt=%d total=%u"
+		" | vehLoaded=%d wantVeh=%d vehIDs=%d,%d,%d,%d,%d,%d"
+		" | startCountdown=%d genDist=%.2f fov=%.1f camFwdZ=%.3f"
+		" | cmCalls=%d cmNotLoaded=%d cmGaveUp=%d ccmCalls=%d ccmNoRating=%d\n",
+		now,
+		pos.x, pos.y, pos.z,
+		FindPlayerVehicle() != nil,
+		CGame::IsInInterior(),
+		zone.carDensity, zone.pedDensity, zone.pedGroup,
+		CCarCtrl::NumRandomCars, CCarCtrl::NumParkedCars, CCarCtrl::NumLawEnforcerCars,
+		CCarCtrl::NumMissionCars, CCarCtrl::NumFiretrucksOnDuty, CCarCtrl::NumAmbulancesOnDuty,
+		pPlayer->m_nTrafficMultiplier, pPlayer->m_fRoadDensity, fGate, CCarCtrl::MaxNumberOfCarsInUse,
+		CIniFile::CarNumberMultiplier, CIniFile::PedNumberMultiplier,
+		CPopulation::MaxNumberOfPedsInUse, CPopulation::MaxNumberOfPedsInUseInterior, CPopulation::ms_nTotalPeds,
+		CStreaming::ms_numVehiclesLoaded, desiredNumVehiclesLoaded,
+		CStreaming::ms_vehiclesLoaded[0], CStreaming::ms_vehiclesLoaded[1], CStreaming::ms_vehiclesLoaded[2],
+		CStreaming::ms_vehiclesLoaded[3], CStreaming::ms_vehiclesLoaded[4], CStreaming::ms_vehiclesLoaded[5],
+		CCarCtrl::CountDownToCarsAtStart, TheCamera.GenerationDistMultiplier, CDraw::GetFOV(), TheCamera.GetForward().z,
+		ms_nChooseModelCalls, ms_nChooseModelNotLoaded, ms_nChooseModelGaveUp,
+		ms_nChooseCarModelCalls, ms_nChooseCarModelNoRating);
+
+	fclose(f);
+
+	// TRAFFIC DIAG: temporary. Reset the counters for the next second.
+	ms_nChooseModelCalls = 0;
+	ms_nChooseModelNotLoaded = 0;
+	ms_nChooseModelGaveUp = 0;
+	ms_nChooseCarModelCalls = 0;
+	ms_nChooseCarModelNoRating = 0;
+}
+
 void
 CCarCtrl::GenerateRandomCars()
 {
@@ -128,6 +214,8 @@ CCarCtrl::GenerateRandomCars()
 	/* Approximately once per 4 seconds. */
 	if ((CTimer::GetTimeInMilliseconds() & 0xFFFFF000) != (CTimer::GetPreviousTimeInMilliseconds() & 0xFFFFF000))
 		GenerateEmergencyServicesCar();
+
+	CTrafficDiag::Update(); // TRAFFIC DIAG: temporary.
 }
 
 void
@@ -753,9 +841,14 @@ CCarCtrl::ChooseCarRating(CZoneInfo* pZoneInfo)
 
 int32
 CCarCtrl::ChooseModel(CZoneInfo* pZone, int* pClass) {
+	CTrafficDiag::ms_nChooseModelCalls++; // TRAFFIC DIAG: temporary.
 	int32 model = -1;
 	int32 i;
 	for (i = 10; i > 0 && (model == -1 || !CStreaming::HasModelLoaded(model)); i--) {
+		// TRAFFIC DIAG: temporary. The loop body runs only when no model was
+		// picked yet or the picked model is not loaded; count the latter.
+		if (model != -1)
+			CTrafficDiag::ms_nChooseModelNotLoaded++;
 		int rnd = CGeneral::GetRandomNumberInRange(0, 1000);
 
 		if (rnd < pZone->copThreshold) {
@@ -779,8 +872,10 @@ CCarCtrl::ChooseModel(CZoneInfo* pZone, int* pClass) {
 		*pClass = ChooseCarRating(pZone);
 		model = ChooseCarModel(*pClass);
 	}
-	if (i == 0)
+	if (i == 0) {
+		CTrafficDiag::ms_nChooseModelGaveUp++; // TRAFFIC DIAG: temporary.
 		return -1;
+	}
 	return model;
 }
 
@@ -788,9 +883,12 @@ int32
 CCarCtrl::ChooseCarModel(int32 vehclass)
 {
 	int32 model = -1;
+	CTrafficDiag::ms_nChooseCarModelCalls++; // TRAFFIC DIAG: temporary.
 	++NumRequestsOfCarRating[vehclass];
-	if (NumOfLoadedCarsOfRating[vehclass] == 0)
+	if (NumOfLoadedCarsOfRating[vehclass] == 0) {
+		CTrafficDiag::ms_nChooseCarModelNoRating++; // TRAFFIC DIAG: temporary.
 		return -1;
+	}
 	int32 rnd = CGeneral::GetRandomNumberInRange(0, CarFreqArrays[vehclass][NumOfLoadedCarsOfRating[vehclass] - 1]);
 	int32 index = 0;
 	while (rnd > CarFreqArrays[vehclass][index])
