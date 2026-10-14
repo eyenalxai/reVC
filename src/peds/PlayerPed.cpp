@@ -1,4 +1,5 @@
 #include "common.h"
+#include "main.h"
 
 #include "RwHelper.h"
 #include "PlayerPed.h"
@@ -204,7 +205,7 @@ void
 CPlayerPed::UseSprintEnergy(void)
 {
 	if (m_fCurrentStamina > -150.0f && !CWorld::Players[CWorld::PlayerInFocus].m_bInfiniteSprint
-		&& !m_bAdrenalineActive) {
+		&& !m_bAdrenalineActive && !gInfiniteSprint) {
 		m_fCurrentStamina = m_fCurrentStamina - CTimer::GetTimeStep();
 		m_fStaminaProgress = m_fStaminaProgress + CTimer::GetTimeStep();
 	}
