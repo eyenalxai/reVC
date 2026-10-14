@@ -41,11 +41,11 @@ an angle but is not arcade enough, and the map's narrow roads and straight
 - The slip-angle sign stays the code's: see `GLOSSARY.md`.
 - The drift still never costs speed: a drifting wheel keeps its forward force
   and the slide gets part of the lost speed back.
-- Bikes, AI cars, missions and the default handling path are untouched, with
-  one exception that is a fix, not a drift feature: the skid state is per wheel
-  now, so a car that is already sliding no longer inherits a stale flag from
-  another vehicle (the same result as the tree's FIX_SIGNIFICANT_BUGS path).
-  Watch AI slides in the rain.
+- Feature-off fidelity is by construction: with the drift layer off, the wheel
+  path is the original one. The skid flag stays the vanilla static, the rear
+  wheel axes carry over from the left wheel to the right one exactly as before,
+  and the grip request defaults to identity (scale 1.0, no slide). A drifting
+  wheel skips the static entirely, so the drift never depends on it.
 - This refines ADR 0001: the drift layer is two modules now (`DriftControl`
   for the model, `DriftFeedback` for the presentation), and the rear grip is a
   slip-shaped curve instead of a constant cut.

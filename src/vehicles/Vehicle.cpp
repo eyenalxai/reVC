@@ -791,9 +791,17 @@ CVehicle::ProcessWheel(CVector &wheelFwd, CVector &wheelRight, CVector &wheelCon
 	float contactSpeedFwd = DotProduct(wheelContactSpeed, wheelFwd);
 	float contactSpeedRight = DotProduct(wheelContactSpeed, wheelRight);
 
-	// A wheel that was already sliding loses extra grip. The state comes in
-	// with the wheel, so it belongs to this wheel alone.
-	bool bAlreadySkidding = *wheelState != WHEEL_STATE_NORMAL;
+	// A wheel that was already sliding loses extra grip. The flag stays a
+	// static, exactly like the original handling, so vehicles that do not
+	// drift keep the original behaviour. A drifting wheel skips this loss
+	// entirely (see the bSlide checks) and never depends on the flag.
+	static bool bAlreadySkidding = false;	// this is never reset
+#ifdef FIX_SIGNIFICANT_BUGS
+	bAlreadySkidding = false;
+#endif
+
+	if(*wheelState != WHEEL_STATE_NORMAL)
+		bAlreadySkidding = true;
 	*wheelState = WHEEL_STATE_NORMAL;
 
 	adhesion *= grip.fAdhesionScale;

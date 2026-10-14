@@ -1099,6 +1099,11 @@ CAutomobile::ProcessControl(void)
 			grip.fAdhesionScale = m_DriftControl.GetRearGripScale();
 			grip.bSlide = m_DriftControl.IsDrifting();
 
+			// The wheel axes carry over from the left wheel to the right one,
+			// exactly as the original handling does.
+			CVector wheelFwd = GetForward();
+			CVector wheelRight = GetRight();	// overwritten for resp. wheel
+
 			int32 rearWheels[2] = { CARWHEEL_REAR_LEFT, CARWHEEL_REAR_RIGHT };
 
 			for(int i = 0; i < 2; i++){
@@ -1111,8 +1116,6 @@ CAutomobile::ProcessControl(void)
 				else
 					fThrust = 0.0f;
 
-				CVector wheelFwd = GetForward();
-				CVector wheelRight;
 				wheelFwd -= DotProduct(wheelFwd, m_aWheelColPoints[wheel].normal)*m_aWheelColPoints[wheel].normal;
 				wheelFwd.Normalise();
 				wheelRight = CrossProduct(wheelFwd, m_aWheelColPoints[wheel].normal);
@@ -1144,6 +1147,12 @@ CAutomobile::ProcessControl(void)
 						&m_aWheelSpeed[wheel],
 						&WheelState[wheel],
 						WHEEL_STATUS_OK, grip);
+
+#ifdef FIX_BUGS
+				// Shouldn't we reset these after the left wheel?
+				wheelFwd = GetForward();
+				wheelRight = GetRight();	// actually useless
+#endif
 			}
 		}
 
