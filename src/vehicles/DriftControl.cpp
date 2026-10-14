@@ -14,6 +14,13 @@
 #define DRIFT_ENGAGE_TIME	0.3f	// rear grip ramp in
 #define DRIFT_RELEASE_TIME	0.4f	// rear grip ramp out
 #define DRIFT_BLEND_TIME	0.5f	// ramp out when the drift got too slow
+#define DRIFT_ANGLE_TARGET	35.0f	// steering target cap, degrees
+#define DRIFT_ANGLE_CAP		60.0f	// absolute drift angle cap, degrees
+#define DRIFT_YAW_GAIN		4.0f	// angle error to yaw rate, 1/s
+#define DRIFT_YAW_MAX		1.5f	// maximum yaw rate, rad/s
+#define DRIFT_YAW_ACCEL		6.0f	// yaw rate ramp, rad/s^2
+#define DRIFT_ALIGN_GAIN	2.0f	// aligning pull past the cap, 1/s
+#define DRIFT_STEERLOCK_MULT	1.3f	// front wheel lock while drifting
 
 CDriftControl::CDriftControl(void)
 {
@@ -37,6 +44,42 @@ CDriftControl::GetRearGripScale(void)
 	if(m_Phase == DRIFT_PHASE_INACTIVE)
 		return 1.0f;
 	return 1.0f - (1.0f - GetMinGrip())*m_fGripCut;
+}
+
+float
+CDriftControl::GetSteerAngleMult(void)
+{
+	// While the drift is on, the front wheels anchor the slide. A little more
+	// lock than the original handling gives the counter-steer a readable feel.
+	// It follows the grip cut, so it fades out with the hook-up.
+	return 1.0f + (DRIFT_STEERLOCK_MULT - 1.0f)*m_fGripCut;
+}
+
+void
+CDriftControl::UpdateYawControl(CAutomobile *car, float dt)
+{
+	// Steering selects the drift angle: the entry direction fixes the sign,
+	// steering into the slide widens it, counter-steer lowers it, and a full
+	// flick crosses zero and ends the slide.
+	float intoSlide = car->m_fSteerInput * m_nEntryDir;	// -1 = full counter-steer
+	float targetSlip = m_nEntryDir * DEGTORAD(DRIFT_ANGLE_TARGET)*gDriftStrength * intoSlide;
+	float slipCap = DEGTORAD(DRIFT_ANGLE_CAP);
+	targetSlip = Clamp(targetSlip, -slipCap, slipCap);
+
+	// Move the car's yaw towards the value that closes the angle error.
+	float yawTargetRate = DRIFT_YAW_GAIN*gDriftAssist*(targetSlip - m_fSlipAngle);
+
+	// Light assist: past the cap an aligning torque pulls the car back in line.
+	float slipOverCap = m_fSlipAngle - Clamp(m_fSlipAngle, -slipCap, slipCap);
+	yawTargetRate -= DRIFT_ALIGN_GAIN*gDriftAssist * slipOverCap;
+
+	yawTargetRate = Clamp(yawTargetRate, -DRIFT_YAW_MAX, DRIFT_YAW_MAX);
+
+	// Rate-limit the yaw acceleration and write it to the car's turn speed, as
+	// the physical turn force would. Collisions still override this later.
+	float yawRate = DotProduct(car->m_vecTurnSpeed, car->GetUp()) * 50.0f;
+	float newYawRate = yawRate + Clamp(yawTargetRate - yawRate, -DRIFT_YAW_ACCEL*dt, DRIFT_YAW_ACCEL*dt);
+	car->m_vecTurnSpeed += car->GetUp() * ((newYawRate - yawRate) / 50.0f);
 }
 
 void
@@ -108,7 +151,10 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 
 	// Exit conditions for a running drift. The handbrake release starts the
 	// hook-up; a drift that got too slow blends back to normal grip.
-	if(m_Phase == DRIFT_PHASE_ENGAGE || m_Phase == DRIFT_PHASE_DRIFT)
+	if(m_Phase == DRIFT_PHASE_ENGAGE || m_Phase == DRIFT_PHASE_DRIFT){
 		if(!handbrake || fwdSpeed < DRIFT_MIN_SPEED*fMaxVelocity)
 			StartRecover();
+		else
+			UpdateYawControl(car, dt);
+	}
 }
