@@ -200,6 +200,16 @@ class CRoute
 	T m_node[8];
 };
 
+// A point on a road where a car can be created: the two path nodes that bracket
+// the creation distance and the interpolated position between them.
+struct CCarCreationPlacement
+{
+	int32 node1;
+	int32 node2;
+	CVector position;
+	float positionBetweenNodes;
+};
+
 
 class CPathFind
 {
@@ -262,6 +272,7 @@ public:
 	float FindNodeOrientationForCarPlacement(int32 nodeId);
 	float FindNodeOrientationForCarPlacementFacingDestination(int32 nodeId, float x, float y, bool towards);
 	bool GenerateCarCreationCoors(float x, float y, float dirX, float dirY, float spawnDist, float angleLimit, bool forward, CVector *pPosition, int32 *pNode1, int32 *pNode2, float *pPositionBetweenNodes, bool ignoreDisabled = false);
+	int32 CollectCarCreationCoors(float x, float y, float dirX, float dirY, float spawnDist, float angleLimit, bool forward, bool ignoreDisabled, CCarCreationPlacement *pOut, int32 maxPlacements);
 	bool GeneratePedCreationCoors(float x, float y, float minDist, float maxDist, float minDistOffScreen, float maxDistOffScreen, CVector *pPosition, int32 *pNode1, int32 *pNode2, float *pPositionBetweenNodes, CMatrix *camMatrix);
 	void FindNextNodeWandering(uint8, CVector, CPathNode**, CPathNode**, uint8, uint8*);
 	void DoPathSearch(uint8 type, CVector start, int32 startNodeId, CVector target, CPathNode **nodes, int16 *numNodes, int16 maxNumNodes, CVehicle *vehicle, float *dist, float distLimit, int32 forcedTargetNode);

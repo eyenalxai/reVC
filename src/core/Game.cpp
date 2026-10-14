@@ -915,9 +915,7 @@ void CGame::Process(void)
 #endif
 			CPopulation::Update(false);
 		} else {
-			uint32 startTime = CTimer::GetCurrentTimeInCycles() / CTimer::GetCyclesPerMillisecond();
 			CPopulation::Update(true);
-			processTime = CTimer::GetCurrentTimeInCycles() / CTimer::GetCyclesPerMillisecond() - startTime;
 		}
 		CWeapon::UpdateWeapons();
 		if (!CCutsceneMgr::IsRunning())
@@ -956,8 +954,7 @@ void CGame::Process(void)
 		if (!CReplay::IsPlayingBack())
 		{
 			PUSH_MEMID(MEMID_CARS);
-			if (processTime < 2)
-				CCarCtrl::GenerateRandomCars();
+			CCarCtrl::GenerateRandomCars();
 			CRoadBlocks::GenerateRoadBlocks();
 			CCarCtrl::RemoveDistantCars();
 			CCarCtrl::RemoveCarsIfThePoolGetsFull();
