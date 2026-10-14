@@ -292,6 +292,8 @@ wchar* MultiSamplingDraw(bool *disabled, bool userHovering) {
 void FirstPersonViewAfterChange(int8 before, int8 after) {
 	if (after)
 		TheCamera.CarZoomIndicator = CAM_ZOOM_1STPRS;
+	else if (TheCamera.CarZoomIndicator == CAM_ZOOM_1STPRS)
+		TheCamera.CarZoomIndicator = CAM_ZOOM_2;
 }
 
 wchar* FirstPersonFOVDraw(bool *disabled, bool userHovering) {
