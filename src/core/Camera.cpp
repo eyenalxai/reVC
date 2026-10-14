@@ -985,7 +985,11 @@ CCamera::CamControl(void)
 			// Change user selected mode
 			if(CPad::GetPad(0)->CycleCameraModeUpJustDown() && !CReplay::IsPlayingBack() &&
 			   (m_bLookingAtPlayer || WhoIsInControlOfTheCamera == CAMCONTROL_OBBE) &&
-			   !m_WideScreenOn && !m_bFailedCullZoneTestPreviously && !m_bFirstPersonBeingUsed){
+			   !m_WideScreenOn && !m_bFailedCullZoneTestPreviously && !m_bFirstPersonBeingUsed
+#ifdef FIRST_PERSON
+			   && !FrontEndMenuManager.m_bFirstPersonView
+#endif
+			   ){
 #ifdef GTA_PC_CONTROLS
 				if(FrontEndMenuManager.m_ControlMethod == CONTROL_STANDARD){
 					if(PedZoomIndicator == CAM_ZOOM_3)
@@ -998,7 +1002,11 @@ CCamera::CamControl(void)
 			}
 			if(CPad::GetPad(0)->CycleCameraModeDownJustDown() && !CReplay::IsPlayingBack() &&
 			   (m_bLookingAtPlayer || WhoIsInControlOfTheCamera == CAMCONTROL_OBBE) &&
-			   !m_WideScreenOn && !m_bFailedCullZoneTestPreviously && !m_bFirstPersonBeingUsed){
+			   !m_WideScreenOn && !m_bFailedCullZoneTestPreviously && !m_bFirstPersonBeingUsed
+#ifdef FIRST_PERSON
+			   && !FrontEndMenuManager.m_bFirstPersonView
+#endif
+			   ){
 #ifdef GTA_PC_CONTROLS
 				if(FrontEndMenuManager.m_ControlMethod == CONTROL_STANDARD){
 					if(PedZoomIndicator == CAM_ZOOM_3)
@@ -1017,32 +1025,51 @@ CCamera::CamControl(void)
 
 			// Check 1st person mode
 			if((m_bLookingAtPlayer || m_bEnable1rstPersonCamCntrlsScript) && pTargetEntity->IsPed() &&
-			   (!m_WideScreenOn || m_bEnable1rstPersonCamCntrlsScript) && !Cams[0].Using3rdPersonMouseCam()
+			   (!m_WideScreenOn || m_bEnable1rstPersonCamCntrlsScript)
 #ifdef FREE_CAM
 			   && (!CCamera::bFreeCam || m_bEnable1rstPersonCamCntrlsScript)
 #endif
 			   ){
-				// See if we want to enter first person mode
-				if(CPad::GetPad(0)->LookAroundLeftRight() || CPad::GetPad(0)->LookAroundUpDown()){
-					m_uiFirstPersonCamLastInputTime = CTimer::GetTimeInMilliseconds();
+#ifdef FIRST_PERSON
+				// The setting turned off: leave the first person view once
+				static bool bFirstPersonViewWasOn = false;
+				if(bFirstPersonViewWasOn && !FrontEndMenuManager.m_bFirstPersonView)
+					m_bFirstPersonBeingUsed = false;
+				bFirstPersonViewWasOn = FrontEndMenuManager.m_bFirstPersonView;
+				if(FrontEndMenuManager.m_bFirstPersonView){
+					// The setting keeps the camera in first person while the player is on foot
 					m_bFirstPersonBeingUsed = true;
-				}
-				if(m_bFirstPersonBeingUsed){
-					// Or if we want to go back to 3rd person
-					if(CPad::GetPad(0)->GetPedWalkLeftRight() || CPad::GetPad(0)->GetPedWalkUpDown() ||
-					   CPad::GetPad(0)->GetSquare() || CPad::GetPad(0)->GetTriangle() ||
-					   CPad::GetPad(0)->GetCross() || CPad::GetPad(0)->GetCircle() ||
-					   CTimer::GetTimeInMilliseconds() - m_uiFirstPersonCamLastInputTime > 2850.0f){
-						m_bFirstPersonBeingUsed = false;
-					}else if(CPad::GetPad(0)->TargetJustDown()){
-						m_bFirstPersonBeingUsed = false;
-						m_bJustJumpedOutOf1stPersonBecauseOfTarget = true;
+					m_uiFirstPersonCamLastInputTime = CTimer::GetTimeInMilliseconds();
+				}else
+#endif
+				if(!Cams[0].Using3rdPersonMouseCam()){
+					// See if we want to enter first person mode
+					if(CPad::GetPad(0)->LookAroundLeftRight() || CPad::GetPad(0)->LookAroundUpDown()){
+						m_uiFirstPersonCamLastInputTime = CTimer::GetTimeInMilliseconds();
+						m_bFirstPersonBeingUsed = true;
 					}
-				}
+					if(m_bFirstPersonBeingUsed){
+						// Or if we want to go back to 3rd person
+						if(CPad::GetPad(0)->GetPedWalkLeftRight() || CPad::GetPad(0)->GetPedWalkUpDown() ||
+						   CPad::GetPad(0)->GetSquare() || CPad::GetPad(0)->GetTriangle() ||
+						   CPad::GetPad(0)->GetCross() || CPad::GetPad(0)->GetCircle() ||
+						   CTimer::GetTimeInMilliseconds() - m_uiFirstPersonCamLastInputTime > 2850.0f){
+							m_bFirstPersonBeingUsed = false;
+						}else if(CPad::GetPad(0)->TargetJustDown()){
+							m_bFirstPersonBeingUsed = false;
+							m_bJustJumpedOutOf1stPersonBecauseOfTarget = true;
+						}
+					}
+				}else
+					m_bFirstPersonBeingUsed = false;
 			}else
 				m_bFirstPersonBeingUsed = false;
 
-			if(!FindPlayerPed()->IsPedInControl() || FindPlayerPed()->m_fMoveSpeed > 0.0f)
+			if((!FindPlayerPed()->IsPedInControl() || FindPlayerPed()->m_fMoveSpeed > 0.0f)
+#ifdef FIRST_PERSON
+			   && !FrontEndMenuManager.m_bFirstPersonView
+#endif
+			   )
 				m_bFirstPersonBeingUsed = false;
 			if(m_bFirstPersonBeingUsed){
 				ReqMode = CCam::MODE_1STPERSON;
