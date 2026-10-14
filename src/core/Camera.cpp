@@ -4079,8 +4079,8 @@ CCamera::UsingFirstPersonSights(void)
 float
 CCamera::GetFirstPersonSightsFOV(void)
 {
-	// Aiming down the sights: the sight view zooms in a little
-	return Max((float)(FrontEndMenuManager.GetFirstPersonFOV() - FIRST_PERSON_SIGHTS_FOV_OFFSET),
+	// Aiming down the sights: the sight view zooms in, about 1.5x
+	return Max((float)FrontEndMenuManager.GetFirstPersonFOV() * FIRST_PERSON_SIGHTS_FOV_MULT,
 	           (float)FIRST_PERSON_SIGHTS_FOV_MIN);
 }
 
