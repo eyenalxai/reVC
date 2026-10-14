@@ -29,12 +29,17 @@
 #define DRIFT_ALIGN_GAIN	2.0f	// aligning pull past the slip cap, 1/s
 #define DRIFT_STEERLOCK_MULT	1.3f	// front wheel lock while drifting
 #define DRIFT_SPEED_HOLD	1.0f	// fraction of the lost speed given back per second
+#define DRIFT_RECOVER_TIME	0.3f	// seconds of exit alignment after the handbrake
+#define DRIFT_RECOVER_ALIGN	4.0f	// exit counter-yaw per radian of slip, 1/s
+#define DRIFT_RECOVER_SLIP	2.0f	// below this remaining slip the assist stops
 #define DRIFT_SLIP_MIN		10.0f	// degrees of slide that charge the boost
 #define DRIFT_TIER1_TIME	0.6f	// drift seconds for boost tier 1
 #define DRIFT_TIER2_TIME	1.2f	// drift seconds for boost tier 2
 #define DRIFT_BOOST_TIER1	0.05f	// forward push of tier 1, fraction of top speed
 #define DRIFT_BOOST_TIER2	0.09f	// forward push of tier 2, fraction of top speed
-#define DRIFT_BOOST_SPEED_CAP	1.0f	// never boost past this fraction of top speed
+#define DRIFT_BOOST_MAX		0.25f	// stacked boosts stop at 1.25x top speed
+#define DRIFT_BOOST_PUSH	0.8f	// boost acceleration, fraction of top speed per second
+#define DRIFT_BOOST_DRAIN	0.04f	// boost level that drains per second
 #define DRIFT_TICK_RATE		50.0f	// game ticks per second; turn speed is per tick
 
 CDriftControl::CDriftControl(void)
@@ -51,6 +56,7 @@ CDriftControl::Reset(void)
 	m_fDriftTime = 0.0f;
 	m_fSlipAngle = 0.0f;
 	m_fTargetSlip = 0.0f;
+	m_fBoostLevel = 0.0f;
 	m_fEntrySpeed = 0.0f;
 	m_nEntryDir = 0;
 	m_bHandbrakeTurn = false;
@@ -184,19 +190,33 @@ CDriftControl::HoldDriftSpeed(CAutomobile *car, float dt)
 }
 
 void
-CDriftControl::ApplyBoost(CAutomobile *car)
+CDriftControl::ApplyBoost(CAutomobile *car, float dt)
 {
+	if(m_fBoostLevel <= 0.0f)
+		return;
+
+	// A stacked boost pushes towards the speed the stack asks for, on top of
+	// the normal top speed. It drains on its own, so a chain of clean drifts
+	// keeps the car fast while the player can hold the line.
+	float fMaxVelocity = GetMaxSpeed(car);
+	float fwdSpeed = DotProduct(car->m_vecMoveSpeed, car->GetForward());
+	float push = Min(fMaxVelocity*(1.0f + m_fBoostLevel) - fwdSpeed, DRIFT_BOOST_PUSH*fMaxVelocity*dt);
+	if(push > 0.0f)
+		car->ApplyMoveForce(car->GetForward() * push * car->m_fMass);
+
+	m_fBoostLevel = Max(m_fBoostLevel - DRIFT_BOOST_DRAIN*dt, 0.0f);
+}
+
+void
+CDriftControl::EndDrift(void)
+{
+	// A drift that slid long enough stacks its boost. A boost that is still
+	// running takes the new one on top, up to the stack cap.
 	if(m_fDriftTime < DRIFT_TIER1_TIME)
 		return;
 
-	float fMaxVelocity = GetMaxSpeed(car);
-	float boost = (m_fDriftTime >= DRIFT_TIER2_TIME ? DRIFT_BOOST_TIER2 : DRIFT_BOOST_TIER1)*fMaxVelocity;
-
-	// Never push the car past the boost speed cap.
-	float fwdSpeed = DotProduct(car->m_vecMoveSpeed, car->GetForward());
-	boost = Min(boost, DRIFT_BOOST_SPEED_CAP*fMaxVelocity - fwdSpeed);
-	if(boost > 0.0f)
-		car->ApplyMoveForce(car->GetForward() * boost * car->m_fMass);
+	float boost = m_fDriftTime >= DRIFT_TIER2_TIME ? DRIFT_BOOST_TIER2 : DRIFT_BOOST_TIER1;
+	m_fBoostLevel = Min(m_fBoostLevel + boost, DRIFT_BOOST_MAX);
 }
 
 void
@@ -224,6 +244,10 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 	float fMaxVelocity = GetMaxSpeed(car);
 	bool onGround = car->m_nWheelsOnGround >= 2;
 	bool handbrake = !!car->bIsHandbrakeOn;
+
+	// The boost stack lives outside the drift phases, so a chained boost keeps
+	// pushing after the handbrake is released.
+	ApplyBoost(car, dt);
 
 	// The drift pauses while the car is in the air.
 	if(!onGround && m_Phase != DRIFT_PHASE_INACTIVE)
@@ -266,6 +290,10 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 			m_fGripCut -= dt/DRIFT_BLEND_TIME;
 		else
 			m_fGripCut -= dt/DRIFT_RELEASE_TIME;
+		// Exit alignment: a counter-yaw proportional to the slip that is left,
+		// over the first moments of the recovery, on top of the grip ramp.
+		if(m_fPhaseTimer < DRIFT_RECOVER_TIME && Abs(m_fSlipAngle) > DEGTORAD(DRIFT_RECOVER_SLIP))
+			ApplyYawRate(car, -DRIFT_RECOVER_ALIGN*gDriftAssist*m_fSlipAngle, dt);
 		if(m_fGripCut <= 0.0f){
 			m_fGripCut = 0.0f;
 			m_bHandbrakeTurn = false;
@@ -280,7 +308,7 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 		if(!handbrake || fwdSpeed < DRIFT_MIN_SPEED*fMaxVelocity){
 			// A charged drift gives its boost when the handbrake is released.
 			if(!handbrake)
-				ApplyBoost(car);
+				EndDrift();
 			StartRecover();
 		}else{
 			// Only a real slide charges the boost.
@@ -288,7 +316,7 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 				m_fDriftTime += dt;
 			if(!UpdateTargetAngle(car, dt)){
 				// The counter flick unwound the angle: the drift is over.
-				ApplyBoost(car);
+				EndDrift();
 				StartRecover();
 			}else{
 				UpdateYawControl(car, dt);
