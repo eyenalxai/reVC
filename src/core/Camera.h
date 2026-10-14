@@ -628,6 +628,9 @@ public:
 	bool Find3rdPersonCamTargetVector(float dist, CVector pos, CVector &source, CVector &target);
 	float Find3rdPersonQuickAimPitch(void);
 	bool Using1stPersonWeaponMode(void);
+#ifdef FIRST_PERSON
+	bool Using1stPersonView(void);
+#endif
 
 	// Physical camera
 	void SetRwCamera(RwCamera *cam);
