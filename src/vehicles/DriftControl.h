@@ -23,6 +23,7 @@ public:
 	float m_fTargetSlip;	// slip angle the drift holds, radians
 	float m_fEntrySpeed;	// speed when the drift started
 	int8 m_nEntryDir;	// yaw direction of the drift, +1 or -1
+	bool m_bHandbrakeTurn;	// low-speed entry: a handbrake turn, not a hold-angle drift
 
 	CDriftControl(void);
 

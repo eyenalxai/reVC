@@ -7,9 +7,11 @@
 
 // All drift tuning lives in this block. Times are real seconds, angles are
 // degrees, speeds are a fraction of the handling top speed (fMaxVelocity).
-#define DRIFT_ENTRY_SPEED	0.30f	// entry speed, below this the handbrake keeps braking
-#define DRIFT_MIN_SPEED		0.25f	// below this the car blends back to normal grip
-#define DRIFT_ENTRY_STEER	0.2f	// steering input needed to start a drift
+#define DRIFT_ENTRY_SPEED	0.10f	// entry speed, below this the handbrake turns the car
+#define DRIFT_MIN_SPEED		0.05f	// below this the car blends back to normal grip
+#define DRIFT_ENTRY_STEER	0.15f	// steering input needed to start a drift
+#define DRIFT_TURN_YAW		45.0f	// yaw kick of a low-speed handbrake turn, degrees/s
+#define DRIFT_TURN_ENGAGE	0.1f	// rear grip ramp in of a handbrake turn
 #define DRIFT_GRIP_CUTOFF	0.30f	// rear grip at full effect, 1.0 = original handling
 #define DRIFT_ENGAGE_TIME	0.3f	// rear grip ramp in
 #define DRIFT_RELEASE_TIME	0.4f	// rear grip ramp out
@@ -49,6 +51,7 @@ CDriftControl::Reset(void)
 	m_fTargetSlip = 0.0f;
 	m_fEntrySpeed = 0.0f;
 	m_nEntryDir = 0;
+	m_bHandbrakeTurn = false;
 }
 
 float
@@ -87,6 +90,20 @@ CDriftControl::GetSteerAngleMult(void)
 bool
 CDriftControl::UpdateTargetAngle(CAutomobile *car, float dt)
 {
+	// A handbrake turn does not steer with the angle model, and the throttle
+	// can carry the car past the entry gate. Then the turn becomes a real
+	// drift that holds the angle the car has.
+	if(m_bHandbrakeTurn){
+		float fwdSpeed = DotProduct(car->m_vecMoveSpeed, car->GetForward());
+		if(fwdSpeed < DRIFT_ENTRY_SPEED*GetMaxSpeed(car)){
+			// Keep the target on the angle the car has, so a promotion above
+			// the gate happens without a kick.
+			m_fTargetSlip = m_nEntryDir*Min(Abs(m_fSlipAngle), DEGTORAD(DRIFT_ANGLE_MAX));
+			return true;
+		}
+		m_bHandbrakeTurn = false;
+	}
+
 	// Torque balancing: the drift holds a target slip angle. Steering
 	// integrates the target and nothing straightens the car on its own, so
 	// letting go of the stick keeps the angle and counter-steering unwinds it.
@@ -118,7 +135,14 @@ CDriftControl::UpdateYawControl(CAutomobile *car, float dt)
 {
 	// Move the car's yaw towards the value that closes the angle error. The
 	// yaw authority is absolute, so the drift turns the same at any speed.
-	float yawTargetRate = DRIFT_YAW_GAIN*gDriftAssist*(m_fTargetSlip - m_fSlipAngle);
+	float yawTargetRate;
+	if(m_bHandbrakeTurn){
+		// A handbrake turn is a fixed yaw kick towards the turn. It does not
+		// depend on speed, so the car keeps coming around.
+		yawTargetRate = m_nEntryDir*DEGTORAD(DRIFT_TURN_YAW);
+	}else{
+		yawTargetRate = DRIFT_YAW_GAIN*gDriftAssist*(m_fTargetSlip - m_fSlipAngle);
+	}
 
 	// Light assist: past the cap an aligning torque pulls the car back in line.
 	float slipCap = DEGTORAD(DRIFT_SLIP_CAP);
@@ -189,16 +213,18 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 
 	switch(m_Phase){
 	case DRIFT_PHASE_INACTIVE:
-		// Entry: handbrake + steering at speed. Below the gate the handbrake
-		// keeps the original braking path.
+		// Entry: handbrake + steering. Above the gate that is a drift; below
+		// it the car turns on the handbrake, and there is no speed gate for
+		// that, only a direction check.
 		if(handbrake && onGround &&
-		   fwdSpeed > DRIFT_ENTRY_SPEED*fMaxVelocity &&
+		   fwdSpeed > 0.0f &&
 		   Abs(car->m_fSteerInput) > DRIFT_ENTRY_STEER){
 			m_Phase = DRIFT_PHASE_ENGAGE;
 			m_fPhaseTimer = 0.0f;
 			m_fDriftTime = 0.0f;
 			m_fEntrySpeed = car->m_vecMoveSpeed.Magnitude();
 			m_nEntryDir = car->m_fSteerInput > 0.0f ? 1 : -1;
+			m_bHandbrakeTurn = fwdSpeed < DRIFT_ENTRY_SPEED*fMaxVelocity;
 			// The drift starts at the base hold angle and the player
 			// modulates it from there.
 			m_fTargetSlip = m_nEntryDir*DEGTORAD(DRIFT_HOLD_ANGLE);
@@ -207,7 +233,7 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 
 	case DRIFT_PHASE_ENGAGE:
 		m_fPhaseTimer += dt;
-		m_fGripCut = Min(m_fPhaseTimer/DRIFT_ENGAGE_TIME, 1.0f);
+		m_fGripCut = Min(m_fPhaseTimer/(m_bHandbrakeTurn ? DRIFT_TURN_ENGAGE : DRIFT_ENGAGE_TIME), 1.0f);
 		if(m_fGripCut >= 1.0f)
 			m_Phase = DRIFT_PHASE_DRIFT;
 		break;
@@ -224,6 +250,7 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 			m_fGripCut -= dt/DRIFT_RELEASE_TIME;
 		if(m_fGripCut <= 0.0f){
 			m_fGripCut = 0.0f;
+			m_bHandbrakeTurn = false;
 			m_Phase = DRIFT_PHASE_INACTIVE;
 		}
 		break;
