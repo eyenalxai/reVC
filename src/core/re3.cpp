@@ -67,6 +67,9 @@ bool gDriftEnabled = false;
 float gDriftStrength = 1.0f;
 float gDriftAssist = 1.0f;
 
+// Infinite sprint (see src/peds/PlayerPed.cpp)
+bool gInfiniteSprint = false;
+
 
 #ifdef USE_PS2_RAND
 unsigned long long myrand_seed = 1;

@@ -81,4 +81,7 @@ extern bool gDriftEnabled;
 extern float gDriftStrength;
 extern float gDriftAssist;
 
+// Infinite sprint (see src/peds/PlayerPed.cpp)
+extern bool gInfiniteSprint;
+
 #endif // __GTA_MAIN_H__
