@@ -504,6 +504,10 @@ CMenuManager::CMenuManager()
 	m_PrefsDMA = 1;
 	OS_Language = LANG_ENGLISH;
 	m_ControlMethod = CONTROL_STANDARD;
+#ifdef FIRST_PERSON
+	m_bFirstPersonView = false;
+	m_nFirstPersonFOV = 70;
+#endif
 #ifdef PC_PLAYER_CONTROLS
 	CCamera::m_bUseMouse3rdPerson = true;
 #else

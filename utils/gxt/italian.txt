@@ -1523,6 +1523,9 @@ Corri
 [FEC_FPC]
 Visuale in prima persona
 
+[FEC_FOV]
+Campo visivo
+
 [FEC_LL]
 Guarda a sinistra
 
