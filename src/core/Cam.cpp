@@ -2359,6 +2359,9 @@ CCam::Process_Rocket(const CVector &CameraTarget, float, float, float)
 
 float fDuckingBackOffset = 0.5f;
 float fDuckingRightOffset = 0.18f;
+#ifdef FIRST_PERSON
+float fFirstPersonEyeOffsetFwd = 0.1f;	// the first person camera sits at the eyes, just in front of the head bone
+#endif
 
 void
 CCam::Process_M16_1stPerson(const CVector &CameraTarget, float, float, float)
@@ -2508,6 +2511,14 @@ CCam::Process_M16_1stPerson(const CVector &CameraTarget, float, float, float)
 		((CPed*)CamTargetEntity)->m_pedIK.GetComponentPosition(HeadPos, PED_HEAD);
 		Source = HeadPos;
 		Source.z += 0.1f;
+#ifdef FIRST_PERSON
+		// The first person sight view sits at the eyes: the head bone plus a
+		// small forward offset. The stock back offsets would sit inside the neck.
+		if(TheCamera.FirstPersonViewEnabled() && Mode == MODE_M16_1STPERSON){
+			Source.x += fFirstPersonEyeOffsetFwd*CamTargetEntity->GetForward().x;
+			Source.y += fFirstPersonEyeOffsetFwd*CamTargetEntity->GetForward().y;
+		}else
+#endif
 		if(((CPed*)CamTargetEntity)->bIsDucking){
 			Source.x -= fDuckingBackOffset*CamTargetEntity->GetForward().x;
 			Source.y -= fDuckingBackOffset*CamTargetEntity->GetForward().y;
@@ -2630,6 +2641,14 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		((CPed*)CamTargetEntity)->m_pedIK.GetComponentPosition(HeadPos, PED_HEAD);
 		Source = HeadPos;
 		Source.z += 0.1f;
+#ifdef FIRST_PERSON
+		// The first person view sits at the eyes: the head bone plus a small
+		// forward offset. The stock back offsets would sit inside the neck.
+		if(TheCamera.FirstPersonViewEnabled()){
+			Source.x += fFirstPersonEyeOffsetFwd*CamTargetEntity->GetForward().x;
+			Source.y += fFirstPersonEyeOffsetFwd*CamTargetEntity->GetForward().y;
+		}else
+#endif
 		if(((CPed*)CamTargetEntity)->bIsDucking){
 			Source.x -= fDuckingBackOffset*CamTargetEntity->GetForward().x;
 			Source.y -= fDuckingBackOffset*CamTargetEntity->GetForward().y;
