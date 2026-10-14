@@ -62,6 +62,11 @@
 extern "C" int vsprintf(char* const _Buffer, char const* const _Format, va_list  _ArgList);
 #endif
 
+// Drift handling (see src/vehicles/DriftControl.h)
+bool gDriftEnabled = false;
+float gDriftStrength = 1.0f;
+float gDriftAssist = 1.0f;
+
 
 #ifdef USE_PS2_RAND
 unsigned long long myrand_seed = 1;
@@ -578,6 +583,9 @@ bool LoadINISettings()
 #ifdef NEW_RENDERER
 	ReadIniIfExists("Rendering", "NewRenderer", &gbNewRenderer);
 #endif
+	ReadIniIfExists("Drift", "Enabled", &gDriftEnabled);
+	ReadIniIfExists("Drift", "Strength", &gDriftStrength);
+	ReadIniIfExists("Drift", "Assist", &gDriftAssist);
 
 #ifdef PROPER_SCALING
 	ReadIniIfExists("Draw", "ProperScaling", &CDraw::ms_bProperScaling);	
@@ -690,6 +698,9 @@ void SaveINISettings()
 #ifdef NEW_RENDERER
 	StoreIni("Rendering", "NewRenderer", gbNewRenderer);
 #endif
+	StoreIni("Drift", "Enabled", gDriftEnabled);
+	StoreIni("Drift", "Strength", gDriftStrength);
+	StoreIni("Drift", "Assist", gDriftAssist);
 
 #ifdef PROPER_SCALING	
 	StoreIni("Draw", "ProperScaling", CDraw::ms_bProperScaling);	
@@ -1176,6 +1187,11 @@ extern bool gbRenderWorld2;
 		DebugMenuAddCmd("Game", "Place Car on Road", PlaceOnRoad);
 		DebugMenuAddCmd("Game", "Switch car collision", SwitchCarCollision);
 		DebugMenuAddCmd("Game", "Toggle Comedy Controls", ToggleComedy);
+
+		// Drift handling (see src/vehicles/DriftControl.h)
+		DebugMenuAddVarBool8("Drift", "Enabled", &gDriftEnabled, nil);
+		DebugMenuAddVar("Drift", "Strength", &gDriftStrength, nil, 0.05f, 0.0f, 2.0f);
+		DebugMenuAddVar("Drift", "Assist", &gDriftAssist, nil, 0.05f, 0.0f, 2.0f);
 
 
 #ifdef MISSION_SWITCHER

@@ -105,6 +105,9 @@
 	#define INVERT_PAD_SELECTOR
 #endif
 
+// Drift handling (see src/vehicles/DriftControl.h)
+#define DRIFT_TOGGLE MENUACTION_CFO_SELECT, "FEC_DRF", { new CCFOSelect((int8*)&gDriftEnabled, "Drift", "Enabled", off_on, 2, false) }, 0, 0, MENUALIGN_CENTER,
+
 #ifdef GAMEPAD_MENU
 	#define SELECT_CONTROLLER_TYPE  MENUACTION_CFO_SELECT, "FEC_TYP", { new CCFOSelect((int8*)&FrontEndMenuManager.m_PrefsControllerType, "Controller", "Type", controllerTypes, ARRAY_SIZE(controllerTypes), false, ControllerTypeAfterChange) }, 0, 0, MENUALIGN_LEFT,
 #else
@@ -670,6 +673,7 @@ CMenuScreenCustom aScreens[] = {
 		MENUACTION_CHANGEMENU,	"FEC_JOD", {nil, SAVESLOT_NONE, MENUPAGE_DETECT_JOYSTICK}, 0, 0, MENUALIGN_CENTER,
 #endif
 		MENUACTION_CHANGEMENU,	"FEC_MOU", {nil, SAVESLOT_NONE, MENUPAGE_MOUSE_CONTROLS}, 0, 0, MENUALIGN_CENTER,
+		DRIFT_TOGGLE
 		MENUACTION_RESTOREDEF,	"FET_DEF", {nil, SAVESLOT_NONE, MENUPAGE_CONTROLLER_PC}, 320, 0, MENUALIGN_CENTER,
 		MENUACTION_GOBACK,		"FEDS_TB", {nil, SAVESLOT_NONE, 0}, 320, 0, MENUALIGN_CENTER,
    },

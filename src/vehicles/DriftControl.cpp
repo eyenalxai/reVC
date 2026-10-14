@@ -1,0 +1,224 @@
+#include "common.h"
+#include "main.h"
+
+#include "Vehicle.h"
+#include "Automobile.h"
+#include "DriftControl.h"
+
+// All drift tuning lives in this block. Times are real seconds, speeds are a
+// fraction of the handling top speed (fMaxVelocity).
+#define DRIFT_ENTRY_SPEED	0.30f	// entry speed, below this the handbrake keeps braking
+#define DRIFT_MIN_SPEED		0.25f	// below this the car blends back to normal grip
+#define DRIFT_ENTRY_STEER	0.2f	// steering input needed to start a drift
+#define DRIFT_GRIP_CUTOFF	0.30f	// rear grip at full effect, 1.0 = original handling
+#define DRIFT_ENGAGE_TIME	0.3f	// rear grip ramp in
+#define DRIFT_RELEASE_TIME	0.4f	// rear grip ramp out
+#define DRIFT_BLEND_TIME	0.5f	// ramp out when the drift got too slow
+#define DRIFT_ANGLE_TARGET	35.0f	// steering target cap, degrees
+#define DRIFT_ANGLE_CAP		60.0f	// absolute drift angle cap, degrees
+#define DRIFT_YAW_GAIN		4.0f	// angle error to yaw rate, 1/s
+#define DRIFT_YAW_MAX		1.5f	// maximum yaw rate, rad/s
+#define DRIFT_YAW_ACCEL		6.0f	// yaw rate ramp, rad/s^2
+#define DRIFT_ALIGN_GAIN	2.0f	// aligning pull past the cap, 1/s
+#define DRIFT_STEERLOCK_MULT	1.3f	// front wheel lock while drifting
+#define DRIFT_SPEED_HOLD	1.0f	// fraction of the lost speed given back per second
+#define DRIFT_SLIP_MIN		10.0f	// degrees of slide that charge the boost
+#define DRIFT_TIER1_TIME	0.6f	// drift seconds for boost tier 1
+#define DRIFT_TIER2_TIME	1.2f	// drift seconds for boost tier 2
+#define DRIFT_BOOST_TIER1	0.05f	// forward push of tier 1, fraction of top speed
+#define DRIFT_BOOST_TIER2	0.09f	// forward push of tier 2, fraction of top speed
+#define DRIFT_BOOST_SPEED_CAP	1.0f	// never boost past this fraction of top speed
+#define DRIFT_TICK_RATE		50.0f	// game ticks per second; turn speed is per tick
+
+CDriftControl::CDriftControl(void)
+{
+	Reset();
+}
+
+void
+CDriftControl::Reset(void)
+{
+	m_Phase = DRIFT_PHASE_INACTIVE;
+	m_fGripCut = 0.0f;
+	m_fPhaseTimer = 0.0f;
+	m_fDriftTime = 0.0f;
+	m_fSlipAngle = 0.0f;
+	m_fEntrySpeed = 0.0f;
+	m_nEntryDir = 0;
+}
+
+float
+CDriftControl::GetMinGrip(void)
+{
+	// Strength scales how far the rear grip is cut.
+	return Clamp(1.0f - (1.0f - DRIFT_GRIP_CUTOFF)*gDriftStrength, 0.05f, 1.0f);
+}
+
+float
+CDriftControl::GetMaxSpeed(CAutomobile *car)
+{
+	return car->pHandling->Transmission.fMaxVelocity;
+}
+
+float
+CDriftControl::GetRearGripScale(void)
+{
+	if(m_Phase == DRIFT_PHASE_INACTIVE)
+		return 1.0f;
+	return 1.0f - (1.0f - GetMinGrip())*m_fGripCut;
+}
+
+float
+CDriftControl::GetSteerAngleMult(void)
+{
+	if(m_Phase == DRIFT_PHASE_INACTIVE)
+		return 1.0f;
+
+	// While the drift is on, the front wheels anchor the slide. A little more
+	// lock than the original handling gives the counter-steer a readable feel.
+	// It follows the grip cut, so it fades out during the exit.
+	return 1.0f + (DRIFT_STEERLOCK_MULT - 1.0f)*m_fGripCut;
+}
+
+void
+CDriftControl::UpdateYawControl(CAutomobile *car, float dt)
+{
+	// Steering selects the drift angle: the entry direction fixes the sign,
+	// steering into the slide widens it, counter-steer lowers it, and a full
+	// flick crosses zero and ends the slide.
+	float intoSlide = car->m_fSteerInput * m_nEntryDir;	// -1 = full counter-steer
+	float targetSlip = m_nEntryDir * DEGTORAD(DRIFT_ANGLE_TARGET)*gDriftStrength * intoSlide;
+	float slipCap = DEGTORAD(DRIFT_ANGLE_CAP);
+	targetSlip = Clamp(targetSlip, -slipCap, slipCap);
+
+	// Move the car's yaw towards the value that closes the angle error.
+	float yawTargetRate = DRIFT_YAW_GAIN*gDriftAssist*(targetSlip - m_fSlipAngle);
+
+	// Light assist: past the cap an aligning torque pulls the car back in line.
+	float slipOverCap = m_fSlipAngle - Clamp(m_fSlipAngle, -slipCap, slipCap);
+	yawTargetRate -= DRIFT_ALIGN_GAIN*gDriftAssist * slipOverCap;
+
+	yawTargetRate = Clamp(yawTargetRate, -DRIFT_YAW_MAX, DRIFT_YAW_MAX);
+
+	// Rate-limit the yaw acceleration and write it to the car's turn speed, as
+	// the physical turn force would. Collisions still override this later.
+	float yawRate = DotProduct(car->m_vecTurnSpeed, car->GetUp()) * DRIFT_TICK_RATE;
+	float newYawRate = yawRate + Clamp(yawTargetRate - yawRate, -DRIFT_YAW_ACCEL*dt, DRIFT_YAW_ACCEL*dt);
+	car->m_vecTurnSpeed += car->GetUp() * ((newYawRate - yawRate) / DRIFT_TICK_RATE);
+}
+
+void
+CDriftControl::HoldDriftSpeed(CAutomobile *car, float dt)
+{
+	// The drift must not cost speed: give part of any speed the slide ate
+	// back. The push never goes past the entry speed and follows the current
+	// velocity, so it cannot make the car faster than it entered.
+	float speed = car->m_vecMoveSpeed.Magnitude();
+	if(speed > 0.01f && speed < m_fEntrySpeed){
+		CVector dir = car->m_vecMoveSpeed*(1.0f/speed);
+		car->ApplyMoveForce(dir * ((m_fEntrySpeed - speed)*DRIFT_SPEED_HOLD*car->m_fMass*dt));
+	}
+}
+
+void
+CDriftControl::ApplyBoost(CAutomobile *car)
+{
+	if(m_fDriftTime < DRIFT_TIER1_TIME)
+		return;
+
+	float fMaxVelocity = GetMaxSpeed(car);
+	float boost = (m_fDriftTime >= DRIFT_TIER2_TIME ? DRIFT_BOOST_TIER2 : DRIFT_BOOST_TIER1)*fMaxVelocity;
+
+	// Never push the car past the boost speed cap.
+	float fwdSpeed = DotProduct(car->m_vecMoveSpeed, car->GetForward());
+	boost = Min(boost, DRIFT_BOOST_SPEED_CAP*fMaxVelocity - fwdSpeed);
+	if(boost > 0.0f)
+		car->ApplyMoveForce(car->GetForward() * boost * car->m_fMass);
+}
+
+void
+CDriftControl::StartRecover(void)
+{
+	m_Phase = DRIFT_PHASE_RECOVER;
+	m_fPhaseTimer = 0.0f;
+	m_fDriftTime = 0.0f;
+}
+
+void
+CDriftControl::Update(CAutomobile *car, float timeStep)
+{
+	if(!gDriftEnabled){
+		Reset();
+		return;
+	}
+
+	float dt = timeStep / DRIFT_TICK_RATE;	// the time step is 1.0 at 50 fps
+
+	float fwdSpeed = DotProduct(car->m_vecMoveSpeed, car->GetForward());
+	float rightSpeed = DotProduct(car->m_vecMoveSpeed, car->GetRight());
+	m_fSlipAngle = Atan2(rightSpeed, fwdSpeed);
+
+	float fMaxVelocity = GetMaxSpeed(car);
+	bool onGround = car->m_nWheelsOnGround >= 2;
+	bool handbrake = !!car->bIsHandbrakeOn;
+
+	// The drift pauses while the car is in the air.
+	if(!onGround && m_Phase != DRIFT_PHASE_INACTIVE)
+		return;
+
+	switch(m_Phase){
+	case DRIFT_PHASE_INACTIVE:
+		// Entry: handbrake + steering at speed. Below the gate the handbrake
+		// keeps the original braking path.
+		if(handbrake && onGround &&
+		   fwdSpeed > DRIFT_ENTRY_SPEED*fMaxVelocity &&
+		   Abs(car->m_fSteerInput) > DRIFT_ENTRY_STEER){
+			m_Phase = DRIFT_PHASE_ENGAGE;
+			m_fPhaseTimer = 0.0f;
+			m_fDriftTime = 0.0f;
+			m_fEntrySpeed = car->m_vecMoveSpeed.Magnitude();
+			m_nEntryDir = car->m_fSteerInput > 0.0f ? 1 : -1;
+		}
+		break;
+
+	case DRIFT_PHASE_ENGAGE:
+		m_fPhaseTimer += dt;
+		m_fGripCut = Min(m_fPhaseTimer/DRIFT_ENGAGE_TIME, 1.0f);
+		if(m_fGripCut >= 1.0f)
+			m_Phase = DRIFT_PHASE_DRIFT;
+		break;
+
+	case DRIFT_PHASE_DRIFT:
+		m_fGripCut = 1.0f;
+		break;
+
+	case DRIFT_PHASE_RECOVER:
+		m_fPhaseTimer += dt;
+		if(fwdSpeed < DRIFT_MIN_SPEED*fMaxVelocity)
+			m_fGripCut -= dt/DRIFT_BLEND_TIME;
+		else
+			m_fGripCut -= dt/DRIFT_RELEASE_TIME;
+		if(m_fGripCut <= 0.0f){
+			m_fGripCut = 0.0f;
+			m_Phase = DRIFT_PHASE_INACTIVE;
+		}
+		break;
+	}
+
+	// Exit conditions for a running drift. The handbrake release starts the
+	// recovery; a drift that got too slow blends back to normal grip.
+	if(m_Phase == DRIFT_PHASE_ENGAGE || m_Phase == DRIFT_PHASE_DRIFT){
+		if(!handbrake || fwdSpeed < DRIFT_MIN_SPEED*fMaxVelocity){
+			// A charged drift gives its boost when the handbrake is released.
+			if(!handbrake)
+				ApplyBoost(car);
+			StartRecover();
+		}else{
+			// Only a real slide charges the boost.
+			if(Abs(m_fSlipAngle) > DEGTORAD(DRIFT_SLIP_MIN))
+				m_fDriftTime += dt;
+			UpdateYawControl(car, dt);
+			HoldDriftSpeed(car, dt);
+		}
+	}
+}
