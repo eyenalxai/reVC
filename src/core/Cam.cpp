@@ -2521,6 +2521,9 @@ CCam::Process_M16_1stPerson(const CVector &CameraTarget, float, float, float)
 }
 
 float fBike1stPersonOffsetZ = 0.15f;
+#ifdef FIRST_PERSON
+float fVehicle1stPersonOffsetFwd = 0.1f;
+#endif
 
 void
 CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, float SpeedVar, float TargetSpeedVar)
@@ -2697,6 +2700,28 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		FOV = 60.0f;
 		Source = Multiply3x3(*matrix, CamPos);
 		Source += CamTargetEntity->GetPosition();
+#ifdef FIRST_PERSON
+		// Sit at the player's own eyes, just behind the wheel. Use the player's
+		// head, not the AI driver's: a taxi passenger must see from the
+		// passenger seat. The model and the driving animation decide the side,
+		// so left and right hand drive models both work. Bikes use the same
+		// treatment, on top of the lean matrix set above.
+		CPlayerPed *pPlayer = FindPlayerPed();
+		if(FrontEndMenuManager.m_bFirstPersonView && pPlayer && pPlayer->InVehicle() &&
+		   pPlayer->m_pMyVehicle == (CVehicle*)CamTargetEntity && ((CVehicle*)CamTargetEntity)->pDriver &&
+		   !((CVehicle*)CamTargetEntity)->IsBoat()){
+			// The world update has already placed the player inside the
+			// vehicle, so only the animation hierarchy needs a refresh here.
+			pPlayer->GetMatrix().UpdateRW();
+			pPlayer->UpdateRwFrame();
+			pPlayer->UpdateRpHAnim();
+			CVector Head(0.0f, 0.0f, 0.0f);
+			pPlayer->m_pedIK.GetComponentPosition(Head, PED_HEAD);
+			CVector Fwd = matrix->GetForward();
+			Fwd.Normalise();
+			Source = Head + fVehicle1stPersonOffsetFwd*Fwd;
+		}else
+#endif
 		if(((CVehicle*)CamTargetEntity)->IsBoat())
 			Source.z += 0.5f;
 		else if(((CVehicle*)CamTargetEntity)->IsBike() && ((CVehicle*)CamTargetEntity)->pDriver){
