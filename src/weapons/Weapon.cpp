@@ -72,7 +72,7 @@ Find3rdPersonCamTargetVectorFromCachedVectors(float dist, CVector pos, CVector& 
 }
 #endif
 
-// The ray of the first person camera: the M16 mode and the sight view fire along it
+// The ray of the first person camera: the sight view and hip fire shoot along it
 static void
 GetFirstPersonSightsRay(float range, CVector &source, CVector &target)
 {
@@ -973,6 +973,51 @@ CWeapon::FireInstantHit(CEntity *shooter, CVector *fireSource)
 		ahead.Normalise();
 #endif
 	}
+#ifdef FIRST_PERSON
+	else if ( shooter == FindPlayerPed() && TheCamera.Using1stPersonView() && !TheCamera.UsingFirstPersonSights() )
+	{
+		// Hip fire: the shot leaves along the camera axis with the stock player spread
+		GetFirstPersonSightsRay(info->m_fRange, source, target);
+
+		int32 inaccuracy = 100 - ((CPed *)shooter)->m_wepAccuracy;
+		if (inaccuracy != 0)
+		{
+			float distToTarget = info->m_fRange;
+			float newInaccuracy = fPlayerAimScale * FindPlayerPed()->m_fAttackButtonCounter * (inaccuracy * Min(1.f, fPlayerAimScaleDist / distToTarget));
+			if (FindPlayerPed()->bIsDucking)
+				newInaccuracy *= 0.4f;
+
+			target.x += CGeneral::GetRandomNumberInRange(-0.15f, 0.15f) * newInaccuracy;
+			target.y += CGeneral::GetRandomNumberInRange(-0.15f, 0.15f) * newInaccuracy;
+			target.z += CGeneral::GetRandomNumberInRange(-0.2f, 0.2f) * newInaccuracy;
+			FindPlayerPed()->m_fAttackButtonCounter += info->m_nDamage * 0.04f;
+		}
+
+		CWorld::pIgnoreEntity = shooter;
+		CWorld::bIncludeBikers = true;
+		CWorld::bIncludeDeadPeds = true;
+		CWorld::bIncludeCarTyres = true;
+		ProcessLineOfSight(source, target, point, victim, m_eWeaponType, shooter, true, true, true, true, true, false, false);
+		CWorld::pIgnoreEntity = nil;
+		CWorld::bIncludeBikers = false;
+		CWorld::bIncludeDeadPeds = false;
+		CWorld::bIncludeCarTyres = false;
+
+		if (victim)
+			CheckForShootingVehicleOccupant(&victim, &point, m_eWeaponType, source, target);
+
+		int32 rotSpeed = 1;
+		if (m_eWeaponType == WEAPONTYPE_M4)
+			rotSpeed = 4;
+
+		CVector bulletPos;
+		if (CHeli::TestBulletCollision(&source, &target, &bulletPos, 4))
+		{
+			for (int32 i = 0; i < 16; i++)
+				CParticle::AddParticle(PARTICLE_SPARK, bulletPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.0f, rotSpeed);
+		}
+	}
+#endif
 	else if ( shooter == FindPlayerPed() && TheCamera.Cams[0].Using3rdPersonMouseCam()  )
 	{
 #ifdef FREE_CAM
@@ -1743,13 +1788,14 @@ CWeapon::FireShotgun(CEntity *shooter, CVector *fireSource)
 		CEntity *victim;
 
 #ifdef FIRST_PERSON
-		// Aiming down the sights: the player's shot leaves along the camera axis
-		bool usingSights = shooter == FindPlayerPed() && TheCamera.UsingFirstPersonSights();
+		// The first person view: the sight view and hip fire shoot along the camera axis
+		bool usingFirstPerson = shooter == FindPlayerPed() &&
+			(TheCamera.UsingFirstPersonSights() || TheCamera.Using1stPersonView());
 #endif
 
 		if ( shooter == FindPlayerPed() && TheCamera.Cams[0].Using3rdPersonMouseCam()
 #ifdef FIRST_PERSON
-			|| usingSights
+			|| usingFirstPerson
 #endif
 			)
 		{
@@ -1757,7 +1803,7 @@ CWeapon::FireShotgun(CEntity *shooter, CVector *fireSource)
 #ifdef FREE_CAM
 			if (CCamera::bFreeCam
 #ifdef FIRST_PERSON
-				&& !usingSights
+				&& !usingFirstPerson
 #endif
 				) {
 				CPlayerPed* shooterPed = (CPlayerPed*)shooter;
@@ -1767,7 +1813,7 @@ CWeapon::FireShotgun(CEntity *shooter, CVector *fireSource)
 			else
 #endif
 #ifdef FIRST_PERSON
-			if (usingSights) {
+			if (usingFirstPerson) {
 				CCam *cam = &TheCamera.Cams[TheCamera.ActiveCam];
 				GetFirstPersonSightsRay(1.0f, source, target);
 				Left = CrossProduct(cam->Front, cam->Up);
@@ -2217,20 +2263,21 @@ CWeapon::FireAreaEffect(CEntity *shooter, CVector *fireSource)
 	CVector dir;
 
 #ifdef FIRST_PERSON
-	// Aiming down the sights: the player's flame leaves along the camera axis
-	bool usingSights = shooter == FindPlayerPed() && TheCamera.UsingFirstPersonSights();
+	// The first person view: the sight view and hip fire shoot along the camera axis
+	bool usingFirstPerson = shooter == FindPlayerPed() &&
+		(TheCamera.UsingFirstPersonSights() || TheCamera.Using1stPersonView());
 #endif
 
 	if ( shooter == FindPlayerPed() && TheCamera.Cams[0].Using3rdPersonMouseCam()
 #ifdef FIRST_PERSON
-		|| usingSights
+		|| usingFirstPerson
 #endif
 		)
 	{
 #ifdef FREE_CAM
 		if (CCamera::bFreeCam
 #ifdef FIRST_PERSON
-			&& !usingSights
+			&& !usingFirstPerson
 #endif
 			) {
 			CPlayerPed* shooterPed = (CPlayerPed*)shooter;
@@ -2239,7 +2286,7 @@ CWeapon::FireAreaEffect(CEntity *shooter, CVector *fireSource)
 		else
 #endif
 #ifdef FIRST_PERSON
-		if (usingSights) {
+		if (usingFirstPerson) {
 			GetFirstPersonSightsRay(info->m_fRange, source, target);
 		} else
 #endif
