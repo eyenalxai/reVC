@@ -500,6 +500,17 @@ static_assert(false, "SUPPORT_XBOX_SCRIPT and SUPPORT_MOBILE_SCRIPT are mutually
 
 #endif // VANILLA_DEFINES
 
+// CdStream used named POSIX semaphores. Named semaphores are files in /dev/shm:
+// every running instance of the game shares them, and they survive a killed
+// process. A leftover instance then steals the posts that CdStreamSync waits
+// for, so the main thread waits in CdStreamSync while the stream thread waits
+// for work, and the game hangs in the loading screen. Unnamed semaphores stay
+// inside the process. sem_init does not work on macOS, so it keeps the named
+// ones.
+#if !defined(USE_UNNAMED_SEM) && !defined(__APPLE__) && !defined(_WIN32) && !defined(ANDROID)
+#define USE_UNNAMED_SEM
+#endif
+
 #if defined(AUDIO_OAL) && !defined(EXTERNAL_3D_SOUND)
 #error AUDIO_OAL cannot work without EXTERNAL_3D_SOUND
 #endif
