@@ -598,6 +598,7 @@ struct MenuTrapezoid
 #define FIRST_PERSON_FOV_MAX 90
 #define FIRST_PERSON_SIGHTS_FOV_OFFSET 10	// the sight view zooms in by this much
 #define FIRST_PERSON_SIGHTS_FOV_MIN 40		// and never goes below this
+#define FIRST_PERSON_BODY_NEAR_CLIP 0.05f	// the player's own body parts sit close to the camera
 #endif
 
 class CMenuManager

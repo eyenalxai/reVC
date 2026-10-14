@@ -1808,6 +1808,11 @@ CCamera::CamControl(void)
 		FindPlayerPed()->bIsVisible = false;
 	else
 		FindPlayerPed()->bIsVisible = true;
+#ifdef FIRST_PERSON
+	// The first person view shows the player's own body: legs, hands and weapon
+	if(Using1stPersonView())
+		FindPlayerPed()->bIsVisible = true;
+#endif
 
 	bool switchedFromObbe = false;
 	if(!canUseObbeCam && WhoIsInControlOfTheCamera == CAMCONTROL_OBBE){

@@ -4789,6 +4789,18 @@ CPed::PreRender(void)
 
 	UpdateRpHAnim();
 
+#ifdef FIRST_PERSON
+	// First person: the camera sits inside the head, so collapse the head bone.
+	// The animation hierarchy rebuilds the head when the view ends.
+	if (IsPlayer() && TheCamera.Using1stPersonView()) {
+		RpHAnimHierarchy* hier = GetAnimHierarchyFromSkinClump(GetClump());
+		int32 idx = RpHAnimIDGetIndex(hier, ConvertPedNode2BoneTag(PED_HEAD));
+		RwMatrix* head = &RpHAnimHierarchyGetMatrixArray(hier)[idx];
+		RwV3d zero = { 0.0f, 0.0f, 0.0f };
+		RwMatrixScale(head, &zero, rwCOMBINEPRECONCAT);
+	}
+#endif
+
 	bool bIsWindModifierTurnedOn = false;
 	float fAnyDirectionShift = 1.0f;
 	bool bIsPedDrivingBikeOrOpenTopCar = false;
