@@ -109,6 +109,12 @@ int32 CCarCtrl::LoadedCarsArray[TOTAL_CUSTOM_CLASSES][MAX_CAR_MODELS_IN_ARRAY];
 CVehicle* apCarsToKeep[MAX_CARS_TO_KEEP];
 uint32 aCarsToKeepTime[MAX_CARS_TO_KEEP];
 
+float
+CCarCtrl::GetRandomCarTarget()
+{
+	return Min(RANDOM_CARS_PER_INI_UNIT * CarDensityMultiplier * CIniFile::CarNumberMultiplier, (float)MAX_RANDOM_CARS);
+}
+
 void
 CCarCtrl::GenerateRandomCars()
 {
@@ -116,10 +122,11 @@ CCarCtrl::GenerateRandomCars()
 		CountDownToCarsAtStart = 2;
 		return;
 	}
-	if (NumRandomCars < 80){
-		if (CountDownToCarsAtStart == 0)
-			GenerateOneRandomCar();
-		else if (--CountDownToCarsAtStart == 0) {
+	if (NumRandomCars < MAX_RANDOM_CARS){
+		if (CountDownToCarsAtStart == 0) {
+			for (int i = 0; i < RANDOM_CAR_ATTEMPTS_PER_FRAME; i++)
+				GenerateOneRandomCar();
+		} else if (--CountDownToCarsAtStart == 0) {
 			for (int i = 0; i < 100; i++)
 				GenerateOneRandomCar();
 			CTheCarGenerators::GenerateEvenIfPlayerIsCloseCounter = 20;
@@ -140,8 +147,9 @@ CCarCtrl::GenerateOneRandomCar()
 	CVector2D vecPlayerSpeed = FindPlayerSpeed();
 	CZoneInfo zone;
 	CTheZones::GetZoneInfoForTimeOfDay(&vecTargetPos, &zone);
-	pPlayer->m_nTrafficMultiplier = pPlayer->m_fRoadDensity * zone.carDensity;
-	if (NumRandomCars >= pPlayer->m_nTrafficMultiplier * CarDensityMultiplier * CIniFile::CarNumberMultiplier)
+	float trafficDensity = pPlayer->m_fRoadDensity * zone.carDensity;
+	pPlayer->m_nTrafficMultiplier = trafficDensity;
+	if (NumRandomCars >= GetRandomCarTarget())
 		return;
 	if (NumFiretrucksOnDuty + NumAmbulancesOnDuty + NumParkedCars + NumMissionCars + NumLawEnforcerCars + NumRandomCars >= MaxNumberOfCarsInUse)
 		return;

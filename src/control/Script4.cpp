@@ -1809,7 +1809,7 @@ int8 CRunningScript::ProcessCommands900To999(int32 command)
 	{
 		CollectParameters(&m_nIp, 4);
 		// Keep in sync with the NumRandomCars cap in CCarCtrl::GenerateRandomCars().
-		if (CCarCtrl::NumRandomCars >= 80)
+		if (CCarCtrl::NumRandomCars >= MAX_RANDOM_CARS)
 			return 0;
 		int attempts;
 		int model = -1;
