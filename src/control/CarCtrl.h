@@ -8,6 +8,8 @@
 #define METERS_PER_SECOND_TO_GAME_SPEED (1.0f / GAME_SPEED_TO_METERS_PER_SECOND)
 #define GAME_SPEED_TO_CARAI_SPEED 60.0f
 #define TIME_COPS_WAIT_TO_EXIT_AFTER_STOPPING 2500
+#define RANDOM_CARS_PER_INI_UNIT 30.0f
+#define RANDOM_CAR_ATTEMPTS_PER_FRAME 3
 
 class CZoneInfo;
 class CAutomobile;
@@ -15,6 +17,7 @@ class CAutomobile;
 enum{
 	MAX_CARS_TO_KEEP = 2,
 	MAX_CAR_MODELS_IN_ARRAY = 25,
+	MAX_RANDOM_CARS = 110,
 };
 
 #ifdef FIX_BUGS
@@ -68,6 +71,7 @@ public:
 	static bool MapCouldMoveInThisArea(float x, float y);
 	static void ScanForPedDanger(CVehicle *veh);
 	static void RemoveFromInterestingVehicleList(CVehicle*);
+	static float GetRandomCarTarget(void);
 	static void GenerateRandomCars(void);
 	static void GenerateOneRandomCar(void);
 	static void GenerateEmergencyServicesCar(void);

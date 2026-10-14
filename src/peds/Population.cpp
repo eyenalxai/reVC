@@ -543,7 +543,7 @@ CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScree
 		if ((ms_nNumCop < maxCops || forceAddingCop) &&
 			(!playerInfo->m_pPed->bInVehicle &&
 				(CCarCtrl::NumLawEnforcerCars >= wantedInfo->m_MaximumLawEnforcerVehicles
-				|| CCarCtrl::NumRandomCars >= playerInfo->m_nTrafficMultiplier * CCarCtrl::CarDensityMultiplier
+				|| CCarCtrl::NumRandomCars >= CCarCtrl::GetRandomCarTarget()
 				|| CCarCtrl::NumFiretrucksOnDuty + CCarCtrl::NumAmbulancesOnDuty + CCarCtrl::NumParkedCars
 				+ CCarCtrl::NumMissionCars + CCarCtrl::NumLawEnforcerCars + CCarCtrl::NumRandomCars >= CCarCtrl::MaxNumberOfCarsInUse) || forceAddingCop)) {
 			addCop = true;
