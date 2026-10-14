@@ -36,6 +36,7 @@
 #include "Sprite.h"
 #include "Pickups.h"
 #include "SaveBuf.h"
+#include "Frontend.h"
 
 float fReloadAnimSampleFraction[5] = {  0.5f,  0.7f,  0.75f,  0.75f,  0.7f };
 float fSeaSparrowAimingAngle = 10.0f;
@@ -69,6 +70,16 @@ Find3rdPersonCamTargetVectorFromCachedVectors(float dist, CVector pos, CVector& 
 		target = dist * target + source;
 		return true;
 	}
+}
+#endif
+
+#ifdef FIRST_PERSON
+static bool
+UsingFirstPersonSights(void)
+{
+	// Aiming down the sights in the first person view
+	return FrontEndMenuManager.m_bFirstPersonView &&
+		TheCamera.PlayerWeaponMode.Mode == CCam::MODE_M16_1STPERSON;
 }
 #endif
 
@@ -1733,16 +1744,37 @@ CWeapon::FireShotgun(CEntity *shooter, CVector *fireSource)
 		CColPoint point;
 		CEntity *victim;
 
-		if ( shooter == FindPlayerPed() && TheCamera.Cams[0].Using3rdPersonMouseCam() )
+#ifdef FIRST_PERSON
+		// Aiming down the sights: the shot leaves along the camera axis
+		bool usingSights = UsingFirstPersonSights();
+#endif
+
+		if ( shooter == FindPlayerPed() && (TheCamera.Cams[0].Using3rdPersonMouseCam()
+#ifdef FIRST_PERSON
+			|| usingSights
+#endif
+			) )
 		{
 			CVector Left;
 #ifdef FREE_CAM
-			if (CCamera::bFreeCam) {
+			if (CCamera::bFreeCam
+#ifdef FIRST_PERSON
+				&& !usingSights
+#endif
+				) {
 				CPlayerPed* shooterPed = (CPlayerPed*)shooter;
 				Find3rdPersonCamTargetVectorFromCachedVectors(1.0f, *fireSource, source, target, shooterPed->m_cachedCamSource, shooterPed->m_cachedCamFront, shooterPed->m_cachedCamUp);
 				Left = CrossProduct(shooterPed->m_cachedCamFront, shooterPed->m_cachedCamUp);
 			}
 			else
+#endif
+#ifdef FIRST_PERSON
+			if (usingSights) {
+				CCam *cam = &TheCamera.Cams[TheCamera.ActiveCam];
+				source = cam->Source;
+				target = cam->Front + source;
+				Left = CrossProduct(cam->Front, cam->Up);
+			} else
 #endif
 			{
 				TheCamera.Find3rdPersonCamTargetVector(1.0f, *fireSource, source, target);
@@ -2187,14 +2219,34 @@ CWeapon::FireAreaEffect(CEntity *shooter, CVector *fireSource)
 	CVector target;
 	CVector dir;
 
-	if ( shooter == FindPlayerPed() && TheCamera.Cams[0].Using3rdPersonMouseCam() )
+#ifdef FIRST_PERSON
+	// Aiming down the sights: the flame leaves along the camera axis
+	bool usingSights = UsingFirstPersonSights();
+#endif
+
+	if ( shooter == FindPlayerPed() && (TheCamera.Cams[0].Using3rdPersonMouseCam()
+#ifdef FIRST_PERSON
+		|| usingSights
+#endif
+		) )
 	{
 #ifdef FREE_CAM
-		if (CCamera::bFreeCam) {
+		if (CCamera::bFreeCam
+#ifdef FIRST_PERSON
+			&& !usingSights
+#endif
+			) {
 			CPlayerPed* shooterPed = (CPlayerPed*)shooter;
 			Find3rdPersonCamTargetVectorFromCachedVectors(info->m_fRange, *fireSource, source, target, shooterPed->m_cachedCamSource, shooterPed->m_cachedCamFront, shooterPed->m_cachedCamUp);
 		}
 		else
+#endif
+#ifdef FIRST_PERSON
+		if (usingSights) {
+			CCam *cam = &TheCamera.Cams[TheCamera.ActiveCam];
+			source = cam->Source;
+			target = cam->Front*info->m_fRange + source;
+		} else
 #endif
 		{
 			TheCamera.Find3rdPersonCamTargetVector(info->m_fRange, *fireSource, source, target);

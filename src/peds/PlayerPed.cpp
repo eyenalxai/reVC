@@ -24,6 +24,7 @@
 #include "PedPlacement.h"
 #include "VarConsole.h"
 #include "SaveBuf.h"
+#include "Frontend.h"
 
 #define PAD_MOVE_TO_GAME_WORLD_MOVE 60.0f
 
@@ -825,6 +826,24 @@ CPlayerPed::PlayerControlM16(CPad *padUsed)
 		bCrouchWhenShooting = false;
 	}
 
+#ifdef FIRST_PERSON
+	if (TheCamera.Using1stPersonView() && !m_attachedTo) {
+		// Aiming down the sights: the player walks at the first person walk
+		// speed. Never sprints, and keeps the weapon aim state.
+		float leftRight = padUsed->GetPedWalkLeftRight();
+		float upDown = padUsed->GetPedWalkUpDown();
+		float padMove = CVector2D(leftRight, upDown).Magnitude();
+		float padMoveInGameUnit = padMove / PAD_MOVE_TO_GAME_WORLD_MOVE;
+		if (padMoveInGameUnit > 0.0f) {
+			m_fRotationDest = CGeneral::LimitRadianAngle(TheCamera.Orientation);
+			m_fMoveSpeed = Min(padMoveInGameUnit, 0.07f * CTimer::GetTimeStep() + m_fMoveSpeed);
+		} else {
+			m_fMoveSpeed = 0.0f;
+		}
+		SetRealMoveAnim();
+	}
+#endif
+
 	if (!padUsed->GetTarget() && !m_attachedTo) {
 		RestorePreviousState();
 		TheCamera.ClearPlayerWeaponMode();
@@ -1266,10 +1285,19 @@ CPlayerPed::ProcessPlayerWeapon(CPad *padUsed)
 
 	if (!m_pFire) {
 		eWeaponType weapon = GetWeapon()->m_eWeaponType;
-		if (weapon == WEAPONTYPE_ROCKETLAUNCHER || weapon == WEAPONTYPE_SNIPERRIFLE ||
+		bool enterWeaponMode = weapon == WEAPONTYPE_ROCKETLAUNCHER || weapon == WEAPONTYPE_SNIPERRIFLE ||
 			weapon == WEAPONTYPE_LASERSCOPE || weapon == WEAPONTYPE_M4 ||
 			weapon == WEAPONTYPE_RUGER || weapon == WEAPONTYPE_M60 ||
-			weapon == WEAPONTYPE_CAMERA) {
+			weapon == WEAPONTYPE_CAMERA;
+#ifdef FIRST_PERSON
+		// First person view: every weapon that can aim enters the sight view,
+		// not only the stock weapon set. The flamethrower aims too, although
+		// the weapon data does not give it the CANAIM flag.
+		enterWeaponMode = enterWeaponMode ||
+			(FrontEndMenuManager.m_bFirstPersonView &&
+			 (weaponInfo->IsFlagSet(WEAPONFLAG_CANAIM) || weapon == WEAPONTYPE_FLAMETHROWER));
+#endif
+		if (enterWeaponMode) {
 
 			if (padUsed->TargetJustDown() || TheCamera.m_bJustJumpedOutOf1stPersonBecauseOfTarget) {
 #ifdef FREE_CAM
