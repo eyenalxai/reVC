@@ -2332,7 +2332,15 @@ CCam::Process_M16_1stPerson(const CVector &CameraTarget, float, float, float)
 
 	bool isAttached = ((CPed*)CamTargetEntity)->IsPlayer() && ((CPed*)CamTargetEntity)->m_attachedTo;
 
+#ifdef FIRST_PERSON
+	// Aiming down the sights: the sight view zooms in a little
+	if(FrontEndMenuManager.m_bFirstPersonView && Mode == MODE_M16_1STPERSON)
+		FOV = Max(40.0f, (float)(Clamp(FrontEndMenuManager.m_nFirstPersonFOV, 50, 90) - 10));
+	else
+		FOV = DefaultFOV;
+#else
 	FOV = DefaultFOV;
+#endif
 	TargetCoors = CameraTarget;
 
 	if(ResetStatics){
