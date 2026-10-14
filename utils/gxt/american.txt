@@ -1447,6 +1447,9 @@ Run
 [FEC_FPC]
 First person camera
 
+[FEC_FOV]
+First Person FOV
+
 [FEC_LL]
 Look left
 

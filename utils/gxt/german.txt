@@ -1751,6 +1751,9 @@ Rennen
 [FEC_FPC]
 Subjektive Kamera
 
+[FEC_FOV]
+Sichtfeld
+
 [FEC_LL]
 Nach links sehen
 
