@@ -2600,7 +2600,8 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		bool UseMouse = false;
 		float MouseX = CPad::GetPad(0)->GetMouseX();
 		float MouseY = CPad::GetPad(0)->GetMouseY();
-		if(TheCamera.FirstPersonViewEnabled() && (MouseX != 0.0f || MouseY != 0.0f)){
+		if(TheCamera.FirstPersonViewEnabled() && (MouseX != 0.0f || MouseY != 0.0f) &&
+		   !CPad::GetPad(0)->ArePlayerControlsDisabled()){
 			UseMouse = true;
 			LookLeftRight = -3.0f*MouseX;
 			LookUpDown = 4.0f*MouseY;
