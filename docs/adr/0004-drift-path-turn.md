@@ -41,8 +41,11 @@ miss the 0.6 s tier. Holding the angle is not enough: the path must turn.
 ## Consequences
 
 - The path curves at `radius = speed / rate`: at the full 60 degrees per
-  second, about 30 m at 60 km/h and 60 m at 120 km/h. The corner tightens as
+  second, about 16 m at 60 km/h and 32 m at 120 km/h. The corner tightens as
   the player winds the target angle down.
+- The curve rate is capped at the yaw authority (`DRIFT_YAW_MAX`), so a
+  strength setting above about 1.4 cannot make the velocity outrun the nose;
+  the nose and the velocity stay equal and the slip keeps its target.
 - The angle still shapes the turn: the curve rate follows the target angle, so
   a small angle turns gently, and a counter-steered drift near zero target
   turns almost straight. The handbrake turn keeps its fixed yaw kick and never

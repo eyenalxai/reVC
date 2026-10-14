@@ -27,7 +27,7 @@
 #define DRIFT_YAW_GAIN		4.0f	// angle error to yaw rate, 1/s
 #define DRIFT_YAW_MAX		1.5f	// maximum yaw rate, rad/s
 #define DRIFT_YAW_ACCEL		6.0f	// yaw rate ramp, rad/s^2
-#define DRIFT_CURVE_RATE	60.0f	// path turn at full angle, degrees/s
+#define DRIFT_CURVE_RATE	60.0f	// curve rate at full angle, degrees/s
 #define DRIFT_ALIGN_GAIN	2.0f	// aligning pull past the slip cap, 1/s
 #define DRIFT_VEL_ALIGN_GAIN	3.0f	// slip error to velocity alignment, 1/s
 #define DRIFT_VEL_ALIGN_RATE	120.0f	// cap on the velocity alignment, degrees/s
@@ -172,15 +172,27 @@ CDriftControl::ApplyYawRate(CAutomobile *car, float yawTargetRate, float dt)
 }
 
 // The rate the drift turns the whole car at, nose and direction of travel:
-// the path turn. It follows the target angle, so a small angle turns gently
+// the curve rate. It follows the target angle, so a small angle turns gently
 // and a full angle turns hard, and it fades with the strength and the grip
 // cut like the alignment does.
 float
 CDriftControl::GetCurveRate(void)
 {
-	return m_nEntryDir * DEGTORAD(DRIFT_CURVE_RATE) *
-	       Clamp(Abs(m_fTargetSlip)/DEGTORAD(DRIFT_ANGLE_MAX), 0.0f, 1.0f) *
-	       gDriftStrength * m_fGripCut;
+	float rate = m_nEntryDir * DEGTORAD(DRIFT_CURVE_RATE) *
+	             Clamp(Abs(m_fTargetSlip)/DEGTORAD(DRIFT_ANGLE_MAX), 0.0f, 1.0f) *
+	             GetEffectScale();
+	// The nose can only turn at DRIFT_YAW_MAX, so the curve rate stops there
+	// too; the nose and the velocity stay together and the slip keeps its
+	// target.
+	return Clamp(rate, -DRIFT_YAW_MAX, DRIFT_YAW_MAX);
+}
+
+// How strongly the drift's own effects apply right now: the player's strength
+// setting and the ramp in and out of the grip cut.
+float
+CDriftControl::GetEffectScale(void)
+{
+	return gDriftStrength * m_fGripCut;
 }
 
 void
@@ -237,7 +249,7 @@ CDriftControl::AlignVelocity(CAutomobile *car, float dt)
 	if(m_bHandbrakeTurn)
 		return;
 
-	// The whole path turns: nose and velocity rotate together, so the slip
+	// The whole car turns: nose and velocity rotate together, so the slip
 	// stays at the target while the drift works through the corner. The
 	// error correction on top brings the slip back to the target when it
 	// drifts off it.
@@ -263,7 +275,7 @@ void
 CDriftControl::SteerVelocity(CAutomobile *car, float error, float gain, float rateCap, float dt)
 {
 	float rate = Clamp(error*gain, -rateCap, rateCap);
-	RotateVelocity(car, rate*gDriftStrength*m_fGripCut*dt);
+	RotateVelocity(car, rate*GetEffectScale()*dt);
 }
 
 void

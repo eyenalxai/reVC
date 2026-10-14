@@ -54,6 +54,7 @@ private:
 	bool UpdateTargetAngle(CAutomobile *car, float dt);
 	void ApplyYawRate(CAutomobile *car, float yawTargetRate, float dt);
 	float GetCurveRate(void);
+	float GetEffectScale(void);
 	void AlignVelocity(CAutomobile *car, float dt);
 	void BleedSlip(CAutomobile *car, float dt);
 	void SteerVelocity(CAutomobile *car, float error, float gain, float rateCap, float dt);

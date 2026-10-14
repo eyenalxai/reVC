@@ -27,7 +27,9 @@ rotating.
    error (gain 3 per second) with a capped rotation rate (120 degrees per
    second), scaled by the drift strength and the grip cut, so it fades in on
    entry and out on exit. The hold angle is now reached at street speed, where
-   the tyre forces alone cannot make it.
+   the tyre forces alone cannot make it. ADR 0004 adds the drift's own turn
+   (the curve rate): the nose and the velocity then turn together, so this
+   alignment holds the slip while the drift carries the corner.
 2. The rotation never changes the length of the velocity. The component along
    the car's up axis does not turn; the rest turns around it. The drift cannot
    add or remove speed, so the speed retention of ADR 0002 still holds.
@@ -53,7 +55,3 @@ rotating.
   boost charge ends at the release, so the window does not change the boost.
 - The log's km/h column now multiplies the per-tick velocity by the tick rate
   (VICE-52), so the next capture can pair a real speed with its frac value.
-- ADR 0004 adds the drift's own turn rate, the path turn. It replaces the
-  angle-only statement of Decision 1 about the direction of travel: the nose
-  and the velocity now turn together while the alignment holds the slip at the
-  target, so the drift carries the corner instead of only holding the angle.
