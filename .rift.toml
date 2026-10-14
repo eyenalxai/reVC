@@ -1,0 +1,6 @@
+version = 1
+
+# Hooks must keep stdout clean. rift's shell integration captures stdout to
+# learn which directory to cd into, so hook output on stdout breaks `rift create`.
+[[hooks.postcreate]]
+run = "rata link --team VICE 1>&2"
