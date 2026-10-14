@@ -20,6 +20,7 @@ public:
 	float m_fPhaseTimer;	// seconds spent in the current phase
 	float m_fDriftTime;	// seconds of real sliding, charges the boost
 	float m_fSlipAngle;	// angle between the car's forward and its velocity, radians
+	float m_fTargetSlip;	// slip angle the drift holds, radians
 	float m_fEntrySpeed;	// speed when the drift started
 	int8 m_nEntryDir;	// yaw direction of the drift, +1 or -1
 
@@ -36,6 +37,8 @@ public:
 
 private:
 	void UpdateYawControl(CAutomobile *car, float dt);
+	bool UpdateTargetAngle(CAutomobile *car, float dt);
+	void ApplyYawRate(CAutomobile *car, float yawTargetRate, float dt);
 	void HoldDriftSpeed(CAutomobile *car, float dt);
 	void ApplyBoost(CAutomobile *car);
 	void StartRecover(void);

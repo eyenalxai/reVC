@@ -5,8 +5,8 @@
 #include "Automobile.h"
 #include "DriftControl.h"
 
-// All drift tuning lives in this block. Times are real seconds, speeds are a
-// fraction of the handling top speed (fMaxVelocity).
+// All drift tuning lives in this block. Times are real seconds, angles are
+// degrees, speeds are a fraction of the handling top speed (fMaxVelocity).
 #define DRIFT_ENTRY_SPEED	0.30f	// entry speed, below this the handbrake keeps braking
 #define DRIFT_MIN_SPEED		0.25f	// below this the car blends back to normal grip
 #define DRIFT_ENTRY_STEER	0.2f	// steering input needed to start a drift
@@ -14,12 +14,15 @@
 #define DRIFT_ENGAGE_TIME	0.3f	// rear grip ramp in
 #define DRIFT_RELEASE_TIME	0.4f	// rear grip ramp out
 #define DRIFT_BLEND_TIME	0.5f	// ramp out when the drift got too slow
-#define DRIFT_ANGLE_TARGET	35.0f	// steering target cap, degrees
-#define DRIFT_ANGLE_CAP		60.0f	// absolute drift angle cap, degrees
+#define DRIFT_HOLD_ANGLE	20.0f	// drift angle the model holds on entry
+#define DRIFT_ANGLE_RATE	90.0f	// steering integration of the hold angle, degrees/s
+#define DRIFT_ANGLE_MAX		45.0f	// hold angle cap
+#define DRIFT_ANGLE_MIN		(-5.0f)	// hold angle floor; the drift ends past zero
+#define DRIFT_SLIP_CAP		60.0f	// slip angle past which the align assist pulls
 #define DRIFT_YAW_GAIN		4.0f	// angle error to yaw rate, 1/s
 #define DRIFT_YAW_MAX		1.5f	// maximum yaw rate, rad/s
 #define DRIFT_YAW_ACCEL		6.0f	// yaw rate ramp, rad/s^2
-#define DRIFT_ALIGN_GAIN	2.0f	// aligning pull past the cap, 1/s
+#define DRIFT_ALIGN_GAIN	2.0f	// aligning pull past the slip cap, 1/s
 #define DRIFT_STEERLOCK_MULT	1.3f	// front wheel lock while drifting
 #define DRIFT_SPEED_HOLD	1.0f	// fraction of the lost speed given back per second
 #define DRIFT_SLIP_MIN		10.0f	// degrees of slide that charge the boost
@@ -43,6 +46,7 @@ CDriftControl::Reset(void)
 	m_fPhaseTimer = 0.0f;
 	m_fDriftTime = 0.0f;
 	m_fSlipAngle = 0.0f;
+	m_fTargetSlip = 0.0f;
 	m_fEntrySpeed = 0.0f;
 	m_nEntryDir = 0;
 }
@@ -80,24 +84,26 @@ CDriftControl::GetSteerAngleMult(void)
 	return 1.0f + (DRIFT_STEERLOCK_MULT - 1.0f)*m_fGripCut;
 }
 
-void
-CDriftControl::UpdateYawControl(CAutomobile *car, float dt)
+bool
+CDriftControl::UpdateTargetAngle(CAutomobile *car, float dt)
 {
-	// Steering selects the drift angle: the entry direction fixes the sign,
-	// steering into the slide widens it, counter-steer lowers it, and a full
-	// flick crosses zero and ends the slide.
-	float intoSlide = car->m_fSteerInput * m_nEntryDir;	// -1 = full counter-steer
-	float targetSlip = m_nEntryDir * DEGTORAD(DRIFT_ANGLE_TARGET)*gDriftStrength * intoSlide;
-	float slipCap = DEGTORAD(DRIFT_ANGLE_CAP);
-	targetSlip = Clamp(targetSlip, -slipCap, slipCap);
+	// Torque balancing: the drift holds a target slip angle. Steering
+	// integrates the target and nothing straightens the car on its own, so
+	// letting go of the stick keeps the angle and counter-steering unwinds it.
+	float target = m_fTargetSlip + car->m_fSteerInput*DEGTORAD(DRIFT_ANGLE_RATE)*dt;
+	float angle = target*m_nEntryDir;
 
-	// Move the car's yaw towards the value that closes the angle error.
-	float yawTargetRate = DRIFT_YAW_GAIN*gDriftAssist*(targetSlip - m_fSlipAngle);
+	// A hard counter flick crosses zero and ends the drift.
+	if(angle < DEGTORAD(DRIFT_ANGLE_MIN))
+		return false;
 
-	// Light assist: past the cap an aligning torque pulls the car back in line.
-	float slipOverCap = m_fSlipAngle - Clamp(m_fSlipAngle, -slipCap, slipCap);
-	yawTargetRate -= DRIFT_ALIGN_GAIN*gDriftAssist * slipOverCap;
+	m_fTargetSlip = m_nEntryDir*Clamp(angle, 0.0f, DEGTORAD(DRIFT_ANGLE_MAX));
+	return true;
+}
 
+void
+CDriftControl::ApplyYawRate(CAutomobile *car, float yawTargetRate, float dt)
+{
 	yawTargetRate = Clamp(yawTargetRate, -DRIFT_YAW_MAX, DRIFT_YAW_MAX);
 
 	// Rate-limit the yaw acceleration and write it to the car's turn speed, as
@@ -105,6 +111,21 @@ CDriftControl::UpdateYawControl(CAutomobile *car, float dt)
 	float yawRate = DotProduct(car->m_vecTurnSpeed, car->GetUp()) * DRIFT_TICK_RATE;
 	float newYawRate = yawRate + Clamp(yawTargetRate - yawRate, -DRIFT_YAW_ACCEL*dt, DRIFT_YAW_ACCEL*dt);
 	car->m_vecTurnSpeed += car->GetUp() * ((newYawRate - yawRate) / DRIFT_TICK_RATE);
+}
+
+void
+CDriftControl::UpdateYawControl(CAutomobile *car, float dt)
+{
+	// Move the car's yaw towards the value that closes the angle error. The
+	// yaw authority is absolute, so the drift turns the same at any speed.
+	float yawTargetRate = DRIFT_YAW_GAIN*gDriftAssist*(m_fTargetSlip - m_fSlipAngle);
+
+	// Light assist: past the cap an aligning torque pulls the car back in line.
+	float slipCap = DEGTORAD(DRIFT_SLIP_CAP);
+	float slipOverCap = m_fSlipAngle - Clamp(m_fSlipAngle, -slipCap, slipCap);
+	yawTargetRate -= DRIFT_ALIGN_GAIN*gDriftAssist * slipOverCap;
+
+	ApplyYawRate(car, yawTargetRate, dt);
 }
 
 void
@@ -178,6 +199,9 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 			m_fDriftTime = 0.0f;
 			m_fEntrySpeed = car->m_vecMoveSpeed.Magnitude();
 			m_nEntryDir = car->m_fSteerInput > 0.0f ? 1 : -1;
+			// The drift starts at the base hold angle and the player
+			// modulates it from there.
+			m_fTargetSlip = m_nEntryDir*DEGTORAD(DRIFT_HOLD_ANGLE);
 		}
 		break;
 
@@ -217,8 +241,14 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 			// Only a real slide charges the boost.
 			if(Abs(m_fSlipAngle) > DEGTORAD(DRIFT_SLIP_MIN))
 				m_fDriftTime += dt;
-			UpdateYawControl(car, dt);
-			HoldDriftSpeed(car, dt);
+			if(!UpdateTargetAngle(car, dt)){
+				// The counter flick unwound the angle: the drift is over.
+				ApplyBoost(car);
+				StartRecover();
+			}else{
+				UpdateYawControl(car, dt);
+				HoldDriftSpeed(car, dt);
+			}
 		}
 	}
 }
