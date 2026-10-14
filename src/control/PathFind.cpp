@@ -1767,8 +1767,11 @@ CPathFind::TestCoorsCloseness(CVector target, uint8 type, CVector start)
 		DoPathSearch(type, start, -1, target, nil, &DummyResult2, 0, nil, &dist, 50.0f, -1);
 #ifdef FIX_BUGS
 	// dist has GenerationDistMultiplier as a factor, so our reference dist should have it too
+	// CCarCtrl::GenerateOneRandomCar requests car spawns up to REQUEST_ONSCREEN_DISTANCE (250 m) away.
+	// A road route can be about 1.6x the straight line, so 400 m accepts such spawns with margin.
+	// An unreachable spawn point leaves dist at its maximum, so the test still rejects it.
 	if(type == PATH_CAR)
-		return dist < 150.0f*TheCamera.GenerationDistMultiplier;
+		return dist < 400.0f*TheCamera.GenerationDistMultiplier;
 	else
 		return dist < 100.0f*TheCamera.GenerationDistMultiplier;
 #else
