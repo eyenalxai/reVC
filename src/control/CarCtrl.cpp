@@ -116,7 +116,7 @@ CCarCtrl::GenerateRandomCars()
 		CountDownToCarsAtStart = 2;
 		return;
 	}
-	if (NumRandomCars < 45){
+	if (NumRandomCars < 80){
 		if (CountDownToCarsAtStart == 0)
 			GenerateOneRandomCar();
 		else if (--CountDownToCarsAtStart == 0) {
