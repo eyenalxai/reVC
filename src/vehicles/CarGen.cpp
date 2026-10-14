@@ -51,7 +51,7 @@ uint32 CCarGenerator::CalcNextGen()
 void CCarGenerator::DoInternalProcessing()
 {
 	int mi;
-	if (CCarCtrl::NumParkedCars >= 14)
+	if (CCarCtrl::NumParkedCars >= 20)
 		return;
 	if (m_nModelIndex >= 0) {
 		if (CheckForBlockage(m_nModelIndex)) {

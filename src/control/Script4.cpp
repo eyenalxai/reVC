@@ -1939,7 +1939,7 @@ int8 CRunningScript::ProcessCommands900To999(int32 command)
 			}
 			else
 				model = -1;
-			if (++index >= 50)
+			if (++index >= MAXVEHICLESLOADED)
 				index = 0;
 		}
 		if (model == -1)
