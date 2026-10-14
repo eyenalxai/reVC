@@ -5,6 +5,7 @@
 #include "Vehicle.h"
 #include "Automobile.h"
 #include "DriftControl.h"
+#include "DriftTelemetry.h"
 
 // All drift tuning lives in this block. Times are real seconds, angles are
 // degrees, speeds are a fraction of the handling top speed (fMaxVelocity).
@@ -136,6 +137,8 @@ CDriftControl::UpdateTargetAngle(CAutomobile *car, float dt)
 			return true;
 		}
 		m_bHandbrakeTurn = false;
+		if(gDriftDebug)
+			CDriftTelemetry::Event(car, this, "PROMOTE");
 	}
 
 	// Torque balancing: the drift holds a target slip angle. Steering
@@ -282,9 +285,12 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 	// pushing after the handbrake is released.
 	ApplyBoost(car, dt);
 
-	// The readout shows the live drift state while it is on (see re3.cpp).
-	if(gDriftDebug)
+	// The readout shows the live drift state while it is on (see re3.cpp);
+	// the telemetry records it to a file (see DriftTelemetry.h).
+	if(gDriftDebug){
 		PrintDebugState(car);
+		CDriftTelemetry::Tick(car, this);
+	}
 
 	// The drift pauses while the car is in the air.
 	if(!onGround && m_Phase != DRIFT_PHASE_INACTIVE)
@@ -348,8 +354,20 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 		bool tooSlow = !m_bHandbrakeTurn && fwdSpeed < DRIFT_MIN_SPEED*fMaxVelocity;
 		if(!handbrake || tooSlow || deadStop){
 			// A charged drift gives its boost when the handbrake is released.
-			if(!handbrake)
+			if(!handbrake){
 				EndDrift();
+				if(gDriftDebug){
+					char event[32];
+					sprintf(event, "RELEASE %.2f", m_fDriftTime);
+					CDriftTelemetry::Event(car, this, event);
+				}
+			}else if(tooSlow){
+				if(gDriftDebug)
+					CDriftTelemetry::Event(car, this, "SLOW");
+			}else{
+				if(gDriftDebug)
+					CDriftTelemetry::Event(car, this, "STOP");
+			}
 			StartRecover();
 		}else{
 			// Only a real slide charges the boost.
@@ -357,6 +375,8 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 				m_fDriftTime += dt;
 			if(!UpdateTargetAngle(car, dt)){
 				// The counter flick unwound the angle: the drift is over.
+				if(gDriftDebug)
+					CDriftTelemetry::Event(car, this, "FLICK");
 				EndDrift();
 				StartRecover();
 			}else{
