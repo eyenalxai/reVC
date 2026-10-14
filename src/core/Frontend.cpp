@@ -718,10 +718,10 @@ CMenuManager::CheckSliderMovement(int value)
 		break;
 	case MENUACTION_DRAWDIST:
 		if(value > 0)
-			m_PrefsLOD += ((1.8f - 0.925f) / MENUSLIDER_LOGICAL_BARS);
+			m_PrefsLOD += ((2.5f - 0.925f) / MENUSLIDER_LOGICAL_BARS);
 		else
-			m_PrefsLOD -= ((1.8f - 0.925f) / MENUSLIDER_LOGICAL_BARS);
-		m_PrefsLOD = Clamp(m_PrefsLOD, 0.925f, 1.8f);
+			m_PrefsLOD -= ((2.5f - 0.925f) / MENUSLIDER_LOGICAL_BARS);
+		m_PrefsLOD = Clamp(m_PrefsLOD, 0.925f, 2.5f);
 		CRenderer::ms_lodDistScale = m_PrefsLOD;
 		break;
 
@@ -1551,7 +1551,7 @@ CMenuManager::DrawStandardMenus(bool activeScreen)
 							ProcessSlider(m_PrefsBrightness / 384.0f, SLIDER_Y(70.0f), HOVEROPTION_INCREASE_BRIGHTNESS, HOVEROPTION_DECREASE_BRIGHTNESS, SCREEN_WIDTH, true);
 							break;
 						case MENUACTION_DRAWDIST:
-							ProcessSlider((m_PrefsLOD - 0.925f) / 0.875f, SLIDER_Y(99.0f), HOVEROPTION_INCREASE_DRAWDIST, HOVEROPTION_DECREASE_DRAWDIST, SCREEN_WIDTH, true);
+							ProcessSlider((m_PrefsLOD - 0.925f) / 1.575f, SLIDER_Y(99.0f), HOVEROPTION_INCREASE_DRAWDIST, HOVEROPTION_DECREASE_DRAWDIST, SCREEN_WIDTH, true);
 							break;
 						case MENUACTION_MUSICVOLUME:
 							if(m_nPrefsAudio3DProviderIndex != NO_AUDIO_PROVIDER)
@@ -3170,6 +3170,7 @@ CMenuManager::LoadSettings()
 #ifdef LEGACY_MENU_OPTIONS
 	m_PrefsVsync = m_PrefsVsyncDisp;
 #endif
+	m_PrefsLOD = Clamp(m_PrefsLOD, 0.925f, 2.5f);
 	CRenderer::ms_lodDistScale = m_PrefsLOD;
 
 	if (m_nPrefsAudio3DProviderIndex == NO_AUDIO_PROVIDER)

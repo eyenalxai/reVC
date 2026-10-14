@@ -1443,12 +1443,15 @@ CRenderer::InsertEntityIntoList(CEntity *ent)
 
 #ifdef NEW_RENDERER
 	// TODO: there are more flags being checked here
-	if(gbNewRenderer && (ent->IsVehicle() || ent->IsPed()))
-		ms_aVisibleVehiclePtrs[ms_nNoOfVisibleVehicles++] = ent;
-	else if(gbNewRenderer && ent->IsBuilding())
-		ms_aVisibleBuildingPtrs[ms_nNoOfVisibleBuildings++] = ent;
-	else
+	if(gbNewRenderer && (ent->IsVehicle() || ent->IsPed())){
+		if(ms_nNoOfVisibleVehicles < NUMVISIBLEENTITIES)
+			ms_aVisibleVehiclePtrs[ms_nNoOfVisibleVehicles++] = ent;
+	}else if(gbNewRenderer && ent->IsBuilding()){
+		if(ms_nNoOfVisibleBuildings < NUMVISIBLEENTITIES)
+			ms_aVisibleBuildingPtrs[ms_nNoOfVisibleBuildings++] = ent;
+	}else
 #endif
+	if(ms_nNoOfVisibleEntities < NUMVISIBLEENTITIES)
 		ms_aVisibleEntityPtrs[ms_nNoOfVisibleEntities++] = ent;
 }
 
