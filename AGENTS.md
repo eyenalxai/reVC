@@ -2,6 +2,10 @@
 
 Make technical decisions yourself; do not ask the owner. The owner does not know the code. Backwards compatibility does not matter. Rip and tear if needed. Refactor anything you need; you have free rein over the code. Focus on long-term maintenance.
 
+## Commits
+
+All new commits must be written in conventional commit style.
+
 ## Agent skills
 
 ### Issue tracker
