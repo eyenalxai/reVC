@@ -28,6 +28,11 @@
 
 #define PAD_MOVE_TO_GAME_WORLD_MOVE 60.0f
 
+#ifdef FIRST_PERSON
+// The first person aim pose aims at a point this far along the aim ray
+#define FIRST_PERSON_AIM_DISTANCE 30.0f
+#endif
+
 bool CPlayerPed::bDontAllowWeaponChange;
 #ifndef MASTER
 bool CPlayerPed::bDebugPlayerInfo;
@@ -101,6 +106,9 @@ CPlayerPed::CPlayerPed(void) : CPed(PEDTYPE_PLAYER1)
 	idleAnimBlockIndex = CAnimManager::GetAnimationBlockIndex("playidles");
 #ifdef FREE_CAM
 	m_bFreeAimActive = false;
+#endif
+#ifdef FIRST_PERSON
+	m_bFirstPersonAimActive = false;
 #endif
 }
 
@@ -812,6 +820,55 @@ switchDetectDone:
 	}
 }
 
+#ifdef FIRST_PERSON
+// Aim the aim IK at a world position. The stock CPedIK::PointGunAtPosition works
+// the same way, but this path keeps the aim flag set so that CPed::AimGun applies
+// the pose every frame and CPed::ClearAimFlag releases it.
+void
+CPlayerPed::AimAtPosition(const CVector &position)
+{
+	RwV3d armPos;
+	m_pedIK.GetComponentPosition(armPos, PED_UPPERARMR);
+
+	SetAimFlag(CGeneral::GetRadianAngleBetweenPoints(position.x, position.y, GetPosition().x, GetPosition().y));
+	m_fFPSMoveHeading = CGeneral::GetRadianAngleBetweenPoints(position.z,
+		Distance2D(GetPosition(), position.x, position.y), armPos.z, 0.0f);
+	m_bFirstPersonAimActive = true;
+}
+
+// The first person aim pose: the sight view holds the pose toward the view, and
+// the third person mouse camera holds it toward the crosshair. The stock lock-on
+// and SYPHON paths never set m_bFirstPersonAimActive, so their aim flag stays.
+void
+CPlayerPed::UpdateFirstPersonAim(CPad *padUsed)
+{
+	if (TheCamera.UsingFirstPersonSights()) {
+		// Aiming down the sights: the pose follows the camera front
+		CCam *cam = &TheCamera.Cams[TheCamera.ActiveCam];
+		AimAtPosition(cam->Source + FIRST_PERSON_AIM_DISTANCE * cam->Front);
+		return;
+	}
+
+	if (CCamera::m_bUseMouse3rdPerson && TheCamera.Cams[0].Using3rdPersonMouseCam()
+#ifdef FREE_CAM
+		&& !CCamera::bFreeCam
+#endif
+		&& !TheCamera.Using1stPersonView() && !m_pPointGunAt && padUsed->GetTarget()
+		&& m_nSelectedWepSlot == m_currentWeapon && m_nMoveState != PEDMOVE_SPRINT
+		&& !TheCamera.Using1stPersonWeaponMode()
+		&& CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_CANAIM)) {
+		// Third person mouse camera: Target raises the gun toward the crosshair
+		CVector source, target;
+		TheCamera.Find3rdPersonCamTargetVector(FIRST_PERSON_AIM_DISTANCE, GetPosition(), source, target);
+		AimAtPosition(target);
+		return;
+	}
+
+	if (m_bFirstPersonAimActive)
+		ClearAimFlag();
+}
+#endif
+
 void
 CPlayerPed::PlayerControlM16(CPad *padUsed)
 {
@@ -848,6 +905,10 @@ CPlayerPed::PlayerControlM16(CPad *padUsed)
 		RestorePreviousState();
 		TheCamera.ClearPlayerWeaponMode();
 	}
+
+#ifdef FIRST_PERSON
+	UpdateFirstPersonAim(padUsed);
+#endif
 
 	if (padUsed->GetWeapon() && CTimer::GetTimeInMilliseconds() > GetWeapon()->m_nTimer) {
 		if (GetWeapon()->m_eWeaponState == WEAPONSTATE_OUT_OF_AMMO) {
@@ -1506,6 +1567,10 @@ CPlayerPed::ProcessPlayerWeapon(CPad *padUsed)
 		}
 	}
 	m_bHasLockOnTarget = m_pPointGunAt != nil;
+
+#ifdef FIRST_PERSON
+	UpdateFirstPersonAim(padUsed);
+#endif
 }
 
 bool
