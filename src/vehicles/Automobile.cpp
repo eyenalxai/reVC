@@ -3205,6 +3205,9 @@ CAutomobile::ProcessControlInputs(uint8 pad)
 		fValue = sq(m_fSteerInput);
 	m_fSteerAngle = DEGTORAD(pHandling->fSteeringLock) * fValue;
 
+	// A drift gives the front wheels more lock (see DriftControl.h)
+	m_fSteerAngle *= m_DriftControl.GetSteerAngleMult();
+
 	if(bComedyControls){
 		int rnd = CGeneral::GetRandomNumber() % 10;
 		switch(m_comedyControlState){

@@ -26,8 +26,10 @@ public:
 	void Update(CAutomobile *car, float timeStep);
 	bool IsDrifting(void) { return m_Phase != DRIFT_PHASE_INACTIVE; }
 	float GetRearGripScale(void);
+	float GetSteerAngleMult(void);
 
 private:
+	void UpdateYawControl(CAutomobile *car, float dt);
 	void StartRecover(void);
 	float GetMinGrip(void);
 };
