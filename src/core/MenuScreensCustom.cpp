@@ -68,10 +68,11 @@
 #endif
 
 #ifdef PED_CAR_DENSITY_SLIDERS
-	// 0.2f - 3.4f makes it possible to have 1.0f somewhere inbetween
+	// The step is (max - min) / 16. Tops chosen so the defaults land on a step:
+	// ped (2.76 - 0.2) / 16 = 0.16, so 1.0f is reachable; car (2.6 - 0.2) / 16 = 0.15, so 2.0f is reachable.
 	#define DENSITY_SLIDERS \
-		MENUACTION_CFO_SLIDER, "FEM_PED", { new CCFOSlider(&CIniFile::PedNumberMultiplier, "Display", "PedDensity", 0.2f, 3.4f, PedDensityChange) }, 0, 0, MENUALIGN_LEFT, \
-		MENUACTION_CFO_SLIDER, "FEM_CAR", { new CCFOSlider(&CIniFile::CarNumberMultiplier, "Display", "CarDensity", 0.2f, 3.4f, CarDensityChange) }, 0, 0, MENUALIGN_LEFT, 
+		MENUACTION_CFO_SLIDER, "FEM_PED", { new CCFOSlider(&CIniFile::PedNumberMultiplier, "Display", "PedDensity", 0.2f, 2.76f, PedDensityChange) }, 0, 0, MENUALIGN_LEFT, \
+		MENUACTION_CFO_SLIDER, "FEM_CAR", { new CCFOSlider(&CIniFile::CarNumberMultiplier, "Display", "CarDensity", 0.2f, 2.6f, CarDensityChange) }, 0, 0, MENUALIGN_LEFT, 
 #else
 	#define DENSITY_SLIDERS 
 #endif

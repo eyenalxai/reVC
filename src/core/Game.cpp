@@ -377,8 +377,8 @@ bool CGame::Initialise(const char* datFile)
 
 #ifndef GTA_PS2
 #ifdef PED_CAR_DENSITY_SLIDERS
-	// Load density values from gta3.ini only if our reVC.ini have them 0.6f
-	if (CIniFile::PedNumberMultiplier == 0.6f && CIniFile::CarNumberMultiplier == 0.6f)
+	// Load density values from gta3.ini only if our reVC.ini have them 1.0f/2.0f
+	if (CIniFile::PedNumberMultiplier == 1.0f && CIniFile::CarNumberMultiplier == 2.0f)
 #endif
 		CIniFile::LoadIniFile();
 #endif
