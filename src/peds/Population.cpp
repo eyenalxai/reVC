@@ -34,6 +34,8 @@
 #define OFFSCREEN_CREATION_MULT	0.5f
 #define PED_REMOVE_DIST			(MIN_CREATION_DIST + CREATION_RANGE + 1.0f)
 #define PED_REMOVE_DIST_SPECIAL	(MIN_CREATION_DIST + CREATION_RANGE + 15.0f) // for peds with bCullExtraFarAway flag
+#define PED_AREA_DENSITY_SCALE	3.0f // scale the zone density budget for dense on-foot crowds
+#define PED_ATTEMPTS_PER_FRAME	3 // spawn attempts per frame
 
 PedGroup CPopulation::ms_pPedGroups[NUMPEDGROUPS];
 bool CPopulation::ms_bGivePedsWeapons;
@@ -377,10 +379,12 @@ CPopulation::Update(bool addPeds)
 			ms_nTotalPeds -= ms_nTotalCarPassengerPeds;
 			if (!CCutsceneMgr::IsRunning() && addPeds) {
 				float pcdm = PedCreationDistMultiplier();
-				AddToPopulation(pcdm * (MIN_CREATION_DIST * TheCamera.GenerationDistMultiplier),
-					pcdm * ((MIN_CREATION_DIST + CREATION_RANGE) * TheCamera.GenerationDistMultiplier),
-					pcdm * (MIN_CREATION_DIST + CREATION_RANGE) * OFFSCREEN_CREATION_MULT - CREATION_RANGE,
-					pcdm * (MIN_CREATION_DIST + CREATION_RANGE) * OFFSCREEN_CREATION_MULT);
+				for (int i = 0; i < PED_ATTEMPTS_PER_FRAME; i++) {
+					AddToPopulation(pcdm * (MIN_CREATION_DIST * TheCamera.GenerationDistMultiplier),
+						pcdm * ((MIN_CREATION_DIST + CREATION_RANGE) * TheCamera.GenerationDistMultiplier),
+						pcdm * (MIN_CREATION_DIST + CREATION_RANGE) * OFFSCREEN_CREATION_MULT - CREATION_RANGE,
+						pcdm * (MIN_CREATION_DIST + CREATION_RANGE) * OFFSCREEN_CREATION_MULT);
+				}
 			}
 		}
 	}
@@ -543,7 +547,7 @@ CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScree
 		if ((ms_nNumCop < maxCops || forceAddingCop) &&
 			(!playerInfo->m_pPed->bInVehicle &&
 				(CCarCtrl::NumLawEnforcerCars >= wantedInfo->m_MaximumLawEnforcerVehicles
-				|| CCarCtrl::NumRandomCars >= playerInfo->m_nTrafficMultiplier * CCarCtrl::CarDensityMultiplier
+				|| CCarCtrl::NumRandomCars >= CCarCtrl::GetRandomCarTarget()
 				|| CCarCtrl::NumFiretrucksOnDuty + CCarCtrl::NumAmbulancesOnDuty + CCarCtrl::NumParkedCars
 				+ CCarCtrl::NumMissionCars + CCarCtrl::NumLawEnforcerCars + CCarCtrl::NumRandomCars >= CCarCtrl::MaxNumberOfCarsInUse) || forceAddingCop)) {
 			addCop = true;
@@ -565,7 +569,10 @@ CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScree
 
 	// Yeah, float
 	float maxPossiblePedsForArea = (zoneInfo.pedDensity + zoneInfo.carDensity) * playerInfo->m_fRoadDensity * PedDensityMultiplier
-		* (CDarkel::FrenzyOnGoing() ? 1.f : CIniFile::PedNumberMultiplier) * missionAndWeatherMult;
+		* (CDarkel::FrenzyOnGoing() ? 1.f : CIniFile::PedNumberMultiplier) * missionAndWeatherMult * PED_AREA_DENSITY_SCALE;
+	// Car and law-enforcer drivers count in ms_nTotalPeds: add them back so the on-foot
+	// budget does not shrink with the car count.
+	maxPossiblePedsForArea += CCarCtrl::NumRandomCars + CCarCtrl::NumLawEnforcerCars;
 	maxPossiblePedsForArea = Min(maxPossiblePedsForArea, selectedMaxPeds);
 
 	if (ms_nTotalPeds < maxPossiblePedsForArea || addCop) {

@@ -66,6 +66,7 @@ extern "C" int vsprintf(char* const _Buffer, char const* const _Format, va_list 
 bool gDriftEnabled = false;
 float gDriftStrength = 1.0f;
 float gDriftAssist = 1.0f;
+bool gDriftDebug = false;
 
 // Infinite sprint (see src/peds/PlayerPed.cpp)
 bool gInfiniteSprint = false;
@@ -589,6 +590,7 @@ bool LoadINISettings()
 	ReadIniIfExists("Drift", "Enabled", &gDriftEnabled);
 	ReadIniIfExists("Drift", "Strength", &gDriftStrength);
 	ReadIniIfExists("Drift", "Assist", &gDriftAssist);
+	ReadIniIfExists("Drift", "Debug", &gDriftDebug);
 
 #ifdef PROPER_SCALING
 	ReadIniIfExists("Draw", "ProperScaling", &CDraw::ms_bProperScaling);	
@@ -704,6 +706,7 @@ void SaveINISettings()
 	StoreIni("Drift", "Enabled", gDriftEnabled);
 	StoreIni("Drift", "Strength", gDriftStrength);
 	StoreIni("Drift", "Assist", gDriftAssist);
+	StoreIni("Drift", "Debug", gDriftDebug);
 
 #ifdef PROPER_SCALING	
 	StoreIni("Draw", "ProperScaling", CDraw::ms_bProperScaling);	
@@ -1195,6 +1198,18 @@ extern bool gbRenderWorld2;
 		DebugMenuAddVarBool8("Drift", "Enabled", &gDriftEnabled, nil);
 		DebugMenuAddVar("Drift", "Strength", &gDriftStrength, nil, 0.05f, 0.0f, 2.0f);
 		DebugMenuAddVar("Drift", "Assist", &gDriftAssist, nil, 0.05f, 0.0f, 2.0f);
+
+		// Live readout of the player's drift (see DriftControl.cpp)
+		extern bool gDriftDebug;
+		extern float gDriftDebugSlip, gDriftDebugTarget, gDriftDebugYaw;
+		extern float gDriftDebugCharge, gDriftDebugBoost, gDriftDebugSpeed;
+		DebugMenuAddVarBool8("Drift", "Debug readout", &gDriftDebug, nil);
+		DebugMenuAddVar("Drift", "Slip angle", &gDriftDebugSlip, nil, 0.1f, -90.0f, 90.0f);
+		DebugMenuAddVar("Drift", "Target slip", &gDriftDebugTarget, nil, 0.1f, -90.0f, 90.0f);
+		DebugMenuAddVar("Drift", "Yaw rate", &gDriftDebugYaw, nil, 1.0f, -360.0f, 360.0f);
+		DebugMenuAddVar("Drift", "Charge", &gDriftDebugCharge, nil, 0.01f, 0.0f, 3.0f);
+		DebugMenuAddVar("Drift", "Boost", &gDriftDebugBoost, nil, 0.01f, 0.0f, 1.0f);
+		DebugMenuAddVar("Drift", "Speed delta", &gDriftDebugSpeed, nil, 0.01f, -1.0f, 1.0f);
 
 
 #ifdef MISSION_SWITCHER

@@ -172,7 +172,7 @@ CSkidmarks::RegisterOne(uintptr id, const CVector &pos, float fwdX, float fwdY, 
 }
 
 void
-CSkidmarks::RegisterOne(uintptr id, const CVector &pos, float fwdX, float fwdY, eSkidmarkType type, bool *isBloody)
+CSkidmarks::RegisterOne(uintptr id, const CVector &pos, float fwdX, float fwdY, eSkidmarkType type, bool *isBloody, float fWidthScale)
 {
 	int i;
 	CVector2D fwd(fwdX, fwdY);
@@ -224,8 +224,8 @@ CSkidmarks::RegisterOne(uintptr id, const CVector &pos, float fwdX, float fwdY, 
 		fwd.Normalise();
 		float turn = DotProduct2D(fwd, right);
 		turn = Abs(turn) + 1.0f;
-		aSkidmarks[i].m_sideX[aSkidmarks[i].m_last] = right.x * turn * 0.125f;
-		aSkidmarks[i].m_sideY[aSkidmarks[i].m_last] = right.y * turn * 0.125f;
+		aSkidmarks[i].m_sideX[aSkidmarks[i].m_last] = right.x * turn * 0.125f * fWidthScale;
+		aSkidmarks[i].m_sideY[aSkidmarks[i].m_last] = right.y * turn * 0.125f * fWidthScale;
 		if(aSkidmarks[i].m_last == 1){
 			aSkidmarks[i].m_sideX[0] = aSkidmarks[i].m_sideX[1];
 			aSkidmarks[i].m_sideY[0] = aSkidmarks[i].m_sideY[1];

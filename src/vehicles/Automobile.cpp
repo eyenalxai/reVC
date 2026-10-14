@@ -20,6 +20,7 @@
 #include "Glass.h"
 #include "Antennas.h"
 #include "Skidmarks.h"
+#include "DriftFeedback.h"
 #include "WindModifiers.h"
 #include "Shadows.h"
 #include "PointLights.h"
@@ -1066,9 +1067,6 @@ CAutomobile::ProcessControl(void)
 		// Process rear wheels
 
 		if(m_aWheelTimer[CARWHEEL_REAR_LEFT] > 0.0f || m_aWheelTimer[CARWHEEL_REAR_RIGHT] > 0.0f){
-			CVector wheelFwd = GetForward();
-			CVector wheelRight = GetRight();	// overwritten for resp. wheel
-
 			float rearBrake = brake;
 			float rearTraction = traction;
 			if(bIsHandbrakeOn){
@@ -1096,91 +1094,56 @@ CAutomobile::ProcessControl(void)
 				rearTraction *= m_fTireTemperature;
 			}
 
-			float rearGripScale = m_DriftControl.GetRearGripScale();
-			bool bDrifting = m_DriftControl.IsDrifting();
+			// The drift layer asks for its own rear grip (see DriftControl.h).
+			tWheelGripRequest grip;
+			grip.fAdhesionScale = m_DriftControl.GetRearGripScale();
+			grip.bSlide = m_DriftControl.IsDrifting();
 
-			if(m_aWheelTimer[CARWHEEL_REAR_LEFT] > 0.0f){
+			int32 rearWheels[2] = { CARWHEEL_REAR_LEFT, CARWHEEL_REAR_RIGHT };
+
+			for(int i = 0; i < 2; i++){
+				int32 wheel = rearWheels[i];
+				if(m_aWheelTimer[wheel] <= 0.0f)
+					continue;
+
 				if(mod_HandlingManager.HasRearWheelDrive(pHandling->nIdentifier))
 					fThrust = acceleration;
 				else
 					fThrust = 0.0f;
 
-				wheelFwd -= DotProduct(wheelFwd, m_aWheelColPoints[CARWHEEL_REAR_LEFT].normal)*m_aWheelColPoints[CARWHEEL_REAR_LEFT].normal;
+				CVector wheelFwd = GetForward();
+				CVector wheelRight;
+				wheelFwd -= DotProduct(wheelFwd, m_aWheelColPoints[wheel].normal)*m_aWheelColPoints[wheel].normal;
 				wheelFwd.Normalise();
-				wheelRight = CrossProduct(wheelFwd, m_aWheelColPoints[CARWHEEL_REAR_LEFT].normal);
+				wheelRight = CrossProduct(wheelFwd, m_aWheelColPoints[wheel].normal);
 				wheelRight.Normalise();
 
-				m_aWheelColPoints[CARWHEEL_REAR_LEFT].surfaceA = SURFACE_WHEELBASE;
-				float adhesion = CSurfaceTable::GetAdhesiveLimit(m_aWheelColPoints[CARWHEEL_REAR_LEFT])*rearTraction;
+				m_aWheelColPoints[wheel].surfaceA = SURFACE_WHEELBASE;
+				float adhesion = CSurfaceTable::GetAdhesiveLimit(m_aWheelColPoints[wheel])*rearTraction;
 				if(GetStatus() == STATUS_PLAYER)
-					adhesion *= CSurfaceTable::GetWetMultiplier(m_aWheelColPoints[CARWHEEL_REAR_LEFT].surfaceB);
-				WheelState[CARWHEEL_REAR_LEFT] = m_aWheelState[CARWHEEL_REAR_LEFT];
+					adhesion *= CSurfaceTable::GetWetMultiplier(m_aWheelColPoints[wheel].surfaceB);
+				WheelState[wheel] = m_aWheelState[wheel];
 
-				if(Damage.GetWheelStatus(CARWHEEL_REAR_LEFT) == WHEEL_STATUS_BURST)
+				if(Damage.GetWheelStatus(wheel) == WHEEL_STATUS_BURST)
 					ProcessWheel(wheelFwd, wheelRight,
-						contactSpeeds[CARWHEEL_REAR_LEFT], contactPoints[CARWHEEL_REAR_LEFT],
+						contactSpeeds[wheel], contactPoints[wheel],
 						m_nWheelsOnGround, fThrust,
 						rearBrake*brakeBiasRear,
-						adhesion*tractionBiasRear*rearGripScale*Damage.m_fWheelDamageEffect,
-						CARWHEEL_REAR_LEFT,
-						&m_aWheelSpeed[CARWHEEL_REAR_LEFT],
-						&WheelState[CARWHEEL_REAR_LEFT],
-						WHEEL_STATUS_BURST, bDrifting);
+						adhesion*tractionBiasRear*Damage.m_fWheelDamageEffect,
+						wheel,
+						&m_aWheelSpeed[wheel],
+						&WheelState[wheel],
+						WHEEL_STATUS_BURST, grip);
 				else
 					ProcessWheel(wheelFwd, wheelRight,
-						contactSpeeds[CARWHEEL_REAR_LEFT], contactPoints[CARWHEEL_REAR_LEFT],
+						contactSpeeds[wheel], contactPoints[wheel],
 						m_nWheelsOnGround, fThrust,
 						rearBrake*brakeBiasRear,
-						adhesion*tractionBiasRear*rearGripScale,
-						CARWHEEL_REAR_LEFT,
-						&m_aWheelSpeed[CARWHEEL_REAR_LEFT],
-						&WheelState[CARWHEEL_REAR_LEFT],
-						WHEEL_STATUS_OK, bDrifting);
-			}
-
-#ifdef FIX_BUGS
-			// Shouldn't we reset these after the left wheel?
-			wheelFwd = GetForward();
-			wheelRight = GetRight();	// actually useless
-#endif
-
-			if(m_aWheelTimer[CARWHEEL_REAR_RIGHT] > 0.0f){
-				if(mod_HandlingManager.HasRearWheelDrive(pHandling->nIdentifier))
-					fThrust = acceleration;
-				else
-					fThrust = 0.0f;
-
-				wheelFwd -= DotProduct(wheelFwd, m_aWheelColPoints[CARWHEEL_REAR_RIGHT].normal)*m_aWheelColPoints[CARWHEEL_REAR_RIGHT].normal;
-				wheelFwd.Normalise();
-				wheelRight = CrossProduct(wheelFwd, m_aWheelColPoints[CARWHEEL_REAR_RIGHT].normal);
-				wheelRight.Normalise();
-
-				m_aWheelColPoints[CARWHEEL_REAR_RIGHT].surfaceA = SURFACE_WHEELBASE;
-				float adhesion = CSurfaceTable::GetAdhesiveLimit(m_aWheelColPoints[CARWHEEL_REAR_RIGHT])*rearTraction;
-				if(GetStatus() == STATUS_PLAYER)
-					adhesion *= CSurfaceTable::GetWetMultiplier(m_aWheelColPoints[CARWHEEL_REAR_RIGHT].surfaceB);
-				WheelState[CARWHEEL_REAR_RIGHT] = m_aWheelState[CARWHEEL_REAR_RIGHT];
-
-				if(Damage.GetWheelStatus(CARWHEEL_REAR_RIGHT) == WHEEL_STATUS_BURST)
-					ProcessWheel(wheelFwd, wheelRight,
-						contactSpeeds[CARWHEEL_REAR_RIGHT], contactPoints[CARWHEEL_REAR_RIGHT],
-						m_nWheelsOnGround, fThrust,
-						rearBrake*brakeBiasRear,
-						adhesion*tractionBiasRear*rearGripScale*Damage.m_fWheelDamageEffect,
-						CARWHEEL_REAR_RIGHT,
-						&m_aWheelSpeed[CARWHEEL_REAR_RIGHT],
-						&WheelState[CARWHEEL_REAR_RIGHT],
-						WHEEL_STATUS_BURST, bDrifting);
-				else
-					ProcessWheel(wheelFwd, wheelRight,
-						contactSpeeds[CARWHEEL_REAR_RIGHT], contactPoints[CARWHEEL_REAR_RIGHT],
-						m_nWheelsOnGround, fThrust,
-						rearBrake*brakeBiasRear,
-						adhesion*tractionBiasRear*rearGripScale,
-						CARWHEEL_REAR_RIGHT,
-						&m_aWheelSpeed[CARWHEEL_REAR_RIGHT],
-						&WheelState[CARWHEEL_REAR_RIGHT],
-						WHEEL_STATUS_OK, bDrifting);
+						adhesion*tractionBiasRear,
+						wheel,
+						&m_aWheelSpeed[wheel],
+						&WheelState[wheel],
+						WHEEL_STATUS_OK, grip);
 			}
 		}
 
@@ -1761,6 +1724,10 @@ CAutomobile::PreRender(void)
 	int i, j, n;
 	CVehicleModelInfo *mi = (CVehicleModelInfo*)CModelInfo::GetModelInfo(GetModelIndex());
 
+	// Drift feedback is player-only, like the drift itself.
+	if(GetStatus() == STATUS_PLAYER)
+		CDriftFeedback::Update(this, CTimer::GetTimeStepInSeconds());
+
 	if(GetModelIndex() == MI_RHINO && m_aCarNodes[CAR_WINDSCREEN]){
 		// Rotate Rhino turret
 		CMatrix m;
@@ -1778,6 +1745,12 @@ CAutomobile::PreRender(void)
 	}
 
 	float fwdSpeed = DotProduct(m_vecMoveSpeed, GetForward())*180.0f;
+
+
+	// VICE-32: a drift of the player's car leaves wider skid marks and throws
+	// extra smoke. Both stay neutral while the feature is off.
+	float driftSlip = GetStatus() == STATUS_PLAYER ? Abs(CDriftFeedback::GetStrength()) : 0.0f;
+	float driftSkidWidth = 1.0f + (DRIFT_SKID_WIDTH_MAX - 1.0f)*driftSlip;
 
 
 	// Wheel particles
@@ -1857,7 +1830,7 @@ CAutomobile::PreRender(void)
 					if(m_aWheelTimer[i] > 0.0f)
 						CSkidmarks::RegisterOne((uintptr)this + i, m_aWheelColPoints[i].point,
 							GetForward().x, GetForward().y,
-							m_aWheelSkidmarkType[i], &m_aWheelSkidmarkBloody[i]);
+							m_aWheelSkidmarkType[i], &m_aWheelSkidmarkBloody[i], driftSkidWidth);
 					break;
 
 				case WHEEL_STATE_SKIDDING:
@@ -1875,7 +1848,7 @@ CAutomobile::PreRender(void)
 						if(m_aWheelTimer[i] > 0.0f)
 							CSkidmarks::RegisterOne((uintptr)this + i, m_aWheelColPoints[i].point,
 								GetForward().x, GetForward().y,
-								m_aWheelSkidmarkType[i], &m_aWheelSkidmarkBloody[i]);
+								m_aWheelSkidmarkType[i], &m_aWheelSkidmarkBloody[i], driftSkidWidth);
 					}
 					break;
 
@@ -1891,7 +1864,7 @@ CAutomobile::PreRender(void)
 					if(m_aWheelTimer[i] > 0.0f)
 						CSkidmarks::RegisterOne((uintptr)this + i, m_aWheelColPoints[i].point,
 							GetForward().x, GetForward().y,
-							m_aWheelSkidmarkType[i], &m_aWheelSkidmarkBloody[i]);
+							m_aWheelSkidmarkType[i], &m_aWheelSkidmarkBloody[i], driftSkidWidth);
 					break;
 
 				default:
@@ -1900,7 +1873,7 @@ CAutomobile::PreRender(void)
 					if((m_aWheelSkidmarkBloody[i] || m_aWheelSkidmarkUnk[i]) && m_aWheelTimer[i] > 0.0f)
 						CSkidmarks::RegisterOne((uintptr)this + i, m_aWheelColPoints[i].point,
 							GetForward().x, GetForward().y,
-							m_aWheelSkidmarkType[i], &m_aWheelSkidmarkBloody[i]);
+							m_aWheelSkidmarkType[i], &m_aWheelSkidmarkBloody[i], driftSkidWidth);
 				}
 
 				// Sparks for friction of burst wheels
@@ -1932,6 +1905,31 @@ CAutomobile::PreRender(void)
 					}
 				}
 			}
+
+			// VICE-32: a drift throws extra tyre smoke over every wheel that
+			// is on the road. The count is time based (SmokeCount), so the
+			// amount of smoke does not follow the frame rate.
+			if(driftSlip > 0.0f){
+				for(i = 0; i < 4; i++){
+					if(m_aSuspensionSpringRatioPrev[i] >= 1.0f)
+						continue;
+					if(m_aWheelColPoints[i].surfaceB == SURFACE_WATER)
+						continue;
+					// Only a wheel that is really sliding throws the extra
+					// smoke.
+					if(m_aWheelState[i] == WHEEL_STATE_NORMAL)
+						continue;
+
+					n = CDriftFeedback::SmokeCount(driftSlip);
+					for(j = 0; j < n; j++){
+						CVector smokePos = m_aWheelColPoints[i].point + CVector(0.0f, 0.0f, 0.25f);
+						smokePos += GetRight()*CGeneral::GetRandomNumberInRange(-0.2f, 0.2f);
+						smokePos += GetForward()*CGeneral::GetRandomNumberInRange(-0.25f, 0.1f);
+						CParticle::AddParticle(PARTICLE_RUBBER_SMOKE, smokePos,
+							GetForward()*0.03f + CVector(0.0f, 0.0f, 0.05f));
+					}
+				}
+			}
 		}
 	}
 
@@ -1952,7 +1950,7 @@ CAutomobile::PreRender(void)
 				CSkidmarks::RegisterOne((uintptr)this + 5,
 					m_aWheelColPoints[CARWHEEL_REAR_LEFT].point + offset,
 					GetForward().x, GetForward().y,
-					m_aWheelSkidmarkType[CARWHEEL_REAR_LEFT], &m_aWheelSkidmarkBloody[CARWHEEL_REAR_LEFT]);
+					m_aWheelSkidmarkType[CARWHEEL_REAR_LEFT], &m_aWheelSkidmarkBloody[CARWHEEL_REAR_LEFT], driftSkidWidth);
 			break;
 		default: break;
 		}
@@ -1970,7 +1968,7 @@ CAutomobile::PreRender(void)
 				CSkidmarks::RegisterOne((uintptr)this + 6,
 					m_aWheelColPoints[CARWHEEL_REAR_RIGHT].point + offset,
 					GetForward().x, GetForward().y,
-					m_aWheelSkidmarkType[CARWHEEL_REAR_RIGHT], &m_aWheelSkidmarkBloody[CARWHEEL_REAR_RIGHT]);
+					m_aWheelSkidmarkType[CARWHEEL_REAR_RIGHT], &m_aWheelSkidmarkBloody[CARWHEEL_REAR_RIGHT], driftSkidWidth);
 			break;
 		default: break;
 		}
@@ -3026,6 +3024,10 @@ CAutomobile::Render(void)
 		}
 	}
 
+	// The drift lean turns the rendered model only; the physics matrix comes
+	// back right after the draw call. It belongs to the player's car alone.
+	bool bDriftLean = GetStatus() == STATUS_PLAYER && CDriftFeedback::BeginLean(this);
+
 	if(CVehicle::bWheelsOnlyCheat){
 		RpAtomicRender((RpAtomic*)GetFirstObject(m_aCarNodes[CAR_WHEEL_RB]));
 		RpAtomicRender((RpAtomic*)GetFirstObject(m_aCarNodes[CAR_WHEEL_LB]));
@@ -3037,6 +3039,9 @@ CAutomobile::Render(void)
 			RpAtomicRender((RpAtomic*)GetFirstObject(m_aCarNodes[CAR_WHEEL_LM]));
 	}else
 		CEntity::Render();
+
+	if(bDriftLean)
+		CDriftFeedback::EndLean();
 }
 
 int32

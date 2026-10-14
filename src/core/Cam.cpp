@@ -5,6 +5,7 @@
 #include "World.h"
 #include "Vehicle.h"
 #include "Automobile.h"
+#include "DriftFeedback.h"
 #include "Boat.h"
 #include "Bones.h"
 #include "Ped.h"
@@ -4896,6 +4897,7 @@ CCam::Process_FollowCar_SA(const CVector& CameraTarget, float TargetOrientation,
 	static float dontCollideWithCars;
 	static bool alphaCorrected;
 	static float heightIncreaseMult;
+	static float driftFov;	// VICE-32: the drift FOV of the last frame
 
 	if (!CamTargetEntity->IsVehicle())
 		return;
@@ -5014,6 +5016,18 @@ CCam::Process_FollowCar_SA(const CVector& CameraTarget, float TargetOrientation,
 	CA_MAX_DISTANCE = newDistance;
 	CA_MIN_DISTANCE = 3.5f;
 
+	// VICE-32: a drift stretches the chase view. The term of the last frame
+	// comes back out first, so the speed FOV below keeps the value it would
+	// have without the drift. Only the active camera carries the term.
+	bool bDriftCam = isCar && car->GetStatus() == STATUS_PLAYER &&
+		this == &TheCamera.Cams[TheCamera.ActiveCam];
+	if (bDriftCam) {
+		CDriftFeedback::Update((CAutomobile*)car, CTimer::GetTimeStepInSeconds());
+		FOV -= driftFov;
+	} else {
+		driftFov = 0.0f;
+	}
+
 	if (ResetStatics) {
 		FOV = DefaultFOV;
 	} else {
@@ -5028,6 +5042,11 @@ CCam::Process_FollowCar_SA(const CVector& CameraTarget, float TargetOrientation,
 			FOV = Pow(0.98f, CTimer::GetTimeStep()) * (FOV - DefaultFOV) + DefaultFOV;
 
 		FOV = Clamp(FOV, DefaultFOV, DefaultFOV + 30.0f);
+	}
+
+	if (bDriftCam) {
+		driftFov = DEGTORAD(DRIFT_CAM_FOV_MAX)*Abs(CDriftFeedback::GetStrength());
+		FOV += driftFov;
 	}
 
 	// WORKAROUND: I still don't know how looking behind works (m_bCamDirectlyInFront is unused in III, they seem to use m_bUseTransitionBeta)
@@ -5103,6 +5122,13 @@ CCam::Process_FollowCar_SA(const CVector& CameraTarget, float TargetOrientation,
 		betaChange = betaChangeLimit;
 	}
 	float targetBeta = camRightHeading + betaChange;
+
+	// VICE-32: the drift leads the camera a little further towards the
+	// direction of travel, on top of the speed lag above. The size comes from
+	// the slip angle, the side from the same velocity offset.
+	float driftLead = DEGTORAD(DRIFT_CAM_LEAD_MAX)*Abs(CDriftFeedback::GetStrength());
+	if (driftLead > 0.0f && velocityRightHeading != camRightHeading)
+		targetBeta += velocityRightHeading > camRightHeading ? driftLead : -driftLead;
 
 	if (targetBeta < Beta - HALFPI)
 		targetBeta += TWOPI;

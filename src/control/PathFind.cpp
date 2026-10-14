@@ -1468,58 +1468,93 @@ CPathFind::FindNodeOrientationForCarPlacementFacingDestination(int32 nodeId, flo
 	return RADTODEG(dir.Heading());
 }
 
+// Scans the car path nodes once and collects every (node1, node2) pair that
+// brackets the creation distance, crosses it (d1*d2 < 0) and passes the
+// direction test. Reservoir sampling keeps the returned placements uniform
+// over all valid pairs while storing at most maxPlacements of them; the
+// reservoir is shuffled so the first placement is uniform too.
+// Returns the number of placements written to pOut.
+int32
+CPathFind::CollectCarCreationCoors(float x, float y, float dirX, float dirY, float spawnDist, float angleLimit, bool forward, bool ignoreDisabled, CCarCreationPlacement *pOut, int32 maxPlacements)
+{
+	int32 found = 0;
+
+	if(m_numCarPathNodes == 0 || maxPlacements <= 0)
+		return 0;
+
+	float maxDist = Max(spawnDist + 70.0f, spawnDist * 1.7f);
+
+	for(int32 node1 = 0; node1 < m_numCarPathNodes; node1++){
+		if(m_pathNodes[node1].bDisabled && !ignoreDisabled)
+			continue;
+		float dist1 = Distance2D(m_pathNodes[node1].GetPosition(), x, y);
+		if(dist1 >= maxDist)
+			continue;
+		float d1 = m_pathNodes[node1].bWaterPath ? (dist1 - spawnDist * 1.5f) : (dist1 - spawnDist);
+		for(int32 j = 0; j < m_pathNodes[node1].numLinks; j++){
+			int32 node2 = ConnectedNode(m_pathNodes[node1].firstLink + j);
+			if(m_pathNodes[node2].bDisabled && !ignoreDisabled)
+				continue;
+			float dist2 = Distance2D(m_pathNodes[node2].GetPosition(), x, y);
+			float d2 = m_pathNodes[node2].bWaterPath ? (dist2 - spawnDist * 1.5f) : (dist2 - spawnDist);
+			if(d1*d2 >= 0.0f)
+				continue;
+			// nodes are on different sides of spawn distance
+			float f2 = Abs(d1)/(Abs(d1) + Abs(d2));
+			float f1 = 1.0f - f2;
+			CVector pos = m_pathNodes[node1].GetPosition()*f1 + m_pathNodes[node2].GetPosition()*f2;
+			CVector2D dist2d(pos.x - x, pos.y - y);
+			dist2d.Normalise();	// done manually in the game
+			float dot = DotProduct2D(dist2d, CVector2D(dirX, dirY));
+			if(forward ? !(dot > angleLimit) : !(dot <= angleLimit))
+				continue;
+
+			CCarCreationPlacement placement;
+			placement.node1 = node1;
+			placement.node2 = node2;
+			placement.position = pos;
+			placement.positionBetweenNodes = f2;
+
+			if(found < maxPlacements){
+				pOut[found] = placement;
+			}else{
+				// Reservoir sampling: replace one random placement we kept.
+				int32 r = CGeneral::GetRandomNumber() % (found + 1);
+				if(r < maxPlacements)
+					pOut[r] = placement;
+			}
+			found++;
+		}
+	}
+
+	if(found > maxPlacements)
+		found = maxPlacements;
+
+	// The reservoir holds the first pairs of the scan in order; shuffle it so
+	// that callers which try pOut[0] first do not favour them.
+	for(int32 i = found - 1; i > 0; i--){
+		int32 r = CGeneral::GetRandomNumber() % (i + 1);
+		CCarCreationPlacement tmp = pOut[i];
+		pOut[i] = pOut[r];
+		pOut[r] = tmp;
+	}
+
+	return found;
+}
+
 bool
 CPathFind::GenerateCarCreationCoors(float x, float y, float dirX, float dirY, float spawnDist, float angleLimit, bool forward, CVector *pPosition, int32 *pNode1, int32 *pNode2, float *pPositionBetweenNodes, bool ignoreDisabled)
 {
-	int i, j;
-	int node1, node2;
-	float dist1, dist2, d1, d2;
+	CCarCreationPlacement placement;
 
-	if(m_numCarPathNodes == 0)
+	if(CollectCarCreationCoors(x, y, dirX, dirY, spawnDist, angleLimit, forward, ignoreDisabled, &placement, 1) == 0)
 		return false;
 
-	for(i = 0; i < 500; i++){
-		node1 = (CGeneral::GetRandomNumber()>>3) % m_numCarPathNodes;
-		if(m_pathNodes[node1].bDisabled && !ignoreDisabled)
-			continue;
-		dist1 = Distance2D(m_pathNodes[node1].GetPosition(), x, y);
-		if(dist1 < Max(spawnDist + 70.0f, spawnDist * 1.7f)){
-			d1 = m_pathNodes[node1].bWaterPath ? (dist1 - spawnDist * 1.5f) : (dist1 - spawnDist);
-			for(j = 0; j < m_pathNodes[node1].numLinks; j++){
-				node2 = ConnectedNode(m_pathNodes[node1].firstLink + j);
-				if(m_pathNodes[node2].bDisabled && !ignoreDisabled)
-					continue;
-				dist2 = Distance2D(m_pathNodes[node2].GetPosition(), x, y);
-				d2 = m_pathNodes[node2].bWaterPath ? (dist2 - spawnDist * 1.5f) : (dist2 - spawnDist);
-				if(d1*d2 < 0.0f){
-					// nodes are on different sides of spawn distance
-					float f2 = Abs(d1)/(Abs(d1) + Abs(d2));
-					float f1 = 1.0f - f2;
-					*pPositionBetweenNodes = f2;
-					CVector pos = m_pathNodes[node1].GetPosition()*f1 + m_pathNodes[node2].GetPosition()*f2;
-					CVector2D dist2d(pos.x - x, pos.y - y);
-					dist2d.Normalise();	// done manually in the game
-					float dot = DotProduct2D(dist2d, CVector2D(dirX, dirY));
-					if(forward){
-						if(dot > angleLimit){
-							*pNode1 = node1;
-							*pNode2 = node2;
-							*pPosition = pos;
-							return true;
-						}
-					}else{
-						if(dot <= angleLimit){
-							*pNode1 = node1;
-							*pNode2 = node2;
-							*pPosition = pos;
-							return true;
-						}
-					}
-				}
-			}
-		}
-	}
-	return false;
+	*pNode1 = placement.node1;
+	*pNode2 = placement.node2;
+	*pPosition = placement.position;
+	*pPositionBetweenNodes = placement.positionBetweenNodes;
+	return true;
 }
 
 bool

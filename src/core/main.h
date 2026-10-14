@@ -80,6 +80,7 @@ extern bool gbNoMovies;
 extern bool gDriftEnabled;
 extern float gDriftStrength;
 extern float gDriftAssist;
+extern bool gDriftDebug;
 
 // Infinite sprint (see src/peds/PlayerPed.cpp)
 extern bool gInfiniteSprint;
