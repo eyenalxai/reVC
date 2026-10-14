@@ -29,8 +29,8 @@
 #include "Clock.h"
 #include "WaterLevel.h"
 
-#define MIN_CREATION_DIST		70.0f // not for off-screen peds at start of the game (look at the GeneratePedsAtStartOfGame)
-#define CREATION_RANGE			20.0f // added over the MIN_CREATION_DIST.
+#define MIN_CREATION_DIST		100.0f // on-screen creation ring 100..130 m; not for off-screen peds at start of the game (look at the GeneratePedsAtStartOfGame)
+#define CREATION_RANGE			30.0f // added over the MIN_CREATION_DIST, so the on-screen ring ends at 130 m.
 #define OFFSCREEN_CREATION_MULT	0.5f
 #define PED_REMOVE_DIST			(MIN_CREATION_DIST + CREATION_RANGE + 1.0f)
 #define PED_REMOVE_DIST_SPECIAL	(MIN_CREATION_DIST + CREATION_RANGE + 15.0f) // for peds with bCullExtraFarAway flag
