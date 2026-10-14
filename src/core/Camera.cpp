@@ -1090,6 +1090,13 @@ CCamera::CamControl(void)
 				m_bFirstPersonBeingUsed = false;
 			if(m_bFirstPersonBeingUsed){
 				ReqMode = CCam::MODE_1STPERSON;
+#ifdef FIRST_PERSON
+				// The persistent first person view must not disable the player controls.
+				// Clearing also recovers a stale flag left by the stock look-around.
+				if(FrontEndMenuManager.m_bFirstPersonView)
+					CPad::GetPad(0)->DisablePlayerControls &= ~PLAYERCONTROL_CAMERA;
+				else
+#endif
 				CPad::GetPad(0)->DisablePlayerControls |= PLAYERCONTROL_CAMERA;
 			}
 
