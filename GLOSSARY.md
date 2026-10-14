@@ -19,6 +19,14 @@ slides to its right).
 The slip angle an active drift holds. Entry sets it to the base hold angle, and
 steering moves it: steering into the slide widens it, counter-steer unwinds it.
 
+## Velocity alignment
+
+The drift layer's steering of the direction of travel. While a drift grips, the
+car's velocity is rotated towards the hold angle, so the angle is reached at
+street speed and not only at high speed. On exit, the same rotation bleeds the
+slip that is left towards zero. It rotates the velocity and never changes its
+length.
+
 ## Handbrake turn
 
 A turn on the handbrake below the entry speed. The rear grip is cut hard and a
