@@ -2513,6 +2513,9 @@ CCam::Process_M16_1stPerson(const CVector &CameraTarget, float, float, float)
 }
 
 float fBike1stPersonOffsetZ = 0.15f;
+#ifdef FIRST_PERSON
+float fCar1stPersonOffsetFwd = 0.1f;
+#endif
 
 void
 CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, float SpeedVar, float TargetSpeedVar)
@@ -2697,6 +2700,22 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 			Neck += ((CVehicle*)CamTargetEntity)->m_vecMoveSpeed * CTimer::GetTimeStep();
 			Source.z = Neck.z + fBike1stPersonOffsetZ;
 		}
+#ifdef FIRST_PERSON
+		else if(FrontEndMenuManager.m_bFirstPersonView && ((CVehicle*)CamTargetEntity)->pDriver){
+			// Sit at the driver's eyes, just behind the wheel. The model and the
+			// driver animation decide the side, so left and right hand drive work.
+			CPed *pDriver = ((CVehicle*)CamTargetEntity)->pDriver;
+			pDriver->SetPedPositionInCar();
+			pDriver->GetMatrix().UpdateRW();
+			pDriver->UpdateRwFrame();
+			pDriver->UpdateRpHAnim();
+			CVector Head(0.0f, 0.0f, 0.0f);
+			pDriver->m_pedIK.GetComponentPosition(Head, PED_HEAD);
+			CVector Fwd = matrix->GetForward();
+			Fwd.Normalise();
+			Source = Head + fCar1stPersonOffsetFwd*Fwd;
+		}
+#endif
 
 		if(((CVehicle*)CamTargetEntity)->IsUpsideDown()){
 			if(DontLookThroughWorldFixer < 0.5f)
