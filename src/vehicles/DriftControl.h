@@ -36,6 +36,7 @@ public:
 	bool IsActive(void) { return m_Phase != DRIFT_PHASE_INACTIVE; }
 	float GetRearGripScale(void);
 	float GetSteerAngleMult(void);
+	void PrintDebugState(CAutomobile *car);
 
 private:
 	void UpdateYawControl(CAutomobile *car, float dt);

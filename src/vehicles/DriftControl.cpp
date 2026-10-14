@@ -1,6 +1,7 @@
 #include "common.h"
 #include "main.h"
 
+#include "Debug.h"
 #include "Vehicle.h"
 #include "Automobile.h"
 #include "DriftControl.h"
@@ -41,6 +42,14 @@
 #define DRIFT_BOOST_PUSH	0.8f	// boost acceleration, fraction of top speed per second
 #define DRIFT_BOOST_DRAIN	0.04f	// boost level that drains per second
 #define DRIFT_TICK_RATE		50.0f	// game ticks per second; turn speed is per tick
+
+// The readout mirrors the player's drift for the debug menu (see re3.cpp).
+float gDriftDebugSlip;	// slip angle, degrees
+float gDriftDebugTarget;	// target slip angle, degrees
+float gDriftDebugYaw;	// yaw rate, degrees per second
+float gDriftDebugCharge;	// seconds of slide that charge the boost
+float gDriftDebugBoost;	// stacked boost, fraction of top speed
+float gDriftDebugSpeed;	// speed change since entry, fraction of top speed
 
 CDriftControl::CDriftControl(void)
 {
@@ -86,8 +95,9 @@ CDriftControl::GetRearGripScale(void)
 	// curve, so it is hand-shaped on top of the surface and temperature terms
 	// that the caller still applies.
 	float grip;
-	if(m_bHandbrakeTurn){
-		// A handbrake turn cuts the grip hard, whatever the angle is.
+	if(m_bHandbrakeTurn && IsDrifting()){
+		// A handbrake turn cuts the grip hard, whatever the angle is. The
+		// recovery goes back to the curve, so the exit hooks up.
 		grip = GetMinGrip();
 	}else{
 		float t = (Abs(m_fSlipAngle) - DEGTORAD(DRIFT_GRIP_STICKY)) /
@@ -228,6 +238,27 @@ CDriftControl::StartRecover(void)
 }
 
 void
+CDriftControl::PrintDebugState(CAutomobile *car)
+{
+	static const char *phases[] = { "INACTIVE", "ENGAGE", "DRIFT", "RECOVER" };
+	char buf[128];
+
+	float fMaxVelocity = GetMaxSpeed(car);
+
+	gDriftDebugSlip = RADTODEG(m_fSlipAngle);
+	gDriftDebugTarget = RADTODEG(m_fTargetSlip);
+	gDriftDebugYaw = RADTODEG(DotProduct(car->m_vecTurnSpeed, car->GetUp()) * DRIFT_TICK_RATE);
+	gDriftDebugCharge = m_fDriftTime;
+	gDriftDebugBoost = m_fBoostLevel;
+	gDriftDebugSpeed = (car->m_vecMoveSpeed.Magnitude() - m_fEntrySpeed)/fMaxVelocity;
+
+	sprintf(buf, "Drift %-8s%s slip %.1f/%.1f yaw %.0f charge %.2f boost %.2f speed %+.2f",
+		phases[m_Phase], m_bHandbrakeTurn ? " turn" : "",
+		gDriftDebugSlip, gDriftDebugTarget, gDriftDebugYaw, gDriftDebugCharge, gDriftDebugBoost, gDriftDebugSpeed);
+	CDebug::PrintAt(buf, 2, 5);
+}
+
+void
 CDriftControl::Update(CAutomobile *car, float timeStep)
 {
 	if(!gDriftEnabled){
@@ -248,6 +279,10 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 	// The boost stack lives outside the drift phases, so a chained boost keeps
 	// pushing after the handbrake is released.
 	ApplyBoost(car, dt);
+
+	// The readout shows the live drift state while it is on (see re3.cpp).
+	if(gDriftDebug)
+		PrintDebugState(car);
 
 	// The drift pauses while the car is in the air.
 	if(!onGround && m_Phase != DRIFT_PHASE_INACTIVE)

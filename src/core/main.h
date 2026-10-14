@@ -80,5 +80,6 @@ extern bool gbNoMovies;
 extern bool gDriftEnabled;
 extern float gDriftStrength;
 extern float gDriftAssist;
+extern bool gDriftDebug;
 
 #endif // __GTA_MAIN_H__
