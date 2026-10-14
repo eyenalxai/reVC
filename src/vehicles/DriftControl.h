@@ -55,6 +55,7 @@ private:
 	void ApplyYawRate(CAutomobile *car, float yawTargetRate, float dt);
 	void AlignVelocity(CAutomobile *car, float dt);
 	void BleedSlip(CAutomobile *car, float dt);
+	void SteerVelocity(CAutomobile *car, float error, float gain, float rateCap, float dt);
 	void RotateVelocity(CAutomobile *car, float angle);
 	void HoldDriftSpeed(CAutomobile *car, float dt);
 	void ApplyBoost(CAutomobile *car, float dt);

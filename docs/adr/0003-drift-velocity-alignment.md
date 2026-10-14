@@ -21,12 +21,13 @@ rotating.
 
 ## Decision
 
-1. While a drift grips (ENGAGE and DRIFT), the layer steers the car's velocity
-   towards the target slip angle, not only the car's nose. It is a proportional
-   controller on the slip error (gain 3 per second) with a capped rotation rate
-   (120 degrees per second), scaled by the drift strength and the grip cut, so
-   it fades in on entry and out on exit. The hold angle is now reached at
-   street speed, where the tyre forces alone cannot make it.
+1. While a drift grips (ENGAGE and DRIFT), the layer applies velocity
+   alignment: it steers the car's velocity towards the target slip angle, not
+   only the car's nose. The alignment is a proportional controller on the slip
+   error (gain 3 per second) with a capped rotation rate (120 degrees per
+   second), scaled by the drift strength and the grip cut, so it fades in on
+   entry and out on exit. The hold angle is now reached at street speed, where
+   the tyre forces alone cannot make it.
 2. The rotation never changes the length of the velocity. The component along
    the car's up axis does not turn; the rest turns around it. The drift cannot
    add or remove speed, so the speed retention of ADR 0002 still holds.
@@ -36,14 +37,15 @@ rotating.
    grow with it (DRIFT_RECOVER_TIME 0.6 s, DRIFT_RELEASE_TIME 0.6 s). A release
    at 35-40 degrees reaches below 10 degrees inside the window without a sign
    flip; past about 60 degrees a wild release can still spin.
-4. The handbrake turn does not use the velocity steer. It only turns the car,
-   so the angle model and the velocity steer stay off there.
+4. The handbrake turn does not use the velocity alignment. It only turns the
+   car, so the angle model and the alignment stay off while it runs; the exit
+   bleed still runs in its recovery, next to the counter-yaw.
 
 ## Consequences
 
 - The slip of a drift now has three actors: the nose yaw (ADR 0002), the tyre
-  forces, and the velocity steer. The steer carries the angle where the tyre
-  forces cannot; the yaw controller still shapes the nose.
+  forces, and the velocity alignment. The alignment carries the angle where
+  the tyre forces cannot; the yaw controller still shapes the nose.
 - The invariants do not move: the layer is player-only, off by default, inert
   with the feature off, surfaces and temperature still multiply on the grip,
   and AI, bikes and missions keep the original handling.
