@@ -29,8 +29,8 @@
 #include "Clock.h"
 #include "WaterLevel.h"
 
-#define MIN_CREATION_DIST		40.0f // not for start of the game (look at the GeneratePedsAtStartOfGame)
-#define CREATION_RANGE			10.0f // added over the MIN_CREATION_DIST.
+#define MIN_CREATION_DIST		70.0f // not for off-screen peds at start of the game (look at the GeneratePedsAtStartOfGame)
+#define CREATION_RANGE			20.0f // added over the MIN_CREATION_DIST.
 #define OFFSCREEN_CREATION_MULT	0.5f
 #define PED_REMOVE_DIST			(MIN_CREATION_DIST + CREATION_RANGE + 1.0f)
 #define PED_REMOVE_DIST_SPECIAL	(MIN_CREATION_DIST + CREATION_RANGE + 15.0f) // for peds with bCullExtraFarAway flag
@@ -398,8 +398,8 @@ CPopulation::GeneratePedsAtStartOfGame()
 			+ ms_nTotalGangPeds + ms_nNumCivFemale + ms_nNumCivMale;
 		ms_nTotalPeds -= ms_nTotalCarPassengerPeds;
 
-		// Min dist is 10.0f only for start of the game (naturally)
-		AddToPopulation(10.0f, PedCreationDistMultiplier() * (MIN_CREATION_DIST + CREATION_RANGE),
+		// Off-screen min dist is 10.0f only for start of the game (naturally)
+		AddToPopulation(MIN_CREATION_DIST, PedCreationDistMultiplier() * (MIN_CREATION_DIST + CREATION_RANGE),
 			10.0f, PedCreationDistMultiplier() * (MIN_CREATION_DIST + CREATION_RANGE));
 	}
 }
@@ -707,28 +707,29 @@ CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScree
 
 				generatedCoors.z = Max(generatedCoors.z, groundZ);
 			}
-			bool surfaceAndDistIsOk = true;
+			bool distIsOk = true;
 			if (TheCamera.IsSphereVisible(generatedCoors, 2.0f)) {
 				if (PedCreationDistMultiplier() * MIN_CREATION_DIST > (generatedCoors - playerCentreOfWorld).Magnitude2D())
-					surfaceAndDistIsOk = false;
+					distIsOk = false;
 			}
 
 			// Place skaters if only they're on tarmac.
+			bool surfaceIsOk = true;
 			if (((CPedModelInfo*)CModelInfo::GetModelInfo(modelToAdd))->m_pedStatType == PEDSTAT_SKATER) {
 				CEntity* foundEnt = nil;
 				CColPoint foundCol;
 				CWorld::ProcessVerticalLine(generatedCoors + CVector(0.f, 0.f, 2.f), generatedCoors.z - 2.0f, foundCol, foundEnt, true, false, false, false, false, false, nil);
 				if (foundEnt) {
 					if (foundCol.surfaceB == SURFACE_TARMAC || foundCol.surfaceB == SURFACE_PAVEMENT)
-						surfaceAndDistIsOk = true;
+						surfaceIsOk = true;
 					else
-						surfaceAndDistIsOk = false;
+						surfaceIsOk = false;
 
 				} else {
-					surfaceAndDistIsOk = false;
+					surfaceIsOk = false;
 				}
 			}
-			if (!surfaceAndDistIsOk)
+			if (!distIsOk || !surfaceIsOk)
 				break;
 			CPed *newPed = AddPed((ePedType)pedTypeToAdd, modelToAdd, generatedCoors);
 			if (forceAddingCop && newPed->m_nPedType == PEDTYPE_COP)
