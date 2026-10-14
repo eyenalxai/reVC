@@ -1609,17 +1609,18 @@ CCamera::CamControl(void)
 			   Cams[ActiveCam].Mode == CCam::MODE_TOP_DOWN_PED ||
 			   syphonJumpCut || stopArrestCam){
 				if(!m_bJustCameOutOfGarage){
-					if(Cams[ActiveCam].Mode == CCam::MODE_1STPERSON ||
-					   Cams[ActiveCam].Mode == CCam::MODE_SNIPER ||
-					   Cams[ActiveCam].Mode == CCam::MODE_ROCKETLAUNCHER ||
-					   Cams[ActiveCam].Mode == CCam::MODE_M16_1STPERSON ||
-					   Cams[ActiveCam].Mode == CCam::MODE_SNIPER_RUNABOUT ||
-					   Cams[ActiveCam].Mode == CCam::MODE_ROCKETLAUNCHER_RUNABOUT ||
-					   Cams[ActiveCam].Mode == CCam::MODE_1STPERSON_RUNABOUT ||
-					   Cams[ActiveCam].Mode == CCam::MODE_M16_1STPERSON_RUNABOUT ||
-					   Cams[ActiveCam].Mode == CCam::MODE_FIGHT_CAM_RUNABOUT ||
-					   Cams[ActiveCam].Mode == CCam::MODE_HELICANNON_1STPERSON ||
-					   Cams[ActiveCam].Mode == CCam::MODE_CAMERA){
+					if((Cams[ActiveCam].Mode == CCam::MODE_1STPERSON ||
+					    Cams[ActiveCam].Mode == CCam::MODE_SNIPER ||
+					    Cams[ActiveCam].Mode == CCam::MODE_ROCKETLAUNCHER ||
+					    Cams[ActiveCam].Mode == CCam::MODE_M16_1STPERSON ||
+					    Cams[ActiveCam].Mode == CCam::MODE_SNIPER_RUNABOUT ||
+					    Cams[ActiveCam].Mode == CCam::MODE_ROCKETLAUNCHER_RUNABOUT ||
+					    Cams[ActiveCam].Mode == CCam::MODE_1STPERSON_RUNABOUT ||
+					    Cams[ActiveCam].Mode == CCam::MODE_M16_1STPERSON_RUNABOUT ||
+					    Cams[ActiveCam].Mode == CCam::MODE_FIGHT_CAM_RUNABOUT ||
+					    Cams[ActiveCam].Mode == CCam::MODE_HELICANNON_1STPERSON ||
+					    Cams[ActiveCam].Mode == CCam::MODE_CAMERA) &&
+					   pTargetEntity->IsPed()){
 						float angle = CGeneral::GetATanOfXY(Cams[ActiveCam].Front.x, Cams[ActiveCam].Front.y) - HALFPI;
 						((CPed*)pTargetEntity)->m_fRotationCur = angle;
 						((CPed*)pTargetEntity)->m_fRotationDest = angle;
