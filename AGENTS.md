@@ -1,6 +1,6 @@
 ## Engineering
 
-Make technical decisions yourself; do not ask the owner. The owner does not know the code. Backwards compatibility does not matter. Rip and tear if needed. Refactor anything you need; you have free rein over the code. Focus on long-term maintenance.
+Make technical decisions yourself; do not ask the owner. The owner does not know the code. Backwards compatibility does not matter. Rip and tear if needed. Refactor anything you need; you have free rein over the code. Focus on long-term maintenance. Do not write duplicated code. Re-use existing code when possible.
 
 ## Commits
 
