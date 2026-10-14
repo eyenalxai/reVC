@@ -1906,6 +1906,11 @@ cursorEnterCB(GLFWwindow* window, int entered) {
 void
 windowFocusCB(GLFWwindow* window, int focused) {
 	WindowFocused = !!focused;
+	// A focused window cannot be minimized. gamescope's X11 window manager reports
+	// a fresh fullscreen window as iconified although it is visible; drop the stale
+	// flag, or the front end stays skipped and the main menu never runs.
+	if (focused)
+		WindowIconified = false;
 	if (!focused)
 		PSGLOBAL(cursorIsInWindow) = false;
 	else if (lastCursorMode == GLFW_CURSOR_DISABLED || glfwGetWindowAttrib(window, GLFW_HOVERED))
@@ -2312,7 +2317,11 @@ main(int argc, char *argv[])
 					
 					case GS_FRONTEND:
 					{
-						if(!WindowIconified)
+						// gamescope's X11 window manager reports a fresh fullscreen window as
+						// iconified while it is visible and focused. A focused window cannot be
+						// minimized, so treat it as visible; otherwise the front end would never
+						// run and the game would start a new game instead of the main menu.
+						if(!WindowIconified || WindowFocused)
 							RsEventHandler(rsFRONTENDIDLE, nil);
 
 #ifdef PS2_MENU
