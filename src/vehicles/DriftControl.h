@@ -18,7 +18,9 @@ public:
 	eDriftPhase m_Phase;
 	float m_fGripCut;	// 0.0 = rear wheels grip normally, 1.0 = full cutoff
 	float m_fPhaseTimer;	// seconds spent in the current phase
+	float m_fDriftTime;	// seconds of real sliding, charges the boost
 	float m_fSlipAngle;	// angle between the car's forward and its velocity, radians
+	float m_fEntrySpeed;	// speed when the drift started
 	int8 m_nEntryDir;	// yaw direction of the drift, +1 or -1
 
 	CDriftControl(void);
@@ -30,6 +32,8 @@ public:
 
 private:
 	void UpdateYawControl(CAutomobile *car, float dt);
+	void HoldDriftSpeed(CAutomobile *car, float dt);
+	void ApplyBoost(CAutomobile *car);
 	void StartRecover(void);
 	float GetMinGrip(void);
 };
