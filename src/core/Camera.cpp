@@ -172,7 +172,16 @@ CCamera::Init(void)
 	m_WideScreenOn = false;
 	m_fFOV_Wide_Screen = 0.0f;
 	m_bRestoreByJumpCut = false;
+#ifdef FIRST_PERSON
+	// First person view: a new drive starts in the stock vehicle first person camera
+	m_bLastTargetWasVehicle = false;
+	if(FrontEndMenuManager.m_bFirstPersonView)
+		CarZoomIndicator = CAM_ZOOM_1STPRS;
+	else
+		CarZoomIndicator = CAM_ZOOM_2;
+#else
 	CarZoomIndicator = CAM_ZOOM_2;
+#endif
 	PedZoomIndicator = CAM_ZOOM_2;
 	CarZoomValueSmooth = 0.0f;
 	m_fPedZoomValueSmooth = 0.0f;
@@ -723,6 +732,11 @@ CCamera::CamControl(void)
 
 		// Vehicle target
 		if(pTargetEntity->IsVehicle()){
+#ifdef FIRST_PERSON
+			// First person view: a new vehicle starts in the stock first person camera
+			if(FrontEndMenuManager.m_bFirstPersonView && !m_bLastTargetWasVehicle) CarZoomIndicator = CAM_ZOOM_1STPRS;
+			m_bLastTargetWasVehicle = true;
+#endif
 #ifdef GTA_TRAIN
 			if(((CVehicle*)pTargetEntity)->IsTrain()){
 				if(!m_bTargetJustBeenOnTrain){
@@ -982,6 +996,9 @@ CCamera::CamControl(void)
 
 		// Ped target
 		else if(pTargetEntity->IsPed()){
+#ifdef FIRST_PERSON
+			m_bLastTargetWasVehicle = false;
+#endif
 			// Change user selected mode
 			if(CPad::GetPad(0)->CycleCameraModeUpJustDown() && !CReplay::IsPlayingBack() &&
 			   (m_bLookingAtPlayer || WhoIsInControlOfTheCamera == CAMCONTROL_OBBE) &&
