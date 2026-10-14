@@ -70,6 +70,7 @@ public:
 	static void RemoveFromInterestingVehicleList(CVehicle*);
 	static void GenerateRandomCars(void);
 	static void GenerateOneRandomCar(void);
+	static bool CreateCarFromPlacement(const CCarCreationPlacement& placement, int carClass, int carModel, const CVector& vecTargetPos, const CVector2D& vecPlayerSpeed, bool testForCollision, bool bTopDownCamera);
 	static void GenerateEmergencyServicesCar(void);
 	static int32 ChooseModel(CZoneInfo*, int*);
 	static int32 ChoosePoliceCarModel(void);

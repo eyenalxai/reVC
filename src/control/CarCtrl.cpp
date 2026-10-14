@@ -57,6 +57,11 @@
 
 #define ATTEMPTS_TO_FIND_NEXT_NODE (15)
 
+/* How many distinct placements GenerateOneRandomCar tries before it gives up
+ * for this frame. Rejections that depend on one placement (blocked lane,
+ * one-way road, unreachable target, ...) do not end the call. */
+#define CAR_SPAWN_ATTEMPTS (4)
+
 #define DISTANCE_TO_SWITCH_FROM_BLOCK_TO_STOP (5.0f)
 #define DISTANCE_TO_SWITCH_FROM_STOP_TO_BLOCK (10.0f)
 #define MAX_SPEED_TO_ACCOUNT_IN_INTERCEPTING (0.13f)
@@ -167,9 +172,6 @@ CCarCtrl::GenerateOneRandomCar()
 	float frontX, frontY;
 	float preferredDistance, angleLimit;
 	bool invertAngleLimitTest;
-	CVector spawnPosition;
-	int32 curNodeId, nextNodeId;
-	float positionBetweenNodes;
 	bool testForCollision;
 	CVehicle* pPlayerVehicle = FindPlayerVehicle();
 	CVector2D vecPlayerVehicleSpeed;
@@ -290,59 +292,92 @@ CCarCtrl::GenerateOneRandomCar()
 			break;
 		}
 	}
-	if (!ThePaths.GenerateCarCreationCoors(vecTargetPos.x, vecTargetPos.y, frontX, frontY,
-		preferredDistance, angleLimit, invertAngleLimitTest, &spawnPosition, &curNodeId, &nextNodeId,
-		&positionBetweenNodes, carClass == COPS && pWanted->GetWantedLevel() >= 1))
+	CCarCreationPlacement placements[CAR_SPAWN_ATTEMPTS];
+	int32 numPlacements = ThePaths.CollectCarCreationCoors(vecTargetPos.x, vecTargetPos.y, frontX, frontY,
+		preferredDistance, angleLimit, invertAngleLimitTest, carClass == COPS && pWanted->GetWantedLevel() >= 1,
+		placements, CAR_SPAWN_ATTEMPTS);
+	if (numPlacements == 0)
 		return;
-	CPathNode* pCurNode = &ThePaths.m_pathNodes[curNodeId];
-	CPathNode* pNextNode = &ThePaths.m_pathNodes[nextNodeId];
-	bool bBoatGenerated = false;
-	if ((CGeneral::GetRandomNumber() & 0xF) > Min(pCurNode->spawnRate, pNextNode->spawnRate))
-		return;
-	if (pCurNode->bWaterPath) {
-		bBoatGenerated = true;
-		if (carClass == COPS) {
-			carModel = MI_PREDATOR;
-			carClass = COPS_BOAT;
-			if (!CStreaming::HasModelLoaded(MI_PREDATOR)) {
-				CStreaming::RequestModel(MI_PREDATOR, STREAMFLAGS_DEPENDENCY);
-				return;
+	/* The boat model is chosen at most once per call, so a retry never re-rolls it. */
+	int32 boatModel = -1;
+	bool bBoatModelChosen = false;
+	for (int32 i = 0; i < numPlacements; i++) {
+		const CCarCreationPlacement& placement = placements[i];
+		int placementClass = carClass;
+		int placementModel = carModel;
+		if (ThePaths.m_pathNodes[placement.node1].bWaterPath) {
+			if (carClass == COPS) {
+				placementClass = COPS_BOAT;
+				placementModel = MI_PREDATOR;
+				if (!CStreaming::HasModelLoaded(MI_PREDATOR)) {
+					CStreaming::RequestModel(MI_PREDATOR, STREAMFLAGS_DEPENDENCY);
+					return;
+				}
+			}
+			else {
+				if (!bBoatModelChosen) {
+					int j;
+					for (j = 10; j > 0 && (boatModel == -1 || !CStreaming::HasModelLoaded(boatModel)); j--)
+						boatModel = ChooseBoatModel(ChooseBoatRating(&zone));
+					if (j == 0)
+						return;
+					bBoatModelChosen = true;
+				}
+				placementModel = boatModel;
 			}
 		}
-		else {
-			int i;
-			carModel = -1;
-			for (i = 10; i > 0 && (carModel == -1 || !CStreaming::HasModelLoaded(carModel)); i--) {
-				carModel = ChooseBoatModel(ChooseBoatRating(&zone));
-			}
-			if (i == 0)
-				return;
-		}
-		if (pCurNode->bOnlySmallBoats || pNextNode->bOnlySmallBoats) {
-			if (BoatWithTallMast(carModel))
-				return;
-		}
+		/* A rejection that depends on this placement falls through to the next
+		 * one; at most one vehicle is created per call. */
+		if (CreateCarFromPlacement(placement, placementClass, placementModel, vecTargetPos, vecPlayerSpeed, testForCollision, bTopDownCamera))
+			return;
 	}
-	int16 colliding;
-	CWorld::FindObjectsKindaColliding(spawnPosition, bBoatGenerated ? 40.0f : 10.0f, true, &colliding, 2, nil, false, true, true, false, false);
-	if (colliding)
-		/* If something is already present in spawn position, do not create vehicle*/
-		return;
-	if (!bBoatGenerated && !ThePaths.TestCoorsCloseness(vecTargetPos, false, spawnPosition))
-		/* Testing if spawn position can reach target position via valid path. */
-		return;
+}
+
+bool
+CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int carClass, int carModel, const CVector& vecTargetPos, const CVector2D& vecPlayerSpeed, bool testForCollision, bool bTopDownCamera)
+{
+	CPathNode* pCurNode = &ThePaths.m_pathNodes[placement.node1];
+	CPathNode* pNextNode = &ThePaths.m_pathNodes[placement.node2];
+	bool bBoatGenerated = pCurNode->bWaterPath;
+	if ((CGeneral::GetRandomNumber() & 0xF) > Min(pCurNode->spawnRate, pNextNode->spawnRate))
+		return false;
+	if (bBoatGenerated && (pCurNode->bOnlySmallBoats || pNextNode->bOnlySmallBoats) && BoatWithTallMast(carModel))
+		return false;
+	if (pCurNode->numLinks == 1)
+		/* Do not create vehicle if there is nowhere to go. */
+		return false;
 	int16 idInNode = 0;
 
 	while (idInNode < pCurNode->numLinks &&
-		ThePaths.ConnectedNode(idInNode + pCurNode->firstLink) != nextNodeId)
+		ThePaths.ConnectedNode(idInNode + pCurNode->firstLink) != placement.node2)
 		idInNode++;
 	int16 connectionId = ThePaths.m_carPathConnections[idInNode + pCurNode->firstLink];
 	CCarPathLink* pPathLink = &ThePaths.m_carPathLinks[connectionId];
-	int16 lanesOnCurrentRoad = pPathLink->pathNodeIndex == nextNodeId ? pPathLink->numLeftLanes : pPathLink->numRightLanes;
-	CVehicleModelInfo* pModelInfo = (CVehicleModelInfo*)CModelInfo::GetModelInfo(carModel);
+	int16 lanesOnCurrentRoad = pPathLink->pathNodeIndex == placement.node2 ? pPathLink->numLeftLanes : pPathLink->numRightLanes;
 	if (lanesOnCurrentRoad == 0)
 		/* Not spawning vehicle if road is one way and intended direction is opposide to that way. */
-		return;
+		return false;
+	int16 lane = CGeneral::GetRandomNumber() % lanesOnCurrentRoad;
+	int16 nextDirection = (placement.node1 >= placement.node2) ? 1 : -1;
+	float nextLinkForwardX = nextDirection * pPathLink->GetDirX();
+	float nextLinkForwardY = nextDirection * pPathLink->GetDirY();
+	/* Test the occupancy of the lane the vehicle is created in, not of the road
+	 * centre: that position is what the vehicle will occupy. Only vehicles block
+	 * the placement, because sidewalk peds stand 5-10 m from the road centre and
+	 * used to reject about half of the placements. */
+	float laneOffset = (lane + pPathLink->OneWayLaneOffset()) * LANE_WIDTH;
+	CVector lanePosition(
+		placement.position.x + laneOffset * nextLinkForwardY,
+		placement.position.y - laneOffset * nextLinkForwardX,
+		placement.position.z);
+	int16 colliding;
+	CWorld::FindObjectsKindaColliding(lanePosition, bBoatGenerated ? 40.0f : 10.0f, true, &colliding, 2, nil, false, true, false, false, false);
+	if (colliding)
+		/* If something is already present in spawn position, try the next placement. */
+		return false;
+	if (!bBoatGenerated && !ThePaths.TestCoorsCloseness(vecTargetPos, false, placement.position))
+		/* Testing if spawn position can reach target position via valid path. */
+		return false;
 	CVehicle* pVehicle;
 	if (CModelInfo::IsBoatModel(carModel))
 		pVehicle = new CBoat(carModel, RANDOM_VEHICLE);
@@ -351,8 +386,8 @@ CCarCtrl::GenerateOneRandomCar()
 	else
 		pVehicle = new CAutomobile(carModel, RANDOM_VEHICLE);
 	pVehicle->AutoPilot.m_nPrevRouteNode = 0;
-	pVehicle->AutoPilot.m_nCurrentRouteNode = curNodeId;
-	pVehicle->AutoPilot.m_nNextRouteNode = nextNodeId;
+	pVehicle->AutoPilot.m_nCurrentRouteNode = placement.node1;
+	pVehicle->AutoPilot.m_nNextRouteNode = placement.node2;
 	switch (carClass) {
 	case COPS:
 		pVehicle->AutoPilot.m_nTempAction = TEMPACT_NONE;
@@ -399,22 +434,18 @@ CCarCtrl::GenerateOneRandomCar()
 	if (pVehicle && pVehicle->GetModelIndex() == MI_MRWHOOP)
 		pVehicle->m_bSirenOrAlarm = true;
 	pVehicle->AutoPilot.m_nNextPathNodeInfo = connectionId;
-	pVehicle->AutoPilot.m_nNextLane = pVehicle->AutoPilot.m_nCurrentLane = CGeneral::GetRandomNumber() % lanesOnCurrentRoad;
+	pVehicle->AutoPilot.m_nNextLane = pVehicle->AutoPilot.m_nCurrentLane = lane;
 	CBox* boundingBox = &CModelInfo::GetColModel(pVehicle->GetModelIndex())->boundingBox;
 	float carLength = 1.0f + (boundingBox->max.y - boundingBox->min.y) / 2;
 	float distanceBetweenNodes = (pCurNode->GetPosition() - pNextNode->GetPosition()).Magnitude2D();
+	float positionBetweenNodes = placement.positionBetweenNodes;
 	/* If car is so long that it doesn't fit between two car nodes, place it directly in the middle. */
 	/* Otherwise put it at least in a way that full vehicle length fits between two nodes. */
 	if (distanceBetweenNodes / 2 < carLength)
 		positionBetweenNodes = 0.5f;
 	else
 		positionBetweenNodes = Min(1.0f - carLength / distanceBetweenNodes, Max(carLength / distanceBetweenNodes, positionBetweenNodes));
-	pVehicle->AutoPilot.m_nNextDirection = (curNodeId >= nextNodeId) ? 1 : -1;
-	if (pCurNode->numLinks == 1){
-		/* Do not create vehicle if there is nowhere to go. */
-		delete pVehicle;
-		return;
-	}
+	pVehicle->AutoPilot.m_nNextDirection = nextDirection;
 	int16 nextConnection = pVehicle->AutoPilot.m_nNextPathNodeInfo;
 	int16 newLink;
 	while (nextConnection == pVehicle->AutoPilot.m_nNextPathNodeInfo){
@@ -422,7 +453,7 @@ CCarCtrl::GenerateOneRandomCar()
 		nextConnection = ThePaths.m_carPathConnections[newLink + pCurNode->firstLink];
 	}
 	pVehicle->AutoPilot.m_nCurrentPathNodeInfo = nextConnection;
-	pVehicle->AutoPilot.m_nCurrentDirection = (ThePaths.ConnectedNode(newLink + pCurNode->firstLink) >= curNodeId) ? 1 : -1;
+	pVehicle->AutoPilot.m_nCurrentDirection = (ThePaths.ConnectedNode(newLink + pCurNode->firstLink) >= placement.node1) ? 1 : -1;
 	CVector2D vecBetweenNodes = pNextNode->GetPosition() - pCurNode->GetPosition();
 	float forwardX, forwardY;
 	float distBetweenNodes = vecBetweenNodes.Magnitude();
@@ -549,7 +580,7 @@ CCarCtrl::GenerateOneRandomCar()
 	if (bBoatGenerated) {
 		if (!CWaterLevel::GetWaterLevel(finalPosition, &groundZ, true)) {
 			delete pVehicle;
-			return;
+			return false;
 		}
 	}
 	else {
@@ -563,7 +594,7 @@ CCarCtrl::GenerateOneRandomCar()
 	if (groundZ == INFINITE_Z || ABS(groundZ - finalPosition.z) > 7.0f) {
 		/* Failed to find ground or too far from expected position. */
 		delete pVehicle;
-		return;
+		return false;
 	}
 	if (CModelInfo::IsBoatModel(carModel)) {
 		finalPosition.z = groundZ;
@@ -593,21 +624,21 @@ CCarCtrl::GenerateOneRandomCar()
 		if ((vecTargetPos - pVehicle->GetPosition()).Magnitude2D() > OFFSCREEN_DESPAWN_RANGE * (pVehicle->bExtendedRange ? EXTENDED_RANGE_DESPAWN_MULTIPLIER : 1.0f)) {
 			/* Too far away cars that are not visible aren't needed. */
 			delete pVehicle;
-			return;
+			return false;
 		}
 	}else{
 		if ((vecTargetPos - pVehicle->GetPosition()).Magnitude2D() > TheCamera.GenerationDistMultiplier * (pVehicle->bExtendedRange ? EXTENDED_RANGE_DESPAWN_MULTIPLIER : 1.0f) * ONSCREEN_DESPAWN_RANGE ||
 			(vecTargetPos - pVehicle->GetPosition()).Magnitude2D() < TheCamera.GenerationDistMultiplier * MINIMAL_DISTANCE_TO_SPAWN_ONSCREEN) {
 			delete pVehicle;
-			return;
+			return false;
 		}
 		if ((TheCamera.GetPosition() - pVehicle->GetPosition()).Magnitude2D() < 82.5f * TheCamera.GenerationDistMultiplier || bTopDownCamera) {
 			delete pVehicle;
-			return;
+			return false;
 		}
 		if (pVehicle->GetModelIndex() == MI_MARQUIS) { // so marquis can only spawn if player doesn't see it?
 			delete pVehicle;
-			return;
+			return false;
 		}
 	}
 	CVehicleModelInfo* pVehicleModel = pVehicle->GetModelInfo();
@@ -616,18 +647,18 @@ CCarCtrl::GenerateOneRandomCar()
 		CWorld::FindObjectsKindaColliding(pVehicle->GetPosition(), radiusToTest + 20.0f, true, &colliding, 2, nil, false, true, false, false, false);
 		if (colliding){
 			delete pVehicle;
-			return;
+			return false;
 		}
 	}
 	CWorld::FindObjectsKindaColliding(pVehicle->GetPosition(), radiusToTest, true, &colliding, 2, nil, false, true, false, false, false);
 	if (colliding){
 		delete pVehicle;
-		return;
+		return false;
 	}
 	if (speedDifferenceWithTarget.x * distanceToTarget.x +
 		speedDifferenceWithTarget.y * distanceToTarget.y >= 0.0f){
 		delete pVehicle;
-		return;
+		return false;
 	}
 	pVehicleModel->AvoidSameVehicleColour(&pVehicle->m_currentColour1, &pVehicle->m_currentColour2);
 	CWorld::Add(pVehicle);
@@ -714,6 +745,7 @@ CCarCtrl::GenerateOneRandomCar()
 			}
 		}
 	}
+	return true;
 }
 
 bool
