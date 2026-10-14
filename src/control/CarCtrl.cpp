@@ -946,13 +946,15 @@ CCarCtrl::RemoveDistantCars()
 		CVehicle* pVehicle = CPools::GetVehiclePool()->GetSlot(i);
 		if (!pVehicle)
 			continue;
-		PossiblyRemoveVehicle(pVehicle);
+		// PossiblyRemoveVehicle may delete the vehicle, so handle the road
+		// block peds first, while the pointer is still valid.
 		if (pVehicle->bCreateRoadBlockPeds){
 			if ((pVehicle->GetPosition() - FindPlayerCentreOfWorld(CWorld::PlayerInFocus)).Magnitude2D() < DISTANCE_TO_SPAWN_ROADBLOCK_PEDS) {
 				CRoadBlocks::GenerateRoadBlockCopsForCar(pVehicle, pVehicle->m_nRoadblockType);
 				pVehicle->bCreateRoadBlockPeds = false;
 			}
 		}
+		PossiblyRemoveVehicle(pVehicle);
 	}
 }
 
