@@ -27,6 +27,7 @@
 #define DRIFT_YAW_GAIN		4.0f	// angle error to yaw rate, 1/s
 #define DRIFT_YAW_MAX		1.5f	// maximum yaw rate, rad/s
 #define DRIFT_YAW_ACCEL		6.0f	// yaw rate ramp, rad/s^2
+#define DRIFT_CURVE_RATE	60.0f	// path turn at full angle, degrees/s
 #define DRIFT_ALIGN_GAIN	2.0f	// aligning pull past the slip cap, 1/s
 #define DRIFT_VEL_ALIGN_GAIN	3.0f	// slip error to velocity alignment, 1/s
 #define DRIFT_VEL_ALIGN_RATE	120.0f	// cap on the velocity alignment, degrees/s
@@ -170,18 +171,34 @@ CDriftControl::ApplyYawRate(CAutomobile *car, float yawTargetRate, float dt)
 	car->m_vecTurnSpeed += car->GetUp() * ((newYawRate - yawRate) / DRIFT_TICK_RATE);
 }
 
+// The rate the drift turns the whole car at, nose and direction of travel:
+// the path turn. It follows the target angle, so a small angle turns gently
+// and a full angle turns hard, and it fades with the strength and the grip
+// cut like the alignment does.
+float
+CDriftControl::GetCurveRate(void)
+{
+	return m_nEntryDir * DEGTORAD(DRIFT_CURVE_RATE) *
+	       Clamp(Abs(m_fTargetSlip)/DEGTORAD(DRIFT_ANGLE_MAX), 0.0f, 1.0f) *
+	       gDriftStrength * m_fGripCut;
+}
+
 void
 CDriftControl::UpdateYawControl(CAutomobile *car, float dt)
 {
-	// Move the car's yaw towards the value that closes the angle error. The
-	// yaw authority is absolute, so the drift turns the same at any speed.
+	// Move the car's yaw towards the value that closes the angle error, on
+	// top of the drift's own turn. The yaw authority is absolute, so the
+	// drift turns the same at any speed.
 	float yawTargetRate;
 	if(m_bHandbrakeTurn){
 		// A handbrake turn is a fixed yaw kick towards the turn. It does not
 		// depend on speed, so the car keeps coming around.
 		yawTargetRate = m_nEntryDir*DEGTORAD(DRIFT_TURN_YAW);
 	}else{
-		yawTargetRate = DRIFT_YAW_GAIN*gDriftAssist*(m_fTargetSlip - m_fSlipAngle);
+		// The curve rate carries the whole car around the corner; the angle
+		// error on top of it brings the slip to the target and holds it.
+		yawTargetRate = GetCurveRate() +
+		                DRIFT_YAW_GAIN*gDriftAssist*(m_fTargetSlip - m_fSlipAngle);
 	}
 
 	// Light assist: past the cap an aligning torque pulls the car back in line.
@@ -208,15 +225,23 @@ CDriftControl::RotateVelocity(CAutomobile *car, float angle)
 	car->m_vecMoveSpeed = alongUp + v*c + CrossProduct(up, v)*s;
 }
 
-// Steers the velocity towards the slip angle the drift holds. The yaw
-// controller turns the nose; this turns the velocity, so the hold angle is
-// reached at street speed and not only at the top end.
+// Steers the velocity towards the slip angle the drift holds and turns it by
+// the same curve rate as the nose. The yaw controller turns the nose; this
+// turns the velocity with it, so the hold angle is reached at street speed,
+// not only at the top end, and the car carries the corner instead of sliding
+// straight.
 void
 CDriftControl::AlignVelocity(CAutomobile *car, float dt)
 {
 	// A handbrake turn only turns the car; the angle model is off.
 	if(m_bHandbrakeTurn)
 		return;
+
+	// The whole path turns: nose and velocity rotate together, so the slip
+	// stays at the target while the drift works through the corner. The
+	// error correction on top brings the slip back to the target when it
+	// drifts off it.
+	RotateVelocity(car, GetCurveRate()*dt);
 
 	SteerVelocity(car, m_fSlipAngle - m_fTargetSlip,
 	              DRIFT_VEL_ALIGN_GAIN, DEGTORAD(DRIFT_VEL_ALIGN_RATE), dt);
