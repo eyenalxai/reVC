@@ -12,7 +12,9 @@
 #define DRIFT_ENTRY_STEER	0.15f	// steering input needed to start a drift
 #define DRIFT_TURN_YAW		45.0f	// yaw kick of a low-speed handbrake turn, degrees/s
 #define DRIFT_TURN_ENGAGE	0.1f	// rear grip ramp in of a handbrake turn
-#define DRIFT_GRIP_CUTOFF	0.30f	// rear grip at full effect, 1.0 = original handling
+#define DRIFT_GRIP_CUTOFF	0.22f	// rear grip at full effect, 1.0 = original handling
+#define DRIFT_GRIP_STICKY	5.0f	// below this slip angle the rear tyre is sticky
+#define DRIFT_GRIP_SLIDE	15.0f	// above this slip angle the rear tyre is let go
 #define DRIFT_ENGAGE_TIME	0.3f	// rear grip ramp in
 #define DRIFT_RELEASE_TIME	0.4f	// rear grip ramp out
 #define DRIFT_BLEND_TIME	0.5f	// ramp out when the drift got too slow
@@ -72,7 +74,23 @@ CDriftControl::GetRearGripScale(void)
 {
 	if(m_Phase == DRIFT_PHASE_INACTIVE)
 		return 1.0f;
-	return 1.0f - (1.0f - GetMinGrip())*m_fGripCut;
+
+	// The rear grip is not a constant cut: the tyre is sticky just off centre
+	// and lets go as the slide grows. The player feels the steepness of this
+	// curve, so it is hand-shaped on top of the surface and temperature terms
+	// that the caller still applies.
+	float grip;
+	if(m_bHandbrakeTurn){
+		// A handbrake turn cuts the grip hard, whatever the angle is.
+		grip = GetMinGrip();
+	}else{
+		float t = (Abs(m_fSlipAngle) - DEGTORAD(DRIFT_GRIP_STICKY)) /
+		          (DEGTORAD(DRIFT_GRIP_SLIDE) - DEGTORAD(DRIFT_GRIP_STICKY));
+		grip = 1.0f + (GetMinGrip() - 1.0f)*Clamp(t, 0.0f, 1.0f);
+	}
+
+	// The phase ramps the request in on entry and out on exit.
+	return 1.0f - (1.0f - grip)*m_fGripCut;
 }
 
 float
