@@ -76,4 +76,9 @@ extern bool gbDrawVersionText;
 extern bool gbNoMovies;
 #endif
 
+// Drift handling (see src/vehicles/DriftControl.h)
+extern bool gDriftEnabled;
+extern float gDriftStrength;
+extern float gDriftAssist;
+
 #endif // __GTA_MAIN_H__
