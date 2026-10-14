@@ -777,35 +777,28 @@ float fBurstTyreMod = 0.13f;
 
 void
 CVehicle::ProcessWheel(CVector &wheelFwd, CVector &wheelRight, CVector &wheelContactSpeed, CVector &wheelContactPoint,
-	int32 wheelsOnGround, float thrust, float brake, float adhesion, int8 wheelId, float *wheelSpeed, tWheelState *wheelState, uint16 wheelStatus, bool driftSlide)
+	int32 wheelsOnGround, float thrust, float brake, float adhesion, int8 wheelId, float *wheelSpeed, tWheelState *wheelState, uint16 wheelStatus, tWheelGripRequest grip)
 {
-	// BUG: using statics here is probably a bad idea
-	static bool bAlreadySkidding = false;	// this is never reset
-	static bool bBraking;
-	static bool bDriving;
-
-#ifdef FIX_SIGNIFICANT_BUGS
-	bAlreadySkidding = false;
-#endif
-
 	// how much force we want to apply in these axes
 	float fwd = 0.0f;
 	float right = 0.0f;
 
-	bBraking = brake != 0.0f;
+	bool bBraking = brake != 0.0f;
 	if(bBraking)
 		thrust = 0.0f;
-	bDriving = thrust != 0.0f;
+	bool bDriving = thrust != 0.0f;
 
 	float contactSpeedFwd = DotProduct(wheelContactSpeed, wheelFwd);
 	float contactSpeedRight = DotProduct(wheelContactSpeed, wheelRight);
 
-	if(*wheelState != WHEEL_STATE_NORMAL)
-		bAlreadySkidding = true;
+	// A wheel that was already sliding loses extra grip. The state comes in
+	// with the wheel, so it belongs to this wheel alone.
+	bool bAlreadySkidding = *wheelState != WHEEL_STATE_NORMAL;
 	*wheelState = WHEEL_STATE_NORMAL;
 
+	adhesion *= grip.fAdhesionScale;
 	adhesion *= CTimer::GetTimeStep();
-	if(bAlreadySkidding)
+	if(bAlreadySkidding && !grip.bSkipTractionLoss)
 		adhesion *= pHandling->fTractionLoss;
 
 	// moving sideways
@@ -885,13 +878,13 @@ CVehicle::ProcessWheel(CVector &wheelFwd, CVector &wheelRight, CVector &wheelCon
 		}
 
 		float l = Sqrt(speedSq);
-		if(driftSlide){
+		if(grip.bKeepForwardForce){
 			// A drifting wheel slides sideways: the sideways demand is scaled
 			// down to the tyre budget, while the forward force keeps its value,
 			// so the slide does not eat forward speed.
 			right *= adhesion / l;
 		}else{
-			float tractionLoss = bAlreadySkidding ? 1.0f : pHandling->fTractionLoss;
+			float tractionLoss = bAlreadySkidding || grip.bSkipTractionLoss ? 1.0f : pHandling->fTractionLoss;
 			right *= adhesion * tractionLoss / l;
 			fwd *= adhesion * tractionLoss / l;
 		}

@@ -1067,9 +1067,6 @@ CAutomobile::ProcessControl(void)
 		// Process rear wheels
 
 		if(m_aWheelTimer[CARWHEEL_REAR_LEFT] > 0.0f || m_aWheelTimer[CARWHEEL_REAR_RIGHT] > 0.0f){
-			CVector wheelFwd = GetForward();
-			CVector wheelRight = GetRight();	// overwritten for resp. wheel
-
 			float rearBrake = brake;
 			float rearTraction = traction;
 			if(bIsHandbrakeOn){
@@ -1097,91 +1094,57 @@ CAutomobile::ProcessControl(void)
 				rearTraction *= m_fTireTemperature;
 			}
 
-			float rearGripScale = m_DriftControl.GetRearGripScale();
-			bool bDrifting = m_DriftControl.IsDrifting();
+			// The drift layer asks for its own rear grip (see DriftControl.h).
+			tWheelGripRequest grip;
+			grip.fAdhesionScale = m_DriftControl.GetRearGripScale();
+			grip.bKeepForwardForce = m_DriftControl.IsDrifting();
+			grip.bSkipTractionLoss = grip.bKeepForwardForce;
 
-			if(m_aWheelTimer[CARWHEEL_REAR_LEFT] > 0.0f){
+			int32 rearWheels[2] = { CARWHEEL_REAR_LEFT, CARWHEEL_REAR_RIGHT };
+
+			for(int i = 0; i < 2; i++){
+				int32 wheel = rearWheels[i];
+				if(m_aWheelTimer[wheel] <= 0.0f)
+					continue;
+
 				if(mod_HandlingManager.HasRearWheelDrive(pHandling->nIdentifier))
 					fThrust = acceleration;
 				else
 					fThrust = 0.0f;
 
-				wheelFwd -= DotProduct(wheelFwd, m_aWheelColPoints[CARWHEEL_REAR_LEFT].normal)*m_aWheelColPoints[CARWHEEL_REAR_LEFT].normal;
+				CVector wheelFwd = GetForward();
+				CVector wheelRight;
+				wheelFwd -= DotProduct(wheelFwd, m_aWheelColPoints[wheel].normal)*m_aWheelColPoints[wheel].normal;
 				wheelFwd.Normalise();
-				wheelRight = CrossProduct(wheelFwd, m_aWheelColPoints[CARWHEEL_REAR_LEFT].normal);
+				wheelRight = CrossProduct(wheelFwd, m_aWheelColPoints[wheel].normal);
 				wheelRight.Normalise();
 
-				m_aWheelColPoints[CARWHEEL_REAR_LEFT].surfaceA = SURFACE_WHEELBASE;
-				float adhesion = CSurfaceTable::GetAdhesiveLimit(m_aWheelColPoints[CARWHEEL_REAR_LEFT])*rearTraction;
+				m_aWheelColPoints[wheel].surfaceA = SURFACE_WHEELBASE;
+				float adhesion = CSurfaceTable::GetAdhesiveLimit(m_aWheelColPoints[wheel])*rearTraction;
 				if(GetStatus() == STATUS_PLAYER)
-					adhesion *= CSurfaceTable::GetWetMultiplier(m_aWheelColPoints[CARWHEEL_REAR_LEFT].surfaceB);
-				WheelState[CARWHEEL_REAR_LEFT] = m_aWheelState[CARWHEEL_REAR_LEFT];
+					adhesion *= CSurfaceTable::GetWetMultiplier(m_aWheelColPoints[wheel].surfaceB);
+				WheelState[wheel] = m_aWheelState[wheel];
 
-				if(Damage.GetWheelStatus(CARWHEEL_REAR_LEFT) == WHEEL_STATUS_BURST)
+				if(Damage.GetWheelStatus(wheel) == WHEEL_STATUS_BURST)
 					ProcessWheel(wheelFwd, wheelRight,
-						contactSpeeds[CARWHEEL_REAR_LEFT], contactPoints[CARWHEEL_REAR_LEFT],
+						contactSpeeds[wheel], contactPoints[wheel],
 						m_nWheelsOnGround, fThrust,
 						rearBrake*brakeBiasRear,
-						adhesion*tractionBiasRear*rearGripScale*Damage.m_fWheelDamageEffect,
-						CARWHEEL_REAR_LEFT,
-						&m_aWheelSpeed[CARWHEEL_REAR_LEFT],
-						&WheelState[CARWHEEL_REAR_LEFT],
-						WHEEL_STATUS_BURST, bDrifting);
+						adhesion*tractionBiasRear*Damage.m_fWheelDamageEffect,
+						wheel,
+						&m_aWheelSpeed[wheel],
+						&WheelState[wheel],
+						WHEEL_STATUS_BURST, grip);
 				else
 					ProcessWheel(wheelFwd, wheelRight,
-						contactSpeeds[CARWHEEL_REAR_LEFT], contactPoints[CARWHEEL_REAR_LEFT],
+						contactSpeeds[wheel], contactPoints[wheel],
 						m_nWheelsOnGround, fThrust,
 						rearBrake*brakeBiasRear,
-						adhesion*tractionBiasRear*rearGripScale,
-						CARWHEEL_REAR_LEFT,
-						&m_aWheelSpeed[CARWHEEL_REAR_LEFT],
-						&WheelState[CARWHEEL_REAR_LEFT],
-						WHEEL_STATUS_OK, bDrifting);
-			}
-
-#ifdef FIX_BUGS
-			// Shouldn't we reset these after the left wheel?
-			wheelFwd = GetForward();
-			wheelRight = GetRight();	// actually useless
-#endif
-
-			if(m_aWheelTimer[CARWHEEL_REAR_RIGHT] > 0.0f){
-				if(mod_HandlingManager.HasRearWheelDrive(pHandling->nIdentifier))
-					fThrust = acceleration;
-				else
-					fThrust = 0.0f;
-
-				wheelFwd -= DotProduct(wheelFwd, m_aWheelColPoints[CARWHEEL_REAR_RIGHT].normal)*m_aWheelColPoints[CARWHEEL_REAR_RIGHT].normal;
-				wheelFwd.Normalise();
-				wheelRight = CrossProduct(wheelFwd, m_aWheelColPoints[CARWHEEL_REAR_RIGHT].normal);
-				wheelRight.Normalise();
-
-				m_aWheelColPoints[CARWHEEL_REAR_RIGHT].surfaceA = SURFACE_WHEELBASE;
-				float adhesion = CSurfaceTable::GetAdhesiveLimit(m_aWheelColPoints[CARWHEEL_REAR_RIGHT])*rearTraction;
-				if(GetStatus() == STATUS_PLAYER)
-					adhesion *= CSurfaceTable::GetWetMultiplier(m_aWheelColPoints[CARWHEEL_REAR_RIGHT].surfaceB);
-				WheelState[CARWHEEL_REAR_RIGHT] = m_aWheelState[CARWHEEL_REAR_RIGHT];
-
-				if(Damage.GetWheelStatus(CARWHEEL_REAR_RIGHT) == WHEEL_STATUS_BURST)
-					ProcessWheel(wheelFwd, wheelRight,
-						contactSpeeds[CARWHEEL_REAR_RIGHT], contactPoints[CARWHEEL_REAR_RIGHT],
-						m_nWheelsOnGround, fThrust,
-						rearBrake*brakeBiasRear,
-						adhesion*tractionBiasRear*rearGripScale*Damage.m_fWheelDamageEffect,
-						CARWHEEL_REAR_RIGHT,
-						&m_aWheelSpeed[CARWHEEL_REAR_RIGHT],
-						&WheelState[CARWHEEL_REAR_RIGHT],
-						WHEEL_STATUS_BURST, bDrifting);
-				else
-					ProcessWheel(wheelFwd, wheelRight,
-						contactSpeeds[CARWHEEL_REAR_RIGHT], contactPoints[CARWHEEL_REAR_RIGHT],
-						m_nWheelsOnGround, fThrust,
-						rearBrake*brakeBiasRear,
-						adhesion*tractionBiasRear*rearGripScale,
-						CARWHEEL_REAR_RIGHT,
-						&m_aWheelSpeed[CARWHEEL_REAR_RIGHT],
-						&WheelState[CARWHEEL_REAR_RIGHT],
-						WHEEL_STATUS_OK, bDrifting);
+						adhesion*tractionBiasRear,
+						wheel,
+						&m_aWheelSpeed[wheel],
+						&WheelState[wheel],
+						WHEEL_STATUS_OK, grip);
 			}
 		}
 

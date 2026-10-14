@@ -172,6 +172,19 @@ enum
 	ROTOR_BOTTOM = 9,
 };
 
+// What the caller asks a wheel to do with its tyre budget. The default is the
+// original handling: full grip, and the budget is shared by both axes. The
+// drift layer (see DriftControl.h) asks for a softer sideways-only budget that
+// does not eat the forward force.
+struct tWheelGripRequest
+{
+	float fAdhesionScale;	// scales the wheel's adhesion, 1.0 = untouched
+	bool bKeepForwardForce;	// keep the forward force when the tyre budget overflows
+	bool bSkipTractionLoss;	// do not take the extra grip loss of a wheel that skids
+
+	tWheelGripRequest(void) : fAdhesionScale(1.0f), bKeepForwardForce(false), bSkipTractionLoss(false) {}
+};
+
 class CVehicle : public CPhysical
 {
 public:
@@ -332,7 +345,7 @@ public:
 	bool BladeColSectorList(CPtrList &list, CColModel &rotorColModel, CMatrix &matrix, int16 rotorType, float damageMult);
 
 	void ProcessWheel(CVector &wheelFwd, CVector &wheelRight, CVector &wheelContactSpeed, CVector &wheelContactPoint,
-		int32 wheelsOnGround, float thrust, float brake, float adhesion, int8 wheelId, float *wheelSpeed, tWheelState *wheelState, uint16 wheelStatus, bool driftSlide = false);
+		int32 wheelsOnGround, float thrust, float brake, float adhesion, int8 wheelId, float *wheelSpeed, tWheelState *wheelState, uint16 wheelStatus, tWheelGripRequest grip = tWheelGripRequest());
 	void ProcessBikeWheel(CVector &wheelFwd, CVector &wheelRight, CVector &wheelContactSpeed, CVector &wheelContactPoint,
 		int32 wheelsOnGround, float thrust, float brake, float adhesion, float destabTraction, int8 wheelId, float *wheelSpeed, tWheelState *wheelState, eBikeWheelSpecial special, uint16 wheelStatus);
 	void ExtinguishCarFire(void);

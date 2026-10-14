@@ -3,8 +3,9 @@
 
 class CAutomobile;
 
-// Arcade drift handling for the player's car. See docs/adr/0001-arcade-drift-handling.md.
-// The controller is a member of CAutomobile, but only the player's car steps it.
+// Arcade drift handling for the player's car. See docs/adr/ for the drift
+// decision records. The controller is a member of CAutomobile, but only the
+// player's car steps it.
 class CDriftControl
 {
 public:
@@ -20,8 +21,11 @@ public:
 	float m_fPhaseTimer;	// seconds spent in the current phase
 	float m_fDriftTime;	// seconds of real sliding, charges the boost
 	float m_fSlipAngle;	// angle between the car's forward and its velocity, radians
+	float m_fTargetSlip;	// slip angle the drift holds, radians
+	float m_fBoostLevel;	// stacked boost, fraction of top speed on top
 	float m_fEntrySpeed;	// speed when the drift started
 	int8 m_nEntryDir;	// yaw direction of the drift, +1 or -1
+	bool m_bHandbrakeTurn;	// low-speed entry: a handbrake turn, not a hold-angle drift
 
 	CDriftControl(void);
 
@@ -33,11 +37,15 @@ public:
 	bool IsActive(void) { return m_Phase != DRIFT_PHASE_INACTIVE; }
 	float GetRearGripScale(void);
 	float GetSteerAngleMult(void);
+	void PrintDebugState(CAutomobile *car);
 
 private:
 	void UpdateYawControl(CAutomobile *car, float dt);
+	bool UpdateTargetAngle(CAutomobile *car, float dt);
+	void ApplyYawRate(CAutomobile *car, float yawTargetRate, float dt);
 	void HoldDriftSpeed(CAutomobile *car, float dt);
-	void ApplyBoost(CAutomobile *car);
+	void ApplyBoost(CAutomobile *car, float dt);
+	void EndDrift(void);
 	void StartRecover(void);
 	float GetMinGrip(void);
 	float GetMaxSpeed(CAutomobile *car);

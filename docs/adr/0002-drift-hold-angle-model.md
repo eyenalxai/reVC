@@ -1,0 +1,45 @@
+# ADR 0002: The drift v2 control law holds a target slip angle
+
+Date: 2026-10-15
+Status: Accepted
+
+## Context
+
+ADR 0001 built the drift layer around a steering-to-angle mapping: the target
+was `steer * constant`, so letting go of the stick straightened the car, and a
+drift needed 30 percent of the top speed to start. The owner's verdict: v1 holds
+an angle but is not arcade enough, and the map's narrow roads and straight
+90-degree corners need drifts at low speed.
+
+## Decision
+
+1. The target slip angle is stateful. Entry sets it to a base hold angle
+   (20 degrees) and steering integrates it (90 degrees per second, in drift
+   units, clamped to -5..45). No input holds the angle; a hard counter flick
+   unwinds it past zero and ends the drift. This is the torque-balancing model
+   of the Criterion GDC 2018 talk (~21:00).
+2. The entry gate is 10 percent of the top speed and the blend-out floor is
+   5 percent. Below the gate, handbrake and steering make a handbrake turn: a
+   hard rear grip cut with a fixed yaw kick (45 degrees per second) and no
+   speed gate.
+3. The rear grip is a curve of the slip angle, sticky below 5 degrees and at
+   most 0.22 of the normal grip above 15 degrees, instead of a constant cut.
+   Surface adhesion and tyre temperature still multiply on top.
+4. The yaw authority is absolute: it never scales with speed, and the layer
+   keeps writing the car's turn speed directly.
+5. A finished drift stacks its boost (0.05 or 0.09 of the top speed per tier,
+   cap 0.25) on a boost level that pushes and drains, instead of one impulse.
+   The cap lets a chain run at 1.25x the top speed.
+
+## Consequences
+
+- `CVehicle::ProcessWheel` takes a `tWheelGripRequest` (adhesion scale,
+  keep-forward-force, skip-traction-loss) instead of a `driftSlide` boolean.
+  The four near-duplicate rear-wheel call sites are one loop.
+- `bAlreadySkidding` is per-wheel state read from the wheel, not a static that
+  leaks between calls and vehicles.
+- The slip-angle sign stays the code's: see `GLOSSARY.md`.
+- The drift still never costs speed: a drifting wheel keeps its forward force
+  and the slide gets part of the lost speed back.
+- Bikes, AI cars, missions and the default handling path are untouched, and
+  the feature stays off by default.
