@@ -556,6 +556,15 @@ CMenuManager::CMenuManager()
 #endif
 }
 
+#ifdef FIRST_PERSON
+int8
+CMenuManager::GetFirstPersonFOV(void)
+{
+	// The FOV setting is clamped where it is read
+	return Clamp(m_nFirstPersonFOV, FIRST_PERSON_FOV_MIN, FIRST_PERSON_FOV_MAX);
+}
+#endif
+
 void
 CMenuManager::SetFrontEndRenderStates(void)
 {

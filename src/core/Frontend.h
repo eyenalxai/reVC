@@ -592,6 +592,14 @@ struct MenuTrapezoid
 	}
 };
 
+#ifdef FIRST_PERSON
+// First person view FOV, in degrees
+#define FIRST_PERSON_FOV_MIN 50
+#define FIRST_PERSON_FOV_MAX 90
+#define FIRST_PERSON_SIGHTS_FOV_OFFSET 10	// the sight view zooms in by this much
+#define FIRST_PERSON_SIGHTS_FOV_MIN 40		// and never goes below this
+#endif
+
 class CMenuManager
 {
 public:
@@ -760,6 +768,10 @@ public:
 #endif
 	};
 	bool GetIsMenuActive() {return !!m_bMenuActive;}
+
+#ifdef FIRST_PERSON
+	int8 GetFirstPersonFOV(void);
+#endif
 
 #ifdef CUTSCENE_BORDERS_SWITCH
 	static bool m_PrefsCutsceneBorders;

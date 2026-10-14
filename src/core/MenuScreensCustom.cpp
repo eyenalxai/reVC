@@ -313,7 +313,7 @@ void FirstPersonFOVPress(int8 action) {
 		FrontEndMenuManager.m_nFirstPersonFOV += 5;
 	else
 		return;
-	FrontEndMenuManager.m_nFirstPersonFOV = Clamp(FrontEndMenuManager.m_nFirstPersonFOV, 50, 90);
+	FrontEndMenuManager.m_nFirstPersonFOV = FrontEndMenuManager.GetFirstPersonFOV();
 	FrontEndMenuManager.SaveSettings();
 }
 #endif

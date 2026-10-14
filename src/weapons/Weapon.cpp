@@ -36,7 +36,6 @@
 #include "Sprite.h"
 #include "Pickups.h"
 #include "SaveBuf.h"
-#include "Frontend.h"
 
 float fReloadAnimSampleFraction[5] = {  0.5f,  0.7f,  0.75f,  0.75f,  0.7f };
 float fSeaSparrowAimingAngle = 10.0f;
@@ -73,15 +72,14 @@ Find3rdPersonCamTargetVectorFromCachedVectors(float dist, CVector pos, CVector& 
 }
 #endif
 
-#ifdef FIRST_PERSON
-static bool
-UsingFirstPersonSights(void)
+// The ray of the first person camera: the M16 mode and the sight view fire along it
+static void
+GetFirstPersonSightsRay(float range, CVector &source, CVector &target)
 {
-	// Aiming down the sights in the first person view
-	return FrontEndMenuManager.m_bFirstPersonView &&
-		TheCamera.PlayerWeaponMode.Mode == CCam::MODE_M16_1STPERSON;
+	CCam *cam = &TheCamera.Cams[TheCamera.ActiveCam];
+	source = cam->Source;
+	target = cam->Front*range + source;
 }
-#endif
 
 CWeaponInfo *
 CWeapon::GetInfo()
@@ -1745,15 +1743,15 @@ CWeapon::FireShotgun(CEntity *shooter, CVector *fireSource)
 		CEntity *victim;
 
 #ifdef FIRST_PERSON
-		// Aiming down the sights: the shot leaves along the camera axis
-		bool usingSights = UsingFirstPersonSights();
+		// Aiming down the sights: the player's shot leaves along the camera axis
+		bool usingSights = shooter == FindPlayerPed() && TheCamera.UsingFirstPersonSights();
 #endif
 
-		if ( shooter == FindPlayerPed() && (TheCamera.Cams[0].Using3rdPersonMouseCam()
+		if ( shooter == FindPlayerPed() && TheCamera.Cams[0].Using3rdPersonMouseCam()
 #ifdef FIRST_PERSON
 			|| usingSights
 #endif
-			) )
+			)
 		{
 			CVector Left;
 #ifdef FREE_CAM
@@ -1771,8 +1769,7 @@ CWeapon::FireShotgun(CEntity *shooter, CVector *fireSource)
 #ifdef FIRST_PERSON
 			if (usingSights) {
 				CCam *cam = &TheCamera.Cams[TheCamera.ActiveCam];
-				source = cam->Source;
-				target = cam->Front + source;
+				GetFirstPersonSightsRay(1.0f, source, target);
 				Left = CrossProduct(cam->Front, cam->Up);
 			} else
 #endif
@@ -2220,15 +2217,15 @@ CWeapon::FireAreaEffect(CEntity *shooter, CVector *fireSource)
 	CVector dir;
 
 #ifdef FIRST_PERSON
-	// Aiming down the sights: the flame leaves along the camera axis
-	bool usingSights = UsingFirstPersonSights();
+	// Aiming down the sights: the player's flame leaves along the camera axis
+	bool usingSights = shooter == FindPlayerPed() && TheCamera.UsingFirstPersonSights();
 #endif
 
-	if ( shooter == FindPlayerPed() && (TheCamera.Cams[0].Using3rdPersonMouseCam()
+	if ( shooter == FindPlayerPed() && TheCamera.Cams[0].Using3rdPersonMouseCam()
 #ifdef FIRST_PERSON
 		|| usingSights
 #endif
-		) )
+		)
 	{
 #ifdef FREE_CAM
 		if (CCamera::bFreeCam
@@ -2243,9 +2240,7 @@ CWeapon::FireAreaEffect(CEntity *shooter, CVector *fireSource)
 #endif
 #ifdef FIRST_PERSON
 		if (usingSights) {
-			CCam *cam = &TheCamera.Cams[TheCamera.ActiveCam];
-			source = cam->Source;
-			target = cam->Front*info->m_fRange + source;
+			GetFirstPersonSightsRay(info->m_fRange, source, target);
 		} else
 #endif
 		{
@@ -2471,8 +2466,8 @@ CWeapon::FireM16_1stPerson(CEntity *shooter)
 	CCam *cam = &TheCamera.Cams[TheCamera.ActiveCam];
 	ASSERT(cam!=nil);
 
-	CVector source = cam->Source;
-	CVector target = cam->Front*info->m_fRange + source;
+	CVector source, target;
+	GetFirstPersonSightsRay(info->m_fRange, source, target);
 
 	if (ProcessLineOfSight(source, target, point, victim, m_eWeaponType, shooter, true, true, true, true, true, true, false)) {
 		CheckForShootingVehicleOccupant(&victim, &point, m_eWeaponType, source, target);

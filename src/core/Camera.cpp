@@ -175,7 +175,8 @@ CCamera::Init(void)
 #ifdef FIRST_PERSON
 	// First person view: a new drive starts in the stock vehicle first person camera
 	m_bLastTargetWasVehicle = false;
-	if(FrontEndMenuManager.m_bFirstPersonView)
+	m_bFirstPersonViewWasOn = false;
+	if(FirstPersonViewEnabled())
 		CarZoomIndicator = CAM_ZOOM_1STPRS;
 	else
 		CarZoomIndicator = CAM_ZOOM_2;
@@ -734,7 +735,7 @@ CCamera::CamControl(void)
 		if(pTargetEntity->IsVehicle()){
 #ifdef FIRST_PERSON
 			// First person view: a new vehicle starts in the stock first person camera
-			if(FrontEndMenuManager.m_bFirstPersonView && !m_bLastTargetWasVehicle) CarZoomIndicator = CAM_ZOOM_1STPRS;
+			if(FirstPersonViewEnabled() && !m_bLastTargetWasVehicle) CarZoomIndicator = CAM_ZOOM_1STPRS;
 			m_bLastTargetWasVehicle = true;
 #endif
 #ifdef GTA_TRAIN
@@ -1004,7 +1005,7 @@ CCamera::CamControl(void)
 			   (m_bLookingAtPlayer || WhoIsInControlOfTheCamera == CAMCONTROL_OBBE) &&
 			   !m_WideScreenOn && !m_bFailedCullZoneTestPreviously && !m_bFirstPersonBeingUsed
 #ifdef FIRST_PERSON
-			   && !FrontEndMenuManager.m_bFirstPersonView
+			   && !FirstPersonViewEnabled()
 #endif
 			   ){
 #ifdef GTA_PC_CONTROLS
@@ -1021,7 +1022,7 @@ CCamera::CamControl(void)
 			   (m_bLookingAtPlayer || WhoIsInControlOfTheCamera == CAMCONTROL_OBBE) &&
 			   !m_WideScreenOn && !m_bFailedCullZoneTestPreviously && !m_bFirstPersonBeingUsed
 #ifdef FIRST_PERSON
-			   && !FrontEndMenuManager.m_bFirstPersonView
+			   && !FirstPersonViewEnabled()
 #endif
 			   ){
 #ifdef GTA_PC_CONTROLS
@@ -1049,11 +1050,10 @@ CCamera::CamControl(void)
 			   ){
 #ifdef FIRST_PERSON
 				// The setting turned off: leave the first person view once
-				static bool bFirstPersonViewWasOn = false;
-				if(bFirstPersonViewWasOn && !FrontEndMenuManager.m_bFirstPersonView)
+				if(m_bFirstPersonViewWasOn && !FirstPersonViewEnabled())
 					m_bFirstPersonBeingUsed = false;
-				bFirstPersonViewWasOn = FrontEndMenuManager.m_bFirstPersonView;
-				if(FrontEndMenuManager.m_bFirstPersonView){
+				m_bFirstPersonViewWasOn = FirstPersonViewEnabled();
+				if(FirstPersonViewEnabled()){
 					// The setting keeps the camera in first person while the player is on foot
 					m_bFirstPersonBeingUsed = true;
 					m_uiFirstPersonCamLastInputTime = CTimer::GetTimeInMilliseconds();
@@ -1084,7 +1084,7 @@ CCamera::CamControl(void)
 
 			if((!FindPlayerPed()->IsPedInControl() || FindPlayerPed()->m_fMoveSpeed > 0.0f)
 #ifdef FIRST_PERSON
-			   && !FrontEndMenuManager.m_bFirstPersonView
+			   && !FirstPersonViewEnabled()
 #endif
 			   )
 				m_bFirstPersonBeingUsed = false;
@@ -1093,7 +1093,7 @@ CCamera::CamControl(void)
 #ifdef FIRST_PERSON
 				// The persistent first person view must not disable the player controls.
 				// Clearing also recovers a stale flag left by the stock look-around.
-				if(FrontEndMenuManager.m_bFirstPersonView)
+				if(FirstPersonViewEnabled())
 					CPad::GetPad(0)->DisablePlayerControls &= ~PLAYERCONTROL_CAMERA;
 				else
 #endif
@@ -4062,10 +4062,33 @@ CCamera::Using1stPersonWeaponMode(void)
 
 #ifdef FIRST_PERSON
 bool
+CCamera::FirstPersonViewEnabled(void)
+{
+	// The first person view setting on the Display Setup page
+	return FrontEndMenuManager.m_bFirstPersonView;
+}
+
+bool
+CCamera::UsingFirstPersonSights(void)
+{
+	// Aiming down the sights in the first person view
+	return FirstPersonViewEnabled() &&
+		PlayerWeaponMode.Mode == CCam::MODE_M16_1STPERSON;
+}
+
+float
+CCamera::GetFirstPersonSightsFOV(void)
+{
+	// Aiming down the sights: the sight view zooms in a little
+	return Max((float)(FrontEndMenuManager.GetFirstPersonFOV() - FIRST_PERSON_SIGHTS_FOV_OFFSET),
+	           (float)FIRST_PERSON_SIGHTS_FOV_MIN);
+}
+
+bool
 CCamera::Using1stPersonView(void)
 {
 	// First person view: the plain on-foot view or the view down the sights
-	return FrontEndMenuManager.m_bFirstPersonView &&
+	return FirstPersonViewEnabled() &&
 		(Cams[ActiveCam].Mode == CCam::MODE_1STPERSON || Cams[ActiveCam].Mode == CCam::MODE_M16_1STPERSON);
 }
 #endif

@@ -727,7 +727,7 @@ void CControllerConfigManager::AffectControllerStateOn_ButtonDown(int32 button, 
 		}
 #ifdef FIRST_PERSON
 		// The persistent first person view on foot keeps the normal on-foot controls
-		if (mode == CCam::MODE_1STPERSON && FrontEndMenuManager.m_bFirstPersonView)
+		if (mode == CCam::MODE_1STPERSON && TheCamera.FirstPersonViewEnabled())
 			firstPerson = false;
 #endif
 

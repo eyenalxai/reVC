@@ -1447,11 +1447,10 @@ CPed::CalculateNewVelocity(void)
 		m_moved = m_moved * (1 / 100.0f);
 	}
 
-	if ((!TheCamera.Cams[TheCamera.ActiveCam].GetWeaponFirstPersonOn() && !TheCamera.Cams[0].Using3rdPersonMouseCam()
+	if ((!TheCamera.Cams[TheCamera.ActiveCam].GetWeaponFirstPersonOn() && !TheCamera.Cams[0].Using3rdPersonMouseCam())
 #ifdef FIRST_PERSON
 		&& !TheCamera.Using1stPersonView()
 #endif
-		)
 		|| FindPlayerPed() != this || !CanStrafeOrMouseControl()) {
 
 		if (FindPlayerPed() == this)

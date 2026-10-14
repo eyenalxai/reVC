@@ -334,6 +334,9 @@ public:
 	bool m_bcutsceneFinished;
 	bool m_bCullZoneChecksOn;
 	bool m_bFirstPersonBeingUsed;
+#ifdef FIRST_PERSON
+	bool m_bFirstPersonViewWasOn;
+#endif
 	bool m_bJustJumpedOutOf1stPersonBecauseOfTarget;
 	bool m_bIdleOn;
 	bool m_bInATunnelAndABigVehicle;
@@ -629,6 +632,9 @@ public:
 	float Find3rdPersonQuickAimPitch(void);
 	bool Using1stPersonWeaponMode(void);
 #ifdef FIRST_PERSON
+	bool FirstPersonViewEnabled(void);
+	bool UsingFirstPersonSights(void);
+	float GetFirstPersonSightsFOV(void);
 	bool Using1stPersonView(void);
 #endif
 

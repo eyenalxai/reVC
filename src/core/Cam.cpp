@@ -2334,8 +2334,8 @@ CCam::Process_M16_1stPerson(const CVector &CameraTarget, float, float, float)
 
 #ifdef FIRST_PERSON
 	// Aiming down the sights: the sight view zooms in a little
-	if(FrontEndMenuManager.m_bFirstPersonView && Mode == MODE_M16_1STPERSON)
-		FOV = Max(40.0f, (float)(Clamp(FrontEndMenuManager.m_nFirstPersonFOV, 50, 90) - 10));
+	if(TheCamera.FirstPersonViewEnabled() && Mode == MODE_M16_1STPERSON)
+		FOV = TheCamera.GetFirstPersonSightsFOV();
 	else
 		FOV = DefaultFOV;
 #else
@@ -2556,8 +2556,8 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 
 #ifdef FIRST_PERSON
 		// The first person view setting overrides the default FOV
-		if(FrontEndMenuManager.m_bFirstPersonView)
-			FOV = Clamp(FrontEndMenuManager.m_nFirstPersonFOV, 50, 90);
+		if(TheCamera.FirstPersonViewEnabled())
+			FOV = FrontEndMenuManager.GetFirstPersonFOV();
 #endif
 
 		TargetCoors = CameraTarget;
@@ -2571,7 +2571,7 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 			// static DPadHorizontal unused
 			m_bCollisionChecksOn = true;
 #ifdef FIRST_PERSON
-			if(FrontEndMenuManager.m_bFirstPersonView)
+			if(TheCamera.FirstPersonViewEnabled())
 				CPad::GetPad(0)->ClearMouseHistory();
 #endif
 			ResetStatics = false;
@@ -2600,7 +2600,7 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		bool UseMouse = false;
 		float MouseX = CPad::GetPad(0)->GetMouseX();
 		float MouseY = CPad::GetPad(0)->GetMouseY();
-		if(FrontEndMenuManager.m_bFirstPersonView && (MouseX != 0.0f || MouseY != 0.0f)){
+		if(TheCamera.FirstPersonViewEnabled() && (MouseX != 0.0f || MouseY != 0.0f)){
 			UseMouse = true;
 			LookLeftRight = -3.0f*MouseX;
 			LookUpDown = 4.0f*MouseY;
@@ -2707,7 +2707,7 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		// so left and right hand drive models both work. Bikes use the same
 		// treatment, on top of the lean matrix set above.
 		CPlayerPed *pPlayer = FindPlayerPed();
-		if(FrontEndMenuManager.m_bFirstPersonView && pPlayer && pPlayer->InVehicle() &&
+		if(TheCamera.FirstPersonViewEnabled() && pPlayer && pPlayer->InVehicle() &&
 		   pPlayer->m_pMyVehicle == (CVehicle*)CamTargetEntity && ((CVehicle*)CamTargetEntity)->pDriver &&
 		   !((CVehicle*)CamTargetEntity)->IsBoat()){
 			// The world update has already placed the player inside the

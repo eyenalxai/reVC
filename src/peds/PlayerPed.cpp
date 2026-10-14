@@ -24,7 +24,6 @@
 #include "PedPlacement.h"
 #include "VarConsole.h"
 #include "SaveBuf.h"
-#include "Frontend.h"
 
 #define PAD_MOVE_TO_GAME_WORLD_MOVE 60.0f
 
@@ -1285,19 +1284,18 @@ CPlayerPed::ProcessPlayerWeapon(CPad *padUsed)
 
 	if (!m_pFire) {
 		eWeaponType weapon = GetWeapon()->m_eWeaponType;
-		bool enterWeaponMode = weapon == WEAPONTYPE_ROCKETLAUNCHER || weapon == WEAPONTYPE_SNIPERRIFLE ||
+		if (weapon == WEAPONTYPE_ROCKETLAUNCHER || weapon == WEAPONTYPE_SNIPERRIFLE ||
 			weapon == WEAPONTYPE_LASERSCOPE || weapon == WEAPONTYPE_M4 ||
 			weapon == WEAPONTYPE_RUGER || weapon == WEAPONTYPE_M60 ||
-			weapon == WEAPONTYPE_CAMERA;
+			weapon == WEAPONTYPE_CAMERA
 #ifdef FIRST_PERSON
-		// First person view: every weapon that can aim enters the sight view,
-		// not only the stock weapon set. The flamethrower aims too, although
-		// the weapon data does not give it the CANAIM flag.
-		enterWeaponMode = enterWeaponMode ||
-			(FrontEndMenuManager.m_bFirstPersonView &&
-			 (weaponInfo->IsFlagSet(WEAPONFLAG_CANAIM) || weapon == WEAPONTYPE_FLAMETHROWER));
+			// First person view: every weapon that can aim enters the sight view,
+			// not only the stock weapon set. The flamethrower aims too, although
+			// the weapon data does not give it the CANAIM flag.
+			|| (TheCamera.FirstPersonViewEnabled() &&
+			    (weaponInfo->IsFlagSet(WEAPONFLAG_CANAIM) || weapon == WEAPONTYPE_FLAMETHROWER))
 #endif
-		if (enterWeaponMode) {
+			) {
 
 			if (padUsed->TargetJustDown() || TheCamera.m_bJustJumpedOutOf1stPersonBecauseOfTarget) {
 #ifdef FREE_CAM
