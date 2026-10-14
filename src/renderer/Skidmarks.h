@@ -37,7 +37,7 @@ public:
 	static void Clear(void);
 	static void Update(void);
 	static void Render(void);
-	static void RegisterOne(uintptr id, const CVector &pos, float fwdX, float fwdY, eSkidmarkType type, bool *isBloody);
+	static void RegisterOne(uintptr id, const CVector &pos, float fwdX, float fwdY, eSkidmarkType type, bool *isBloody, float fWidthScale = 1.0f);
 	static void RegisterOne(uintptr id, const CVector &pos, float fwdX, float fwdY, bool *isMuddy, bool *isBloody);
 };
 

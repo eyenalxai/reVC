@@ -1785,6 +1785,12 @@ CAutomobile::PreRender(void)
 	float fwdSpeed = DotProduct(m_vecMoveSpeed, GetForward())*180.0f;
 
 
+	// VICE-32: a drift of the player's car leaves wider skid marks and throws
+	// extra smoke. Both stay neutral while the feature is off.
+	float driftSlip = GetStatus() == STATUS_PLAYER ? Abs(CDriftFeedback::GetStrength()) : 0.0f;
+	float driftSkidWidth = 1.0f + (DRIFT_SKID_WIDTH_MAX - 1.0f)*driftSlip;
+
+
 	// Wheel particles
 
 	if(GetModelIndex() == MI_DODO || GetVehicleAppearance() != VEHICLE_APPEARANCE_CAR){
@@ -1862,7 +1868,7 @@ CAutomobile::PreRender(void)
 					if(m_aWheelTimer[i] > 0.0f)
 						CSkidmarks::RegisterOne((uintptr)this + i, m_aWheelColPoints[i].point,
 							GetForward().x, GetForward().y,
-							m_aWheelSkidmarkType[i], &m_aWheelSkidmarkBloody[i]);
+							m_aWheelSkidmarkType[i], &m_aWheelSkidmarkBloody[i], driftSkidWidth);
 					break;
 
 				case WHEEL_STATE_SKIDDING:
@@ -1880,7 +1886,7 @@ CAutomobile::PreRender(void)
 						if(m_aWheelTimer[i] > 0.0f)
 							CSkidmarks::RegisterOne((uintptr)this + i, m_aWheelColPoints[i].point,
 								GetForward().x, GetForward().y,
-								m_aWheelSkidmarkType[i], &m_aWheelSkidmarkBloody[i]);
+								m_aWheelSkidmarkType[i], &m_aWheelSkidmarkBloody[i], driftSkidWidth);
 					}
 					break;
 
@@ -1896,7 +1902,7 @@ CAutomobile::PreRender(void)
 					if(m_aWheelTimer[i] > 0.0f)
 						CSkidmarks::RegisterOne((uintptr)this + i, m_aWheelColPoints[i].point,
 							GetForward().x, GetForward().y,
-							m_aWheelSkidmarkType[i], &m_aWheelSkidmarkBloody[i]);
+							m_aWheelSkidmarkType[i], &m_aWheelSkidmarkBloody[i], driftSkidWidth);
 					break;
 
 				default:
@@ -1905,7 +1911,7 @@ CAutomobile::PreRender(void)
 					if((m_aWheelSkidmarkBloody[i] || m_aWheelSkidmarkUnk[i]) && m_aWheelTimer[i] > 0.0f)
 						CSkidmarks::RegisterOne((uintptr)this + i, m_aWheelColPoints[i].point,
 							GetForward().x, GetForward().y,
-							m_aWheelSkidmarkType[i], &m_aWheelSkidmarkBloody[i]);
+							m_aWheelSkidmarkType[i], &m_aWheelSkidmarkBloody[i], driftSkidWidth);
 				}
 
 				// Sparks for friction of burst wheels
@@ -1937,6 +1943,27 @@ CAutomobile::PreRender(void)
 					}
 				}
 			}
+
+			// VICE-32: a drift throws extra tyre smoke over every wheel that
+			// is on the road. The count is time based (SmokeCount), so the
+			// amount of smoke does not follow the frame rate.
+			if(driftSlip > 0.0f){
+				for(i = 0; i < 4; i++){
+					if(m_aSuspensionSpringRatioPrev[i] >= 1.0f)
+						continue;
+					if(m_aWheelColPoints[i].surfaceB == SURFACE_WATER)
+						continue;
+
+					n = CDriftFeedback::SmokeCount(driftSlip);
+					for(j = 0; j < n; j++){
+						CVector smokePos = m_aWheelColPoints[i].point + CVector(0.0f, 0.0f, 0.25f);
+						smokePos += GetRight()*CGeneral::GetRandomNumberInRange(-0.2f, 0.2f);
+						smokePos += GetForward()*CGeneral::GetRandomNumberInRange(-0.25f, 0.1f);
+						CParticle::AddParticle(PARTICLE_RUBBER_SMOKE, smokePos,
+							GetForward()*0.03f + CVector(0.0f, 0.0f, 0.05f));
+					}
+				}
+			}
 		}
 	}
 
@@ -1957,7 +1984,7 @@ CAutomobile::PreRender(void)
 				CSkidmarks::RegisterOne((uintptr)this + 5,
 					m_aWheelColPoints[CARWHEEL_REAR_LEFT].point + offset,
 					GetForward().x, GetForward().y,
-					m_aWheelSkidmarkType[CARWHEEL_REAR_LEFT], &m_aWheelSkidmarkBloody[CARWHEEL_REAR_LEFT]);
+					m_aWheelSkidmarkType[CARWHEEL_REAR_LEFT], &m_aWheelSkidmarkBloody[CARWHEEL_REAR_LEFT], driftSkidWidth);
 			break;
 		default: break;
 		}
@@ -1975,7 +2002,7 @@ CAutomobile::PreRender(void)
 				CSkidmarks::RegisterOne((uintptr)this + 6,
 					m_aWheelColPoints[CARWHEEL_REAR_RIGHT].point + offset,
 					GetForward().x, GetForward().y,
-					m_aWheelSkidmarkType[CARWHEEL_REAR_RIGHT], &m_aWheelSkidmarkBloody[CARWHEEL_REAR_RIGHT]);
+					m_aWheelSkidmarkType[CARWHEEL_REAR_RIGHT], &m_aWheelSkidmarkBloody[CARWHEEL_REAR_RIGHT], driftSkidWidth);
 			break;
 		default: break;
 		}
