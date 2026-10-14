@@ -57,6 +57,12 @@ that is still running takes a new one on top, up to a cap (a boost chain).
 The module `src/vehicles/DriftControl.*`. It adds drift handling to the player's
 car. Every other vehicle keeps the original handling path.
 
+## Feedback layer
+
+The module `src/vehicles/DriftFeedback.*`. It turns the drift layer's state into
+what the player sees: the car lean, the camera response, and the skid marks and
+smoke. It changes nothing in the physics.
+
 ## Boost chain
 
 The stack of drift boosts. A clean drift that ends while a boost is still

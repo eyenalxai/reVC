@@ -179,10 +179,10 @@ enum
 struct tWheelGripRequest
 {
 	float fAdhesionScale;	// scales the wheel's adhesion, 1.0 = untouched
-	bool bKeepForwardForce;	// keep the forward force when the tyre budget overflows
-	bool bSkipTractionLoss;	// do not take the extra grip loss of a wheel that skids
+	bool bSlide;		// a controlled slide: keep the forward force when the
+				// tyre budget overflows and skip the extra skid grip loss
 
-	tWheelGripRequest(void) : fAdhesionScale(1.0f), bKeepForwardForce(false), bSkipTractionLoss(false) {}
+	tWheelGripRequest(void) : fAdhesionScale(1.0f), bSlide(false) {}
 };
 
 class CVehicle : public CPhysical

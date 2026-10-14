@@ -1097,8 +1097,7 @@ CAutomobile::ProcessControl(void)
 			// The drift layer asks for its own rear grip (see DriftControl.h).
 			tWheelGripRequest grip;
 			grip.fAdhesionScale = m_DriftControl.GetRearGripScale();
-			grip.bKeepForwardForce = m_DriftControl.IsDrifting();
-			grip.bSkipTractionLoss = grip.bKeepForwardForce;
+			grip.bSlide = m_DriftControl.IsDrifting();
 
 			int32 rearWheels[2] = { CARWHEEL_REAR_LEFT, CARWHEEL_REAR_RIGHT };
 
@@ -1915,6 +1914,10 @@ CAutomobile::PreRender(void)
 					if(m_aSuspensionSpringRatioPrev[i] >= 1.0f)
 						continue;
 					if(m_aWheelColPoints[i].surfaceB == SURFACE_WATER)
+						continue;
+					// Only a wheel that is really sliding throws the extra
+					// smoke.
+					if(m_aWheelState[i] == WHEEL_STATE_NORMAL)
 						continue;
 
 					n = CDriftFeedback::SmokeCount(driftSlip);
@@ -3022,8 +3025,8 @@ CAutomobile::Render(void)
 	}
 
 	// The drift lean turns the rendered model only; the physics matrix comes
-	// back right after the draw call.
-	bool bDriftLean = CDriftFeedback::BeginLean(this);
+	// back right after the draw call. It belongs to the player's car alone.
+	bool bDriftLean = GetStatus() == STATUS_PLAYER && CDriftFeedback::BeginLean(this);
 
 	if(CVehicle::bWheelsOnlyCheat){
 		RpAtomicRender((RpAtomic*)GetFirstObject(m_aCarNodes[CAR_WHEEL_RB]));

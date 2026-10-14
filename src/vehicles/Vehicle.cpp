@@ -798,7 +798,7 @@ CVehicle::ProcessWheel(CVector &wheelFwd, CVector &wheelRight, CVector &wheelCon
 
 	adhesion *= grip.fAdhesionScale;
 	adhesion *= CTimer::GetTimeStep();
-	if(bAlreadySkidding && !grip.bSkipTractionLoss)
+	if(bAlreadySkidding && !grip.bSlide)
 		adhesion *= pHandling->fTractionLoss;
 
 	// moving sideways
@@ -878,13 +878,13 @@ CVehicle::ProcessWheel(CVector &wheelFwd, CVector &wheelRight, CVector &wheelCon
 		}
 
 		float l = Sqrt(speedSq);
-		if(grip.bKeepForwardForce){
+		if(grip.bSlide){
 			// A drifting wheel slides sideways: the sideways demand is scaled
 			// down to the tyre budget, while the forward force keeps its value,
 			// so the slide does not eat forward speed.
 			right *= adhesion / l;
 		}else{
-			float tractionLoss = bAlreadySkidding || grip.bSkipTractionLoss ? 1.0f : pHandling->fTractionLoss;
+			float tractionLoss = bAlreadySkidding || grip.bSlide ? 1.0f : pHandling->fTractionLoss;
 			right *= adhesion * tractionLoss / l;
 			fwd *= adhesion * tractionLoss / l;
 		}

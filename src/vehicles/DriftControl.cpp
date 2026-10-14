@@ -144,11 +144,13 @@ CDriftControl::UpdateTargetAngle(CAutomobile *car, float dt)
 	float target = m_fTargetSlip + car->m_fSteerInput*DEGTORAD(DRIFT_ANGLE_RATE)*dt;
 	float angle = target*m_nEntryDir;
 
-	// A hard counter flick crosses zero and ends the drift.
-	if(angle < DEGTORAD(DRIFT_ANGLE_MIN))
+	// A hard counter flick winds the target down through zero. It must be
+	// held to break the drift, so the target keeps its wind-down room and the
+	// exit is time based, not a single gated frame.
+	if(angle <= DEGTORAD(DRIFT_ANGLE_MIN))
 		return false;
 
-	m_fTargetSlip = m_nEntryDir*Clamp(angle, 0.0f, DEGTORAD(DRIFT_ANGLE_MAX));
+	m_fTargetSlip = m_nEntryDir*Clamp(angle, DEGTORAD(DRIFT_ANGLE_MIN), DEGTORAD(DRIFT_ANGLE_MAX));
 	return true;
 }
 
@@ -340,7 +342,11 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 	// Exit conditions for a running drift. The handbrake release starts the
 	// recovery; a drift that got too slow blends back to normal grip.
 	if(m_Phase == DRIFT_PHASE_ENGAGE || m_Phase == DRIFT_PHASE_DRIFT){
-		if(!handbrake || fwdSpeed < DRIFT_MIN_SPEED*fMaxVelocity){
+		// A handbrake turn keeps working below the drift floor; only the
+		// handbrake release or a dead stop ends it.
+		bool deadStop = m_bHandbrakeTurn && fwdSpeed < 0.01f;
+		bool tooSlow = !m_bHandbrakeTurn && fwdSpeed < DRIFT_MIN_SPEED*fMaxVelocity;
+		if(!handbrake || tooSlow || deadStop){
 			// A charged drift gives its boost when the handbrake is released.
 			if(!handbrake)
 				EndDrift();

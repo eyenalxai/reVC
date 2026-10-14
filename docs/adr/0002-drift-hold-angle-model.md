@@ -33,13 +33,20 @@ an angle but is not arcade enough, and the map's narrow roads and straight
 
 ## Consequences
 
-- `CVehicle::ProcessWheel` takes a `tWheelGripRequest` (adhesion scale,
-  keep-forward-force, skip-traction-loss) instead of a `driftSlide` boolean.
-  The four near-duplicate rear-wheel call sites are one loop.
+- `CVehicle::ProcessWheel` takes a `tWheelGripRequest` (adhesion scale and a
+  slide flag) instead of a `driftSlide` boolean. The four near-duplicate
+  rear-wheel call sites are one loop.
 - `bAlreadySkidding` is per-wheel state read from the wheel, not a static that
   leaks between calls and vehicles.
 - The slip-angle sign stays the code's: see `GLOSSARY.md`.
 - The drift still never costs speed: a drifting wheel keeps its forward force
   and the slide gets part of the lost speed back.
-- Bikes, AI cars, missions and the default handling path are untouched, and
-  the feature stays off by default.
+- Bikes, AI cars, missions and the default handling path are untouched, with
+  one exception that is a fix, not a drift feature: the skid state is per wheel
+  now, so a car that is already sliding no longer inherits a stale flag from
+  another vehicle (the same result as the tree's FIX_SIGNIFICANT_BUGS path).
+  Watch AI slides in the rain.
+- This refines ADR 0001: the drift layer is two modules now (`DriftControl`
+  for the model, `DriftFeedback` for the presentation), and the rear grip is a
+  slip-shaped curve instead of a constant cut.
+- The feature stays off by default.
