@@ -116,17 +116,57 @@ uint32 aCarsToKeepTime[MAX_CARS_TO_KEEP];
 // Remove this whole block and every line marked with "TRAFFIC DIAG" before merge.
 extern int32 desiredNumVehiclesLoaded; // Defined in Streaming.cpp; no header declares it.
 
-// TRAFFIC DIAG: temporary. Static counters filled by ChooseModel/ChooseCarModel,
-// logged and reset once per second by Update().
+// TRAFFIC DIAG: temporary. Static counters filled by ChooseModel/ChooseCarModel
+// and GenerateOneRandomCar, logged and reset once per second by Update().
 class CTrafficDiag
 {
 public:
+	static const int MAX_ATTEMPTS = 3;
+	/* Snapshot of one GenerateOneRandomCar call that reached the model
+	 * selection. fPlacedDistance is -1 when the car was never placed. */
+	struct SAttempt {
+		float fPreferredDistance;
+		float fPlacedDistance;
+		bool bOnScreen;
+		bool bBoat;
+	};
 	static uint32 ms_nLastLogTime;
 	static int32 ms_nChooseModelCalls;
 	static int32 ms_nChooseModelNotLoaded;
 	static int32 ms_nChooseModelGaveUp;
 	static int32 ms_nChooseCarModelCalls;
 	static int32 ms_nChooseCarModelNoRating;
+	/* Exit paths of GenerateOneRandomCar, in code order. */
+	static int32 ms_nGateReached;
+	static int32 ms_nMaxCarsReached;
+	static int32 ms_nChooseModelFailed;
+	static int32 ms_nAttempts;
+	static int32 ms_nSpawnRateFailed;
+	static int32 ms_nBoatModelNotLoaded;
+	static int32 ms_nNoBoatModel;
+	static int32 ms_nTallMastFailed;
+	static int32 ms_nPlacementFailed;
+	static int32 ms_nSpawnPosBlocked;
+	static int32 ms_nPathUnreachable;
+	static int32 ms_nWrongWayLane;
+	static int32 ms_nDeadEndNode;
+	static int32 ms_nWaterLevelFailed;
+	static int32 ms_nGroundFailed;
+	static int32 ms_nDeletedOffscreenTooFar;
+	static int32 ms_nDeletedOnscreenOutOfBand;
+	static int32 ms_nDeletedCameraTooClose;
+	static int32 ms_nDeletedMarquis;
+	static int32 ms_nDeletedCollision;
+	static int32 ms_nDeletedSpeedDot;
+	static int32 ms_nAdded;
+	/* The last three attempts, oldest first. ms_Current fills up during the
+	 * current attempt and is copied here by FinishAttempt(). */
+	static SAttempt ms_aAttempts[MAX_ATTEMPTS];
+	static SAttempt ms_Current;
+	static bool ms_bAttemptActive;
+	static void BeginAttempt(int32 carModel);
+	static void FinishAttempt(void);
+	static void Exit(int32* pCounter);
 	static void Update(void);
 };
 
@@ -137,6 +177,66 @@ int32 CTrafficDiag::ms_nChooseModelNotLoaded;
 int32 CTrafficDiag::ms_nChooseModelGaveUp;
 int32 CTrafficDiag::ms_nChooseCarModelCalls;
 int32 CTrafficDiag::ms_nChooseCarModelNoRating;
+int32 CTrafficDiag::ms_nGateReached;
+int32 CTrafficDiag::ms_nMaxCarsReached;
+int32 CTrafficDiag::ms_nChooseModelFailed;
+int32 CTrafficDiag::ms_nAttempts;
+int32 CTrafficDiag::ms_nSpawnRateFailed;
+int32 CTrafficDiag::ms_nBoatModelNotLoaded;
+int32 CTrafficDiag::ms_nNoBoatModel;
+int32 CTrafficDiag::ms_nTallMastFailed;
+int32 CTrafficDiag::ms_nPlacementFailed;
+int32 CTrafficDiag::ms_nSpawnPosBlocked;
+int32 CTrafficDiag::ms_nPathUnreachable;
+int32 CTrafficDiag::ms_nWrongWayLane;
+int32 CTrafficDiag::ms_nDeadEndNode;
+int32 CTrafficDiag::ms_nWaterLevelFailed;
+int32 CTrafficDiag::ms_nGroundFailed;
+int32 CTrafficDiag::ms_nDeletedOffscreenTooFar;
+int32 CTrafficDiag::ms_nDeletedOnscreenOutOfBand;
+int32 CTrafficDiag::ms_nDeletedCameraTooClose;
+int32 CTrafficDiag::ms_nDeletedMarquis;
+int32 CTrafficDiag::ms_nDeletedCollision;
+int32 CTrafficDiag::ms_nDeletedSpeedDot;
+int32 CTrafficDiag::ms_nAdded;
+CTrafficDiag::SAttempt CTrafficDiag::ms_aAttempts[CTrafficDiag::MAX_ATTEMPTS];
+CTrafficDiag::SAttempt CTrafficDiag::ms_Current;
+bool CTrafficDiag::ms_bAttemptActive;
+
+// TRAFFIC DIAG: temporary. Start the snapshot of a new attempt after the car
+// model has been chosen in GenerateOneRandomCar.
+void
+CTrafficDiag::BeginAttempt(int32 carModel)
+{
+	ms_bAttemptActive = true;
+	ms_nAttempts++;
+	ms_Current.fPreferredDistance = 0.0f;
+	ms_Current.fPlacedDistance = -1.0f;
+	ms_Current.bOnScreen = false;
+	ms_Current.bBoat = carModel != -1 && CModelInfo::IsBoatModel(carModel);
+}
+
+// TRAFFIC DIAG: temporary. Copy the finished attempt into the ring of the
+// last three attempts.
+void
+CTrafficDiag::FinishAttempt(void)
+{
+	if (!ms_bAttemptActive)
+		return;
+	ms_bAttemptActive = false;
+	ms_aAttempts[0] = ms_aAttempts[1];
+	ms_aAttempts[1] = ms_aAttempts[2];
+	ms_aAttempts[2] = ms_Current;
+}
+
+// TRAFFIC DIAG: temporary. Count one exit path of GenerateOneRandomCar and
+// finish the attempt snapshot.
+void
+CTrafficDiag::Exit(int32* pCounter)
+{
+	(*pCounter)++;
+	FinishAttempt();
+}
 
 // TRAFFIC DIAG: temporary. Writes one line per second to reVC_traffic.log
 // in the process working directory. Opens with "a" and closes every time,
@@ -167,7 +267,11 @@ CTrafficDiag::Update(void)
 		" | peds max=%d maxInt=%d total=%u"
 		" | vehLoaded=%d wantVeh=%d vehIDs=%d,%d,%d,%d,%d,%d"
 		" | startCountdown=%d genDist=%.2f fov=%.1f camFwdZ=%.3f"
-		" | cmCalls=%d cmNotLoaded=%d cmGaveUp=%d ccmCalls=%d ccmNoRating=%d\n",
+		" | cmCalls=%d cmNotLoaded=%d cmGaveUp=%d ccmCalls=%d ccmNoRating=%d"
+		" | attempts=%d gate=%d maxCars=%d modelFail=%d spawnRate=%d boatWait=%d noBoat=%d tallMast=%d"
+		" spawnBlock=%d placementFailed=%d unreachable=%d oneWay=%d deadEnd=%d waterFail=%d groundFailed=%d"
+		" offscreenFar=%d onscreenBand=%d camNear=%d marquis=%d collision=%d speedDot=%d added=%d"
+		" | last3 [pref=%.0f placed=%.0f on=%d boat=%d] [pref=%.0f placed=%.0f on=%d boat=%d] [pref=%.0f placed=%.0f on=%d boat=%d]\n",
 		now,
 		pos.x, pos.y, pos.z,
 		FindPlayerVehicle() != nil,
@@ -183,7 +287,19 @@ CTrafficDiag::Update(void)
 		CStreaming::ms_vehiclesLoaded[3], CStreaming::ms_vehiclesLoaded[4], CStreaming::ms_vehiclesLoaded[5],
 		CCarCtrl::CountDownToCarsAtStart, TheCamera.GenerationDistMultiplier, CDraw::GetFOV(), TheCamera.GetForward().z,
 		ms_nChooseModelCalls, ms_nChooseModelNotLoaded, ms_nChooseModelGaveUp,
-		ms_nChooseCarModelCalls, ms_nChooseCarModelNoRating);
+		ms_nChooseCarModelCalls, ms_nChooseCarModelNoRating,
+		ms_nAttempts, ms_nGateReached, ms_nMaxCarsReached, ms_nChooseModelFailed,
+		ms_nSpawnRateFailed, ms_nBoatModelNotLoaded, ms_nNoBoatModel, ms_nTallMastFailed,
+		ms_nSpawnPosBlocked, ms_nPlacementFailed, ms_nPathUnreachable, ms_nWrongWayLane,
+		ms_nDeadEndNode, ms_nWaterLevelFailed, ms_nGroundFailed,
+		ms_nDeletedOffscreenTooFar, ms_nDeletedOnscreenOutOfBand, ms_nDeletedCameraTooClose,
+		ms_nDeletedMarquis, ms_nDeletedCollision, ms_nDeletedSpeedDot, ms_nAdded,
+		ms_aAttempts[0].fPreferredDistance, ms_aAttempts[0].fPlacedDistance,
+		ms_aAttempts[0].bOnScreen, ms_aAttempts[0].bBoat,
+		ms_aAttempts[1].fPreferredDistance, ms_aAttempts[1].fPlacedDistance,
+		ms_aAttempts[1].bOnScreen, ms_aAttempts[1].bBoat,
+		ms_aAttempts[2].fPreferredDistance, ms_aAttempts[2].fPlacedDistance,
+		ms_aAttempts[2].bOnScreen, ms_aAttempts[2].bBoat);
 
 	fclose(f);
 
@@ -193,6 +309,28 @@ CTrafficDiag::Update(void)
 	ms_nChooseModelGaveUp = 0;
 	ms_nChooseCarModelCalls = 0;
 	ms_nChooseCarModelNoRating = 0;
+	ms_nGateReached = 0;
+	ms_nMaxCarsReached = 0;
+	ms_nChooseModelFailed = 0;
+	ms_nAttempts = 0;
+	ms_nSpawnRateFailed = 0;
+	ms_nBoatModelNotLoaded = 0;
+	ms_nNoBoatModel = 0;
+	ms_nTallMastFailed = 0;
+	ms_nPlacementFailed = 0;
+	ms_nSpawnPosBlocked = 0;
+	ms_nPathUnreachable = 0;
+	ms_nWrongWayLane = 0;
+	ms_nDeadEndNode = 0;
+	ms_nWaterLevelFailed = 0;
+	ms_nGroundFailed = 0;
+	ms_nDeletedOffscreenTooFar = 0;
+	ms_nDeletedOnscreenOutOfBand = 0;
+	ms_nDeletedCameraTooClose = 0;
+	ms_nDeletedMarquis = 0;
+	ms_nDeletedCollision = 0;
+	ms_nDeletedSpeedDot = 0;
+	ms_nAdded = 0;
 }
 
 void
@@ -229,10 +367,14 @@ CCarCtrl::GenerateOneRandomCar()
 	CZoneInfo zone;
 	CTheZones::GetZoneInfoForTimeOfDay(&vecTargetPos, &zone);
 	pPlayer->m_nTrafficMultiplier = pPlayer->m_fRoadDensity * zone.carDensity;
-	if (NumRandomCars >= pPlayer->m_nTrafficMultiplier * CarDensityMultiplier * CIniFile::CarNumberMultiplier)
+	if (NumRandomCars >= pPlayer->m_nTrafficMultiplier * CarDensityMultiplier * CIniFile::CarNumberMultiplier) {
+		CTrafficDiag::Exit(&CTrafficDiag::ms_nGateReached); // TRAFFIC DIAG: temporary.
 		return;
-	if (NumFiretrucksOnDuty + NumAmbulancesOnDuty + NumParkedCars + NumMissionCars + NumLawEnforcerCars + NumRandomCars >= MaxNumberOfCarsInUse)
+	}
+	if (NumFiretrucksOnDuty + NumAmbulancesOnDuty + NumParkedCars + NumMissionCars + NumLawEnforcerCars + NumRandomCars >= MaxNumberOfCarsInUse) {
+		CTrafficDiag::Exit(&CTrafficDiag::ms_nMaxCarsReached); // TRAFFIC DIAG: temporary.
 		return;
+	}
 	CWanted* pWanted = pPlayer->m_pPed->m_pWanted;
 	int carClass;
 	int carModel;
@@ -247,11 +389,14 @@ CCarCtrl::GenerateOneRandomCar()
 		carModel = ChoosePoliceCarModel();
 	}else{
 		carModel = ChooseModel(&zone, &carClass);
-		if (carModel == -1 || (carClass == COPS && pWanted->GetWantedLevel() >= 1))
+		if (carModel == -1 || (carClass == COPS && pWanted->GetWantedLevel() >= 1)) {
 			/* All cop spawns with wanted level are handled by condition above. */
 			/* In particular it means that cop cars never spawn if player has wanted level of 1. */
+			CTrafficDiag::Exit(&CTrafficDiag::ms_nChooseModelFailed); // TRAFFIC DIAG: temporary.
 			return;
+		}
 	}
+	CTrafficDiag::BeginAttempt(carModel); // TRAFFIC DIAG: temporary.
 	float frontX, frontY;
 	float preferredDistance, angleLimit;
 	bool invertAngleLimitTest;
@@ -378,22 +523,29 @@ CCarCtrl::GenerateOneRandomCar()
 			break;
 		}
 	}
+	CTrafficDiag::ms_Current.fPreferredDistance = preferredDistance; // TRAFFIC DIAG: temporary.
 	if (!ThePaths.GenerateCarCreationCoors(vecTargetPos.x, vecTargetPos.y, frontX, frontY,
 		preferredDistance, angleLimit, invertAngleLimitTest, &spawnPosition, &curNodeId, &nextNodeId,
-		&positionBetweenNodes, carClass == COPS && pWanted->GetWantedLevel() >= 1))
+		&positionBetweenNodes, carClass == COPS && pWanted->GetWantedLevel() >= 1)) {
+		CTrafficDiag::Exit(&CTrafficDiag::ms_nPlacementFailed); // TRAFFIC DIAG: temporary.
 		return;
+	}
 	CPathNode* pCurNode = &ThePaths.m_pathNodes[curNodeId];
 	CPathNode* pNextNode = &ThePaths.m_pathNodes[nextNodeId];
 	bool bBoatGenerated = false;
-	if ((CGeneral::GetRandomNumber() & 0xF) > Min(pCurNode->spawnRate, pNextNode->spawnRate))
+	if ((CGeneral::GetRandomNumber() & 0xF) > Min(pCurNode->spawnRate, pNextNode->spawnRate)) {
+		CTrafficDiag::Exit(&CTrafficDiag::ms_nSpawnRateFailed); // TRAFFIC DIAG: temporary.
 		return;
+	}
 	if (pCurNode->bWaterPath) {
 		bBoatGenerated = true;
+		CTrafficDiag::ms_Current.bBoat = true; // TRAFFIC DIAG: temporary.
 		if (carClass == COPS) {
 			carModel = MI_PREDATOR;
 			carClass = COPS_BOAT;
 			if (!CStreaming::HasModelLoaded(MI_PREDATOR)) {
 				CStreaming::RequestModel(MI_PREDATOR, STREAMFLAGS_DEPENDENCY);
+				CTrafficDiag::Exit(&CTrafficDiag::ms_nBoatModelNotLoaded); // TRAFFIC DIAG: temporary.
 				return;
 			}
 		}
@@ -403,22 +555,30 @@ CCarCtrl::GenerateOneRandomCar()
 			for (i = 10; i > 0 && (carModel == -1 || !CStreaming::HasModelLoaded(carModel)); i--) {
 				carModel = ChooseBoatModel(ChooseBoatRating(&zone));
 			}
-			if (i == 0)
+			if (i == 0) {
+				CTrafficDiag::Exit(&CTrafficDiag::ms_nNoBoatModel); // TRAFFIC DIAG: temporary.
 				return;
+			}
 		}
 		if (pCurNode->bOnlySmallBoats || pNextNode->bOnlySmallBoats) {
-			if (BoatWithTallMast(carModel))
+			if (BoatWithTallMast(carModel)) {
+				CTrafficDiag::Exit(&CTrafficDiag::ms_nTallMastFailed); // TRAFFIC DIAG: temporary.
 				return;
+			}
 		}
 	}
 	int16 colliding;
 	CWorld::FindObjectsKindaColliding(spawnPosition, bBoatGenerated ? 40.0f : 10.0f, true, &colliding, 2, nil, false, true, true, false, false);
-	if (colliding)
+	if (colliding) {
 		/* If something is already present in spawn position, do not create vehicle*/
+		CTrafficDiag::Exit(&CTrafficDiag::ms_nSpawnPosBlocked); // TRAFFIC DIAG: temporary.
 		return;
-	if (!bBoatGenerated && !ThePaths.TestCoorsCloseness(vecTargetPos, false, spawnPosition))
+	}
+	if (!bBoatGenerated && !ThePaths.TestCoorsCloseness(vecTargetPos, false, spawnPosition)) {
 		/* Testing if spawn position can reach target position via valid path. */
+		CTrafficDiag::Exit(&CTrafficDiag::ms_nPathUnreachable); // TRAFFIC DIAG: temporary.
 		return;
+	}
 	int16 idInNode = 0;
 
 	while (idInNode < pCurNode->numLinks &&
@@ -428,9 +588,11 @@ CCarCtrl::GenerateOneRandomCar()
 	CCarPathLink* pPathLink = &ThePaths.m_carPathLinks[connectionId];
 	int16 lanesOnCurrentRoad = pPathLink->pathNodeIndex == nextNodeId ? pPathLink->numLeftLanes : pPathLink->numRightLanes;
 	CVehicleModelInfo* pModelInfo = (CVehicleModelInfo*)CModelInfo::GetModelInfo(carModel);
-	if (lanesOnCurrentRoad == 0)
+	if (lanesOnCurrentRoad == 0) {
 		/* Not spawning vehicle if road is one way and intended direction is opposide to that way. */
+		CTrafficDiag::Exit(&CTrafficDiag::ms_nWrongWayLane); // TRAFFIC DIAG: temporary.
 		return;
+	}
 	CVehicle* pVehicle;
 	if (CModelInfo::IsBoatModel(carModel))
 		pVehicle = new CBoat(carModel, RANDOM_VEHICLE);
@@ -501,6 +663,7 @@ CCarCtrl::GenerateOneRandomCar()
 	if (pCurNode->numLinks == 1){
 		/* Do not create vehicle if there is nowhere to go. */
 		delete pVehicle;
+		CTrafficDiag::Exit(&CTrafficDiag::ms_nDeadEndNode); // TRAFFIC DIAG: temporary.
 		return;
 	}
 	int16 nextConnection = pVehicle->AutoPilot.m_nNextPathNodeInfo;
@@ -637,6 +800,7 @@ CCarCtrl::GenerateOneRandomCar()
 	if (bBoatGenerated) {
 		if (!CWaterLevel::GetWaterLevel(finalPosition, &groundZ, true)) {
 			delete pVehicle;
+			CTrafficDiag::Exit(&CTrafficDiag::ms_nWaterLevelFailed); // TRAFFIC DIAG: temporary.
 			return;
 		}
 	}
@@ -651,6 +815,7 @@ CCarCtrl::GenerateOneRandomCar()
 	if (groundZ == INFINITE_Z || ABS(groundZ - finalPosition.z) > 7.0f) {
 		/* Failed to find ground or too far from expected position. */
 		delete pVehicle;
+		CTrafficDiag::Exit(&CTrafficDiag::ms_nGroundFailed); // TRAFFIC DIAG: temporary.
 		return;
 	}
 	if (CModelInfo::IsBoatModel(carModel)) {
@@ -677,24 +842,32 @@ CCarCtrl::GenerateOneRandomCar()
 		break;
 	}
 	CVisibilityPlugins::SetClumpAlpha(pVehicle->GetClump(), 0);
+	// TRAFFIC DIAG: temporary. Record where the car was placed and whether the
+	// game considers it on screen for the last-three-attempts log line.
+	CTrafficDiag::ms_Current.fPlacedDistance = (vecTargetPos - pVehicle->GetPosition()).Magnitude2D();
+	CTrafficDiag::ms_Current.bOnScreen = pVehicle->GetIsOnScreen();
 	if (!pVehicle->GetIsOnScreen()){
 		if ((vecTargetPos - pVehicle->GetPosition()).Magnitude2D() > OFFSCREEN_DESPAWN_RANGE * (pVehicle->bExtendedRange ? EXTENDED_RANGE_DESPAWN_MULTIPLIER : 1.0f)) {
 			/* Too far away cars that are not visible aren't needed. */
 			delete pVehicle;
+			CTrafficDiag::Exit(&CTrafficDiag::ms_nDeletedOffscreenTooFar); // TRAFFIC DIAG: temporary.
 			return;
 		}
 	}else{
 		if ((vecTargetPos - pVehicle->GetPosition()).Magnitude2D() > TheCamera.GenerationDistMultiplier * (pVehicle->bExtendedRange ? EXTENDED_RANGE_DESPAWN_MULTIPLIER : 1.0f) * ONSCREEN_DESPAWN_RANGE ||
 			(vecTargetPos - pVehicle->GetPosition()).Magnitude2D() < TheCamera.GenerationDistMultiplier * MINIMAL_DISTANCE_TO_SPAWN_ONSCREEN) {
 			delete pVehicle;
+			CTrafficDiag::Exit(&CTrafficDiag::ms_nDeletedOnscreenOutOfBand); // TRAFFIC DIAG: temporary.
 			return;
 		}
 		if ((TheCamera.GetPosition() - pVehicle->GetPosition()).Magnitude2D() < 82.5f * TheCamera.GenerationDistMultiplier || bTopDownCamera) {
 			delete pVehicle;
+			CTrafficDiag::Exit(&CTrafficDiag::ms_nDeletedCameraTooClose); // TRAFFIC DIAG: temporary.
 			return;
 		}
 		if (pVehicle->GetModelIndex() == MI_MARQUIS) { // so marquis can only spawn if player doesn't see it?
 			delete pVehicle;
+			CTrafficDiag::Exit(&CTrafficDiag::ms_nDeletedMarquis); // TRAFFIC DIAG: temporary.
 			return;
 		}
 	}
@@ -704,21 +877,25 @@ CCarCtrl::GenerateOneRandomCar()
 		CWorld::FindObjectsKindaColliding(pVehicle->GetPosition(), radiusToTest + 20.0f, true, &colliding, 2, nil, false, true, false, false, false);
 		if (colliding){
 			delete pVehicle;
+			CTrafficDiag::Exit(&CTrafficDiag::ms_nDeletedCollision); // TRAFFIC DIAG: temporary.
 			return;
 		}
 	}
 	CWorld::FindObjectsKindaColliding(pVehicle->GetPosition(), radiusToTest, true, &colliding, 2, nil, false, true, false, false, false);
 	if (colliding){
 		delete pVehicle;
+		CTrafficDiag::Exit(&CTrafficDiag::ms_nDeletedCollision); // TRAFFIC DIAG: temporary.
 		return;
 	}
 	if (speedDifferenceWithTarget.x * distanceToTarget.x +
 		speedDifferenceWithTarget.y * distanceToTarget.y >= 0.0f){
 		delete pVehicle;
+		CTrafficDiag::Exit(&CTrafficDiag::ms_nDeletedSpeedDot); // TRAFFIC DIAG: temporary.
 		return;
 	}
 	pVehicleModel->AvoidSameVehicleColour(&pVehicle->m_currentColour1, &pVehicle->m_currentColour2);
 	CWorld::Add(pVehicle);
+	CTrafficDiag::Exit(&CTrafficDiag::ms_nAdded); // TRAFFIC DIAG: temporary.
 	if (carClass == COPS || carClass == COPS_BOAT)
 		CCarAI::AddPoliceCarOccupants(pVehicle);
 	else {
