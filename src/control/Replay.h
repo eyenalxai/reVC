@@ -151,11 +151,11 @@ class CReplay
 	struct tPedHeaderPacket
 	{
 		uint8 type;
-		uint8 index;
+		uint16 index;
 		uint16 mi;
 		uint8 pedtype;
 	private:
-		uint8 __align[3];
+		uint8 __align[1];
 	};
 	VALIDATE_SIZE(tPedHeaderPacket, 8);
 
@@ -181,21 +181,21 @@ class CReplay
 	struct tPedUpdatePacket
 	{
 		uint8 type;
-		uint8 index;
+		uint16 index;
 		int8 heading;
-		int8 vehicle_index;
+		int16 vehicle_index;
 		CStoredAnimationState anim_state;
 		CCompressedMatrixNotAligned matrix;
 		uint16 weapon_model;
 		int8 assoc_group_id;
 		bool is_visible;
 	};
-	VALIDATE_SIZE(tPedUpdatePacket, 40);
+	VALIDATE_SIZE(tPedUpdatePacket, 48);
 
 	struct tVehicleUpdatePacket
 	{
 		uint8 type;
-		uint8 index;
+		uint16 index;
 		uint8 health;
 		uint8 acceleration;
 		CCompressedMatrixNotAligned matrix;
@@ -219,12 +219,12 @@ class CReplay
 		int8 vehicle_type;
 
 	};
-	VALIDATE_SIZE(tVehicleUpdatePacket, 52);
+	VALIDATE_SIZE(tVehicleUpdatePacket, 56);
 
 	struct tBikeUpdatePacket
 	{
 		uint8 type;
-		uint8 index;
+		uint16 index;
 		uint8 health;
 		uint8 acceleration;
 		CCompressedMatrixNotAligned matrix;
@@ -242,7 +242,7 @@ class CReplay
 		int8 wheel_angle;
 
 	};
-	VALIDATE_SIZE(tBikeUpdatePacket, 44);
+	VALIDATE_SIZE(tBikeUpdatePacket, 48);
 
 	struct tParticlePacket
 	{
