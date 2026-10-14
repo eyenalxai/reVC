@@ -26,7 +26,11 @@ public:
 	CDriftControl(void);
 
 	void Update(CAutomobile *car, float timeStep);
-	bool IsDrifting(void) { return m_Phase != DRIFT_PHASE_INACTIVE; }
+	void Reset(void);
+	// True while the drift owns the rear wheels (entry and full drift).
+	bool IsDrifting(void) { return m_Phase == DRIFT_PHASE_ENGAGE || m_Phase == DRIFT_PHASE_DRIFT; }
+	// True from entry until the exit ramp finishes.
+	bool IsActive(void) { return m_Phase != DRIFT_PHASE_INACTIVE; }
 	float GetRearGripScale(void);
 	float GetSteerAngleMult(void);
 
@@ -36,6 +40,7 @@ private:
 	void ApplyBoost(CAutomobile *car);
 	void StartRecover(void);
 	float GetMinGrip(void);
+	float GetMaxSpeed(CAutomobile *car);
 };
 
 #endif // __GTA_DRIFTCONTROL_H__

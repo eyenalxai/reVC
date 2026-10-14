@@ -7,7 +7,7 @@
 
 // All drift tuning lives in this block. Times are real seconds, speeds are a
 // fraction of the handling top speed (fMaxVelocity).
-#define DRIFT_ENTRY_SPEED	0.30f	// drift gate, below this the handbrake keeps braking
+#define DRIFT_ENTRY_SPEED	0.30f	// entry speed, below this the handbrake keeps braking
 #define DRIFT_MIN_SPEED		0.25f	// below this the car blends back to normal grip
 #define DRIFT_ENTRY_STEER	0.2f	// steering input needed to start a drift
 #define DRIFT_GRIP_CUTOFF	0.30f	// rear grip at full effect, 1.0 = original handling
@@ -28,8 +28,15 @@
 #define DRIFT_BOOST_TIER1	0.05f	// forward push of tier 1, fraction of top speed
 #define DRIFT_BOOST_TIER2	0.09f	// forward push of tier 2, fraction of top speed
 #define DRIFT_BOOST_SPEED_CAP	1.0f	// never boost past this fraction of top speed
+#define DRIFT_TICK_RATE		50.0f	// game ticks per second; turn speed is per tick
 
 CDriftControl::CDriftControl(void)
+{
+	Reset();
+}
+
+void
+CDriftControl::Reset(void)
 {
 	m_Phase = DRIFT_PHASE_INACTIVE;
 	m_fGripCut = 0.0f;
@@ -48,6 +55,12 @@ CDriftControl::GetMinGrip(void)
 }
 
 float
+CDriftControl::GetMaxSpeed(CAutomobile *car)
+{
+	return car->pHandling->Transmission.fMaxVelocity;
+}
+
+float
 CDriftControl::GetRearGripScale(void)
 {
 	if(m_Phase == DRIFT_PHASE_INACTIVE)
@@ -58,9 +71,12 @@ CDriftControl::GetRearGripScale(void)
 float
 CDriftControl::GetSteerAngleMult(void)
 {
+	if(m_Phase == DRIFT_PHASE_INACTIVE)
+		return 1.0f;
+
 	// While the drift is on, the front wheels anchor the slide. A little more
 	// lock than the original handling gives the counter-steer a readable feel.
-	// It follows the grip cut, so it fades out with the hook-up.
+	// It follows the grip cut, so it fades out during the exit.
 	return 1.0f + (DRIFT_STEERLOCK_MULT - 1.0f)*m_fGripCut;
 }
 
@@ -86,9 +102,9 @@ CDriftControl::UpdateYawControl(CAutomobile *car, float dt)
 
 	// Rate-limit the yaw acceleration and write it to the car's turn speed, as
 	// the physical turn force would. Collisions still override this later.
-	float yawRate = DotProduct(car->m_vecTurnSpeed, car->GetUp()) * 50.0f;
+	float yawRate = DotProduct(car->m_vecTurnSpeed, car->GetUp()) * DRIFT_TICK_RATE;
 	float newYawRate = yawRate + Clamp(yawTargetRate - yawRate, -DRIFT_YAW_ACCEL*dt, DRIFT_YAW_ACCEL*dt);
-	car->m_vecTurnSpeed += car->GetUp() * ((newYawRate - yawRate) / 50.0f);
+	car->m_vecTurnSpeed += car->GetUp() * ((newYawRate - yawRate) / DRIFT_TICK_RATE);
 }
 
 void
@@ -110,7 +126,7 @@ CDriftControl::ApplyBoost(CAutomobile *car)
 	if(m_fDriftTime < DRIFT_TIER1_TIME)
 		return;
 
-	float fMaxVelocity = car->pHandling->Transmission.fMaxVelocity;
+	float fMaxVelocity = GetMaxSpeed(car);
 	float boost = (m_fDriftTime >= DRIFT_TIER2_TIME ? DRIFT_BOOST_TIER2 : DRIFT_BOOST_TIER1)*fMaxVelocity;
 
 	// Never push the car past the boost speed cap.
@@ -132,19 +148,17 @@ void
 CDriftControl::Update(CAutomobile *car, float timeStep)
 {
 	if(!gDriftEnabled){
-		m_Phase = DRIFT_PHASE_INACTIVE;
-		m_fGripCut = 0.0f;
-		m_fDriftTime = 0.0f;
+		Reset();
 		return;
 	}
 
-	float dt = timeStep / 50.0f;	// the time step is 1.0 at 50 fps
+	float dt = timeStep / DRIFT_TICK_RATE;	// the time step is 1.0 at 50 fps
 
 	float fwdSpeed = DotProduct(car->m_vecMoveSpeed, car->GetForward());
 	float rightSpeed = DotProduct(car->m_vecMoveSpeed, car->GetRight());
 	m_fSlipAngle = Atan2(rightSpeed, fwdSpeed);
 
-	float fMaxVelocity = car->pHandling->Transmission.fMaxVelocity;
+	float fMaxVelocity = GetMaxSpeed(car);
 	bool onGround = car->m_nWheelsOnGround >= 2;
 	bool handbrake = !!car->bIsHandbrakeOn;
 
@@ -192,7 +206,7 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 	}
 
 	// Exit conditions for a running drift. The handbrake release starts the
-	// hook-up; a drift that got too slow blends back to normal grip.
+	// recovery; a drift that got too slow blends back to normal grip.
 	if(m_Phase == DRIFT_PHASE_ENGAGE || m_Phase == DRIFT_PHASE_DRIFT){
 		if(!handbrake || fwdSpeed < DRIFT_MIN_SPEED*fMaxVelocity){
 			// A charged drift gives its boost when the handbrake is released.

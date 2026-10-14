@@ -901,9 +901,13 @@ CAutomobile::ProcessControl(void)
 			}
 		}
 
-		// Drift handling is player-only (see DriftControl.h)
-		if(FindPlayerVehicle() == this)
+		// Drift handling is player-only (see DriftControl.h). A car that
+		// leaves player control (exit, switch, mission cut) drops its drift
+		// state at once, so no grip cut survives.
+		if(GetStatus() == STATUS_PLAYER)
 			m_DriftControl.Update(this, CTimer::GetTimeStep());
+		else if(m_DriftControl.IsActive())
+			m_DriftControl.Reset();
 
 		float traction;
 		if(GetStatus() == STATUS_PHYSICS)

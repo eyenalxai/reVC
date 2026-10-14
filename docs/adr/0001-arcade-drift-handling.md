@@ -32,7 +32,8 @@ that step. A change there touches the whole game.
 - **Tune `handling.cfg` only.** Too coarse: no control over the angle, no boost,
   and every owner of the game must edit their own data file.
 - **Rework the shared grip model.** Changes AI, traffic and normal driving at
-  the same time. It also conflicts with the rule "never slower than default".
+  the same time. It also conflicts with the owner rule that the new handling
+  must never be slower than the default handling (spec VICE-14).
 - **Port a kart model as-is.** The ground truth differs from GTA physics; a
   port would fight the existing collision, surface and damage systems.
 
