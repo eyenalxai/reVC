@@ -1808,7 +1808,8 @@ int8 CRunningScript::ProcessCommands900To999(int32 command)
 	case COMMAND_CREATE_RANDOM_CAR_FOR_CAR_PARK:
 	{
 		CollectParameters(&m_nIp, 4);
-		if (CCarCtrl::NumRandomCars >= 30)
+		// Keep in sync with the NumRandomCars cap in CCarCtrl::GenerateRandomCars().
+		if (CCarCtrl::NumRandomCars >= 80)
 			return 0;
 		int attempts;
 		int model = -1;
@@ -1817,6 +1818,8 @@ int8 CRunningScript::ProcessCommands900To999(int32 command)
 			if (model != -1)
 				break;
 			model = CStreaming::ms_vehiclesLoaded[index];
+			if (++index >= MAXVEHICLESLOADED)
+				index = 0;
 			if (model == -1)
 				continue;
 			if (CModelInfo::IsCarModel(model) || CModelInfo::IsBikeModel(model)) {
@@ -1939,8 +1942,6 @@ int8 CRunningScript::ProcessCommands900To999(int32 command)
 			}
 			else
 				model = -1;
-			if (++index >= MAXVEHICLESLOADED)
-				index = 0;
 		}
 		if (model == -1)
 			return 0;
