@@ -651,6 +651,9 @@ public:
 	bool UsingThirdPersonAds(void);
 	// The first person mode with the player's own vehicle as the target
 	bool InFirstPersonCarView(void);
+	// The car ADS: the aim button held while the camera serves the player's
+	// vehicle, the third person mouse camera or the first person car view
+	bool UsingCarAds(void);
 #endif
 
 	// Physical camera

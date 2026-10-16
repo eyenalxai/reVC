@@ -40,12 +40,15 @@ public:
 	void Shutdown();
 	
 	bool Fire          (CEntity *shooter, CVector *fireSource);
-	bool FireFromCar   (CVehicle *shooter, bool left, bool right);
+	// Fires the drive-by; aiming fires the free aim along the camera instead,
+	// and left/right only apply to the drive-by
+	bool FireFromCar   (CVehicle *shooter, bool left, bool right, bool aiming);
 	// The drive-by fire of the vehicle callers: fires and then sets the
 	// 70 ms drive-by cadence only when a shot left the barrel. A failed
 	// attempt, an empty clip or a started reload leaves the timer alone,
-	// so the call can never shorten a running reload (VICE-90).
-	void FireFromCarWithCadence(CVehicle *shooter, bool left, bool right);
+	// so the call can never shorten a running reload (VICE-90). The aiming
+	// flag fires the free aim along the camera instead (VICE-110).
+	void FireFromCarWithCadence(CVehicle *shooter, bool left, bool right, bool aiming);
 	bool FireMelee     (CEntity *shooter, CVector &fireSource);
 	bool FireInstantHit(CEntity *shooter, CVector *fireSource);
 	
@@ -64,6 +67,13 @@ public:
 	bool TakePhotograph       (CEntity *shooter);
 	bool FireM16_1stPerson    (CEntity *shooter);
 	bool FireInstantHitFromCar(CVehicle *shooter, bool left, bool right);
+#ifdef FIRST_PERSON
+	// The free aim from a car: the target comes from the camera and there is no
+	// auto aim
+	bool FireInstantHitFromCarFreeAim(CVehicle *shooter);
+#endif
+	// The shot from a car after the source and the target are known
+	bool FireFromCarAt        (CVehicle *shooter, CVector &source, CVector &target);
 	
 	static void DoDoomAiming       (CEntity *shooter, CVector *source,   CVector *target);
 	static void DoTankDoomAiming   (CEntity *shooter, CEntity *driver,   CVector *source, CVector *target);

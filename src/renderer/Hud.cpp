@@ -438,6 +438,13 @@ DrawCrosshairAndSights(CPlayerPed *playerPed, eWeaponType WeaponType, int32 Mode
 		}
 	}
 
+#ifdef FIRST_PERSON
+	// The car ADS shows the crosshair in the first person car view too; the
+	// third person view draws it at the camera crosshair position above
+	if (TheCamera.UsingCarAds() && Mode == CCam::MODE_1STPERSON)
+		DrawCrossHairPC = 1;
+#endif
+
 	if (DrawCrossHair || DrawCrossHairPC) {
 		RwRenderStateSet(rwRENDERSTATETEXTUREFILTER, (void *)rwFILTERLINEAR);
 
