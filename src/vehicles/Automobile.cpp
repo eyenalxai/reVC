@@ -219,8 +219,6 @@ CAutomobile::CAutomobile(int32 id, uint8 CreatedBy)
 	m_fCarGunUD = 0.05f;
 	m_fPropellerRotation = 0.0f;
 	m_fHeliOrientation = -1.0f;
-	m_weaponDoorTimerLeft = 0.0f;
-	m_weaponDoorTimerRight = m_weaponDoorTimerLeft;
 
 	if(GetModelIndex() == MI_DODO){
 		RpAtomicSetFlags((RpAtomic*)GetFirstObject(m_aCarNodes[CAR_WHEEL_LF]), 0);
@@ -2174,9 +2172,7 @@ CAutomobile::PreRender(void)
 					if(GetStatus() == STATUS_PLAYER && (CTimer::GetFrameCounter()&3) == 0 &&
 					   CWeather::Rain == 0.0f && i == 0){
 						CVector camDist = GetPosition() - TheCamera.GetPosition();
-						if(DotProduct(GetForward(), camDist) > 0.0f ||
-						   TheCamera.GetLookDirection() == LOOKING_LEFT ||
-						   TheCamera.GetLookDirection() == LOOKING_RIGHT){
+						if(DotProduct(GetForward(), camDist) > 0.0f){
 							CParticle::AddParticle(PARTICLE_HEATHAZE, pos1, CVector(0.0f, 0.0f, 0.0f));
 							if(pHandling->Flags & HANDLING_DBL_EXHAUST)
 								CParticle::AddParticle(PARTICLE_HEATHAZE, pos2, CVector(0.0f, 0.0f, 0.0f));
@@ -3769,21 +3765,6 @@ CAutomobile::DoDriveByShootings(void)
 	if (pDriver->IsPlayer())
 		((CPlayerPed*)pDriver)->ProcessActiveReloadInput(CPad::GetPad(0));
 
-	bool lookingLeft = false;
-	bool lookingRight = false;
-	if(TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_TOPDOWN ||
-	   TheCamera.m_bObbeCinematicCarCamOn){
-		if(CPad::GetPad(0)->GetLookLeft())
-			lookingLeft = true;
-		if(CPad::GetPad(0)->GetLookRight())
-			lookingRight = true;
-	}else{
-		if(TheCamera.Cams[TheCamera.ActiveCam].LookingLeft)
-			lookingLeft = true;
-		if(TheCamera.Cams[TheCamera.ActiveCam].LookingRight)
-			lookingRight = true;
-	}
-
 	AnimationId rightAnim = ANIM_STD_CAR_DRIVEBY_RIGHT;
 	AnimationId leftAnim = ANIM_STD_CAR_DRIVEBY_LEFT;
 	if (pDriver->m_pMyVehicle->bLowVehicle) {
@@ -3791,35 +3772,19 @@ CAutomobile::DoDriveByShootings(void)
 		leftAnim = ANIM_STD_CAR_DRIVEBY_LEFT_LO;
 	}
 
-	// The car ADS: the aim button aims freely with the camera instead of the
-	// look keys. The free aim shot has no animation of its own, so the drive-by
-	// arm stands in.
+	// The stock side look and its drive-by are gone (VICE-138): the car ADS is
+	// the way to aim and shoot from a car now. The free aim shot has no
+	// animation of its own, so the drive-by arm stands in.
 	bool aiming = TheCamera.UsingCarAds();
 
-	if(lookingLeft || lookingRight || aiming){
-		if(aiming)
-			anim = UpdateDriveByAimAnim(ASSOCGRP_STD, leftAnim, rightAnim);
-		else if(lookingLeft){
-			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), rightAnim);
-			if(anim)
-				anim->blendDelta = -1000.0f;
-			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), leftAnim);
-			if(anim == nil || anim->blendDelta < 0.0f)
-				anim = CAnimManager::AddAnimation(pDriver->GetClump(), ASSOCGRP_STD, leftAnim);
-		}else if(pDriver->m_pMyVehicle->pPassengers[0] == nil || TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_1STPERSON){
-			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), leftAnim);
-			if(anim)
-				anim->blendDelta = -1000.0f;
-			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), rightAnim);
-			if(anim == nil || anim->blendDelta < 0.0f)
-				anim = CAnimManager::AddAnimation(pDriver->GetClump(), ASSOCGRP_STD, rightAnim);
-		}
+	if(aiming){
+		anim = UpdateDriveByAimAnim(ASSOCGRP_STD, leftAnim, rightAnim);
 
 		// The free aim fires at once: the drive-by arm is only a stand-in and
 		// the first person car view does not show it
-		if (aiming || !anim || !anim->IsRunning()) {
+		if(!anim || !anim->IsRunning()){
 			if (CPad::GetPad(0)->GetCarGunFired() && CTimer::GetTimeInMilliseconds() > weapon->m_nTimer)
-				weapon->FireFromCarWithCadence(this, lookingLeft, true, aiming);
+				weapon->FireFromCarWithCadence(this, aiming);
 		}
 	}else{
 		// The stock code refills the clip while the player does not aim.
@@ -3834,16 +3799,6 @@ CAutomobile::DoDriveByShootings(void)
 		anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), rightAnim);
 		if(anim)
 			anim->blendDelta = -1000.0f;
-	}
-
-	// TODO: what is this?
-	if(!lookingLeft && m_weaponDoorTimerLeft > 0.0f){
-		m_weaponDoorTimerLeft = Max(m_weaponDoorTimerLeft - CTimer::GetTimeStep()*0.1f, 0.0f);
-		ProcessOpenDoor(CAR_DOOR_LF, ANIM_STD_NUM, m_weaponDoorTimerLeft);
-	}
-	if(!lookingRight && m_weaponDoorTimerRight > 0.0f){
-		m_weaponDoorTimerRight = Max(m_weaponDoorTimerRight - CTimer::GetTimeStep()*0.1f, 0.0f);
-		ProcessOpenDoor(CAR_DOOR_RF, ANIM_STD_NUM, m_weaponDoorTimerRight);
 	}
 }
 

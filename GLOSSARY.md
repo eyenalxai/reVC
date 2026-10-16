@@ -424,6 +424,15 @@ setting keeps the camera at the player's eyes, the mouse aims and WASD stays
 with the movement. The stock look-around view (the setting off) is a separate,
 stock path and stays as it is.
 
+## Camera toggle
+
+The `CAMERA_CHANGE_VIEW_ALL_SITUATIONS` action (Home by default) flips the
+first person view setting, on foot and in a vehicle. The choice is the state
+the Display setting and the settings file use, so it holds across entering and
+leaving a vehicle and a save remembers it (VICE-139). The view change glides
+through the camera handover. The stock ped zoom cycle the action used to run
+is gone.
+
 ## Sight view
 
 The view the shot leaves from and the weapon holds its pose at while the player
@@ -467,9 +476,10 @@ the view where the mouse put it.
 ## Car ADS
 
 Aiming from the driver's seat with the mouse aim button: the follow camera
-pulls in and the free aim fires along the camera instead of the stock sideways
-drive-by. Only the drive-by vehicles (car, bike, boat) and the drive-by weapon
-take it, and the bullets ignore the player's own car.
+pulls in and the free aim fires along the camera. Only the drive-by vehicles
+(car, bike, boat) and the drive-by weapon take it, and the bullets ignore the
+player's own car. The stock sideways drive-by of the look keys is gone
+(VICE-138); a bike keeps its stock forward drive-by on the plain fire button.
 
 ## First person sights
 
