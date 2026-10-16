@@ -41,10 +41,6 @@ enum Config {
 	// (NUMOBJECTS) + 4 spare (VICE-134).
 	NUMDUMMIES = 2800,
 	NUMAUDIOSCRIPTOBJECTS = 192,
-	// First person is always on. The parallel feature line still guards its
-	// code with this define (HUD reticle, car ADS, camera work), so it must
-	// stay defined for that code to compile.
-	FIRST_PERSON,
 
 	// Sfx and music
 	NUMCUTSCENEOBJECTS = 50,	// not a pool in VC
@@ -453,6 +449,7 @@ static_assert(false, "SUPPORT_XBOX_SCRIPT and SUPPORT_MOBILE_SCRIPT are mutually
 #define CANCELLABLE_CAR_ENTER
 
 // Camera
+#define FIRST_PERSON		// First person camera with aim down the sights. Always on; the feature line guards its code with this name, so it must stay defined.
 #define IMPROVED_CAMERA		// Better Debug cam, and maybe more in the future
 #define FREE_CAM		// Rotating cam
 
