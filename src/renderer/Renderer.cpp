@@ -1,6 +1,7 @@
 #define WITHD3D
 #include "common.h"
 
+#include "DrawDistance.h"
 #include "main.h"
 #include "Lights.h"
 #include "ModelInfo.h"
@@ -72,7 +73,7 @@ CEntity *CRenderer::ms_aVisibleBuildingPtrs[NUMVISIBLEENTITIES];
 CVUVECTOR CRenderer::ms_vecCameraPosition;
 CVehicle *CRenderer::m_pFirstPersonVehicle;
 bool CRenderer::m_loadingPriority;
-float CRenderer::ms_lodDistScale = 1.2f;
+float CRenderer::ms_lodDistScale = DRAWDIST_DEFAULT;
 
 void
 CRenderer::Init(void)

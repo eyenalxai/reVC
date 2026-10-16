@@ -8,21 +8,18 @@
  * population use comes from here: the car, the boat, the car generator and the
  * pedestrian. No other file holds a radius of the ring.
  *
- * The table is a set of stock radii (spawn distance 1.0, FOV factor 1.0, the
- * radii the game always used), plus the one distance that does not scale: the
- * reserve between a spawn ring and its despawn threshold. One scale multiplies
- * the radii:
+ * The one range control is the draw distance (VICE-125). The ring request is
+ * the LOD distance over its stock value:
  *
- *	scale = min(spawnDistance * fovFactor, visibleCap)
+ *	scale = min(lodDistance / RING_LOD_REFERENCE, visibleCap)
  *
- * The first part is what the game always did: the Display slider and the FOV
- * factor scale every radius. The cap is the fix for the empty streets at
- * maximum settings. The visible range is min(the LOD distance, the weather far
- * clip). A ring that aims past it only wastes spawns: the weather hides the car
- * or the world, and the birth cull deletes it on the frame it is created. The
- * cap keeps the largest spawn radius (the on-screen car ring) one
- * RING_CAR_DESPAWN_RESERVE inside the visible range, so a grown ring never sits
- * on the far clip.
+ * The LOD distance is 300 times the LOD multiplier, and the multiplier is the
+ * FOV factor times the draw distance (Camera.cpp), so the slider that draws the
+ * world farther also pushes the ring out, and the stock draw distance gives the
+ * stock ring. The cap is the visible range: min(the LOD distance, the weather
+ * far clip), one reserve short, so a ring never sits past what the player can
+ * see. A ring that aims past it only wastes spawns: the weather hides the car
+ * or the world, and the birth cull deletes it on the frame it is created.
  *
  * The cap has a floor under it: the stock ring at the live FOV factor. The cap
  * stops growth, it never pulls a radius below the radius the game always had:
@@ -31,10 +28,10 @@
  * keeps the camera rule and the generator ring inside their bands, which the
  * checks below spell out.
  *
- * Two radii were never multiplied by the FOV factor (the game scales with it
- * what the camera sees ahead, not what is out of sight) and keep their own
- * scale, the spawn distance alone, capped the same way: the off-screen car band
- * and the top-down request sit on it.
+ * Two radii never took the FOV factor (the game scales with it what the camera
+ * sees ahead, not what is out of sight) and keep it out: the off-screen car
+ * band and the top-down request. The camera rule and the generator rings, on
+ * the other hand, keep their own FOV factor.
  *
  * The invariant, for every scale:
  *
@@ -51,12 +48,13 @@
  * utils/traffic-rings (the lane offset of the widest road, the 2 m shift of the
  * final position and the curve deviation), and none of them scales with the
  * ring. A fresh spawn can therefore never be culled on the frame it is created,
- * at any slider value, weather and FOV factor.
+ * at any draw distance, weather and FOV factor.
  *
- * No engine header is included here. The harness in utils/traffic-rings reads
- * this table on its own and proves the invariant over the slider matrix in the
- * ticket VICE-120.
+ * No engine header is included here. The harness in utils/traffic-rings and the
+ * evidence program in utils/one-range-control read this table on their own.
  */
+
+#include "DrawDistance.h"
 
 static inline float TrafficRingsMin(float a, float b) { return a < b ? a : b; }
 static inline float TrafficRingsMax(float a, float b) { return a > b ? a : b; }
@@ -65,13 +63,19 @@ static inline float TrafficRingsMax(float a, float b) { return a > b ? a : b; }
 
 /* The car. The off-screen band spawns at the side of the player, the on-screen
  * band in front. */
-#define RING_CAR_SIDE_SPAWN		120.0f	/* OFFSCREEN_DESPAWN_RANGE; the off-screen band, spawn distance only */
+#define RING_CAR_SIDE_SPAWN		120.0f	/* OFFSCREEN_DESPAWN_RANGE; the off-screen band, draw distance only */
 #define RING_CAR_ONSCREEN_SPAWN_MAX	250.0f	/* REQUEST_ONSCREEN_DISTANCE; the FOV factor scales it */
 #define RING_CAR_DESPAWN_RESERVE	30.0f	/* the step from 250 to 220 and to 280 */
 #define RING_CAR_ONSCREEN_SPAWN_MIN	(RING_CAR_ONSCREEN_SPAWN_MAX - RING_CAR_DESPAWN_RESERVE)	/* MINIMAL_DISTANCE_TO_SPAWN_ONSCREEN */
 #define RING_CAR_DESPAWN		(RING_CAR_ONSCREEN_SPAWN_MAX + RING_CAR_DESPAWN_RESERVE)
 #define RING_CAR_CAMERA_MIN		82.5f	/* a fresh on-screen spawn this close to the camera is deleted */
 #define RING_MAX_FOV_FACTOR		2.2f	/* the camera caps the FOV factor here (Camera.cpp) */
+
+/* The LOD distance of the stock ring: 300 m times the draw distance the game
+ * ships with (DrawDistance.h, Renderer.cpp ms_lodDistScale). The ring request
+ * is the live LOD distance over this, so the default draw distance gives the
+ * stock ring and a higher one grows it. */
+#define RING_LOD_REFERENCE		(300.0f * DRAWDIST_DEFAULT)
 
 /* The boat. A water path node sits off the car path, so the water ring is 1.5
  * times the car ring. A vehicle with the extended range (a boat, or a set piece
@@ -80,10 +84,11 @@ static inline float TrafficRingsMax(float a, float b) { return a > b ? a : b; }
 #define RING_EXTENDED_RANGE_FACTOR	1.5f
 
 /* The car generator: it holds its parked car between the near and the far ring
- * and keeps a visible boat car up to the boat ring. The FOV factor scales it,
- * as it always did, and the despawn of the cars it makes is always wider (280 m
- * against 230 m at the same factor), so its car is never removed at its own
- * door; the harness checks that. */
+ * and keeps a visible boat car up to the boat ring. Both follow the one range
+ * control now: the parked cars appear with the world the slider draws, and the
+ * despawn of the cars they make is always wider (280 m against 230 m at the
+ * same scale), so a parked car is never removed at its own door; the checks
+ * below and the harness carry that. */
 #define RING_GENERATOR_FAR		230.0f
 #define RING_GENERATOR_NEAR_GAP		20.0f	/* the far ring minus the near ring, stock */
 #define RING_GENERATOR_BOAT_FAR		345.0f
@@ -111,9 +116,8 @@ static_assert(RING_CAR_ONSCREEN_SPAWN_MIN < RING_CAR_ONSCREEN_SPAWN_MAX, "the on
  * at its cap: the band's inner edge is 220 m or more at every scale (the floor
  * keeps the scale at the FOV factor), and the rule stops at 82.5 x 2.2. */
 static_assert(RING_CAR_CAMERA_MIN * RING_MAX_FOV_FACTOR < RING_CAR_ONSCREEN_SPAWN_MIN, "the camera rule must sit inside the on-screen band at the FOV cap");
-/* The generator ring keeps the FOV factor too, so its far ring must hold it
- * against the smaller car despawn: 230 m < 280 m at the same factor, and the
- * boat ring 345 m < the 1.5 x 280 m of a boat. */
+/* The generator rings and the car despawn share the scale now, so the stock
+ * numbers alone carry their invariant. */
 static_assert(RING_GENERATOR_FAR < RING_CAR_DESPAWN, "the generator ring must stay inside the car despawn");
 static_assert(RING_GENERATOR_BOAT_FAR < RING_EXTENDED_RANGE_FACTOR * RING_CAR_DESPAWN, "the boat generator ring must stay inside the boat despawn");
 static_assert(RING_GENERATOR_FAR > RING_GENERATOR_NEAR_GAP, "the generator ring must have a width");
@@ -125,16 +129,15 @@ static_assert(RING_PED_OFFSCREEN_MAX < RING_PED_REMOVE, "the off-screen ped band
 /* The live game values the table derives from. */
 struct STrafficRingInput
 {
-	float spawnDistance;	/* the Display slider, 1.0 is stock */
+	float lodDistance;	/* LOD_DISTANCE: the distance the world is drawn at (the range control) */
 	float fovFactor;	/* TheCamera.GenerationDistMultiplier, 1.0 at FOV 70, capped at 2.2 */
-	float lodDistance;	/* LOD_DISTANCE: the distance the world is drawn at */
 	float farClip;		/* CTimeCycle::GetFarClip(): the weather far clip */
 };
 
 /* The radii of one frame, in metres. */
 struct STrafficRings
 {
-	float scale;		/* the one ring scale: spawn distance x FOV factor, capped */
+	float scale;		/* the one ring scale: the LOD distance over its stock value, capped */
 	float sideScale;	/* the scale of the radii that never took the FOV factor */
 	float visibleRange;	/* min(lodDistance, farClip), 0 while it is not known */
 
@@ -172,13 +175,17 @@ ComputeTrafficRings(const STrafficRingInput &in)
 	else
 		r.visibleRange = in.lodDistance;
 
+	/* The request of the one range control: the LOD distance over the stock LOD
+	 * distance, so the stock draw distance gives the stock ring. The off-screen
+	 * family asks without the FOV factor. */
+	float requested = in.lodDistance / RING_LOD_REFERENCE;
+	float requestedSide = requested / in.fovFactor;
 	/* The caps: the largest spawn radius stays the reserve inside the visible
 	 * range. The cap never pulls a radius below the stock radius at the live
 	 * FOV factor; it only stops growth. A range of zero is not known yet (the
 	 * boot path), and there is nothing to fit: the requested rings stand. */
-	float requested = in.spawnDistance * in.fovFactor;
 	float scaleCap = requested;
-	float sideCap = in.spawnDistance;
+	float sideCap = requestedSide;
 	if (r.visibleRange > 0.0f) {
 		float visibleCap = (r.visibleRange - RING_CAR_DESPAWN_RESERVE) / RING_CAR_ONSCREEN_SPAWN_MAX;
 		/* The floor of the on-screen family is the FOV factor, the floor of the
@@ -186,9 +193,8 @@ ComputeTrafficRings(const STrafficRingInput &in)
 		scaleCap = TrafficRingsMax(visibleCap, in.fovFactor);
 		sideCap = TrafficRingsMax(visibleCap / in.fovFactor, 1.0f);
 	}
-	r.scale = TrafficRingsMin(requested, scaleCap);
-	/* The off-screen band and the top-down request never took the FOV factor. */
-	r.sideScale = TrafficRingsMin(in.spawnDistance, sideCap);
+	r.scale = TrafficRingsMax(TrafficRingsMin(requested, scaleCap), in.fovFactor);
+	r.sideScale = TrafficRingsMax(TrafficRingsMin(requestedSide, sideCap), 1.0f);
 
 	/* The car. The reserve is the same distance at every scale: it holds the
 	 * placement error of a fresh spawn, and that does not shrink with the ring.
@@ -210,13 +216,14 @@ ComputeTrafficRings(const STrafficRingInput &in)
 	r.boatSpawnFactor = RING_BOAT_SPAWN_FACTOR;
 	r.extendedRangeFactor = RING_EXTENDED_RANGE_FACTOR;
 
-	/* The car generator: the FOV factor scales it, as it always did (-20 m for
-	 * the near ring). The car despawn is wider at the same factor, so the
-	 * parked car is never removed at its own door (the static asserts say so,
-	 * the harness checks it per cell). */
-	r.generatorFar = RING_GENERATOR_FAR * in.fovFactor;
+	/* The car generator: the one range control drives it, exactly like the
+	 * traffic ring, so the parked cars appear with the world the slider draws.
+	 * The car despawn is wider at the same scale, so a parked car is never
+	 * removed at its own door (the static asserts say so, the harness checks it
+	 * per cell). */
+	r.generatorFar = RING_GENERATOR_FAR * r.scale;
 	r.generatorNear = r.generatorFar - RING_GENERATOR_NEAR_GAP;
-	r.generatorBoatFar = RING_GENERATOR_BOAT_FAR * in.fovFactor;
+	r.generatorBoatFar = RING_GENERATOR_BOAT_FAR * r.scale;
 
 	/* The pedestrian. The creation ring takes the whole scale; the off-screen
 	 * band is its half, with the ring's width as the pull-back. */
@@ -229,6 +236,31 @@ ComputeTrafficRings(const STrafficRingInput &in)
 
 	return r;
 }
+
+/*
+ * The mapping of the old spawn distance key (VICE-125). The old slider v scaled
+ * the ring by v; the draw distance d scales it by d / the default, so the draw
+ * distance DRAWDIST_DEFAULT x v gives the same ring at every FOV factor
+ * (the factor cancels between the two).
+ *
+ * LegacyRangeDrawDistance returns the draw distance an old file maps to, or a
+ * negative number when the file's own draw distance stands: the map applies to
+ * a file that raised the spawn distance and never moved the draw distance, so a
+ * file that set the draw distance keeps it.
+ */
+#define RING_LEGACY_RANGE_MAX		4.0f	/* the old slider's top */
+
+static inline float
+LegacyRangeDrawDistance(float legacyRange, float loadedDrawDistance)
+{
+	legacyRange = TrafficRingsMax(TrafficRingsMin(legacyRange, RING_LEGACY_RANGE_MAX), 1.0f);
+	if (legacyRange <= 1.0f || loadedDrawDistance != DRAWDIST_DEFAULT)
+		return -1.0f;
+	return DRAWDIST_DEFAULT * legacyRange;
+}
+
+static_assert(DRAWDIST_DEFAULT * RING_LEGACY_RANGE_MAX <= DRAWDIST_MAX, "the legacy map must stay inside the draw distance range");
+static_assert(DRAWDIST_DEFAULT >= DRAWDIST_MIN, "the legacy map must stay inside the draw distance range");
 
 /* The table for this frame, from the live game values (TrafficRings.cpp). */
 STrafficRings CurrentTrafficRings(void);

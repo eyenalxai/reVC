@@ -43,6 +43,7 @@
 #include "MemoryHeap.h"
 #include "FileMgr.h"
 #include "Camera.h"
+#include "TrafficRings.h"
 #include "MBlur.h"
 #include "ControllerConfig.h"
 #include "CarCtrl.h"
@@ -590,8 +591,18 @@ bool LoadINISettings()
 	// A stale reVC.ini value above the new slider tops would keep the old pool pressure
 	CIniFile::PedNumberMultiplier = Clamp(CIniFile::PedNumberMultiplier, 0.2f, 3.4f);
 	CIniFile::CarNumberMultiplier = Clamp(CIniFile::CarNumberMultiplier, 0.2f, 3.4f);
-	// Same for the spawn distance slider: a stale value must not pass the slider top
-	CIniFile::SpawnDistanceMultiplier = Clamp(CIniFile::SpawnDistanceMultiplier, 1.0f, 4.0f);
+	// The spawn distance slider is gone (VICE-125): the one range control is
+	// the draw distance. An old file that raised the spawn distance and never
+	// moved the draw distance maps onto the draw distance that gives the same
+	// ring; a file that set the draw distance keeps it. The key goes away with
+	// the next save, so this runs once.
+	float legacyRange;
+	if (ReadIniIfExists("Display", "SpawnDistance", &legacyRange)) {
+		float mapped = LegacyRangeDrawDistance(legacyRange, FrontEndMenuManager.m_PrefsLOD);
+		if (mapped > 0.0f)
+			FrontEndMenuManager.m_PrefsLOD = mapped;
+		cfg["Display"].remove("SpawnDistance");
+	}
 	CIniFile::ApplyPopulationCaps();
 #endif
 

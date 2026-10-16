@@ -10,6 +10,7 @@
 #endif
 #include "platform.h"
 #include "crossplatform.h"
+#include "DrawDistance.h"
 #include "Renderer.h"
 #include "Frontend.h"
 #include "Font.h"
@@ -78,11 +79,11 @@
 #ifdef PED_CAR_DENSITY_SLIDERS
 	// The step is (max - min) / 16. Tops chosen so the defaults land on a step:
 	// ped (3.4 - 0.2) / 16 = 0.2, so 1.0f is reachable; car (3.4 - 0.2) / 16 = 0.2, so 2.0f is reachable.
-	// spawn distance (4.0 - 1.0) / 16 = 0.1875, so 1.0f is reachable.
+	// This is the density; the range of the ring is the draw distance slider
+	// above (MENUACTION_DRAWDIST), the one range control since VICE-125.
 	#define DENSITY_SLIDERS \
 		MENUACTION_CFO_SLIDER, "FEM_PED", { new CCFOSlider(&CIniFile::PedNumberMultiplier, "Display", "PedDensity", 0.2f, 3.4f, PedDensityChange) }, 0, 0, MENUALIGN_LEFT, \
-		MENUACTION_CFO_SLIDER, "FEM_CAR", { new CCFOSlider(&CIniFile::CarNumberMultiplier, "Display", "CarDensity", 0.2f, 3.4f, CarDensityChange) }, 0, 0, MENUALIGN_LEFT, \
-		MENUACTION_CFO_SLIDER, "FEM_SPN", { new CCFOSlider(&CIniFile::SpawnDistanceMultiplier, "Display", "SpawnDistance", 1.0f, 4.0f, SpawnDistanceChange) }, 0, 0, MENUALIGN_LEFT,
+		MENUACTION_CFO_SLIDER, "FEM_CAR", { new CCFOSlider(&CIniFile::CarNumberMultiplier, "Display", "CarDensity", 0.2f, 3.4f, CarDensityChange) }, 0, 0, MENUALIGN_LEFT,
 #else
 	#define DENSITY_SLIDERS 
 #endif
@@ -167,15 +168,15 @@ void RestoreDefDisplay(int8 action) {
 		TheCamera.bFreeCam = false;
 	#endif
 	#ifdef PED_CAR_DENSITY_SLIDERS
-		// The spawn distance has no gta3.ini key, so reset it to the stock value here;
-		// LoadIniFile then recomputes the caps with the default.
-		CIniFile::SpawnDistanceMultiplier = 1.0f;
+		// The density values come from gta3.ini; reload them and the caps with
+		// them. The range of the ring is the draw distance (the GRAPHICS block
+		// below where it is built in, else the draw distance slider).
 		CIniFile::LoadIniFile();
 	#endif
 	#ifdef GRAPHICS_MENU_OPTIONS // otherwise Frontend will handle those
 		FrontEndMenuManager.m_PrefsBrightness = 256;
-		FrontEndMenuManager.m_PrefsLOD = 1.2f;
-		CRenderer::ms_lodDistScale = 1.2f;
+		FrontEndMenuManager.m_PrefsLOD = DRAWDIST_DEFAULT;
+		CRenderer::ms_lodDistScale = DRAWDIST_DEFAULT;
 		FrontEndMenuManager.m_PrefsShowSubtitles = false;
 		FrontEndMenuManager.m_PrefsShowLegends = true;
 		FrontEndMenuManager.m_PrefsRadarMode = 0;
@@ -224,10 +225,6 @@ void PedDensityChange(float before, float after) {
 }
 
 void CarDensityChange(float before, float after) {
-	CIniFile::ApplyPopulationCaps();
-}
-
-void SpawnDistanceChange(float before, float after) {
 	CIniFile::ApplyPopulationCaps();
 }
 #endif

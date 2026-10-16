@@ -207,19 +207,30 @@ where they come from.
 
 ## Spawn distance
 
-The distance from the player where the game creates and removes cars and
-pedestrians. The Display settings slider `SpawnDistance` scales it. The base is
-a ring around the player: pedestrians are created at 100-130 m and removed at
-131/145 m, cars spawn between 120 m and 250 m and despawn at 280 m. The slider
-feeds the ring scale; VICE-125 moves the control to the draw distance.
+The old Display settings slider `SpawnDistance`. It scaled the ring around the
+player: pedestrians were created at 100-130 m and removed at 131/145 m, cars
+spawned between 120 m and 250 m and despawned at 280 m, all times the value.
+VICE-125 removed the slider, because the range is the draw distance now. An old
+file that raised the value and never moved the draw distance is loaded with the
+draw distance that gives the same ring (`1.2 x` the old value); the key is
+dropped with the next save.
+
+## Draw distance (range control)
+
+The Display settings slider `DrawDistance`, the one control of the range since
+VICE-125. It scales the LOD multiplier the renderer draws the world with
+(`CRenderer::ms_lodDistScale`, 0.925 to 16.0, 1.2 at stock), and the traffic
+ring follows it: the ring scale is the LOD distance over its stock value, 300 x
+1.2. The ring of a lowered draw distance stops at the stock ring, so the lower
+part of the slider moves the world only.
 
 ## Traffic ring
 
 One spawn or despawn radius of the traffic: the car side band, the car on-screen
-band, the car despawn, the camera minimum, the top-down bubble, the generator
-ring or the pedestrian band. The stock radii and the rules that build them live
-in `src/control/TrafficRings.h`; `CurrentTrafficRings()` returns the values of
-the frame.
+band, the car despawn, the camera minimum, the generator ring or the pedestrian
+band. The stock radii and the rules that build them live in
+`src/control/TrafficRings.h`; `CurrentTrafficRings()` returns the values of the
+frame.
 
 ## Visible range
 
@@ -230,9 +241,10 @@ data (SUNNY 2000 m, FOGGY 150 m).
 
 ## Ring scale
 
-The one number that scales the traffic ring table: the spawn distance times the
-FOV factor, capped so the on-screen car ring stays inside the visible range.
-1.0 at the stock settings (spawn distance 1.0, FOV 70).
+The one number that scales the traffic ring table: the LOD distance over its
+stock value (300 x 1.2, the shipped draw distance), capped so the on-screen car
+ring stays inside the visible range. 1.0 at the stock settings (the default draw
+distance, FOV 70).
 
 ## Despawn reserve
 

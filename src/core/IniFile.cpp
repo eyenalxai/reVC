@@ -10,7 +10,6 @@
 
 float CIniFile::PedNumberMultiplier = 1.0f;
 float CIniFile::CarNumberMultiplier = 2.0f;
-float CIniFile::SpawnDistanceMultiplier = 1.0f;
 
 void CIniFile::LoadIniFile()
 {
