@@ -29,8 +29,10 @@
 #include "Clock.h"
 #include "WaterLevel.h"
 
-#define MIN_CREATION_DIST		100.0f // on-screen creation ring 100..130 m; not for off-screen peds at start of the game (look at the GeneratePedsAtStartOfGame)
-#define CREATION_RANGE			30.0f // added over the MIN_CREATION_DIST, so the on-screen ring ends at 130 m.
+// The spawn distance slider (reVC.ini [Display] SpawnDistance) scales the creation
+// ring and the removal distances; 1.0 is the stock value.
+#define MIN_CREATION_DIST		(100.0f * CIniFile::SpawnDistanceMultiplier) // on-screen creation ring 100..130 m at 1.0; not for off-screen peds at start of the game (look at the GeneratePedsAtStartOfGame)
+#define CREATION_RANGE			(30.0f * CIniFile::SpawnDistanceMultiplier) // added over the MIN_CREATION_DIST, so the on-screen ring ends at 130 m at 1.0.
 #define OFFSCREEN_CREATION_MULT	0.5f
 #define PED_REMOVE_DIST			(MIN_CREATION_DIST + CREATION_RANGE + 1.0f)
 #define PED_REMOVE_DIST_SPECIAL	(MIN_CREATION_DIST + CREATION_RANGE + 15.0f) // for peds with bCullExtraFarAway flag

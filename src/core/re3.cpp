@@ -651,6 +651,8 @@ bool LoadINISettings()
 	// A stale reVC.ini value above the new slider tops would keep the old pool pressure
 	CIniFile::PedNumberMultiplier = Clamp(CIniFile::PedNumberMultiplier, 0.2f, 3.4f);
 	CIniFile::CarNumberMultiplier = Clamp(CIniFile::CarNumberMultiplier, 0.2f, 3.4f);
+	// Same for the spawn distance slider: a stale value must not pass the slider top
+	CIniFile::SpawnDistanceMultiplier = Clamp(CIniFile::SpawnDistanceMultiplier, 1.0f, 4.0f);
 	CPopulation::MaxNumberOfPedsInUse = DEFAULT_MAX_NUMBER_OF_PEDS * CIniFile::PedNumberMultiplier;
 	CPopulation::MaxNumberOfPedsInUseInterior = DEFAULT_MAX_NUMBER_OF_PEDS_INTERIOR * CIniFile::PedNumberMultiplier;
 	CCarCtrl::MaxNumberOfCarsInUse = DEFAULT_MAX_NUMBER_OF_CARS * CIniFile::CarNumberMultiplier;

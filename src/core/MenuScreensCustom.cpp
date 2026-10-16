@@ -78,9 +78,11 @@
 #ifdef PED_CAR_DENSITY_SLIDERS
 	// The step is (max - min) / 16. Tops chosen so the defaults land on a step:
 	// ped (3.4 - 0.2) / 16 = 0.2, so 1.0f is reachable; car (3.4 - 0.2) / 16 = 0.2, so 2.0f is reachable.
+	// spawn distance (4.0 - 1.0) / 16 = 0.1875, so 1.0f is reachable.
 	#define DENSITY_SLIDERS \
 		MENUACTION_CFO_SLIDER, "FEM_PED", { new CCFOSlider(&CIniFile::PedNumberMultiplier, "Display", "PedDensity", 0.2f, 3.4f, PedDensityChange) }, 0, 0, MENUALIGN_LEFT, \
-		MENUACTION_CFO_SLIDER, "FEM_CAR", { new CCFOSlider(&CIniFile::CarNumberMultiplier, "Display", "CarDensity", 0.2f, 3.4f, CarDensityChange) }, 0, 0, MENUALIGN_LEFT, 
+		MENUACTION_CFO_SLIDER, "FEM_CAR", { new CCFOSlider(&CIniFile::CarNumberMultiplier, "Display", "CarDensity", 0.2f, 3.4f, CarDensityChange) }, 0, 0, MENUALIGN_LEFT, \
+		MENUACTION_CFO_SLIDER, "FEM_SPN", { new CCFOSlider(&CIniFile::SpawnDistanceMultiplier, "Display", "SpawnDistance", 1.0f, 4.0f) }, 0, 0, MENUALIGN_LEFT,
 #else
 	#define DENSITY_SLIDERS 
 #endif
