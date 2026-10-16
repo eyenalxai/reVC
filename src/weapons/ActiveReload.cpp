@@ -19,6 +19,7 @@ static uint32 ms_nWindowStart;		// the window, absolute times
 static uint32 ms_nWindowEnd;
 static bool ms_bJudged;			// the first judging press came in
 static bool ms_bAnimationRequested;	// the reload animation is started
+static bool ms_bPerfect;		// a perfect judgment, until it is consumed
 static eActiveReloadResult ms_eResult;	// the last judgment, for the HUD
 static uint32 ms_nResultTime;
 
@@ -70,6 +71,7 @@ ActiveReload::Reset(void)
 {
 	ms_bActive = false;
 	ms_bAnimationRequested = false;
+	ms_bPerfect = false;
 	ResetResult();
 }
 
@@ -94,6 +96,7 @@ ActiveReload::Start(eWeaponType weaponType, uint32 duration)
 	ms_nWindowEnd = ms_nStart + (uint32)(ms_nDuration*ACTIVE_RELOAD_WINDOW_END);
 	ms_bJudged = false;
 	ms_bAnimationRequested = false;
+	ms_bPerfect = false;
 	ResetResult();
 }
 
@@ -120,6 +123,7 @@ ActiveReload::Judge(CWeapon *weapon)
 		ms_bJudged = true;
 		ms_eResult = ACTIVE_RELOAD_PERFECT;
 		ms_nResultTime = now;
+		ms_bPerfect = true;
 	}
 	// Later presses and presses after the window do nothing.
 }
@@ -138,6 +142,18 @@ ActiveReload::Judged(CWeapon *weapon)
 		return false;
 
 	return TrackedWeapon() == weapon;
+}
+
+bool
+ActiveReload::ConsumePerfect(void)
+{
+	ForgetStaleReload();
+
+	if (!ms_bPerfect)
+		return false;
+
+	ms_bPerfect = false;
+	return true;
 }
 
 bool

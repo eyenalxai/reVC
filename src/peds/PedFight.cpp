@@ -658,6 +658,32 @@ CPed::TryStartReloadAnimation(CAnimBlendAssociation *reloadAnimAssoc)
 	return true;
 }
 
+// Fades out the reload animation of a ped whose perfect reload ended the timer
+// early. The fade runs the existing finish callback once (it restores the
+// crouch pose) and then deletes the association, so a later reload can blend
+// a fresh animation instead of the attack path refusing on the old one
+// (VICE-88). Never delete the association here: the delete flag and the fade
+// are what let the callback run.
+void
+CPed::AbortReloadAnimation(void)
+{
+	CWeaponInfo *ourWeapon = CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType);
+
+	if (GetReloadAnim(ourWeapon) == (AnimationId)0)
+		return;
+
+	// The reload slot first, then the crouch slot, the same order the
+	// reload animation is picked in.
+	CAnimBlendAssociation *reloadAssoc = RpAnimBlendClumpGetAssociation(GetClump(), GetReloadAnim(ourWeapon));
+	if (reloadAssoc == nil && GetCrouchReloadAnim(ourWeapon) != (AnimationId)0)
+		reloadAssoc = RpAnimBlendClumpGetAssociation(GetClump(), GetCrouchReloadAnim(ourWeapon));
+	if (reloadAssoc == nil)
+		return;
+
+	reloadAssoc->blendDelta = -1000.0f;
+	reloadAssoc->flags |= ASSOC_DELETEFADEDOUT;
+}
+
 uint8
 CPed::CheckForPointBlankPeds(CPed *pedToVerify)
 {

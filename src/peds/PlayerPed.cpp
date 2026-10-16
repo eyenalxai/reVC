@@ -839,6 +839,14 @@ CPlayerPed::ProcessActiveReload(CPad *padUsed)
 			weapon->StartReload(this);
 	}
 
+	// The perfect judgment ends the timer almost at once, but the attack
+	// refuses while the reload association runs. Once the weapon state is
+	// READY, fade the animation out so the pose and the attack unblock
+	// (VICE-88). While the state is still RELOADING the attack path can
+	// blend a fresh reload animation and re-block, so wait.
+	if (weapon->m_eWeaponState == WEAPONSTATE_READY && ActiveReload::ConsumePerfect())
+		AbortReloadAnimation();
+
 	// Attack() starts the animation for the player who reloads in a fight;
 	// this covers the player who reloads while standing still. The claim keeps
 	// a long jam from starting the animation a second time. With the fast

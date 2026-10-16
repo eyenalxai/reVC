@@ -690,6 +690,10 @@ public:
 	// reloadAnimAssoc: the association the caller already holds, or nil to
 	// look it up. Returns true when the caller must not continue the attack.
 	bool TryStartReloadAnimation(CAnimBlendAssociation *reloadAnimAssoc = nil);
+	// Fades out a running reload animation: a perfect reload ended the timer
+	// early, and the fade lets the finish callback restore the pose
+	// (VICE-88). A no-op without a reload animation.
+	void AbortReloadAnimation(void);
 	void ClearAimFlag(void);
 	void ClearLookFlag(void);
 	void RestorePreviousState(void);
