@@ -29,6 +29,7 @@
 #include "Hud.h"
 #include "SceneEdit.h"
 #include "Pad.h"
+#include "Cheats.h"
 #include "PlayerPed.h"
 #include "Radar.h"
 #include "debugmenu.h"
@@ -621,33 +622,6 @@ void SaveINISettings()
 #endif
 
 #ifdef DEBUGMENU
-void WeaponCheat1();
-void WeaponCheat2();
-void WeaponCheat3();
-void HealthCheat();
-void VehicleCheat(int model);
-void BlowUpCarsCheat();
-void ChangePlayerCheat();
-void MayhemCheat();
-void EverybodyAttacksPlayerCheat();
-void WeaponsForAllCheat();
-void FastTimeCheat();
-void SlowTimeCheat();
-void MoneyCheat();
-void ArmourCheat();
-void WantedLevelUpCheat();
-void WantedLevelDownCheat();
-void SunnyWeatherCheat();
-void CloudyWeatherCheat();
-void RainyWeatherCheat();
-void FoggyWeatherCheat();
-void FastWeatherCheat();
-void OnlyRenderWheelsCheat();
-void ChittyChittyBangBangCheat();
-void StrongGripCheat();
-void SpecialCarCheats();
-void PickUpChicksCheat();
-
 DebugMenuEntry *carCol1;
 DebugMenuEntry *carCol2;
 

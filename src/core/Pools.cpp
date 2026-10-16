@@ -242,6 +242,33 @@ INITSAVEBUF
 VALIDATESAVEBUF(size)
 }
 
+static bool
+IsVehicleSaved(CVehicle *pVehicle)
+{
+	bool bHasPassenger = false;
+	for (int j = 0; j < ARRAY_SIZE(pVehicle->pPassengers); j++) {
+		if (pVehicle->pPassengers[j])
+			bHasPassenger = true;
+	}
+#ifdef MISSION_REPLAY
+	bool bForceSaving = CWorld::Players[CWorld::PlayerInFocus].m_pPed->m_pMyVehicle == pVehicle && IsQuickSave;
+#endif
+#if defined FIX_BUGS && defined MISSION_REPLAY
+	if ((pVehicle->pDriver || bHasPassenger) && !bForceSaving)
+		return false;
+#else
+	if (pVehicle->pDriver || bHasPassenger)
+		return false;
+#endif
+	if (!pVehicle->IsCar() && !pVehicle->IsBoat() && !pVehicle->IsBike())
+		return false;
+#ifdef MISSION_REPLAY
+	if (bForceSaving)
+		return true;
+#endif
+	return pVehicle->VehicleCreatedBy == MISSION_VEHICLE;
+}
+
 void CPools::SaveVehiclePool(uint8* buf, uint32* size)
 {
 INITSAVEBUF
@@ -253,33 +280,13 @@ INITSAVEBUF
 		CVehicle* pVehicle = GetVehiclePool()->GetSlot(i);
 		if (!pVehicle)
 			continue;
-		bool bHasPassenger = false;
-		for (int j = 0; j < ARRAY_SIZE(pVehicle->pPassengers); j++) {
-			if (pVehicle->pPassengers[j])
-				bHasPassenger = true;
-		}
-#ifdef MISSION_REPLAY
-		bool bForceSaving = CWorld::Players[CWorld::PlayerInFocus].m_pPed->m_pMyVehicle == pVehicle && IsQuickSave;
-#ifdef FIX_BUGS
-		if ((!pVehicle->pDriver && !bHasPassenger) || bForceSaving) {
-#else
-		if (!pVehicle->pDriver && !bHasPassenger) {
-#endif
-			if (pVehicle->IsCar() && (pVehicle->VehicleCreatedBy == MISSION_VEHICLE || bForceSaving))
+		if (IsVehicleSaved(pVehicle)) {
+			if (pVehicle->IsCar())
 				++nNumCars;
-			if (pVehicle->IsBoat() && (pVehicle->VehicleCreatedBy == MISSION_VEHICLE || bForceSaving))
+			if (pVehicle->IsBoat())
 				++nNumBoats;
-			if (pVehicle->IsBike() && (pVehicle->VehicleCreatedBy == MISSION_VEHICLE || bForceSaving))
+			if (pVehicle->IsBike())
 				++nNumBikes;
-#else
-		if (!pVehicle->pDriver && !bHasPassenger) {
-			if (pVehicle->IsCar() && pVehicle->VehicleCreatedBy == MISSION_VEHICLE)
-				++nNumCars;
-			if (pVehicle->IsBoat() && pVehicle->VehicleCreatedBy == MISSION_VEHICLE)
-				++nNumBoats;
-			if (pVehicle->IsBike() && pVehicle->VehicleCreatedBy == MISSION_VEHICLE)
-				++nNumBikes;
-#endif
 		}
 	}
 	*size = nNumCars * (sizeof(uint32) + sizeof(int16) + sizeof(int32) + CAutomobile::nSaveStructSize) + sizeof(int) +
@@ -292,58 +299,28 @@ INITSAVEBUF
 		CVehicle* pVehicle = GetVehiclePool()->GetSlot(i);
 		if (!pVehicle)
 			continue;
-		bool bHasPassenger = false;
-		for (int j = 0; j < ARRAY_SIZE(pVehicle->pPassengers); j++) {
-			if (pVehicle->pPassengers[j])
-				bHasPassenger = true;
-		}
-#ifdef MISSION_REPLAY
-		bool bForceSaving = CWorld::Players[CWorld::PlayerInFocus].m_pPed->m_pMyVehicle == pVehicle && IsQuickSave;
-#endif
-#if defined FIX_BUGS && defined MISSION_REPLAY
-		if ((!pVehicle->pDriver && !bHasPassenger) || bForceSaving) {
-#else
-		if (!pVehicle->pDriver && !bHasPassenger) {
-#endif
+		if (IsVehicleSaved(pVehicle)) {
 #ifdef COMPATIBLE_SAVES
-#ifdef MISSION_REPLAY
-			if ((pVehicle->IsCar() || pVehicle->IsBoat() || pVehicle->IsBike()) && (pVehicle->VehicleCreatedBy == MISSION_VEHICLE || bForceSaving)) {
+			WriteSaveBuf(buf, pVehicle->m_vehType);
+			WriteSaveBuf(buf, pVehicle->GetModelIndex());
+			WriteSaveBuf(buf, GetVehicleRef(pVehicle));
+			pVehicle->Save(buf);
 #else
-			if ((pVehicle->IsCar() || pVehicle->IsBoat() || pVehicle->IsBike()) && pVehicle->VehicleCreatedBy == MISSION_VEHICLE) {
-#endif
-				WriteSaveBuf(buf, pVehicle->m_vehType);
-				WriteSaveBuf(buf, pVehicle->GetModelIndex());
-				WriteSaveBuf(buf, GetVehicleRef(pVehicle));
-				pVehicle->Save(buf);
-			}
-#else
-#ifdef MISSION_REPLAY
-			if (pVehicle->IsCar() && (pVehicle->VehicleCreatedBy == MISSION_VEHICLE || bForceSaving)) {
-#else
-			if (pVehicle->IsCar() && pVehicle->VehicleCreatedBy == MISSION_VEHICLE) {
-#endif
+			if (pVehicle->IsCar()) {
 				WriteSaveBuf(buf, pVehicle->m_vehType);
 				WriteSaveBuf(buf, pVehicle->GetModelIndex());
 				WriteSaveBuf(buf, GetVehicleRef(pVehicle));
 				memcpy(buf, pVehicle, sizeof(CAutomobile));
 				SkipSaveBuf(buf, sizeof(CAutomobile));
 			}
-#ifdef MISSION_REPLAY
-			if (pVehicle->IsBoat() && (pVehicle->VehicleCreatedBy == MISSION_VEHICLE || bForceSaving)) {
-#else
-			if (pVehicle->IsBoat() && pVehicle->VehicleCreatedBy == MISSION_VEHICLE) {
-#endif
+			if (pVehicle->IsBoat()) {
 				WriteSaveBuf(buf, pVehicle->m_vehType);
 				WriteSaveBuf(buf, pVehicle->GetModelIndex());
 				WriteSaveBuf(buf, GetVehicleRef(pVehicle));
 				memcpy(buf, pVehicle, sizeof(CBoat));
 				SkipSaveBuf(buf, sizeof(CBoat));
 			}
-#ifdef MISSION_REPLAY
-			if (pVehicle->IsBike() && (pVehicle->VehicleCreatedBy == MISSION_VEHICLE || bForceSaving)) {
-#else
-			if (pVehicle->IsBike() && pVehicle->VehicleCreatedBy == MISSION_VEHICLE) {
-#endif
+			if (pVehicle->IsBike()) {
 				WriteSaveBuf(buf, pVehicle->m_vehType);
 				WriteSaveBuf(buf, pVehicle->GetModelIndex());
 				WriteSaveBuf(buf, GetVehicleRef(pVehicle));
@@ -354,6 +331,12 @@ INITSAVEBUF
 		}
 	}
 VALIDATESAVEBUF(*size)
+}
+
+static bool
+IsObjectSaved(CObject *pObject)
+{
+	return pObject->ObjectCreatedBy == MISSION_OBJECT;
 }
 
 void CPools::SaveObjectPool(uint8* buf, uint32* size)
@@ -367,7 +350,7 @@ INITSAVEBUF
 		CObject* pObject = GetObjectPool()->GetSlot(i);
 		if (!pObject)
 			continue;
-		if (pObject->ObjectCreatedBy == MISSION_OBJECT)
+		if (IsObjectSaved(pObject))
 			++nObjects;
 	}
 	*size = nObjects * (sizeof(int16) + sizeof(int) + sizeof(CCompressedMatrix) +
@@ -379,7 +362,7 @@ INITSAVEBUF
 		CObject* pObject = GetObjectPool()->GetSlot(i);
 		if (!pObject)
 			continue;
-		if (pObject->ObjectCreatedBy == MISSION_OBJECT) {
+		if (IsObjectSaved(pObject)) {
 			bool bIsPickup = pObject->bIsPickup;
 			bool bPickupObjWithMessage = pObject->bPickupObjWithMessage;
 			bool bOutOfStock = pObject->bOutOfStock;
@@ -501,6 +484,16 @@ INITSAVEBUF
 VALIDATESAVEBUF(size)
 }
 
+static bool
+IsPedSaved(CPed *pPed)
+{
+#ifdef MISSION_REPLAY
+	return (!pPed->bInVehicle || (pPed == CWorld::Players[CWorld::PlayerInFocus].m_pPed && IsQuickSave)) && pPed->m_nPedType == PEDTYPE_PLAYER1;
+#else
+	return !pPed->bInVehicle && pPed->m_nPedType == PEDTYPE_PLAYER1;
+#endif
+}
+
 void CPools::SavePedPool(uint8* buf, uint32* size)
 {
 INITSAVEBUF
@@ -510,11 +503,7 @@ INITSAVEBUF
 		CPed* pPed = GetPedPool()->GetSlot(i);
 		if (!pPed)
 			continue;
-#ifdef MISSION_REPLAY
-		if ((!pPed->bInVehicle || (pPed == CWorld::Players[CWorld::PlayerInFocus].m_pPed && IsQuickSave)) && pPed->m_nPedType == PEDTYPE_PLAYER1)
-#else
-		if (!pPed->bInVehicle && pPed->m_nPedType == PEDTYPE_PLAYER1)
-#endif
+		if (IsPedSaved(pPed))
 			nNumPeds++;
 	}
 	*size = sizeof(int) + nNumPeds * (sizeof(uint32) + sizeof(int16) + sizeof(int) + CPlayerPed::nSaveStructSize +
@@ -524,11 +513,7 @@ INITSAVEBUF
 		CPed* pPed = GetPedPool()->GetSlot(i);
 		if (!pPed)
 			continue;
-#ifdef MISSION_REPLAY
-		if ((!pPed->bInVehicle || (pPed == CWorld::Players[CWorld::PlayerInFocus].m_pPed && IsQuickSave)) && pPed->m_nPedType == PEDTYPE_PLAYER1) {
-#else
-		if (!pPed->bInVehicle && pPed->m_nPedType == PEDTYPE_PLAYER1) {
-#endif
+		if (IsPedSaved(pPed)) {
 			CopyToBuf(buf, pPed->m_nPedType);
 			CopyToBuf(buf, pPed->m_modelIndex);
 			int32 ref = GetPedRef(pPed);

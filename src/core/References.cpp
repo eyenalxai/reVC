@@ -92,6 +92,11 @@ void
 CEntity::PruneReferences(void)
 {
 	CReference *ref, *next, **lastnextp;
+
+	// Nothing to prune without a reference list.
+	if (m_pFirstReference == nil)
+		return;
+
 	lastnextp = &m_pFirstReference;
 	for(ref = m_pFirstReference; ref; ref = next){
 		next = ref->next;
