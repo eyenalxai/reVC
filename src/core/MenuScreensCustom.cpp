@@ -86,7 +86,7 @@
 	#define DENSITY_SLIDERS \
 		MENUACTION_CFO_SLIDER, "FEM_PED", { new CCFOSlider(&CIniFile::PedNumberMultiplier, "Display", "PedDensity", 0.2f, 3.4f, PedDensityChange) }, 0, 0, MENUALIGN_LEFT, \
 		MENUACTION_CFO_SLIDER, "FEM_CAR", { new CCFOSlider(&CIniFile::CarNumberMultiplier, "Display", "CarDensity", 0.2f, 3.4f, CarDensityChange) }, 0, 0, MENUALIGN_LEFT, \
-		MENUACTION_CFO_SLIDER, "FEM_SPN", { new CCFOSlider(&CIniFile::SpawnDistanceMultiplier, "Display", "SpawnDistance", 1.0f, 4.0f) }, 0, 0, MENUALIGN_LEFT,
+		MENUACTION_CFO_SLIDER, "FEM_SPN", { new CCFOSlider(&CIniFile::SpawnDistanceMultiplier, "Display", "SpawnDistance", 1.0f, 4.0f, SpawnDistanceChange) }, 0, 0, MENUALIGN_LEFT,
 #else
 	#define DENSITY_SLIDERS 
 #endif
@@ -171,9 +171,10 @@ void RestoreDefDisplay(int8 action) {
 		TheCamera.bFreeCam = false;
 	#endif
 	#ifdef PED_CAR_DENSITY_SLIDERS
-		CIniFile::LoadIniFile();
-		// The spawn distance has no gta3.ini key, so reset it to the stock value here
+		// The spawn distance has no gta3.ini key, so reset it to the stock value here;
+		// LoadIniFile then recomputes the caps with the default.
 		CIniFile::SpawnDistanceMultiplier = 1.0f;
+		CIniFile::LoadIniFile();
 	#endif
 	#ifdef GRAPHICS_MENU_OPTIONS // otherwise Frontend will handle those
 		FrontEndMenuManager.m_PrefsBrightness = 256;
@@ -223,12 +224,15 @@ void IslandLoadingAfterChange(int8 before, int8 after) {
 
 #ifdef PED_CAR_DENSITY_SLIDERS
 void PedDensityChange(float before, float after) {
-	CPopulation::MaxNumberOfPedsInUse = DEFAULT_MAX_NUMBER_OF_PEDS * after;
-	CPopulation::MaxNumberOfPedsInUseInterior = DEFAULT_MAX_NUMBER_OF_PEDS_INTERIOR * after;
+	CIniFile::ApplyPopulationCaps();
 }
 
 void CarDensityChange(float before, float after) {
-	CCarCtrl::MaxNumberOfCarsInUse = DEFAULT_MAX_NUMBER_OF_CARS * after;
+	CIniFile::ApplyPopulationCaps();
+}
+
+void SpawnDistanceChange(float before, float after) {
+	CIniFile::ApplyPopulationCaps();
 }
 #endif
 
