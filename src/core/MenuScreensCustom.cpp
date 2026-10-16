@@ -168,6 +168,8 @@ void RestoreDefDisplay(int8 action) {
 	#endif
 	#ifdef PED_CAR_DENSITY_SLIDERS
 		CIniFile::LoadIniFile();
+		// The spawn distance has no gta3.ini key, so reset it to the stock value here
+		CIniFile::SpawnDistanceMultiplier = 1.0f;
 	#endif
 	#ifdef GRAPHICS_MENU_OPTIONS // otherwise Frontend will handle those
 		FrontEndMenuManager.m_PrefsBrightness = 256;
