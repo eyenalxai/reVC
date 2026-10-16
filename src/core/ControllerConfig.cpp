@@ -202,8 +202,7 @@ void CControllerConfigManager::LoadSettings(int32 file)
 	{
 		ControlsManager.MakeControllerActionsBlank();
 #ifdef BIND_VEHICLE_FIREWEAPON
-		// VEHICLE_FIREWEAPON entered the block one version before PED_RELOAD.
-		skipVehicleFireWeapon = nVersion < CONTROLS_VERSION - 1;
+		skipVehicleFireWeapon = nVersion < CONTROLS_VERSION_VEHICLE_FIREWEAPON;
 		// Set the default settings of VEHICLE_FIREWEAPON
 		if (skipVehicleFireWeapon) {
 			SetControllerKeyAssociatedWithAction(VEHICLE_FIREWEAPON, rsPADINS, KEYBOARD);
@@ -212,8 +211,7 @@ void CControllerConfigManager::LoadSettings(int32 file)
 				SetMouseButtonAssociatedWithAction(VEHICLE_FIREWEAPON, 1);
 		}
 #endif
-		// PED_RELOAD entered the block at the current version
-		skipPedReload = nVersion < CONTROLS_VERSION;
+		skipPedReload = nVersion < CONTROLS_VERSION_PED_RELOAD;
 		// Set the default settings of PED_RELOAD
 		if (skipPedReload)
 			SetControllerKeyAssociatedWithAction(PED_RELOAD, 'R', KEYBOARD);

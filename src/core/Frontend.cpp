@@ -1684,10 +1684,17 @@ CMenuManager::DrawStandardMenus(bool activeScreen)
 #endif
 }
 
+// The action columns of a row hold the e_ControllerAction of the column, or
+// one of these two instead.
+enum eControllerSetupAction
+{
+	CONTROLLER_NO_ACTION = -1,	// the column shows "not used"
+	CONTROLLER_COMBO_TEXT = -2,	// the column shows the combo text (vehicle row 24)
+};
+
 // One line of a controller setup screen. The text is the GXT key of the action
 // column; the two action columns hold the e_ControllerAction of that column, or
-// -1 when the row has no action there. The vehicle column of row 24 holds -2:
-// it shows the combo text instead of a binding.
+// CONTROLLER_NO_ACTION when the row has no action there.
 struct tControllerSetupRow
 {
 	const char *text;
@@ -1709,69 +1716,69 @@ static const int controllerSetupVehicleFire = PED_FIREWEAPON;
 // for STANDARD and FEC_LUD for CLASSIC.
 static const tControllerSetupRow controllerSetupRowsStandard[] = {
 	{ "FEC_FIR", PED_FIREWEAPON,                     controllerSetupVehicleFire },
-	{ "FEC_NWE", PED_CYCLE_WEAPON_RIGHT,             -1 },
-	{ "FEC_PWE", PED_CYCLE_WEAPON_LEFT,              -1 },
+	{ "FEC_NWE", PED_CYCLE_WEAPON_RIGHT,             CONTROLLER_NO_ACTION },
+	{ "FEC_PWE", PED_CYCLE_WEAPON_LEFT,              CONTROLLER_NO_ACTION },
 	{ "FEC_FOR", GO_FORWARD,                         VEHICLE_ACCELERATE },
 	{ "FEC_BAC", GO_BACK,                            VEHICLE_BRAKE },
 	{ "FEC_LEF", GO_LEFT,                            GO_LEFT },
 	{ "FEC_RIG", GO_RIGHT,                           GO_RIGHT },
-	{ "FEC_ZIN", PED_SNIPER_ZOOM_IN,                 -1 },
-	{ "FEC_ZOT", PED_SNIPER_ZOOM_OUT,                -1 },
+	{ "FEC_ZIN", PED_SNIPER_ZOOM_IN,                 CONTROLLER_NO_ACTION },
+	{ "FEC_ZOT", PED_SNIPER_ZOOM_OUT,                CONTROLLER_NO_ACTION },
 	{ "FEC_EEX", VEHICLE_ENTER_EXIT,                 VEHICLE_ENTER_EXIT },
-	{ "FEC_RAD", -1,                                 VEHICLE_CHANGE_RADIO_STATION },
-	{ "FEC_HRN", -1,                                 VEHICLE_HORN },
-	{ "FEC_SUB", -1,                                 TOGGLE_SUBMISSIONS },
+	{ "FEC_RAD", CONTROLLER_NO_ACTION,               VEHICLE_CHANGE_RADIO_STATION },
+	{ "FEC_HRN", CONTROLLER_NO_ACTION,               VEHICLE_HORN },
+	{ "FEC_SUB", CONTROLLER_NO_ACTION,               TOGGLE_SUBMISSIONS },
 	{ "FEC_CMR", CAMERA_CHANGE_VIEW_ALL_SITUATIONS,  CAMERA_CHANGE_VIEW_ALL_SITUATIONS },
-	{ "FEC_JMP", PED_JUMPING,                        -1 },
-	{ "FEC_SPN", PED_SPRINT,                         -1 },
-	{ "FEC_HND", -1,                                 VEHICLE_HANDBRAKE },
-	{ "FEC_TAR", PED_LOCK_TARGET,                    -1 },
-	{ "FEC_CRO", PED_DUCK,                           -1 },
-	{ "FEC_ANS", PED_ANSWER_PHONE,                   -1 },
-	{ "FEC_TFL", -1,                                 VEHICLE_TURRETLEFT },
-	{ "FEC_TFR", -1,                                 VEHICLE_TURRETRIGHT },
-	{ "FEC_TFU", -1,                                 VEHICLE_TURRETUP },
-	{ "FEC_TFD", -1,                                 VEHICLE_TURRETDOWN },
-	{ "FEC_LBA", PED_LOOKBEHIND,                     -2 },
-	{ "FEC_LOL", -1,                                 VEHICLE_LOOKLEFT },
-	{ "FEC_LOR", -1,                                 VEHICLE_LOOKRIGHT },
-	{ "FEC_RLD", PED_RELOAD,                         -1 },
+	{ "FEC_JMP", PED_JUMPING,                        CONTROLLER_NO_ACTION },
+	{ "FEC_SPN", PED_SPRINT,                         CONTROLLER_NO_ACTION },
+	{ "FEC_HND", CONTROLLER_NO_ACTION,               VEHICLE_HANDBRAKE },
+	{ "FEC_TAR", PED_LOCK_TARGET,                    CONTROLLER_NO_ACTION },
+	{ "FEC_CRO", PED_DUCK,                           CONTROLLER_NO_ACTION },
+	{ "FEC_ANS", PED_ANSWER_PHONE,                   CONTROLLER_NO_ACTION },
+	{ "FEC_TFL", CONTROLLER_NO_ACTION,               VEHICLE_TURRETLEFT },
+	{ "FEC_TFR", CONTROLLER_NO_ACTION,               VEHICLE_TURRETRIGHT },
+	{ "FEC_TFU", CONTROLLER_NO_ACTION,               VEHICLE_TURRETUP },
+	{ "FEC_TFD", CONTROLLER_NO_ACTION,               VEHICLE_TURRETDOWN },
+	{ "FEC_LBA", PED_LOOKBEHIND,                     CONTROLLER_COMBO_TEXT },
+	{ "FEC_LOL", CONTROLLER_NO_ACTION,               VEHICLE_LOOKLEFT },
+	{ "FEC_LOR", CONTROLLER_NO_ACTION,               VEHICLE_LOOKRIGHT },
+	{ "FEC_RLD", PED_RELOAD,                         CONTROLLER_NO_ACTION },
 };
 
 static const tControllerSetupRow controllerSetupRowsClassic[] = {
 	{ "FEC_FIR", PED_FIREWEAPON,                     controllerSetupVehicleFire },
-	{ "FEC_NWE", PED_CYCLE_WEAPON_RIGHT,             -1 },
-	{ "FEC_PWE", PED_CYCLE_WEAPON_LEFT,              -1 },
+	{ "FEC_NWE", PED_CYCLE_WEAPON_RIGHT,             CONTROLLER_NO_ACTION },
+	{ "FEC_PWE", PED_CYCLE_WEAPON_LEFT,              CONTROLLER_NO_ACTION },
 	{ "FEC_FOR", GO_FORWARD,                         VEHICLE_ACCELERATE },
 	{ "FEC_BAC", GO_BACK,                            VEHICLE_BRAKE },
 	{ "FEC_LEF", GO_LEFT,                            GO_LEFT },
 	{ "FEC_RIG", GO_RIGHT,                           GO_RIGHT },
-	{ "FEC_ZIN", PED_SNIPER_ZOOM_IN,                 -1 },
-	{ "FEC_ZOT", PED_SNIPER_ZOOM_OUT,                -1 },
+	{ "FEC_ZIN", PED_SNIPER_ZOOM_IN,                 CONTROLLER_NO_ACTION },
+	{ "FEC_ZOT", PED_SNIPER_ZOOM_OUT,                CONTROLLER_NO_ACTION },
 	{ "FEC_EEX", VEHICLE_ENTER_EXIT,                 VEHICLE_ENTER_EXIT },
-	{ "FEC_RAD", -1,                                 VEHICLE_CHANGE_RADIO_STATION },
-	{ "FEC_HRN", -1,                                 VEHICLE_HORN },
-	{ "FEC_SUB", -1,                                 TOGGLE_SUBMISSIONS },
+	{ "FEC_RAD", CONTROLLER_NO_ACTION,               VEHICLE_CHANGE_RADIO_STATION },
+	{ "FEC_HRN", CONTROLLER_NO_ACTION,               VEHICLE_HORN },
+	{ "FEC_SUB", CONTROLLER_NO_ACTION,               TOGGLE_SUBMISSIONS },
 	{ "FEC_CMR", CAMERA_CHANGE_VIEW_ALL_SITUATIONS,  CAMERA_CHANGE_VIEW_ALL_SITUATIONS },
-	{ "FEC_JMP", PED_JUMPING,                        -1 },
-	{ "FEC_SPN", PED_SPRINT,                         -1 },
-	{ "FEC_HND", -1,                                 VEHICLE_HANDBRAKE },
-	{ "FEC_TAR", PED_LOCK_TARGET,                    -1 },
-	{ "FEC_CRO", PED_DUCK,                           -1 },
-	{ "FEC_ANS", PED_ANSWER_PHONE,                   -1 },
-	{ "FEC_TFL", -1,                                 VEHICLE_TURRETLEFT },
-	{ "FEC_TFR", -1,                                 VEHICLE_TURRETRIGHT },
-	{ "FEC_TFU", -1,                                 VEHICLE_TURRETUP },
-	{ "FEC_TFD", -1,                                 VEHICLE_TURRETDOWN },
-	{ "FEC_LBA", PED_LOOKBEHIND,                     -2 },
+	{ "FEC_JMP", PED_JUMPING,                        CONTROLLER_NO_ACTION },
+	{ "FEC_SPN", PED_SPRINT,                         CONTROLLER_NO_ACTION },
+	{ "FEC_HND", CONTROLLER_NO_ACTION,               VEHICLE_HANDBRAKE },
+	{ "FEC_TAR", PED_LOCK_TARGET,                    CONTROLLER_NO_ACTION },
+	{ "FEC_CRO", PED_DUCK,                           CONTROLLER_NO_ACTION },
+	{ "FEC_ANS", PED_ANSWER_PHONE,                   CONTROLLER_NO_ACTION },
+	{ "FEC_TFL", CONTROLLER_NO_ACTION,               VEHICLE_TURRETLEFT },
+	{ "FEC_TFR", CONTROLLER_NO_ACTION,               VEHICLE_TURRETRIGHT },
+	{ "FEC_TFU", CONTROLLER_NO_ACTION,               VEHICLE_TURRETUP },
+	{ "FEC_TFD", CONTROLLER_NO_ACTION,               VEHICLE_TURRETDOWN },
+	{ "FEC_LBA", PED_LOOKBEHIND,                     CONTROLLER_COMBO_TEXT },
 	{ "FEC_LOL", PED_1RST_PERSON_LOOK_LEFT,          VEHICLE_LOOKLEFT },
 	{ "FEC_LOR", PED_1RST_PERSON_LOOK_RIGHT,         VEHICLE_LOOKRIGHT },
-	{ "FEC_LUD", PED_1RST_PERSON_LOOK_UP,            -1 },
-	{ "FEC_LDU", PED_1RST_PERSON_LOOK_DOWN,          -1 },
-	{ "FEC_NTR", PED_CYCLE_TARGET_LEFT,              -1 },
-	{ "FEC_PTT", PED_CYCLE_TARGET_RIGHT,             -1 },
-	{ "FEC_CEN", PED_CENTER_CAMERA_BEHIND_PLAYER,    -1 },
-	{ "FEC_RLD", PED_RELOAD,                         -1 },
+	{ "FEC_LUD", PED_1RST_PERSON_LOOK_UP,            CONTROLLER_NO_ACTION },
+	{ "FEC_LDU", PED_1RST_PERSON_LOOK_DOWN,          CONTROLLER_NO_ACTION },
+	{ "FEC_NTR", PED_CYCLE_TARGET_LEFT,              CONTROLLER_NO_ACTION },
+	{ "FEC_PTT", PED_CYCLE_TARGET_RIGHT,             CONTROLLER_NO_ACTION },
+	{ "FEC_CEN", PED_CENTER_CAMERA_BEHIND_PLAYER,    CONTROLLER_NO_ACTION },
+	{ "FEC_RLD", PED_RELOAD,                         CONTROLLER_NO_ACTION },
 };
 
 // The rows of one control method and their count.
@@ -1784,9 +1791,10 @@ struct tControllerSetup
 static const tControllerSetup controllerSetupStandard = { controllerSetupRowsStandard, ARRAY_SIZE(controllerSetupRowsStandard) };
 static const tControllerSetup controllerSetupClassic = { controllerSetupRowsClassic, ARRAY_SIZE(controllerSetupRowsClassic) };
 
-// The rows of a control method. Any other value keeps the STANDARD rows, as
-// the label array did before.
-static const tControllerSetup *GetControllerSetup(int8 method)
+// The rows of a control method. Any other value keeps the STANDARD rows, and a
+// third method is one case here.
+static const tControllerSetup *
+GetControllerSetup(int8 method)
 {
 	return method == CONTROL_CLASSIC ? &controllerSetupClassic : &controllerSetupStandard;
 }
@@ -1805,14 +1813,7 @@ CMenuManager::GetNumOptionsCntrlConfigScreens(void)
 			break;
 #endif
 		case MENUPAGE_KEYBOARD_CONTROLS:
-			switch (m_ControlMethod) {
-				case CONTROL_STANDARD:
-					number = controllerSetupStandard.numRows;
-					break;
-				case CONTROL_CLASSIC:
-					number = controllerSetupClassic.numRows;
-					break;
-			}
+			number = GetControllerSetup(m_ControlMethod)->numRows;
 			break;
 	}
 	return number;
@@ -1885,7 +1886,7 @@ CMenuManager::DrawControllerBound(int32 yStart, int32 xStart, int32 unused, int8
 #ifdef FIX_BUGS
 		for (; contSetOrder < MAX_SETORDERS && controllerAction >= 0; contSetOrder++) {
 #else
-		for (; contSetOrder < MAX_SETORDERS && controllerAction != -1; contSetOrder++) {
+		for (; contSetOrder < MAX_SETORDERS && controllerAction != CONTROLLER_NO_ACTION; contSetOrder++) {
 #endif
 			wchar *settingText = ControlsManager.GetControllerSettingTextWithOrderNumber((e_ControllerAction)controllerAction, (eContSetOrder)contSetOrder);
 			if (settingText) {
@@ -1905,11 +1906,11 @@ CMenuManager::DrawControllerBound(int32 yStart, int32 xStart, int32 unused, int8
 					nextX += CFont::GetStringWidth(settingText, true) + bindingMargin;
 			}
 		}
-		if (controllerAction == -1) {
+		if (controllerAction == CONTROLLER_NO_ACTION) {
 			CFont::SetColor(CRGBA(0, 0, 0, FadeIn(255)));
 			CFont::PrintString(nextX, nextY, TheText.Get("FEC_NUS")); // not used
 
-		} else if (controllerAction == -2) {
+		} else if (controllerAction == CONTROLLER_COMBO_TEXT) {
 			CFont::SetColor(CRGBA(0, 0, 0, FadeIn(255)));
 			CFont::PrintString(nextX, nextY, TheText.Get("FEC_CMP")); // combo: l+r
 
@@ -1935,7 +1936,7 @@ CMenuManager::DrawControllerBound(int32 yStart, int32 xStart, int32 unused, int8
 		if (column == CONTSETUP_PED_COLUMN && m_nSelectedContSetupColumn == CONTSETUP_PED_COLUMN ||
 			column == CONTSETUP_VEHICLE_COLUMN && m_nSelectedContSetupColumn == CONTSETUP_VEHICLE_COLUMN) {
 
-			if (optionIdx == m_nSelectedListRow && controllerAction != -1 && controllerAction != -2) {
+			if (optionIdx == m_nSelectedListRow && controllerAction != CONTROLLER_NO_ACTION && controllerAction != CONTROLLER_COMBO_TEXT) {
 				m_CurrCntrlAction = controllerAction; 
 				if (m_bWaitingForNewKeyBind) {
 					static bool showWaitingText = false;
@@ -3961,9 +3962,7 @@ CMenuManager::ProcessList(bool &optionSelected, bool &goBack)
 		m_nTotalListRow = m_nSkinsTotal;
 	}
 	if (m_nCurrScreen == MENUPAGE_KEYBOARD_CONTROLS) {
-		// An unknown control method keeps the STANDARD row count, as the count
-		// read here always did.
-		m_nTotalListRow = m_ControlMethod == CONTROL_CLASSIC ? controllerSetupClassic.numRows : controllerSetupStandard.numRows;
+		m_nTotalListRow = GetControllerSetup(m_ControlMethod)->numRows;
 		if (m_nSelectedListRow > m_nTotalListRow)
 			m_nSelectedListRow = m_nTotalListRow - 1;
 	}
