@@ -1325,7 +1325,12 @@ CCamera::CamControl(void)
 							ReqMode = PlayerWeaponMode.Mode;
 						else
 							ReqMode = CCam::MODE_FOLLOWPED;
-					}else
+					}else if(TheCamera.FirstPersonViewEnabled() && PlayerWeaponMode.Mode == CCam::MODE_M16_1STPERSON)
+						// The mobile ADS keeps the normal first person camera; the M16
+						// camera mode is the stock stationary aim camera and it moves
+						// with the movement keys.
+						ReqMode = CCam::MODE_1STPERSON;
+					else
 						ReqMode = PlayerWeaponMode.Mode;
 				}else if(ReqMode != CCam::MODE_TOP_DOWN_PED && PedZoomIndicator != CAM_ZOOM_3){
 					// Syphon mode

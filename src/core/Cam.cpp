@@ -1408,7 +1408,7 @@ CCam::Process_FollowPedWithMouse(const CVector &CameraTarget, float TargetOrient
 		AdsAiming = TargetPed->m_nMoveState != PEDMOVE_SPRINT &&
 			CWeaponInfo::GetWeaponInfo(TargetPed->GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_CANAIM);
 	}
-	WellBufferMe(AdsAiming ? 1.0f : 0.0f, &m_fAdsAmount, &m_fAdsAmountSpeed, 0.02f, 0.005f, false);
+	WellBufferMe(AdsAiming ? 1.0f : 0.0f, &m_fAdsAmount, &m_fAdsAmountSpeed, 0.2f, 0.1f, false);
 	AdsDistScale = 1.0f - (1.0f - fAdsDistanceScale)*m_fAdsAmount;
 	AdsFOVScale = 1.0f - (1.0f - fAdsFOVScale)*m_fAdsAmount;
 	FOV *= AdsFOVScale;
@@ -2642,6 +2642,9 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		// The first person view setting overrides the default FOV
 		if(TheCamera.FirstPersonViewEnabled())
 			FOV = FrontEndMenuManager.GetFirstPersonFOV();
+		// Aiming down the sights zooms in
+		if(TheCamera.UsingFirstPersonSights())
+			FOV = TheCamera.GetFirstPersonSightsFOV();
 #endif
 
 		TargetCoors = CameraTarget;
