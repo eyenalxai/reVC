@@ -125,13 +125,16 @@ how the budget is spent; it does not change the wheel list.
 ## Magazine weapon
 
 A weapon that fires instant hits and has a clip of two or more rounds. The
-active reload applies to magazine weapons only.
+player's shotgun, stubby shotgun and sniper rifle are magazine weapons; the
+rocket launcher stays one-shot. AI peds keep the per-shot cycle for these
+weapons. The active reload applies to magazine weapons only.
 
 ## Active reload
 
 The timed reload of a magazine weapon. The player starts it with the reload
 key; a press inside the reload window finishes the reload fast, and a press
-before the window jams it. With the feature on, the player's reload is manual
+before the window jams it. The reload also works in a vehicle, with the same
+window and timing bar. With the feature on, the player's reload is manual
 only: the clip never refills by itself.
 
 ## Reload window
