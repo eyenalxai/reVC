@@ -72,6 +72,24 @@ enum e_ControllerAction
 	MAX_CONTROLLERACTIONS,
 };
 
+// The versions of the controller block of gta_vc.set. The loader reads version
+// 3 and newer. CONTROLS_VERSION is the version the writer stamps into the file,
+// and it moves forward when a field joins the block. The loader compares a file
+// against the entry version of each field it has to default; an entry version
+// is frozen forever, because the files that carry it stay on disk. A bump of
+// CONTROLS_VERSION must not move one.
+#ifdef BIND_VEHICLE_FIREWEAPON
+// VEHICLE_FIREWEAPON entered the block at 4 and PED_RELOAD one version later.
+#define CONTROLS_VERSION_VEHICLE_FIREWEAPON 4
+#define CONTROLS_VERSION_PED_RELOAD         5
+#define CONTROLS_VERSION                    5
+#else
+// Without BIND_VEHICLE_FIREWEAPON the vehicle fire key shares the ped's, so
+// PED_RELOAD is the only field after version 3.
+#define CONTROLS_VERSION_PED_RELOAD 4
+#define CONTROLS_VERSION            4
+#endif
+
 enum e_ControllerActionType
 {
 	ACTIONTYPE_1RSTPERSON = 0,
