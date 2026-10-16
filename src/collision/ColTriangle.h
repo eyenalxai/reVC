@@ -131,4 +131,10 @@ struct CColTriangleAccelNode
 	int32 count;	// internal: 0; leaf: number of triangles in the leaf
 };
 
+// Stack bound for the acceleration tree. Every split keeps at least a quarter
+// of the range, so the depth stays below log4/3(numTriangles) — 51 for ten
+// million triangles — and both the builder and a query walk need one entry
+// per level.
+static const int32 TRIANGLE_ACCEL_MAX_DEPTH = 128;
+
 #endif // __GTA_COLTRIANGLE_H__

@@ -166,12 +166,18 @@ CColModel::CalculateTrianglePlanes(void)
 
 	CCollision::ms_numCachedTriangles += numTriangles;
 
-	if(CCollision::ms_numCachedBytes + numTriangles*(int32)sizeof(CColTriangleBasis) <= COLTRI_CACHE_MAX_BYTES){
+	// The basis is optional. Its check counts the planes that were just
+	// allocated, so the cap really covers planes + basis + trees. The VU path
+	// has its own compressed plane format and does not use the basis.
+#ifndef VU_COLLISION
+	if(CCollision::ms_numCachedBytes + numTriangles*(int32)(sizeof(CColTrianglePlane) + sizeof(CColTriangleBasis))
+			<= COLTRI_CACHE_MAX_BYTES){
 		triangleBasis = (CColTriangleBasis*)RwMalloc(sizeof(CColTriangleBasis) * numTriangles);
 		REGISTER_MEMPTR(&triangleBasis);
 		for(int i = 0; i < numTriangles; i++)
 			triangleBasis[i].Set(vertices, triangles[i], trianglePlanes[i]);
 	}
+#endif
 
 	CCollision::ms_numCachedBytes += TriangleCacheBytes(this);
 
@@ -219,7 +225,7 @@ CColModel::CalculateTriangleAccel(void)
 	{
 		int32 lo, hi, node;
 	};
-	Range stack[128];
+	Range stack[TRIANGLE_ACCEL_MAX_DEPTH];
 	int32 sp = 0;
 	int32 numNodes = 1;
 	stack[sp++] = Range{0, numTriangles, 0};
@@ -285,7 +291,7 @@ CColModel::CalculateTriangleAccel(void)
 		}
 
 		assert(best > range.lo && best < range.hi);
-		assert(sp + 2 <= ARRAY_SIZE(stack));
+		assert(sp + 2 <= TRIANGLE_ACCEL_MAX_DEPTH);
 		assert(numNodes + 2 <= maxNodes);
 		int32 child = numNodes;
 		node.child = child;

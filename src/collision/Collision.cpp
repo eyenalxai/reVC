@@ -1684,7 +1684,6 @@ enum {
 // worst case.
 static const float TRI_ACCEL_SLACK_BASE = 1.0e-2f;
 static const float TRI_ACCEL_SLACK_REL = 1.0e-6f;
-static const int32 TRI_ACCEL_STACK_SIZE = 128;
 
 static float
 TriangleAccelSlack(const CColTriangleAccelNode &node, const CColSphere &sphere)
@@ -1704,25 +1703,33 @@ TriangleAccelSlack(const CColTriangleAccelNode &node, const CColSphere &sphere)
 	return TRI_ACCEL_SLACK_BASE + TRI_ACCEL_SLACK_REL*(len*len + len*(cmax + nmax))/radius;
 }
 
+// Appends triangle i when the narrow phase's test accepts it for the sphere.
+// The caller keeps the index order explicit; this only holds the predicate.
+static void
+AppendSphereTriangle(const CColSphere &sphere, CColModel &model, int32 i, int32 *indices, int32 &num)
+{
+	if(CCollision::TestSphereTriangle(sphere, model.vertices, model.triangles[i], model.trianglePlanes[i],
+			model.triangleBasis ? &model.triangleBasis[i] : nil))
+		indices[num++] = i;
+}
+
 // The accelerated version of the ascending scan over model's triangles: it
 // appends exactly the triangles TestSphereTriangle would accept, in the same
 // ascending index order, but skips the subtrees the dilated sphere cannot
 // reach.
-static int32
-CollectSphereTriangles(const CColSphere &sphere, CColModel &model, int32 *indices)
+int32
+CCollision::CollectSphereTriangles(const CColSphere &sphere, CColModel &model, int32 *indices)
 {
 	int32 num = 0;
 	int i;
 
 	if(model.triangleAccel == nil){
 		for(i = 0; i < model.numTriangles; i++)
-			if(CCollision::TestSphereTriangle(sphere, model.vertices, model.triangles[i], model.trianglePlanes[i],
-					model.triangleBasis ? &model.triangleBasis[i] : nil))
-				indices[num++] = i;
+			AppendSphereTriangle(sphere, model, i, indices, num);
 		return num;
 	}
 
-	int32 stack[TRI_ACCEL_STACK_SIZE];
+	int32 stack[TRIANGLE_ACCEL_MAX_DEPTH];
 	int32 sp = 0;
 	stack[sp++] = 0;
 	while(sp > 0){
@@ -1740,14 +1747,13 @@ CollectSphereTriangles(const CColSphere &sphere, CColModel &model, int32 *indice
 			continue;
 
 		if(node.count == 0){
-			assert(sp + 2 <= TRI_ACCEL_STACK_SIZE);
+			assert(sp + 2 <= TRIANGLE_ACCEL_MAX_DEPTH);
 			stack[sp++] = node.child + 1;
 			stack[sp++] = node.child;
 		}else{
+			// the leaf's triangles are contiguous and ascending
 			for(i = node.child; i < node.child + node.count; i++)
-				if(CCollision::TestSphereTriangle(sphere, model.vertices, model.triangles[i], model.trianglePlanes[i],
-						model.triangleBasis ? &model.triangleBasis[i] : nil))
-					indices[num++] = i;
+				AppendSphereTriangle(sphere, model, i, indices, num);
 		}
 	}
 	return num;

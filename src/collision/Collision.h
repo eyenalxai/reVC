@@ -24,11 +24,14 @@ struct CStoredCollPoly
 #define MAX_COLLISION_POINTS 32
 #endif
 
-// Cap for the optional per-triangle caches (basis and broad phase). Past the
-// cap new models leave the basis out and scan every triangle, which gives the
-// same results at the speed of the old code. The measured resident set of the
-// whole game content is around 17 MB, so this is a safety net, not a budget.
-// See VICE-121.
+// Cap for the per-triangle caches (planes, basis and acceleration tree) of
+// all resident models together. Planes are always allocated, the tests need
+// them; when the cap is already reached, a new model keeps its planes but is
+// left without a basis and without the broad phase, which gives the same
+// results at the speed of the old code. A single huge model can therefore
+// lose its acceleration silently. The measured resident set of the whole
+// game content is around 17 MB, so this is a safety net, not a budget.
+// See VICE-121 and docs/adr/0016.
 #ifndef COLTRI_CACHE_MAX_BYTES
 #define COLTRI_CACHE_MAX_BYTES (64*1024*1024)
 #endif
@@ -51,6 +54,13 @@ public:
 	static void DrawColModel_Coloured(const CMatrix &mat, const CColModel &colModel, int32 id);
 
 	static void CalculateTrianglePlanes(CColModel *model);
+#ifndef VU_COLLISION
+	// The broad phase of ProcessColModels: appends the triangles of model the
+	// sphere can reach, in ascending index order. Walks the acceleration tree
+	// when the model has one and scans every triangle otherwise. Exposed so
+	// tools/collision_check can compare the pruned list against the full scan.
+	static int32 CollectSphereTriangles(const CColSphere &sphere, CColModel &model, int32 *indices);
+#endif
 
 	// all these return true if there's a collision
 	static bool TestSphereSphere(const CSphere &s1, const CSphere &s2);

@@ -298,4 +298,23 @@ hover tilt or the road tilt, and the wheel scale. One row of `aWheelPoses` drive
 it, so the rear, mid, Dodo, tank and front wheels share one pass. A row keeps its
 own hover splash order: the two random arguments are drawn in the order the row
 lists them, and swapping a pair would shift the global random stream.
+
+## Triangle basis
+
+The per-triangle frame the sphere/triangle tests work in: the normalized first
+edge, the in-plane vector at right angles to it, and the third vertex's
+coordinates in that frame. It depends only on the triangle, so the collision
+model computes it once (VICE-121).
+
+## Broad phase
+
+The part of `ProcessColModels` that picks which of model B's triangles are
+worth the narrow phase's math. It appends the candidates in ascending triangle
+index order, because the narrow phase keeps the first of equal distances.
+
+## Acceleration tree
+
+A per-model binary tree over contiguous, ascending runs of triangles. Each node
+bounds its run; the broad phase descends only into the nodes the query sphere
+can reach. The model builds it lazily, on its first collision.
 >>>>>>> origin/miami
