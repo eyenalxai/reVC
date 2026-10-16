@@ -309,13 +309,16 @@ wchar* FirstPersonFOVDraw(bool *disabled, bool userHovering) {
 }
 
 void FirstPersonFOVPress(int8 action) {
+	// The stored value is unsigned, so step from the clamped value: a step
+	// below the minimum would wrap around to a large number.
+	int32 fov = FrontEndMenuManager.GetFirstPersonFOV();
 	if (action == FEOPTION_ACTION_LEFT)
-		FrontEndMenuManager.m_nFirstPersonFOV -= 5;
+		fov -= 5;
 	else if (action == FEOPTION_ACTION_RIGHT)
-		FrontEndMenuManager.m_nFirstPersonFOV += 5;
+		fov += 5;
 	else
 		return;
-	FrontEndMenuManager.m_nFirstPersonFOV = FrontEndMenuManager.GetFirstPersonFOV();
+	FrontEndMenuManager.m_nFirstPersonFOV = Clamp(fov, FIRST_PERSON_FOV_MIN, FIRST_PERSON_FOV_MAX);
 	FrontEndMenuManager.SaveSettings();
 }
 #endif
