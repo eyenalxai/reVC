@@ -870,21 +870,15 @@ CMouseControllerState CMousePointerStateHelper::GetMouseSetUp()
 		}
 	}
 #else
-	// It seems there is no way to get number of buttons on mouse, so assign all buttons if we have mouse.
-#if !defined(LIBRW_SDL2)
-    double xpos = 1.0f, ypos;
-	glfwGetCursorPos(PSGLOBAL(window), &xpos, &ypos);
-#else
-    int xpos = 1, ypos;
-    SDL_GetMouseState(&xpos, &ypos);
-#endif
-	if (xpos != 0.f) {
-		state.MMB = true;
-		state.RMB = true;
-		state.LMB = true;
-		state.WHEELDN = true;
-		state.WHEELUP = true;
-	}
+	// There is no portable way to count the buttons, so a mouse that exists has
+	// all of them. The old code only did this when the cursor x was not 0, which
+	// left the aim and the fire unbound whenever the game started with the
+	// pointer at the left edge.
+	state.MMB = true;
+	state.RMB = true;
+	state.LMB = true;
+	state.WHEELDN = true;
+	state.WHEELUP = true;
 #endif
 
 	return state;

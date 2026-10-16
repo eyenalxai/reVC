@@ -477,6 +477,10 @@ void LoadINIControllerSettings()
 			}
 		}
 	}
+
+	// A stale ini file can hold an action without its mouse part, which leaves
+	// the mouse button unbound for good. Fill those in from the defaults.
+	ControlsManager.ApplyDefaultMouseBindings(true);
 }
 
 void SaveINIControllerSettings()

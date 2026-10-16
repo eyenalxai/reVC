@@ -224,6 +224,7 @@ public:
 	void  SetControllerKeyAssociatedWithAction(e_ControllerAction action, int32 key, eControllerType type);
 	int32 GetMouseButtonAssociatedWithAction  (e_ControllerAction action);
 	void  SetMouseButtonAssociatedWithAction  (e_ControllerAction action, int32 button);
+	void  ApplyDefaultMouseBindings           (bool onlyUnset);
 	void  ResetSettingOrder                   (e_ControllerAction action);
 };
 

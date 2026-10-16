@@ -348,42 +348,48 @@ void CControllerConfigManager::InitDefaultControlConfiguration()
 	}
 }
 
+struct tDefaultMouseBinding
+{
+	e_ControllerAction action;
+	int32 button;
+};
+
+// The default mouse bindings. They are installed when the mouse is set up and
+// they fill in bindings that a stale ini file left empty.
+static const tDefaultMouseBinding aDefaultMouseBindings[] = {
+	{ PED_FIREWEAPON,               1 },
+#ifdef BIND_VEHICLE_FIREWEAPON
+	{ VEHICLE_FIREWEAPON,           1 },
+#endif
+	{ PED_LOCK_TARGET,              3 },
+	{ VEHICLE_HANDBRAKE,            3 },
+	{ VEHICLE_LOOKBEHIND,           2 },
+	{ PED_LOOKBEHIND,               2 },
+	{ PED_CYCLE_WEAPON_LEFT,        4 },
+	{ PED_CYCLE_WEAPON_RIGHT,       5 },
+	{ VEHICLE_CHANGE_RADIO_STATION, 4 },
+	{ PED_SNIPER_ZOOM_IN,           4 },
+	{ PED_SNIPER_ZOOM_OUT,          5 },
+};
+
+void CControllerConfigManager::ApplyDefaultMouseBindings(bool onlyUnset)
+{
+	if (!m_bMouseAssociated)
+		return;
+
+	for (int32 i = 0; i < ARRAY_SIZE(aDefaultMouseBindings); i++) {
+		if (!onlyUnset || m_aSettings[aDefaultMouseBindings[i].action][MOUSE].m_Key == 0)
+			SetMouseButtonAssociatedWithAction(aDefaultMouseBindings[i].action, aDefaultMouseBindings[i].button);
+	}
+}
+
 void CControllerConfigManager::InitDefaultControlConfigMouse(CMouseControllerState const &availableButtons)
 {
-	if (availableButtons.LMB)
+	if (availableButtons.LMB || availableButtons.RMB || availableButtons.MMB ||
+	   availableButtons.WHEELUP || availableButtons.WHEELDN)
 	{
 		m_bMouseAssociated = true;
-		SetMouseButtonAssociatedWithAction(PED_FIREWEAPON,               1);
-#ifdef BIND_VEHICLE_FIREWEAPON	
-		SetMouseButtonAssociatedWithAction(VEHICLE_FIREWEAPON,           1);
-#endif
-	}
-
-	if (availableButtons.RMB)
-	{
-		SetMouseButtonAssociatedWithAction(PED_LOCK_TARGET,              3);
-
-		SetMouseButtonAssociatedWithAction(VEHICLE_HANDBRAKE,            3);
-	}
-
-	if (availableButtons.MMB)
-	{
-		SetMouseButtonAssociatedWithAction(VEHICLE_LOOKBEHIND,           2);
-
-		SetMouseButtonAssociatedWithAction(PED_LOOKBEHIND,               2);
-	}
-
-	if (availableButtons.WHEELUP || availableButtons.WHEELDN)
-	{
-		SetMouseButtonAssociatedWithAction(PED_CYCLE_WEAPON_LEFT,        4);
-
-		SetMouseButtonAssociatedWithAction(PED_CYCLE_WEAPON_RIGHT,       5);
-
-		SetMouseButtonAssociatedWithAction(VEHICLE_CHANGE_RADIO_STATION, 4);
-
-		SetMouseButtonAssociatedWithAction(PED_SNIPER_ZOOM_IN, 4);
-
-		SetMouseButtonAssociatedWithAction(PED_SNIPER_ZOOM_OUT, 5);
+		ApplyDefaultMouseBindings(false);
 	}
 }
 
