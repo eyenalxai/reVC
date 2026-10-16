@@ -209,6 +209,7 @@ CustomFrontendOptionsPopulate(void)
 #ifdef LOAD_INI_SETTINGS
 #define MINI_CASE_SENSITIVE
 #include "ini.h"
+#include "Settings.h"
 
 #ifdef __APPLE__
 static const char *
@@ -542,80 +543,7 @@ bool LoadINISettings()
 	if (!ini.read(cfg))
 		return false;
 
-#ifdef IMPROVED_VIDEOMODE
-	ReadIniIfExists("VideoMode", "Width", &FrontEndMenuManager.m_nPrefsWidth);
-	ReadIniIfExists("VideoMode", "Height", &FrontEndMenuManager.m_nPrefsHeight);
-	ReadIniIfExists("VideoMode", "Depth", &FrontEndMenuManager.m_nPrefsDepth);
-	ReadIniIfExists("VideoMode", "Subsystem", &FrontEndMenuManager.m_nPrefsSubsystem);
-	// Windowed mode is loaded below in CUSTOM_FRONTEND_OPTIONS section
-#else
-	ReadIniIfExists("Graphics", "VideoMode", &FrontEndMenuManager.m_nDisplayVideoMode);
-#endif
-	ReadIniIfExists("Controller", "HeadBob1stPerson", &TheCamera.m_bHeadBob);
-	ReadIniIfExists("Controller", "HorizantalMouseSens", &TheCamera.m_fMouseAccelHorzntl);
-	ReadIniIfExists("Controller", "InvertMouseVertically", &MousePointerStateHelper.bInvertVertically);
-	ReadIniIfExists("Controller", "DisableMouseSteering", &CVehicle::m_bDisableMouseSteering);
-	ReadIniIfExists("Controller", "Vibration", &FrontEndMenuManager.m_PrefsUseVibration);
-	ReadIniIfExists("Audio", "SfxVolume", &FrontEndMenuManager.m_PrefsSfxVolume);
-	ReadIniIfExists("Audio", "MusicVolume", &FrontEndMenuManager.m_PrefsMusicVolume);
-	ReadIniIfExists("Audio", "MP3BoostVolume", &FrontEndMenuManager.m_PrefsMP3BoostVolume);
-	ReadIniIfExists("Audio", "Radio", &FrontEndMenuManager.m_PrefsRadioStation);
-#ifdef EXTERNAL_3D_SOUND
-	ReadIniIfExists("Audio", "SpeakerType", &FrontEndMenuManager.m_PrefsSpeakers);
-	ReadIniIfExists("Audio", "Provider", &FrontEndMenuManager.m_nPrefsAudio3DProviderIndex);
-#endif
-	ReadIniIfExists("Audio", "DynamicAcoustics", &FrontEndMenuManager.m_PrefsDMA);
-	ReadIniIfExists("Display", "Brightness", &FrontEndMenuManager.m_PrefsBrightness);
-	ReadIniIfExists("Display", "DrawDistance", &FrontEndMenuManager.m_PrefsLOD);
-	ReadIniIfExists("Display", "Subtitles", &FrontEndMenuManager.m_PrefsShowSubtitles);
-	ReadIniIfExists("Graphics", "AspectRatio", &FrontEndMenuManager.m_PrefsUseWideScreen);
-	ReadIniIfExists("Graphics", "FrameLimiter", &FrontEndMenuManager.m_PrefsFrameLimiter);
-#ifdef LEGACY_MENU_OPTIONS
-	ReadIniIfExists("Graphics", "VSync", &FrontEndMenuManager.m_PrefsVsyncDisp);
-	ReadIniIfExists("Graphics", "Trails", &CMBlur::BlurOn);
-#endif
-	ReadIniIfExists("General", "SkinFile", FrontEndMenuManager.m_PrefsSkinFile, 256);
-	ReadIniIfExists("Controller", "Method", &FrontEndMenuManager.m_ControlMethod);
-	ReadIniIfExists("General", "Language", &FrontEndMenuManager.m_PrefsLanguage);
-	ReadIniIfExists("Display", "ShowHud", &FrontEndMenuManager.m_PrefsShowHud);
-	ReadIniIfExists("Display", "RadarMode", &FrontEndMenuManager.m_PrefsRadarMode);
-	ReadIniIfExists("Display", "ShowLegends", &FrontEndMenuManager.m_PrefsShowLegends);
-
-#ifdef EXTENDED_COLOURFILTER
-	ReadIniIfExists("CustomPipesValues", "PostFXIntensity", &CPostFX::Intensity);
-#endif
-#ifdef EXTENDED_PIPELINES
-	ReadIniIfExists("CustomPipesValues", "NeoVehicleShininess", &CustomPipes::VehicleShininess);
-	ReadIniIfExists("CustomPipesValues", "NeoVehicleSpecularity", &CustomPipes::VehicleSpecularity);
-	ReadIniIfExists("CustomPipesValues", "RimlightMult", &CustomPipes::RimlightMult);
-	ReadIniIfExists("CustomPipesValues", "LightmapMult", &CustomPipes::LightmapMult);
-	ReadIniIfExists("CustomPipesValues", "GlossMult", &CustomPipes::GlossMult);
-#endif
-	ReadIniIfExists("Rendering", "BackfaceCulling", &gBackfaceCulling);
-#ifdef NEW_RENDERER
-	ReadIniIfExists("Rendering", "NewRenderer", &gbNewRenderer);
-#endif
-	ReadIniIfExists("Drift", "Enabled", &gDriftEnabled);
-	ReadIniIfExists("Drift", "Strength", &gDriftStrength);
-	ReadIniIfExists("Drift", "Assist", &gDriftAssist);
-	ReadIniIfExists("Drift", "Debug", &gDriftDebug);
-	ReadIniIfExists("Weapons", "ActiveReload", &gActiveReloadEnabled);
-
-#ifdef PROPER_SCALING
-	ReadIniIfExists("Draw", "ProperScaling", &CDraw::ms_bProperScaling);	
-#endif
-#ifdef FIX_RADAR
-	ReadIniIfExists("Draw", "FixRadar", &CDraw::ms_bFixRadar);	
-#endif
-#ifdef FIX_SPRITES
-	ReadIniIfExists("Draw", "FixSprites", &CDraw::ms_bFixSprites);	
-#endif
-#ifdef DRAW_GAME_VERSION_TEXT
-	ReadIniIfExists("General", "DrawVersionText", &gbDrawVersionText);
-#endif
-#ifdef NO_MOVIES
-	ReadIniIfExists("General", "NoMovies", &gbNoMovies);
-#endif
+	SettingsLoadAll(cfg);
 
 #ifdef CUSTOM_FRONTEND_OPTIONS
 	bool migrate = cfg.get("FrontendOptions").size() != 0;
@@ -667,80 +595,7 @@ bool LoadINISettings()
 
 void SaveINISettings()
 {
-#ifdef IMPROVED_VIDEOMODE
-	StoreIni("VideoMode", "Width", FrontEndMenuManager.m_nPrefsWidth);
-	StoreIni("VideoMode", "Height", FrontEndMenuManager.m_nPrefsHeight);
-	StoreIni("VideoMode", "Depth", FrontEndMenuManager.m_nPrefsDepth);
-	StoreIni("VideoMode", "Subsystem", FrontEndMenuManager.m_nPrefsSubsystem);
-	// Windowed mode is loaded below in CUSTOM_FRONTEND_OPTIONS section
-#else
-	StoreIni("Graphics", "VideoMode", FrontEndMenuManager.m_nDisplayVideoMode);
-#endif
-	StoreIni("Controller", "HeadBob1stPerson", TheCamera.m_bHeadBob);
-	StoreIni("Controller", "HorizantalMouseSens", TheCamera.m_fMouseAccelHorzntl);
-	StoreIni("Controller", "InvertMouseVertically", MousePointerStateHelper.bInvertVertically);
-	StoreIni("Controller", "DisableMouseSteering", CVehicle::m_bDisableMouseSteering);
-	StoreIni("Controller", "Vibration", FrontEndMenuManager.m_PrefsUseVibration);
-	StoreIni("Audio", "SfxVolume", FrontEndMenuManager.m_PrefsSfxVolume);
-	StoreIni("Audio", "MusicVolume", FrontEndMenuManager.m_PrefsMusicVolume);
-	StoreIni("Audio", "MP3BoostVolume", FrontEndMenuManager.m_PrefsMP3BoostVolume);
-	StoreIni("Audio", "Radio", FrontEndMenuManager.m_PrefsRadioStation);
-#ifdef EXTERNAL_3D_SOUND
-	StoreIni("Audio", "SpeakerType", FrontEndMenuManager.m_PrefsSpeakers);
-	StoreIni("Audio", "Provider", FrontEndMenuManager.m_nPrefsAudio3DProviderIndex);
-#endif
-	StoreIni("Audio", "DynamicAcoustics", FrontEndMenuManager.m_PrefsDMA);
-	StoreIni("Display", "Brightness", FrontEndMenuManager.m_PrefsBrightness);
-	StoreIni("Display", "DrawDistance", FrontEndMenuManager.m_PrefsLOD);
-	StoreIni("Display", "Subtitles", FrontEndMenuManager.m_PrefsShowSubtitles);
-	StoreIni("Graphics", "AspectRatio", FrontEndMenuManager.m_PrefsUseWideScreen);
-#ifdef LEGACY_MENU_OPTIONS
-	StoreIni("Graphics", "VSync", FrontEndMenuManager.m_PrefsVsyncDisp);
-	StoreIni("Graphics", "Trails", CMBlur::BlurOn);
-#endif
-	StoreIni("Graphics", "FrameLimiter", FrontEndMenuManager.m_PrefsFrameLimiter);
-	StoreIni("General", "SkinFile", FrontEndMenuManager.m_PrefsSkinFile, 256);
-	StoreIni("Controller", "Method", FrontEndMenuManager.m_ControlMethod);
-	StoreIni("General", "Language", FrontEndMenuManager.m_PrefsLanguage);
-	StoreIni("Display", "ShowHud", FrontEndMenuManager.m_PrefsShowHud);
-	StoreIni("Display", "RadarMode", FrontEndMenuManager.m_PrefsRadarMode);
-	StoreIni("Display", "ShowLegends", FrontEndMenuManager.m_PrefsShowLegends);
-
-#ifdef EXTENDED_COLOURFILTER
-	StoreIni("CustomPipesValues", "PostFXIntensity", CPostFX::Intensity);
-#endif
-#ifdef EXTENDED_PIPELINES
-	StoreIni("CustomPipesValues", "NeoVehicleShininess", CustomPipes::VehicleShininess);
-	StoreIni("CustomPipesValues", "NeoVehicleSpecularity", CustomPipes::VehicleSpecularity);
-	StoreIni("CustomPipesValues", "RimlightMult", CustomPipes::RimlightMult);
-	StoreIni("CustomPipesValues", "LightmapMult", CustomPipes::LightmapMult);
-	StoreIni("CustomPipesValues", "GlossMult", CustomPipes::GlossMult);
-#endif
-	StoreIni("Rendering", "BackfaceCulling", gBackfaceCulling);
-#ifdef NEW_RENDERER
-	StoreIni("Rendering", "NewRenderer", gbNewRenderer);
-#endif
-	StoreIni("Drift", "Enabled", gDriftEnabled);
-	StoreIni("Drift", "Strength", gDriftStrength);
-	StoreIni("Drift", "Assist", gDriftAssist);
-	StoreIni("Drift", "Debug", gDriftDebug);
-	StoreIni("Weapons", "ActiveReload", gActiveReloadEnabled);
-
-#ifdef PROPER_SCALING	
-	StoreIni("Draw", "ProperScaling", CDraw::ms_bProperScaling);	
-#endif
-#ifdef FIX_RADAR
-	StoreIni("Draw", "FixRadar", CDraw::ms_bFixRadar);
-#endif
-#ifdef FIX_SPRITES
-	StoreIni("Draw", "FixSprites", CDraw::ms_bFixSprites);	
-#endif
-#ifdef DRAW_GAME_VERSION_TEXT
-	StoreIni("General", "DrawVersionText", gbDrawVersionText);
-#endif
-#ifdef NO_MOVIES
-	StoreIni("General", "NoMovies", gbNoMovies);
-#endif
+	SettingsSaveAll(cfg);
 #ifdef CUSTOM_FRONTEND_OPTIONS
 	for (int i = 0; i < MENUPAGES; i++) {
 		for (int j = 0; j < NUM_MENUROWS; j++) {

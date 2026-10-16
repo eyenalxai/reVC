@@ -19,6 +19,7 @@ public:
 	bool compressed;
 	bool keepCompressed;
 	float totalLength;
+	float rootSpeed;	// the ground speed of the root motion at association speed 1.0
 	CLink<CAnimBlendHierarchy*> *linkPtr;
 
 	CAnimBlendHierarchy(void);
@@ -34,6 +35,6 @@ public:
 	bool IsCompressed() { return !!compressed; };
 };
 
-VALIDATE_SIZE(CAnimBlendHierarchy, 0x28);
+VALIDATE_SIZE(CAnimBlendHierarchy, 0x2C);
 
 #endif // __GTA_ANIMBLENDHIERARCHY_H__

@@ -95,6 +95,14 @@ The module `src/vehicles/DriftTelemetry.*`. It writes the drift state to
 read back. The game frame thread only appends text to a buffer; one writer
 thread owns the file. It changes nothing in the physics.
 
+## Drift snapshot
+
+One read of the drift layer's live state — the phase, the active and
+handbrake-turn flags, the slip angle, the target, the yaw rate, the grip cut,
+the grip scale, the charge, the boost and the entry speed — taken at the point
+of the read, so the feedback, the telemetry and the on-screen readout all see
+the same values. The drift layer's state stays private.
+
 ## Boost chain
 
 The stack of drift boosts. A clean drift that ends while a boost is still
@@ -127,9 +135,9 @@ how the budget is spent; it does not change the wheel list.
 The module that owns the player's horizontal velocity on foot:
 `CPlayerPed::UpdatePlayerMovement` in `src/peds/PlayerPed.cpp`. Every on-foot
 control path calls it, in both views. The camera sets the view position and the
-direction basis only. The player's speed comes from the input and the physics;
-the fight state, the attached states and the states that hold a blocking
-animation keep the animation driven movement.
+direction basis only. The controller targets the reference speed and owns the
+velocity; the fight state, the attached states and the states that hold a
+blocking animation keep the animation driven movement.
 
 ## Movement state
 
@@ -147,8 +155,11 @@ measured speeds and accelerations by 50.
 
 ## Reference speed
 
-The speed the current walk/run/sprint animation blend moves the ped at with the
-association speed 1.0. The controller targets it and scales the animation
+The ground speed of the walk, run and sprint animation blend the ped plays: the
+net root motion of each playing animation over one cycle, at the playback speed
+the state forces on it. The animations of the strafe, backward and weapon groups
+carry their own speeds, so the reference follows the direction the legs move in
+and the weapon the ped holds. The controller targets it and scales the animation
 playback by (real speed / reference speed), so the legs stay planted while the
 speed changes.
 
@@ -230,9 +241,25 @@ an OBJECT.DAT row is destructible; a building is not.
 
 ## Vegetation model
 
-A model whose name identifies it as a tree or a palm. A vegetation model without
-an OBJECT.DAT row spawns as a building; a vehicle that hits it breaks it like a
-prop.
+A model whose name identifies it as a plant. Two kinds of plant exist. A trunk
+plant is a tree or a palm, and the name contains `palm`, `palwee` or `tree`. A
+leafy plant is any other plant, and the name contains `bush`, `hedge`, `plant`,
+`fern`, `ivy`, `grass`, `shrub`, `rose` or `cactus`. The word test ignores
+case. A name that contains `lod`, `shad`, `reflect` or `street` is not a plant:
+it marks a LOD, a shadow, a reflection or a street light.
+
+A vegetation model without an OBJECT.DAT row spawns as a building. A vehicle
+that hits the building gets the soft hit. Above the smash impulse the plant
+falls: a trunk plant topples like a light pole and stays in the world, a leafy
+plant breaks and disappears.
+
+## Felled plant
+
+A trunk plant a hit has pushed over. It stays visible and colliding, and it
+topples with the physics of a light pole: finite mass, no uproot limit, and a
+push at the contact point. A plant building cannot move, so a dynamic object
+copy with the same model and placement takes its place. The building itself is
+only hidden, never removed.
 
 ## Soft hit
 
@@ -256,3 +283,11 @@ the per-frame size does not grow with the whole world.
 
 The most entities (`MAX_REPLAY_ENTITIES`, 500) one replay frame records. It
 keeps the worst case frame well inside one replay block.
+
+## Wheel pose
+
+The frame transform of one car wheel in `CAutomobile::PreRender`: the spin, the
+hover tilt or the road tilt, and the wheel scale. One row of `aWheelPoses` drives
+it, so the rear, mid, Dodo, tank and front wheels share one pass. A row keeps its
+own hover splash order: the two random arguments are drawn in the order the row
+lists them, and swapping a pair would shift the global random stream.

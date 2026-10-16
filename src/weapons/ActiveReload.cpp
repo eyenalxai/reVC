@@ -115,23 +115,26 @@ ActiveReload::Judge(CWeapon *weapon)
 
 	if (now < ms_nWindowStart) {
 		// Too soon: the reload is jammed and takes half the base time more,
-		// and the protagonist makes the annoyed line (VICE-89).
+		// and the protagonist makes the annoyed line (VICE-89). The line
+		// uses its own sound id, so the crash taunt cooldown cannot drop it
+		// (VICE-118).
 		weapon->m_nTimer += (uint32)(ms_nDuration*ACTIVE_RELOAD_JAM_FRACTION);
 		ms_bJudged = true;
 		ms_eResult = ACTIVE_RELOAD_JAM;
 		ms_nResultTime = now;
 		if (player)
-			player->Say(SOUND_PED_ANNOYED_DRIVER);
+			player->Say(SOUND_PED_RELOAD_JAM);
 	} else if (now <= ms_nWindowEnd) {
 		// In the window: the reload finishes almost at once, and the
-		// protagonist makes the cocky shooting line (VICE-89).
+		// protagonist makes the cocky line (VICE-89). Its own sound id keeps
+		// it away from the shoot taunt cooldown (VICE-118).
 		weapon->m_nTimer = now + ACTIVE_RELOAD_PERFECT_TAIL_MS;
 		ms_bJudged = true;
 		ms_eResult = ACTIVE_RELOAD_PERFECT;
 		ms_nResultTime = now;
 		ms_bPerfect = true;
 		if (player)
-			player->Say(SOUND_PED_ON_FIRE);
+			player->Say(SOUND_PED_RELOAD_PERFECT);
 	}
 	// Later presses and presses after the window do nothing.
 }
