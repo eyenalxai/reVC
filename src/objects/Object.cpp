@@ -104,6 +104,17 @@ CObject::CObject(CDummyObject *dummy)
 	m_objectMatrix = dummy->GetMatrix();
 	dummy->DetachFromRwObject();
 	Init();
+	// Get the state a converted object had back, so a smashed or damaged object
+	// stays that way over the 80 m dummy round trip. The dummy keeps invisibility
+	// itself, a hidden object (smashed or glass) stays hidden. Map dummies carry
+	// no state and leave the object's collision and damage flags as Init() made
+	// them. bHasBeenDamaged has no field on the dummy, so it is lost here.
+	bIsVisible = dummy->bIsVisible;
+	if (dummy->bConvertedFromObject) {
+		bUsesCollision = dummy->bObjectUsesCollision;
+		bRenderDamaged = dummy->bObjectRenderDamaged;
+		bExplosionProof = dummy->bObjectExplosionProof;
+	}
 	m_level = dummy->m_level;
 	m_area = dummy->m_area;
 }
@@ -359,6 +370,52 @@ CObject::RemoveLighting(bool reset)
 	}
 }
 
+// Breaks any vegetation entity: hides it, drops its collision and spawns the
+// palm debris and sound. Palms are objects, vegetation buildings are not, so
+// the moving-list and speed reset only apply to the physical ones.
+void
+SmashVegetation(CEntity *entity)
+{
+	static RwRGBA primaryColor1 = { 0x39, 0x4D, 0x29, 0xff };
+	static RwRGBA primaryColor2 = { 0x94, 0x7D, 0x73, 0xff };
+	static int8 nFrameGen = 0;
+
+	entity->bIsVisible = false;
+	entity->bUsesCollision = false;
+	if (entity->IsObject()) {
+		CObject *object = (CObject*)entity;
+		if (!object->GetIsStatic())
+			object->RemoveFromMovingList();
+		object->SetMoveSpeed(0.0f, 0.0f, 0.0f);
+		object->SetTurnSpeed(0.0f, 0.0f, 0.0f);
+	}
+	entity->SetIsStatic(true);
+	entity->bExplosionProof = true;
+
+	const CVector &vecPos = entity->GetPosition();
+	float fRadius = entity->GetColModel()->boundingSphere.radius;
+	for (int32 i = 0; i < 32; i++) {
+		CVector particleDir = CVector(
+			CGeneral::GetRandomNumberInRange(-0.25f, 0.25f),
+			CGeneral::GetRandomNumberInRange(-0.25f, 0.25f),
+			CGeneral::GetRandomNumberInRange(-0.05f, 0.05f)
+		);
+		CVector particlePos = vecPos;
+		particlePos.z += CGeneral::GetRandomNumberInRange(0.0f, 1.0f) * fRadius;
+		++nFrameGen;
+		int32 nRotationSpeed = CGeneral::GetRandomNumberInRange(-40, 40);
+		int32 nCurFrame = nFrameGen & 0x3;
+		float fSize = CGeneral::GetRandomNumberInRange(0.02f, 0.20f);
+		RwRGBA& particleColor = nFrameGen & 1 ? primaryColor1 : primaryColor2;
+		CParticle::AddParticle(PARTICLE_CAR_DEBRIS, particlePos, particleDir, nil, fSize, particleColor, nRotationSpeed, 0, nCurFrame, 0);
+		if ((i % 7) == 0) {
+			static RwRGBA secondaryColor = { 0x9A, 0x99, 0x99, 0x3E };
+			CParticle::AddParticle(PARTICLE_DEBRIS, particlePos, particleDir, nil, 0.3f, secondaryColor, nRotationSpeed);
+		}
+	}
+	PlayOneShotScriptObject(SCRIPT_SOUND_BOX_DESTROYED_2, vecPos);
+}
+
 void
 CObject::ObjectDamage(float amount)
 {
@@ -377,56 +434,59 @@ CObject::ObjectDamage(float amount)
 		amount = 0.0f;
 	}
 #endif
-	if ((amount * m_fCollisionDamageMultiplier > 150.0f || bBodyCastDamageEffect) && m_nCollisionDamageEffect) {
+	// Vegetation breaks at a low impulse of its own, not at the general 150
+	// threshold: palms have an infinite mass and a 0.5 damage multiplier.
+	const bool bBreakVegetation = m_nCollisionDamageEffect == DAMAGE_EFFECT_SMASH_VEGPALM
+		&& amount > VEGETATION_SMASH_IMPULSE;
+	if ((amount * m_fCollisionDamageMultiplier > 150.0f || bBodyCastDamageEffect || bBreakVegetation) && m_nCollisionDamageEffect) {
 		const CVector& vecPos = GetMatrix().GetPosition();
 		const float fDirectionZ = 0.0002f * amount;
 		switch (m_nCollisionDamageEffect) {
 			case DAMAGE_EFFECT_CHANGE_MODEL:
-				bRenderDamaged = true;
-				return;
-			case DAMAGE_EFFECT_SPLIT_MODEL:
-				return;
-			case DAMAGE_EFFECT_SMASH_AND_DAMAGE_TRAFFICLIGHTS:
-			{
-				static RwRGBA debrisColor = { 0xc8,0xc8,0xc8,0xff };
-				if (bRenderDamaged) {
-					break;
-				}
-				bRenderDamaged = true;
-				CVector min = 0.85f * GetColModel()->boundingBox.min;
-				CVector max = 0.85f * GetColModel()->boundingBox.max;
-				min.z = max.z;
-				min = GetMatrix() * min;
-				max = GetMatrix() * max;
-				CVector temp = (max - min) * 0.02f;
-				for (int32 i = 0; i < 50; i++) {
-					CVector vecDir = CVector(
-						CGeneral::GetRandomNumberInRange(-0.35f, 0.35f),
-						CGeneral::GetRandomNumberInRange(-0.35f, 0.35f),
-						CGeneral::GetRandomNumberInRange(0.10f, 0.25f)
-					);
-					++nFrameGen;
-					int32 currentFrame = nFrameGen & 3;
-					CVector pos = min + temp * (float)i;
-					float fSize = CGeneral::GetRandomNumberInRange(0.02f, 0.20f);
-					float fColorFactor = CGeneral::GetRandomNumberInRange(0.6f, 1.2f);
-					RwRGBA color = debrisColor;
-					color.red *= fColorFactor;
-					color.green *= fColorFactor;
-					int32 nRotationSpeed = CGeneral::GetRandomNumberInRange(-0.40f, 0.40f);
-					CParticle::AddParticle(PARTICLE_CAR_DEBRIS, pos, vecDir, nil, fSize, color, nRotationSpeed, 0, currentFrame, 0);
-				}
-				PlayOneShotScriptObject(SCRIPT_SOUND_METAL_COLLISION, min);
-				break;
-			}
 			case DAMAGE_EFFECT_CHANGE_THEN_SMASH: {
+				// The first hit only swaps to the damaged model, the next one smashes.
 				if (!bRenderDamaged) {
 					bRenderDamaged = true;
 					return;
 				}
 				// fall through
 			}
+			case DAMAGE_EFFECT_SMASH_AND_DAMAGE_TRAFFICLIGHTS:
+			{
+				static RwRGBA debrisColor = { 0xc8,0xc8,0xc8,0xff };
+				// The first hit only cracks the lights, the next one smashes them.
+				if (!bRenderDamaged) {
+					bRenderDamaged = true;
+					CVector min = 0.85f * GetColModel()->boundingBox.min;
+					CVector max = 0.85f * GetColModel()->boundingBox.max;
+					min.z = max.z;
+					min = GetMatrix() * min;
+					max = GetMatrix() * max;
+					CVector temp = (max - min) * 0.02f;
+					for (int32 i = 0; i < 50; i++) {
+						CVector vecDir = CVector(
+							CGeneral::GetRandomNumberInRange(-0.35f, 0.35f),
+							CGeneral::GetRandomNumberInRange(-0.35f, 0.35f),
+							CGeneral::GetRandomNumberInRange(0.10f, 0.25f)
+						);
+						++nFrameGen;
+						int32 currentFrame = nFrameGen & 3;
+						CVector pos = min + temp * (float)i;
+						float fSize = CGeneral::GetRandomNumberInRange(0.02f, 0.20f);
+						float fColorFactor = CGeneral::GetRandomNumberInRange(0.6f, 1.2f);
+						RwRGBA color = debrisColor;
+						color.red *= fColorFactor;
+						color.green *= fColorFactor;
+						int32 nRotationSpeed = CGeneral::GetRandomNumberInRange(-0.40f, 0.40f);
+						CParticle::AddParticle(PARTICLE_CAR_DEBRIS, pos, vecDir, nil, fSize, color, nRotationSpeed, 0, currentFrame, 0);
+					}
+					PlayOneShotScriptObject(SCRIPT_SOUND_METAL_COLLISION, min);
+					return;
+				}
+				// fall through
+			}
 			case DAMAGE_EFFECT_SMASH_COMPLETELY: {
+				static const RwRGBA color = { 128, 128, 128, 255 };
 				bIsVisible = false;
 				bUsesCollision = false;
 				if (!GetIsStatic()) {
@@ -436,6 +496,21 @@ CObject::ObjectDamage(float amount)
 				bExplosionProof = true;
 				SetMoveSpeed(0.0f, 0.0f, 0.0f);
 				SetTurnSpeed(0.0f, 0.0f, 0.0f);
+				for (int32 i = 0; i < 25; i++) {
+					CVector vecDir = CVector(
+						CGeneral::GetRandomNumberInRange(-0.35f, 0.35f),
+						CGeneral::GetRandomNumberInRange(-0.35f, 0.35f),
+						CGeneral::GetRandomNumberInRange(0.10f, 0.25f) + fDirectionZ
+					);
+					++nFrameGen;
+					int32 currentFrame = nFrameGen & 3;
+					float fRandom = CGeneral::GetRandomNumberInRange(0.5f, 1.0f);
+					RwRGBA randomColor = { uint8(color.red * fRandom), uint8(color.green * fRandom), uint8(color.blue * fRandom), color.alpha };
+					float fSize = CGeneral::GetRandomNumberInRange(0.02f, 0.20f);
+					int32 nRotationSpeed = CGeneral::GetRandomNumberInRange(-40, 40);
+					CParticle::AddParticle(PARTICLE_CAR_DEBRIS, vecPos, vecDir, nil, fSize, randomColor, nRotationSpeed, 0, currentFrame, 0);
+				}
+				PlayOneShotScriptObject(SCRIPT_SOUND_BOX_DESTROYED_1, vecPos);
 				break;
 			}
 			case DAMAGE_EFFECT_SMASH_CARDBOARD_COMPLETELY:
@@ -646,41 +721,8 @@ CObject::ObjectDamage(float amount)
 				break;
 			}
 			case DAMAGE_EFFECT_SMASH_VEGPALM:
-			{
-				static RwRGBA primaryColor1 = { 0x39, 0x4D, 0x29, 0xff };
-				static RwRGBA primaryColor2 = { 0x94, 0x7D, 0x73, 0xff };
-				bIsVisible = false;
-				bUsesCollision = false;
-				if (!GetIsStatic()) {
-					RemoveFromMovingList();
-				}
-				SetIsStatic(true);
-				bExplosionProof = true;
-				SetMoveSpeed(0.0f, 0.0f, 0.0f);
-				SetTurnSpeed(0.0f, 0.0f, 0.0f);
-				float fRadius = GetColModel()->boundingSphere.radius;
-				for (int32 i = 0; i < 32; i++) {
-					CVector particleDir = CVector(
-						CGeneral::GetRandomNumberInRange(-0.25f, 0.25f),
-						CGeneral::GetRandomNumberInRange(-0.25f, 0.25f),
-						CGeneral::GetRandomNumberInRange(-0.05f, 0.05f) + fDirectionZ
-					);
-					CVector particlePos = vecPos;
-					particlePos.z += CGeneral::GetRandomNumberInRange(0.0f, 1.0f) * fRadius;
-					++nFrameGen;
-					int32 nRotationSpeed = CGeneral::GetRandomNumberInRange(-40, 40);
-					int32 nCurFrame = nFrameGen & 0x3;
-					float fSize = CGeneral::GetRandomNumberInRange(0.02f, 0.20f);
-					RwRGBA& particleColor = nFrameGen & 1 ? primaryColor1 : primaryColor2;
-					CParticle::AddParticle(PARTICLE_CAR_DEBRIS, particlePos, particleDir, nil, fSize, particleColor, nRotationSpeed, 0, nCurFrame, 0);
-					if ((i % 7) == 0) {
-						static RwRGBA secondaryColor = { 0x9A, 0x99, 0x99, 0x3E };
-						CParticle::AddParticle(PARTICLE_DEBRIS, particlePos, particleDir, nil, 0.3f, secondaryColor, nRotationSpeed);
-					}
-				}
-				PlayOneShotScriptObject(SCRIPT_SOUND_BOX_DESTROYED_2, vecPos);
+				SmashVegetation(this);
 				break;
-			}
 			case DAMAGE_EFFECT_SMASH_BLACKBAG:
 			case DAMAGE_EFFECT_SMASH_BEACHLOUNGE_WOOD:
 			case DAMAGE_EFFECT_SMASH_BEACHLOUNGE_TOWEL:

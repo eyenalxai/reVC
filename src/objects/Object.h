@@ -114,6 +114,14 @@ public:
 	static void DeleteAllTempObjectsInArea(CVector point, float fRadius);
 };
 
+// Impulse that breaks vegetation (a palm object or a vegetation building),
+// much lower than the 150 threshold general objects need.
+#define VEGETATION_SMASH_IMPULSE 60.0f
+
+// Smashes any vegetation entity: hides it, drops its collision and spawns the
+// palm debris and sound. One implementation for palms and vegetation buildings.
+void SmashVegetation(CEntity *entity);
+
 bool IsObjectPointerValid(CObject* pObject);
 
 #endif // __GTA_OBJECT_H__
