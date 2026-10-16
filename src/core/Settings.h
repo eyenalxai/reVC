@@ -6,7 +6,9 @@
 // the loader and the writer walk the same list. The row order is what a fresh
 // file gets, and the type of a row picks the parse and the format of its value.
 
-#define MINI_CASE_SENSITIVE
+// mINI picks its case handling, and with it the inline bodies of the header,
+// from MINI_CASE_SENSITIVE. Define it before this include; the game keeps the
+// case of the keys.
 #include "ini.h"
 
 // The conversion a key gets. The reader and the writer pick the call the old
@@ -14,7 +16,7 @@
 //   uint32, uint8, bool: strtoul and "%u"
 //   int32, int8:         strtol and "%d"
 //   float:               strtof and "%f"
-enum tSettingsType
+enum eSettingsType
 {
 	SETTINGS_UINT32,
 	SETTINGS_INT32,
@@ -28,16 +30,15 @@ enum tSettingsType
 // One key:
 //   section, key: where the value sits in the file
 //   type:         how the reader parses the value and the writer prints it
-//   def:          the stock default, the value the game starts with
 //   min, max:     the bounds of the value, or SETTINGS_NO_BOUND
-//   size:         the room of a string setting, unused by the numeric types
+//   size:         the room of the pointee in bytes; the table check keeps it
+//                 equal to the width of the type
 //   value:        the setting the key speaks for
 struct tSettingsEntry
 {
 	const char *section;
 	const char *key;
-	tSettingsType type;
-	double def;
+	eSettingsType type;
 	double min;
 	double max;
 	int32 size;
