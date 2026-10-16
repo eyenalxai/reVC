@@ -639,7 +639,7 @@ CCamera::Process(void)
 	}else
 		LODDistMultiplier = 1.0f;
 	GenerationDistMultiplier = LODDistMultiplier;
-	LODDistMultiplier *= CRenderer::ms_lodDistScale;
+	LODDistMultiplier *= CRenderer::ms_lodDistScale * LOD_DISTANCE_TEST_MULT;
 
 	CDraw::SetNearClipZ(RwCameraGetNearClipPlane(m_pRwCamera));
 	CDraw::SetFarClipZ(RwCameraGetFarClipPlane(m_pRwCamera));
