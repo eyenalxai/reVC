@@ -32,9 +32,10 @@
 #include "TrafficRings.h"
 
 // The pedestrian ring comes from the one table (TrafficRings.h): the creation
-// ring, the off-screen band and the removal distances scale with it.
+// ring, the off-screen band and the removal distances scale with it. The
+// on-foot budget, its driver and passenger allowance, the pool reserve and the
+// spawn rate come from the cap table (PopulationBudget.h, VICE-123).
 #define PED_AREA_DENSITY_SCALE	3.0f // scale the zone density budget for dense on-foot crowds
-#define PED_ATTEMPTS_PER_FRAME	3 // spawn attempts per frame
 
 // The off-network spawns (VICE-122). A bounded fraction of the pedestrian
 // spawns skips the node path and takes a free position in the creation ring,
@@ -611,7 +612,11 @@ CPopulation::Update(bool addPeds)
 			ms_nTotalPeds = ms_nNumDummy + ms_nNumEmergency + ms_nNumCop
 				+ ms_nTotalGangPeds + ms_nNumCivFemale + ms_nNumCivMale;
 			ms_nTotalPeds -= ms_nTotalCarPassengerPeds;
-			if (!CCutsceneMgr::IsRunning() && addPeds) {
+			// The pool is the hard resource behind the budget: a frame whose
+			// free spaces are down to the reserve adds no pedestrian
+			// (PopulationBudget.h, PED_POOL_RESERVE). One scan a frame.
+			if (!CCutsceneMgr::IsRunning() && addPeds &&
+				CPools::GetPedPool()->GetNoOfFreeSpaces() >= PED_POOL_RESERVE) {
 				float pcdm = PedCreationDistMultiplier();
 				const STrafficRings rings = CurrentTrafficRings();
 				// The ring fills from the target and the lifetime, so the rate follows the ring scale.
@@ -631,6 +636,10 @@ CPopulation::Update(bool addPeds)
 void
 CPopulation::GeneratePedsAtStartOfGame()
 {
+	// The pool check of Update, for the start-of-game burst this places in one
+	// frame (PopulationBudget.h, PED_POOL_RESERVE).
+	if (CPools::GetPedPool()->GetNoOfFreeSpaces() < PED_POOL_RESERVE)
+		return;
 	for (int i = 0; i < 100; i++) {
 		ms_nTotalCivPeds = ms_nNumCivFemale + ms_nNumCivMale;
 		ms_nTotalGangPeds = ms_nNumGang9 + ms_nNumGang8 + ms_nNumGang7
@@ -866,8 +875,7 @@ CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScree
 			(!playerInfo->m_pPed->bInVehicle &&
 				(CCarCtrl::NumLawEnforcerCars >= wantedInfo->m_MaximumLawEnforcerVehicles
 				|| CCarCtrl::NumRandomCars >= CCarCtrl::GetRandomCarTarget()
-				|| CCarCtrl::NumFiretrucksOnDuty + CCarCtrl::NumAmbulancesOnDuty + CCarCtrl::NumParkedCars
-				+ CCarCtrl::NumMissionCars + CCarCtrl::NumLawEnforcerCars + CCarCtrl::NumRandomCars >= CCarCtrl::MaxNumberOfCarsInUse) || forceAddingCop)) {
+				|| CCarCtrl::NumCarsInUse() >= CCarCtrl::MaxNumberOfCarsInUse) || forceAddingCop)) {
 			addCop = true;
 			minDist = PedCreationDistMultiplier() * rings.pedCreateMin;
 			maxDist = PedCreationDistMultiplier() * rings.pedCreateMax;
@@ -886,15 +894,19 @@ CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScree
 	int selectedMaxPeds = CGame::IsInInterior() ? CPopulation::MaxNumberOfPedsInUseInterior : CPopulation::MaxNumberOfPedsInUse;
 
 	// Yeah, float
+	// The on-foot budget of the area, and the hard top of the count on foot:
+	// MaxNumberOfPedsInUse is an on-foot cap, sized by the pool arithmetic of
+	// PopulationBudget.h without the drivers, because the drivers are added on top
+	// of it below and the passengers stay out of ms_nTotalPeds entirely.
 	float maxPossiblePedsForArea = (zoneInfo.pedDensity + zoneInfo.carDensity) * playerInfo->m_fRoadDensity * PedDensityMultiplier
 		* (CDarkel::FrenzyOnGoing() ? 1.f : CIniFile::PedNumberMultiplier) * missionAndWeatherMult * PED_AREA_DENSITY_SCALE
 		* SQR(rings.scale);
-	// Car and law-enforcer drivers count in ms_nTotalPeds: add them back so the on-foot
-	// budget does not shrink with the car count.
-	maxPossiblePedsForArea += CCarCtrl::NumRandomCars + CCarCtrl::NumLawEnforcerCars;
 	maxPossiblePedsForArea = Min(maxPossiblePedsForArea, selectedMaxPeds);
+	// Car and law-enforcer drivers count in ms_nTotalPeds: add them back so the
+	// on-foot budget does not shrink with the car count.
+	float maxPossibleTotalPeds = maxPossiblePedsForArea + CCarCtrl::NumRandomCars + CCarCtrl::NumLawEnforcerCars;
 
-	if (ms_nTotalPeds < maxPossiblePedsForArea || addCop) {
+	if (ms_nTotalPeds < maxPossibleTotalPeds || addCop) {
 		int decisionThreshold = CGeneral::GetRandomNumberInRange(0, 1000);
 		if (decisionThreshold < zoneInfo.copPedThreshold || addCop) {
 			pedTypeToAdd = PEDTYPE_COP;

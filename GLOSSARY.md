@@ -273,20 +273,44 @@ Car Density settings scale it.
 
 ## Population budget
 
-The number of pedestrians an area keeps. It comes from the zone density, the
-road density and the density settings, and it grows with the square of the
-spawn distance, because the ring area does. The game stops adding pedestrians
-when the budget is reached.
+The number of pedestrians an area keeps ON FOOT. It comes from the zone density,
+the road density and the density settings, and it grows with the square of the
+ring scale, because the ring area does. The game stops adding pedestrians when
+the budget is reached. The drivers of the cars count in `ms_nTotalPeds` with the
+pedestrians, so the budget adds them back before the comparison: the drivers and
+the passengers of the cars do not shrink the crowd on the sidewalk.
 
 ## Cap
 
-The hard top for a budget or a count: pedestrians, cars in use, random cars.
-The caps stay below the pools.
+The hard top for a budget or a count: pedestrians, cars in use, random cars, the
+parked cars of a generator set. The caps live in one table,
+`src/core/PopulationBudget.h` (VICE-123), with the fill rates and the streaming
+model budget, the pool each number protects and the arithmetic that ties them
+together; the table's invariants are checked at compile time. The caps stay
+below the pools.
 
 ## Pool
 
 The fixed storage for the entities and their list nodes: pedestrians, vehicles,
-audio entities. A pool never grows; the caps keep the counts below it.
+audio entities. A pool never grows; the caps keep the counts below it. The
+population paths of the caps also refuse to create when the free spaces of the
+ped pool fall below the pool reserve, because the passenger count is a random
+draw and the police crews are not counted at all.
+
+## Driver
+
+The pedestrian that drives a car of the traffic: a `CPed` of the ped pool, one
+per car, created with the car (`CVehicle::SetUpDriver`). A driver counts in
+`ms_nTotalPeds` with the pedestrians, so the on-foot budget adds the drivers of
+the cars back; the car it drives counts in the car budget.
+
+## Parked car
+
+A car a car generator holds at its fixed map position (`CCarGenerator`), not a
+car of the traffic. The generator holds it while the player is inside its ring
+and the car stays until the car despawn, so the curbs fill along the route the
+player drives. A parked car counts in the car budget (`NumParkedCars`) and
+carries no driver while it is parked.
 
 ## Pedestrian node network
 
