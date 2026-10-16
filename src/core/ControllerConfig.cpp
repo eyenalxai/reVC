@@ -1234,8 +1234,8 @@ void CControllerConfigManager::AffectPadFromKeyBoard()
 
 		if (!GetIsKeyboardKeyDown((RsKeyCodes)key))
 			AffectControllerStateOn_ButtonUp(key, KEYBOARD);
-		else if ( !GetIsKeyboardKeyDown((RsKeyCodes)extrakey))
-			AffectControllerStateOn_ButtonUp(key, OPTIONAL_EXTRA);
+		if (!GetIsKeyboardKeyDown((RsKeyCodes)extrakey))
+			AffectControllerStateOn_ButtonUp(extrakey, OPTIONAL_EXTRA);
 	}
 }
 
