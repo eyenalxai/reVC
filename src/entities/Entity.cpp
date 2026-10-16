@@ -502,15 +502,24 @@ CEntity::GetIsOnScreenComplex(void)
 	return TheCamera.IsBoxVisible(boundBox, &TheCamera.GetCameraMatrix());
 }
 
-void
-CEntity::Add(void)
+enum eSectorListOp
+{
+	SECTORLIST_INSERT,
+	SECTORLIST_REMOVE
+};
+
+// Walks the sectors the entity's rect covers and applies the operation to the
+// entity's list in each of them. The middle sector holds the entity in the
+// main list, all other sectors in the overlap list.
+static void
+UpdateSectorLists(CEntity *entity, eSectorListOp op)
 {
 	int x, xstart, xmid, xend;
 	int y, ystart, ymid, yend;
 	CSector *s;
 	CPtrList *list;
 
-	CRect bounds = GetBoundRect();
+	CRect bounds = entity->GetBoundRect();
 	xstart = CWorld::GetSectorIndexX(bounds.left);
 	xend   = CWorld::GetSectorIndexX(bounds.right);
 	xmid   = CWorld::GetSectorIndexX((bounds.left + bounds.right)/2.0f);
@@ -525,7 +534,7 @@ CEntity::Add(void)
 	for(y = ystart; y <= yend; y++)
 		for(x = xstart; x <= xend; x++){
 			s = CWorld::GetSector(x, y);
-			if(x == xmid && y == ymid) switch(m_type){
+			if(x == xmid && y == ymid) switch(entity->GetType()){
 			case ENTITY_TYPE_BUILDING:
 				list = &s->m_lists[ENTITYLIST_BUILDINGS];
 				break;
@@ -541,7 +550,7 @@ CEntity::Add(void)
 			case ENTITY_TYPE_DUMMY:
 				list = &s->m_lists[ENTITYLIST_DUMMIES];
 				break;
-			}else switch(m_type){
+			}else switch(entity->GetType()){
 			case ENTITY_TYPE_BUILDING:
 				list = &s->m_lists[ENTITYLIST_BUILDINGS_OVERLAP];
 				break;
@@ -558,68 +567,27 @@ CEntity::Add(void)
 				list = &s->m_lists[ENTITYLIST_DUMMIES_OVERLAP];
 				break;
 			}
-			list->InsertItem(this);
+			switch(op){
+			case SECTORLIST_INSERT:
+				list->InsertItem(entity);
+				break;
+			case SECTORLIST_REMOVE:
+				list->RemoveItem(entity);
+				break;
+			}
 		}
+}
+
+void
+CEntity::Add(void)
+{
+	UpdateSectorLists(this, SECTORLIST_INSERT);
 }
 
 void
 CEntity::Remove(void)
 {
-	int x, xstart, xmid, xend;
-	int y, ystart, ymid, yend;
-	CSector *s;
-	CPtrList *list;
-
-	CRect bounds = GetBoundRect();
-	xstart = CWorld::GetSectorIndexX(bounds.left);
-	xend   = CWorld::GetSectorIndexX(bounds.right);
-	xmid   = CWorld::GetSectorIndexX((bounds.left + bounds.right)/2.0f);
-	ystart = CWorld::GetSectorIndexY(bounds.top);
-	yend   = CWorld::GetSectorIndexY(bounds.bottom);
-	ymid   = CWorld::GetSectorIndexY((bounds.top + bounds.bottom)/2.0f);
-	assert(xstart >= 0);
-	assert(xend < NUMSECTORS_X);
-	assert(ystart >= 0);
-	assert(yend < NUMSECTORS_Y);
-
-	for(y = ystart; y <= yend; y++)
-		for(x = xstart; x <= xend; x++){
-			s = CWorld::GetSector(x, y);
-			if(x == xmid && y == ymid) switch(m_type){
-			case ENTITY_TYPE_BUILDING:
-				list = &s->m_lists[ENTITYLIST_BUILDINGS];
-				break;
-			case ENTITY_TYPE_VEHICLE:
-				list = &s->m_lists[ENTITYLIST_VEHICLES];
-				break;
-			case ENTITY_TYPE_PED:
-				list = &s->m_lists[ENTITYLIST_PEDS];
-				break;
-			case ENTITY_TYPE_OBJECT:
-				list = &s->m_lists[ENTITYLIST_OBJECTS];
-				break;
-			case ENTITY_TYPE_DUMMY:
-				list = &s->m_lists[ENTITYLIST_DUMMIES];
-				break;
-			}else switch(m_type){
-			case ENTITY_TYPE_BUILDING:
-				list = &s->m_lists[ENTITYLIST_BUILDINGS_OVERLAP];
-				break;
-			case ENTITY_TYPE_VEHICLE:
-				list = &s->m_lists[ENTITYLIST_VEHICLES_OVERLAP];
-				break;
-			case ENTITY_TYPE_PED:
-				list = &s->m_lists[ENTITYLIST_PEDS_OVERLAP];
-				break;
-			case ENTITY_TYPE_OBJECT:
-				list = &s->m_lists[ENTITYLIST_OBJECTS_OVERLAP];
-				break;
-			case ENTITY_TYPE_DUMMY:
-				list = &s->m_lists[ENTITYLIST_DUMMIES_OVERLAP];
-				break;
-			}
-			list->RemoveItem(this);
-		}
+	UpdateSectorLists(this, SECTORLIST_REMOVE);
 }
 
 float
