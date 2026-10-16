@@ -450,8 +450,16 @@ INITSAVEBUF
 		CopyFromBuf(buf, (pBufferObject->GetAddressOfEntityProperties())[0]);
 		CopyFromBuf(buf, (pBufferObject->GetAddressOfEntityProperties())[1]);
 #endif
-		if (GetObjectPool()->GetSlot(ref >> 8))
-			CPopulation::ConvertToDummyObject(GetObjectPool()->GetSlot(ref >> 8));
+		CObject *pOldObject = GetObjectPool()->GetSlot(ref >> 8);
+		if (pOldObject) {
+			CPopulation::ConvertToDummyObject(pOldObject);
+			// A full dummy pool makes the conversion a no-op (VICE-134), and the
+			// load below then overwrites the object in place: its destructor and
+			// its world registration are lost. Report it, the load continues as
+			// before.
+			if (GetObjectPool()->GetSlot(ref >> 8) == pOldObject)
+				debug("LoadObjectPool: no dummy slot for object %d, it is overwritten\n", ref >> 8);
+		}
 		CObject* pObject = new(ref) CObject(mi, false);
 		pObject->GetMatrix() = pBufferObject->GetMatrix();
 #ifdef COMPATIBLE_SAVES

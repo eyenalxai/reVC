@@ -37,7 +37,9 @@ enum Config {
 	NUMBUILDINGS = 7000,
 	NUMTREADABLES = 1,
 	NUMOBJECTS = 460,
-	NUMDUMMIES = 2340,
+	// 2336 dummy objects in the shipped map + 460 possible converted objects
+	// (NUMOBJECTS) + 4 spare (VICE-134).
+	NUMDUMMIES = 2800,
 	NUMAUDIOSCRIPTOBJECTS = 192,
 	// First person is always on. The parallel feature line still guards its
 	// code with this define (HUD reticle, car ADS, camera work), so it must
@@ -61,7 +63,16 @@ enum Config {
 	// Link list lengths
 	NUMALPHALIST = 20,
 	NUMBOATALPHALIST = 20,
-	NUMALPHAENTITYLIST = 200,
+	// The alpha entity list is initialised as NUMALPHAENTITYLIST * 3 with
+	// ASPECT_RATIO_SCALE (9000 nodes). The scans insert at most one node per
+	// entity per frame, so the list covers the visible and offscreen arrays
+	// (NUMVISIBLEENTITIES + NUMINVISIBLEENTITIES = 4300) plus the map's
+	// drawLast instances that the scan culls (3132 vegetation buildings and 416
+	// objects/dummies), 7848 in total, and leaves 1152 for fading entities.
+	// Measured sizes, not a bound: an entity can still fail to insert, which is
+	// harmless (it is drawn right away or skipped for the frame) and reported
+	// once (VICE-134).
+	NUMALPHAENTITYLIST = 3000,
 	NUMALPHAUNTERWATERENTITYLIST = 30,
 	NUMCOLCACHELINKS = 50,
 	NUMREFERENCES = 65536,
