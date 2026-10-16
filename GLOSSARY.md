@@ -234,6 +234,22 @@ The caps stay below the pools.
 The fixed storage for the entities and their list nodes: pedestrians, vehicles,
 audio entities. A pool never grows; the caps keep the counts below it.
 
+## Dummy object
+
+A `CDummyObject`: the stand-in for a map object that is far from the player, or
+for a far script object. It has no physics and no collision. A map instance
+whose model has an OBJECT.DAT row loads as a dummy. The dummy pool holds the
+far ones, the object pool the near ones, and
+`CPopulation::ConvertToDummyObject` and `CPopulation::ConvertToRealObject` move
+an object between the two pools as the player moves.
+
+## Dummy pool
+
+The fixed storage (`NUMDUMMIES` slots) for the dummy objects: the map's dummy
+instances plus every far object that is converted into one. The shipped map
+already fills 2336 of the 2800 slots, so a conversion can fail when the pool is
+full. That is not an error: the object stays real and the next scan retries.
+
 ## Destructible object
 
 An object (`CObject`) that breaks when it takes enough damage. Every model with
@@ -298,4 +314,3 @@ hover tilt or the road tilt, and the wheel scale. One row of `aWheelPoses` drive
 it, so the rear, mid, Dodo, tank and front wheels share one pass. A row keeps its
 own hover splash order: the two random arguments are drawn in the order the row
 lists them, and swapping a pair would shift the global random stream.
->>>>>>> origin/miami
