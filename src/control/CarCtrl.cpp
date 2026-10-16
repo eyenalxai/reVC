@@ -82,10 +82,12 @@
 #define DISTANCE_BETWEEN_CAR_AND_DEAD_PED (6.0f)
 #define PROBABILITY_OF_PASSENGER_IN_VEHICLE (0.125f)
 
-#define ONSCREEN_DESPAWN_RANGE (280.0f)
-#define MINIMAL_DISTANCE_TO_SPAWN_ONSCREEN (220.0f)
+// The spawn distance slider (reVC.ini [Display] SpawnDistance) scales the car
+// spawn and despawn ranges; 1.0 is the stock value.
+#define ONSCREEN_DESPAWN_RANGE (280.0f * CIniFile::SpawnDistanceMultiplier)
+#define MINIMAL_DISTANCE_TO_SPAWN_ONSCREEN (220.0f * CIniFile::SpawnDistanceMultiplier)
 #define REQUEST_ONSCREEN_DISTANCE ((ONSCREEN_DESPAWN_RANGE + MINIMAL_DISTANCE_TO_SPAWN_ONSCREEN) / 2)
-#define OFFSCREEN_DESPAWN_RANGE (120.0f)
+#define OFFSCREEN_DESPAWN_RANGE (120.0f * CIniFile::SpawnDistanceMultiplier)
 #define EXTENDED_RANGE_DESPAWN_MULTIPLIER (1.5f)
 
 bool CCarCtrl::bMadDriversCheat;

@@ -1,5 +1,6 @@
 #include "common.h"
 
+#include "main.h"
 #include "Weapon.h"
 #include "AnimBlendAssociation.h"
 #include "AudioManager.h"
@@ -36,6 +37,7 @@
 #include "Sprite.h"
 #include "Pickups.h"
 #include "SaveBuf.h"
+#include "ActiveReload.h"
 
 float fReloadAnimSampleFraction[5] = {  0.5f,  0.7f,  0.75f,  0.75f,  0.7f };
 float fSeaSparrowAimingAngle = 10.0f;
@@ -204,6 +206,12 @@ CWeapon::Fire(CEntity *shooter, CVector *fireSource)
 	{
 		if (m_nAmmoInClip <= 0) {
 			if (m_nAmmoTotal <= 0 || m_eWeaponState == WEAPONSTATE_RELOADING)
+				return false;
+
+			// The player reloads a magazine weapon by hand: an empty clip
+			// does not refill itself and the weapon does not fire either.
+			// AI peds keep the instant refill.
+			if (UsesManualReload(shooter))
 				return false;
 
 			Reload();
@@ -411,14 +419,15 @@ CWeapon::Fire(CEntity *shooter, CVector *fireSource)
 					return true;
 				}
 
-				m_eWeaponState = WEAPONSTATE_RELOADING;
-				m_nTimer = CTimer::GetTimeInMilliseconds() + GetInfo()->m_nReload;
-
-				if (shooter == FindPlayerPed())
-				{
-					if (CWorld::Players[CWorld::PlayerInFocus].m_bFastReload)
-						m_nTimer = CTimer::GetTimeInMilliseconds() + GetInfo()->m_nReload / 4;
+				// The player's magazine weapon goes READY with an empty
+				// clip: the reload key starts the next reload. AI peds and
+				// the other weapons keep the automatic reload.
+				if (UsesManualReload(shooter)) {
+					m_eWeaponState = WEAPONSTATE_READY;
+					return true;
 				}
+
+				StartReload(shooter);
 
 				return true;
 			}
@@ -479,8 +488,7 @@ CWeapon::FireFromCar(CVehicle *shooter, bool left, bool right)
 			if ( m_nAmmoTotal == 0 )
 				return true;
 
-			m_eWeaponState = WEAPONSTATE_RELOADING;
-			m_nTimer = CTimer::GetTimeInMilliseconds() + GetInfo()->m_nReload;
+			StartReload(shooter);
 
 			return true;
 		}
@@ -3007,6 +3015,39 @@ CWeapon::DoDriveByAutoAiming(CEntity *driver, CVehicle *vehicle, CVector *source
 }
 
 void
+CWeapon::StartReload(CEntity *shooter)
+{
+	CWeaponInfo *info = GetInfo();
+	uint32 duration = info->m_nReload;
+
+	bool isPlayer = shooter == FindPlayerPed();
+
+	if (isPlayer && CWorld::Players[CWorld::PlayerInFocus].m_bFastReload)
+		duration /= 4;
+
+	m_eWeaponState = WEAPONSTATE_RELOADING;
+	m_nTimer = CTimer::GetTimeInMilliseconds() + duration;
+
+	if (UsesManualReload(shooter))
+		ActiveReload::Start(m_eWeaponType, duration);
+}
+
+bool
+CWeapon::UsesManualReload(CEntity *shooter)
+{
+	return gActiveReloadEnabled && IsMagazineWeapon() && shooter == FindPlayerPed();
+}
+
+bool
+CWeapon::CanReload(void)
+{
+	return IsMagazineWeapon()
+		&& m_nAmmoInClip < GetInfo()->m_nAmountofAmmunition
+		&& m_nAmmoTotal > 0
+		&& (m_eWeaponState == WEAPONSTATE_READY || m_eWeaponState == WEAPONSTATE_FIRING || m_eWeaponState == WEAPONSTATE_OUT_OF_AMMO);
+}
+
+void
 CWeapon::Reload(void)
 {
 	if (m_nAmmoTotal == 0)
@@ -3091,7 +3132,10 @@ CWeapon::Update(int32 audioEntity, CPed *pedToAdjustSound)
 					}
 					if (reloadAssoc->GetProgress() >= soundStart && (reloadAssoc->currentTime - reloadAssoc->timeStep) / reloadAssoc->hierarchy->totalLength < soundStart)
 						DMAudio.PlayOneShot(audioEntity, SOUND_WEAPON_RELOAD, m_eWeaponType);
-					if (CTimer::GetTimeInMilliseconds() > m_nTimer && reloadAssoc->GetProgress() < 0.9f) {
+					// A reload the player already judged keeps its own timer:
+					// the animation must not stretch the perfect tail or the
+					// jam back. An unjudged reload keeps the stock extension.
+					if (!ActiveReload::Judged(this) && CTimer::GetTimeInMilliseconds() > m_nTimer && reloadAssoc->GetProgress() < 0.9f) {
 						m_nTimer = CTimer::GetTimeInMilliseconds();
 					}
 				} else {
@@ -3225,6 +3269,13 @@ bool
 CWeapon::IsTypeMelee(void)
 {
 	return CWeaponInfo::GetWeaponInfo(m_eWeaponType)->m_eWeaponFire == WEAPON_FIRE_MELEE;
+}
+
+bool
+CWeapon::IsMagazineWeapon(void)
+{
+	CWeaponInfo *info = GetInfo();
+	return info->m_nAmountofAmmunition >= 2 && info->m_eWeaponFire == WEAPON_FIRE_INSTANT_HIT;
 }
 
 bool

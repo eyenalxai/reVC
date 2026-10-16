@@ -183,6 +183,7 @@ void CControllerConfigManager::LoadSettings(int32 file)
 #ifdef BIND_VEHICLE_FIREWEAPON
 	bool skipVehicleFireWeapon = false;
 #endif
+	bool skipPedReload = false;
 
 	if (file)
 	{
@@ -210,6 +211,15 @@ void CControllerConfigManager::LoadSettings(int32 file)
 				SetMouseButtonAssociatedWithAction(VEHICLE_FIREWEAPON, 1);
 		}
 #endif
+#ifdef BIND_VEHICLE_FIREWEAPON
+		// PED_RELOAD entered the format one version after VEHICLE_FIREWEAPON
+		skipPedReload = nVersion < 5;
+#else
+		skipPedReload = nVersion < 4;
+#endif
+		// Set the default settings of PED_RELOAD
+		if (skipPedReload)
+			SetControllerKeyAssociatedWithAction(PED_RELOAD, 'R', KEYBOARD);
 
 		for (int32 i = 0; i < MAX_CONTROLLERTYPES; i++)
 		{
@@ -220,6 +230,9 @@ void CControllerConfigManager::LoadSettings(int32 file)
 				if (skipVehicleFireWeapon && j == VEHICLE_FIREWEAPON)
 					continue;
 #endif
+				// Skip file read
+				if (skipPedReload && j == PED_RELOAD)
+					continue;
 				CFileMgr::Read(file, (char *)&ControlsManager.m_aSettings[j][i], sizeof(tControllerConfigBind));
 			}
 		}
@@ -278,7 +291,8 @@ void CControllerConfigManager::InitDefaultControlConfiguration()
 	SetControllerKeyAssociatedWithAction    (PED_LOOKBEHIND,                      rsCAPSLK,   OPTIONAL_EXTRA);
 
 	SetControllerKeyAssociatedWithAction    (PED_DUCK,                            'C',        KEYBOARD);
-																		          
+	SetControllerKeyAssociatedWithAction    (PED_RELOAD,                          'R',        KEYBOARD);
+
 	SetControllerKeyAssociatedWithAction    (PED_FIREWEAPON,                      rsPADINS,   KEYBOARD);
 	SetControllerKeyAssociatedWithAction    (PED_FIREWEAPON,                      rsLCTRL,    OPTIONAL_EXTRA);
 #ifdef BIND_VEHICLE_FIREWEAPON
@@ -574,6 +588,7 @@ void CControllerConfigManager::InitialiseControllerActionNameArray()
 	SETACTIONNAME(PED_1RST_PERSON_LOOK_UP);
 	SETACTIONNAME(PED_1RST_PERSON_LOOK_DOWN);
 	SETACTIONNAME(SHOW_MOUSE_POINTER_TOGGLE);
+	SETACTIONNAME(PED_RELOAD);
 	SETACTIONNAME(CAMERA_CHANGE_VIEW_ALL_SITUATIONS);
 	SETACTIONNAME(PED_FIREWEAPON);
 #ifdef BIND_VEHICLE_FIREWEAPON
@@ -905,6 +920,8 @@ void CControllerConfigManager::AffectControllerStateOn_ButtonDown_FirstPersonOnl
 		state.Cross = 255;
 	if (button == GetControllerKeyAssociatedWithAction(PED_DUCK, type))
 		state.LeftShock = 255;
+	if (button == GetControllerKeyAssociatedWithAction(PED_RELOAD, type))
+		state.Reload = 255;
 }
 
 void CControllerConfigManager::AffectControllerStateOn_ButtonDown_ThirdPersonOnly(int32 button, eControllerType type, CControllerState &state)
@@ -923,6 +940,8 @@ void CControllerConfigManager::AffectControllerStateOn_ButtonDown_ThirdPersonOnl
 		state.Cross = 255;
 	if (button == GetControllerKeyAssociatedWithAction(PED_DUCK, type))
 		state.LeftShock = 255;
+	if (button == GetControllerKeyAssociatedWithAction(PED_RELOAD, type))
+		state.Reload = 255;
 	
 	if (FrontEndMenuManager.m_ControlMethod == CONTROL_CLASSIC)
 	{
@@ -1777,6 +1796,7 @@ void CControllerConfigManager::DeleteMatching3rdPersonControls(e_ControllerActio
 		CLEAR_ACTION_IF_NEEDED(PED_LOOKBEHIND);
 		CLEAR_ACTION_IF_NEEDED(PED_DUCK);
 		CLEAR_ACTION_IF_NEEDED(PED_ANSWER_PHONE);
+		CLEAR_ACTION_IF_NEEDED(PED_RELOAD);
 
 		if (FrontEndMenuManager.m_ControlMethod == CONTROL_CLASSIC)
 		{
@@ -1996,6 +2016,7 @@ e_ControllerActionType CControllerConfigManager::GetActionType(e_ControllerActio
 	case PED_CYCLE_TARGET_LEFT:
 	case PED_CYCLE_TARGET_RIGHT:
 	case PED_CENTER_CAMERA_BEHIND_PLAYER:
+	case PED_RELOAD:
 		return ACTIONTYPE_3RDPERSON;
 		break;
 
@@ -2546,8 +2567,9 @@ int32 CControllerConfigManager::GetNumOfSettingsForAction(e_ControllerAction act
 	     nil,    /* TOGGLE_DPAD */                                                                                                                             \
 	     nil,    /* SWITCH_DEBUG_CAM_ON */                                                                                                                     \
 	     nil,    /* TAKE_SCREEN_SHOT */                                                                                                                        \
-	     nil,    /* UNKNOWN_ACTION */                                                                                                                          \
 	     nil,    /* SHOW_MOUSE_POINTER_TOGGLE */                                                                                                               \
+	     nil,    /* PED_RELOAD */                                                                                                                              \
+	     nil,    /* UNKNOWN_ACTION */                                                                                                                          \
 	 },                                                                                                                                                        \
 	 {                                                                                                                                                         \
 	     O,      /* PED_FIREWEAPON */                                                                                                                          \
@@ -2593,8 +2615,9 @@ int32 CControllerConfigManager::GetNumOfSettingsForAction(e_ControllerAction act
 	     nil,    /* TOGGLE_DPAD */                                                                                                                             \
 	     nil,    /* SWITCH_DEBUG_CAM_ON */                                                                                                                     \
 	     nil,    /* TAKE_SCREEN_SHOT */                                                                                                                        \
-	     nil,    /* UNKNOWN_ACTION */                                                                                                                          \
 	     nil,    /* SHOW_MOUSE_POINTER_TOGGLE */                                                                                                               \
+	     nil,    /* PED_RELOAD */                                                                                                                              \
+	     nil,    /* UNKNOWN_ACTION */                                                                                                                          \
 	 },                                                                                                                                                        \
 	 {                                                                                                                                                         \
 	     X,      /* PED_FIREWEAPON */                                                                                                                          \
@@ -2640,8 +2663,9 @@ int32 CControllerConfigManager::GetNumOfSettingsForAction(e_ControllerAction act
 	     nil,    /* TOGGLE_DPAD */                                                                                                                             \
 	     nil,    /* SWITCH_DEBUG_CAM_ON */                                                                                                                     \
 	     nil,    /* TAKE_SCREEN_SHOT */                                                                                                                        \
-	     nil,    /* UNKNOWN_ACTION */                                                                                                                          \
 	     nil,    /* SHOW_MOUSE_POINTER_TOGGLE */                                                                                                               \
+	     nil,    /* PED_RELOAD */                                                                                                                              \
+	     nil,    /* UNKNOWN_ACTION */                                                                                                                          \
 	 },                                                                                                                                                        \
 	 {                                                                                                                                                         \
 	     R1,     /* PED_FIREWEAPON */                                                                                                                          \
@@ -2687,8 +2711,9 @@ int32 CControllerConfigManager::GetNumOfSettingsForAction(e_ControllerAction act
 	     nil,    /* TOGGLE_DPAD */                                                                                                                             \
 	     nil,    /* SWITCH_DEBUG_CAM_ON */                                                                                                                     \
 	     nil,    /* TAKE_SCREEN_SHOT */                                                                                                                        \
-	     nil,    /* UNKNOWN_ACTION */                                                                                                                          \
 	     nil,    /* SHOW_MOUSE_POINTER_TOGGLE */                                                                                                               \
+	     nil,    /* PED_RELOAD */                                                                                                                              \
+	     nil,    /* UNKNOWN_ACTION */                                                                                                                          \
 	 }}
 
 #ifdef BUTTON_ICONS

@@ -82,6 +82,9 @@ extern float gDriftStrength;
 extern float gDriftAssist;
 extern bool gDriftDebug;
 
+// Active reload (see src/weapons/ActiveReload.h)
+extern bool gActiveReloadEnabled;
+
 // Infinite sprint (see src/peds/PlayerPed.cpp)
 extern bool gInfiniteSprint;
 
