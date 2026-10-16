@@ -26,23 +26,6 @@ extern bool gbDontRenderVehicles;
 class CVehicle;
 class CPtrList;
 
-enum eScanStream
-{
-	SCAN_STREAM_NONE,	// do not request models
-	SCAN_STREAM_VISIBILITY,	// request the models the visibility check found
-	SCAN_STREAM_FRUSTUM,	// request every model in the frustum that needs streaming
-};
-
-// What a sector scan does with the entities it finds.
-// The four sector scans differ only in these flags.
-struct SectorScanFlags
-{
-	eScanStream stream;
-	bool bGlassOffscreen;	// an invisible glass entity counts as offscreen
-	bool bMarkPriority;	// a request of a model that is not loaded sets the loading priority
-	bool bRequestLimit;	// a set loading priority holds requests back once the queue is full
-};
-
 class CRenderer
 {
 	static int32 ms_nNoOfVisibleEntities;
@@ -62,6 +45,24 @@ class CRenderer
 public:
 	static float ms_lodDistScale;
 	static bool m_loadingPriority;
+
+	// What a sector scan does with the entities it finds.
+	enum eScanStream
+	{
+		SCAN_STREAM_NONE,	// do not request models
+		SCAN_STREAM_VISIBILITY,	// request the models the visibility check found
+		SCAN_STREAM_FRUSTUM,	// request every model in the frustum that needs streaming
+	};
+
+	// The flags of a sector scan; each of the four sector scans sets its own
+	// combination.
+	struct SectorScanFlags
+	{
+		eScanStream stream;		// how the scan requests models
+		bool bTreatGlassAsOffscreen;	// an invisible glass entity counts as offscreen
+		bool bMarkPriority;		// a request of a model that is not loaded sets the loading priority
+		bool bHoldBackRequests;		// a set loading priority stops the requests
+	};
 
 	static void Init(void);
 	static void Shutdown(void);
@@ -87,10 +88,10 @@ public:
 	static void ScanSectorPoly(RwV2d *poly, int32 numVertices, void (*scanfunc)(CPtrList *));
 	static void ScanBigBuildingList(CPtrList &list);
 	static void ScanSectorList(CPtrList *lists);
+	static void ScanSectorList(CPtrList *lists, const SectorScanFlags &flags);
 	static void ScanSectorList_Priority(CPtrList *lists);
 	static void ScanSectorList_Subway(CPtrList *lists);
 	static void ScanSectorList_RequestModels(CPtrList *lists);
-	static void ScanSectorList_WithFlags(CPtrList *lists, const SectorScanFlags &flags);
 
 	static void SortBIGBuildings(void);
 	static void SortBIGBuildingsForSectorList(CPtrList *list);

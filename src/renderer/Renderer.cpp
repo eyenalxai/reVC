@@ -46,6 +46,16 @@ struct EntityInfo
 	float sort;
 };
 
+// Sorted vehicles that one render pass hands over to the next: the pass that
+// fills the list hands the vehicles to the pass that draws them. A pass clears
+// the list, fills it with the nodes it owns and draws every node, so no node
+// survives into another pass and no vehicle is drawn twice.
+//   RenderEverythingBarRoads (old renderer) fills it with the vehicles it does
+//   not draw itself, for RenderBoats.
+//   RenderBoats (new renderer) fills it with the boats and the vehicles that
+//   touch water and draws them; RenderVehicles then clears it, fills it with
+//   the other vehicles and draws them.
+//   ClearForFrame empties it at the start of a new-renderer frame.
 CLinkList<EntityInfo> gSortedVehiclesAndPeds;
 
 int32 CRenderer::ms_nNoOfVisibleEntities;
@@ -983,17 +993,20 @@ enum Corners
 	CORNER_LOD_RIGHT,
 	CORNER_PRIO_LEFT,
 	CORNER_PRIO_RIGHT,
+	CORNER_COUNT
 };
 
 // Set up the frustum the sector scans work with: the four corners of the far
-// clip plane f, the LOD corners and the priority corners, all in world space.
-static void
-CalcFrustumVectors(CVector *vectors, float f)
+// clip plane, the LOD corners and the priority corners, all in world space.
+// Returns the far clip plane.
+static float
+CalcFrustumVectors(CVector (&vectors)[CORNER_COUNT])
 {
+	float f = RwCameraGetFarClipPlane(TheCamera.m_pRwCamera);
 	RwV2d vw = *RwCameraGetViewWindow(TheCamera.m_pRwCamera);
 	RwMatrix *cammatrix;
 
-	memset(vectors, 0, 9*sizeof(CVector));
+	memset(vectors, 0, sizeof(vectors));
 	vectors[CORNER_FAR_TOPLEFT].x = -vw.x * f;
 	vectors[CORNER_FAR_TOPLEFT].y = vw.y * f;
 	vectors[CORNER_FAR_TOPLEFT].z = f;
@@ -1024,46 +1037,66 @@ CalcFrustumVectors(CVector *vectors, float f)
 	vectors[CORNER_PRIO_RIGHT].x = vectors[CORNER_LOD_RIGHT].x * 0.2f;
 	vectors[CORNER_PRIO_RIGHT].y = vectors[CORNER_LOD_RIGHT].y * 0.2f;
 	vectors[CORNER_PRIO_RIGHT].z = vectors[CORNER_LOD_RIGHT].z;
-	RwV3dTransformPoints(vectors, vectors, 9, cammatrix);
+	RwV3dTransformPoints(vectors, vectors, CORNER_COUNT, cammatrix);
+
+	return f;
+}
+
+// The top-down cameras look straight down; their scan covers the sectors of
+// the far corners clamped to the ground plane instead of the frustum polygon.
+static bool
+IsTopDownCamera(void)
+{
+	int mode = TheCamera.Cams[TheCamera.ActiveCam].Mode;
+	return mode == CCam::MODE_TOPDOWN ||
+#ifdef FIX_BUGS
+	       mode == CCam::MODE_GTACLASSIC ||
+#endif
+	       mode == CCam::MODE_TOP_DOWN_PED;
+}
+
+// Clamp the four far corners of a top-down camera to the ground plane and
+// return the sector range they cover.
+static void
+ClampFrustumToSectors(CVector (&vectors)[CORNER_COUNT], int &x1, int &x2, int &y1, int &y2)
+{
+	CRect rect;
+
+	LimitFrustumVector(vectors[CORNER_FAR_TOPLEFT], vectors[CORNER_CAM], -100.0f);
+	rect.ContainPoint(vectors[CORNER_FAR_TOPLEFT]);
+	LimitFrustumVector(vectors[CORNER_FAR_TOPRIGHT], vectors[CORNER_CAM], -100.0f);
+	rect.ContainPoint(vectors[CORNER_FAR_TOPRIGHT]);
+	LimitFrustumVector(vectors[CORNER_FAR_BOTRIGHT], vectors[CORNER_CAM], -100.0f);
+	rect.ContainPoint(vectors[CORNER_FAR_BOTRIGHT]);
+	LimitFrustumVector(vectors[CORNER_FAR_BOTLEFT], vectors[CORNER_CAM], -100.0f);
+	rect.ContainPoint(vectors[CORNER_FAR_BOTLEFT]);
+
+	x1 = CWorld::GetSectorIndexX(rect.left);
+	if(x1 < 0) x1 = 0;
+	x2 = CWorld::GetSectorIndexX(rect.right);
+	if(x2 >= NUMSECTORS_X-1) x2 = NUMSECTORS_X-1;
+	y1 = CWorld::GetSectorIndexY(rect.top);
+	if(y1 < 0) y1 = 0;
+	y2 = CWorld::GetSectorIndexY(rect.bottom);
+	if(y2 >= NUMSECTORS_Y-1) y2 = NUMSECTORS_Y-1;
 }
 
 void
 CRenderer::ScanWorld(void)
 {
-	float f = RwCameraGetFarClipPlane(TheCamera.m_pRwCamera);
-	CVector vectors[9];
+	CVector vectors[CORNER_COUNT];
 	RwV2d poly[3];
+	int x1, x2, y1, y2;
 
-	CalcFrustumVectors(vectors, f);
+	float f = CalcFrustumVectors(vectors);
 
 	m_pFirstPersonVehicle = nil;
 	CVisibilityPlugins::InitAlphaEntityList();
 	CWorld::AdvanceCurrentScanCode();
 
 	m_loadingPriority = false;
-	if(TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_TOPDOWN ||
-#ifdef FIX_BUGS
-	   TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_GTACLASSIC ||
-#endif
-	   TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_TOP_DOWN_PED){
-		CRect rect;
-		int x1, x2, y1, y2;
-		LimitFrustumVector(vectors[CORNER_FAR_TOPLEFT], vectors[CORNER_CAM], -100.0f);
-		rect.ContainPoint(vectors[CORNER_FAR_TOPLEFT]);
-		LimitFrustumVector(vectors[CORNER_FAR_TOPRIGHT], vectors[CORNER_CAM], -100.0f);
-		rect.ContainPoint(vectors[CORNER_FAR_TOPRIGHT]);
-		LimitFrustumVector(vectors[CORNER_FAR_BOTRIGHT], vectors[CORNER_CAM], -100.0f);
-		rect.ContainPoint(vectors[CORNER_FAR_BOTRIGHT]);
-		LimitFrustumVector(vectors[CORNER_FAR_BOTLEFT], vectors[CORNER_CAM], -100.0f);
-		rect.ContainPoint(vectors[CORNER_FAR_BOTLEFT]);
-		x1 = CWorld::GetSectorIndexX(rect.left);
-		if(x1 < 0) x1 = 0;
-		x2 = CWorld::GetSectorIndexX(rect.right);
-		if(x2 >= NUMSECTORS_X-1) x2 = NUMSECTORS_X-1;
-		y1 = CWorld::GetSectorIndexY(rect.top);
-		if(y1 < 0) y1 = 0;
-		y2 = CWorld::GetSectorIndexY(rect.bottom);
-		if(y2 >= NUMSECTORS_Y-1) y2 = NUMSECTORS_Y-1;
+	if(IsTopDownCamera()){
+		ClampFrustumToSectors(vectors, x1, x2, y1, y2);
 		for(; x1 <= x2; x1++)
 			for(int y = y1; y <= y2; y++)
 				ScanSectorList(CWorld::GetSector(x1, y)->m_lists);
@@ -1129,38 +1162,17 @@ CRenderer::ScanWorld(void)
 void
 CRenderer::RequestObjectsInFrustum(void)
 {
-	float f = RwCameraGetFarClipPlane(TheCamera.m_pRwCamera);
-	CVector vectors[9];
+	CVector vectors[CORNER_COUNT];
 	RwV2d poly[3];
+	int x1, x2, y1, y2;
 
-	CalcFrustumVectors(vectors, f);
+	CalcFrustumVectors(vectors);
 
 	CWorld::AdvanceCurrentScanCode();
 	ms_vecCameraPosition = TheCamera.GetPosition();
 
-	if(TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_TOPDOWN ||
-#ifdef FIX_BUGS
-	   TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_GTACLASSIC ||
-#endif
-	   TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_TOP_DOWN_PED){
-		CRect rect;
-		int x1, x2, y1, y2;
-		LimitFrustumVector(vectors[CORNER_FAR_TOPLEFT], vectors[CORNER_CAM], -100.0f);
-		rect.ContainPoint(vectors[CORNER_FAR_TOPLEFT]);
-		LimitFrustumVector(vectors[CORNER_FAR_TOPRIGHT], vectors[CORNER_CAM], -100.0f);
-		rect.ContainPoint(vectors[CORNER_FAR_TOPRIGHT]);
-		LimitFrustumVector(vectors[CORNER_FAR_BOTRIGHT], vectors[CORNER_CAM], -100.0f);
-		rect.ContainPoint(vectors[CORNER_FAR_BOTRIGHT]);
-		LimitFrustumVector(vectors[CORNER_FAR_BOTLEFT], vectors[CORNER_CAM], -100.0f);
-		rect.ContainPoint(vectors[CORNER_FAR_BOTLEFT]);
-		x1 = CWorld::GetSectorIndexX(rect.left);
-		if(x1 < 0) x1 = 0;
-		x2 = CWorld::GetSectorIndexX(rect.right);
-		if(x2 >= NUMSECTORS_X-1) x2 = NUMSECTORS_X-1;
-		y1 = CWorld::GetSectorIndexY(rect.top);
-		if(y1 < 0) y1 = 0;
-		y2 = CWorld::GetSectorIndexY(rect.bottom);
-		if(y2 >= NUMSECTORS_Y-1) y2 = NUMSECTORS_Y-1;
+	if(IsTopDownCamera()){
+		ClampFrustumToSectors(vectors, x1, x2, y1, y2);
 		for(; x1 <= x2; x1++)
 			for(int y = y1; y <= y2; y++)
 				ScanSectorList_RequestModels(CWorld::GetSector(x1, y)->m_lists);
@@ -1430,18 +1442,43 @@ CRenderer::ScanBigBuildingList(CPtrList &list)
 	}
 }
 
-// The four sector scans differ only in these flags: the model request limit
-// (ScanSectorList), the loading priority (_Priority), the subway variant
-// (_Subway) and the frustum request (_RequestModels).
-static const SectorScanFlags scanSectorListFlags = { SCAN_STREAM_VISIBILITY, true, false, true };
-static const SectorScanFlags scanPriorityFlags = { SCAN_STREAM_VISIBILITY, true, true, false };
+// The four sector scans differ only in these flags: `stream` selects the way
+// the scan requests models, `bTreatGlassAsOffscreen` keeps an invisible glass
+// entity in the offscreen pass, `bMarkPriority` lets a request of a model that
+// is not loaded yet set the loading priority, and `bHoldBackRequests` stops
+// the requests while that priority is set and the request queue is full (the
+// old ms_numModelsRequested limit).
+// scanSectorListFlags = ScanSectorList, scanPriorityFlags = _Priority,
+// scanSubwayFlags = _Subway (GTA_TRAIN), scanRequestModelsFlags = _RequestModels.
+static const CRenderer::SectorScanFlags scanSectorListFlags = {
+	CRenderer::SCAN_STREAM_VISIBILITY,	// stream
+	true,					// bTreatGlassAsOffscreen
+	false,					// bMarkPriority
+	true,					// bHoldBackRequests
+};
+static const CRenderer::SectorScanFlags scanPriorityFlags = {
+	CRenderer::SCAN_STREAM_VISIBILITY,	// stream
+	true,					// bTreatGlassAsOffscreen
+	true,					// bMarkPriority
+	false,					// bHoldBackRequests
+};
 #ifdef GTA_TRAIN
-static const SectorScanFlags scanSubwayFlags = { SCAN_STREAM_NONE, false, false, false };
+static const CRenderer::SectorScanFlags scanSubwayFlags = {
+	CRenderer::SCAN_STREAM_NONE,		// stream
+	false,					// bTreatGlassAsOffscreen
+	false,					// bMarkPriority
+	false,					// bHoldBackRequests
+};
 #endif
-static const SectorScanFlags scanRequestModelsFlags = { SCAN_STREAM_FRUSTUM, false, false, false };
+static const CRenderer::SectorScanFlags scanRequestModelsFlags = {
+	CRenderer::SCAN_STREAM_FRUSTUM,		// stream
+	false,					// bTreatGlassAsOffscreen
+	false,					// bMarkPriority
+	false,					// bHoldBackRequests
+};
 
 void
-CRenderer::ScanSectorList_WithFlags(CPtrList *lists, const SectorScanFlags &flags)
+CRenderer::ScanSectorList(CPtrList *lists, const SectorScanFlags &flags)
 {
 	CPtrNode *node;
 	CPtrList *list;
@@ -1472,7 +1509,7 @@ CRenderer::ScanSectorList_WithFlags(CPtrList *lists, const SectorScanFlags &flag
 				InsertEntityIntoList(ent);
 				break;
 			case VIS_INVISIBLE:
-				if(!flags.bGlassOffscreen || !IsGlass(ent->GetModelIndex()))
+				if(!flags.bTreatGlassAsOffscreen || !IsGlass(ent->GetModelIndex()))
 					break;
 				// fall through
 			case VIS_OFFSCREEN:
@@ -1487,7 +1524,7 @@ CRenderer::ScanSectorList_WithFlags(CPtrList *lists, const SectorScanFlags &flag
 			case VIS_STREAMME:
 				if(flags.stream != SCAN_STREAM_VISIBILITY || CStreaming::ms_disableStreaming)
 					break;
-				if(flags.bRequestLimit && m_loadingPriority && CStreaming::ms_numModelsRequested >= 10)
+				if(flags.bHoldBackRequests && m_loadingPriority && CStreaming::ms_numModelsRequested >= 10)
 					break;
 				CStreaming::RequestModel(ent->GetModelIndex(), 0);
 				if(flags.bMarkPriority && CStreaming::ms_aInfoForModel[ent->GetModelIndex()].m_loadState != STREAMSTATE_LOADED)
@@ -1501,27 +1538,27 @@ CRenderer::ScanSectorList_WithFlags(CPtrList *lists, const SectorScanFlags &flag
 void
 CRenderer::ScanSectorList(CPtrList *lists)
 {
-	ScanSectorList_WithFlags(lists, scanSectorListFlags);
+	ScanSectorList(lists, scanSectorListFlags);
 }
 
 void
 CRenderer::ScanSectorList_Priority(CPtrList *lists)
 {
-	ScanSectorList_WithFlags(lists, scanPriorityFlags);
+	ScanSectorList(lists, scanPriorityFlags);
 }
 
 #ifdef GTA_TRAIN
 void
 CRenderer::ScanSectorList_Subway(CPtrList *lists)
 {
-	ScanSectorList_WithFlags(lists, scanSubwayFlags);
+	ScanSectorList(lists, scanSubwayFlags);
 }
 #endif
 
 void
 CRenderer::ScanSectorList_RequestModels(CPtrList *lists)
 {
-	ScanSectorList_WithFlags(lists, scanRequestModelsFlags);
+	ScanSectorList(lists, scanRequestModelsFlags);
 }
 
 // Put big buildings in front
