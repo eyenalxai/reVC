@@ -122,6 +122,36 @@ The existing model in `CVehicle::ProcessWheel`: one grip budget per wheel,
 shared between the forward force and the sideways force. The drift layer changes
 how the budget is spent; it does not change the wheel list.
 
+## Movement controller
+
+The module that owns the player's horizontal velocity on foot:
+`CPlayerPed::UpdatePlayerMovement` in `src/peds/PlayerPed.cpp`. Every on-foot
+control path calls it, in both views. The camera sets the view position and the
+direction basis only. The player's speed comes from the input and the physics;
+the fight state, the attached states and the states that hold a blocking
+animation keep the animation driven movement.
+
+## Movement state
+
+One of the controller's states (`ePlayerMovementState`): ground and air today.
+Each state has its own acceleration, friction and turn rate row; the planned
+slide state will add a row. The ground state moves the velocity toward the
+target speed, turns the direction and slows the ped down with the friction. The
+air state keeps the momentum and steers with a smaller authority.
+
+## Engine velocity unit
+
+The unit of `m_vecMoveSpeed`: one unit per 1/50 second, so one engine velocity
+unit is 50 units per second. The tuning constants in `PlayerPed.cpp` divide the
+measured speeds and accelerations by 50.
+
+## Reference speed
+
+The speed the current walk/run/sprint animation blend moves the ped at with the
+association speed 1.0. The controller targets it and scales the animation
+playback by (real speed / reference speed), so the legs stay planted while the
+speed changes.
+
 ## Magazine weapon
 
 A weapon that fires instant hits and has a clip of two or more rounds. The
