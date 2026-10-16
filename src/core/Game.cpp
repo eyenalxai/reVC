@@ -176,15 +176,6 @@ CGame::InitialiseOnceBeforeRW(void)
 	return true;
 }
 
-#ifndef LIBRW
-#ifdef PS2_MATFX
-void ReplaceMatFxCallback();
-#endif // PS2_MATFX
-#ifdef PS2_ALPHA_TEST
-void ReplaceAtomicPipeCallback();
-#endif // PS2_ALPHA_TEST
-#endif // !LIBRW
-
 bool
 CGame::InitialiseRenderWare(void)
 {
@@ -238,7 +229,6 @@ CGame::InitialiseRenderWare(void)
 
 	CreateDebugFont();
 
-#ifdef LIBRW
 #ifdef PS2_MATFX
 	rw::MatFX::envMapApplyLight = true;
 	rw::MatFX::envMapUseMatColor = true;
@@ -250,14 +240,6 @@ CGame::InitialiseRenderWare(void)
 #endif
 	rw::RGBA envcol = { 64, 64, 64, 255 };
 	rw::MatFX::envMapColor = envcol;
-#else
-#ifdef PS2_MATFX
-	ReplaceMatFxCallback();
-#endif // PS2_MATFX
-#ifdef PS2_ALPHA_TEST
-	ReplaceAtomicPipeCallback();
-#endif // PS2_ALPHA_TEST
-#endif // LIBRW
 
 	PUSH_MEMID(MEMID_TEXTURES);
 	CFont::Initialise();
