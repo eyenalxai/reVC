@@ -2546,7 +2546,13 @@ CWeapon::FireM16_1stPerson(CEntity *shooter)
 		|| mode == CCam::MODE_M16_1STPERSON_RUNABOUT
 		|| mode == CCam::MODE_SNIPER_RUNABOUT
 		|| mode == CCam::MODE_ROCKETLAUNCHER_RUNABOUT
-		|| mode == CCam::MODE_HELICANNON_1STPERSON) )
+		|| mode == CCam::MODE_HELICANNON_1STPERSON
+#ifdef FIRST_PERSON
+		// The mobile ADS runs the plain first person camera (the sight zoom
+		// comes from the queued weapon mode), so it fires from here too.
+		|| (mode == CCam::MODE_1STPERSON && TheCamera.UsingFirstPersonSights())
+#endif
+		) )
 	{
 		return false;
 	}

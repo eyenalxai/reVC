@@ -1021,6 +1021,49 @@ CPlayerPed::UpdateFirstPersonAim(CPad *padUsed)
 }
 #endif
 
+// The shot of the held fire button: the stationary sights and the airborne
+// player fire straight from the hand, because neither runs the attack
+// animation. The weapon's firing rate spaces the shots and an empty weapon
+// only clicks.
+void
+CPlayerPed::FireWeaponWhenHeld(CPad *padUsed)
+{
+	CWeapon *weapon = GetWeapon();
+	uint32 now = CTimer::GetTimeInMilliseconds();
+
+	if (padUsed->GetWeapon() && now > weapon->m_nTimer) {
+		if (weapon->m_eWeaponState == WEAPONSTATE_OUT_OF_AMMO) {
+			DMAudio.PlayFrontEndSound(SOUND_WEAPON_SNIPER_SHOT_NO_ZOOM, 0.f);
+			weapon->m_nTimer = weapon->GetInfo()->m_nFiringRate + now;
+		} else {
+			CVector firePos = weapon->GetInfo()->m_vecFireOffset;
+			TransformToNode(firePos, PED_HANDR);
+			if (weapon->Fire(this, &firePos))
+				weapon->m_nTimer = weapon->GetInfo()->m_nFiringRate + now;
+			m_nPadDownPressedInMilliseconds = now;
+		}
+	} else if (now > weapon->m_nTimer &&
+		now - CTimer::GetTimeStepInMilliseconds() < weapon->m_nTimer && weapon->m_eWeaponState != WEAPONSTATE_OUT_OF_AMMO) {
+		DMAudio.PlayFrontEndSound(SOUND_WEAPON_AK47_BULLET_ECHO, weapon->m_eWeaponType);
+	}
+}
+
+// The airborne player keeps firing: the jump state owns the landing, so the
+// attack state and its animation stay off and the weapon fires straight from
+// the hand. The sight views fire along the sight ray through CWeapon::Fire.
+void
+CPlayerPed::ProcessAirborneWeapon(CPad *padUsed)
+{
+	CWeapon *weapon = GetWeapon();
+
+	// The melee and the thrown weapons need the attack animation
+	if (weapon->IsTypeMelee() || weapon->GetInfo()->IsFlagSet(WEAPONFLAG_THROW))
+		return;
+
+	FireWeaponWhenHeld(padUsed);
+	weapon->Update(m_audioEntityId, this);
+}
+
 void
 CPlayerPed::PlayerControlM16(CPad *padUsed)
 {
@@ -1053,20 +1096,12 @@ CPlayerPed::PlayerControlM16(CPad *padUsed)
 	UpdateFirstPersonAim(padUsed);
 #endif
 
-	if (padUsed->GetWeapon() && CTimer::GetTimeInMilliseconds() > GetWeapon()->m_nTimer) {
-		if (GetWeapon()->m_eWeaponState == WEAPONSTATE_OUT_OF_AMMO) {
-			DMAudio.PlayFrontEndSound(SOUND_WEAPON_SNIPER_SHOT_NO_ZOOM, 0.f);
-			GetWeapon()->m_nTimer = CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->m_nFiringRate + CTimer::GetTimeInMilliseconds();
-		} else {
-			CVector firePos(0.0f, 0.0f, 0.6f);
-			firePos = GetMatrix() * firePos;
-			GetWeapon()->Fire(this, &firePos);
-			m_nPadDownPressedInMilliseconds = CTimer::GetTimeInMilliseconds();
-		}
-	} else if (CTimer::GetTimeInMilliseconds() > GetWeapon()->m_nTimer &&
-		CTimer::GetTimeInMilliseconds() - CTimer::GetTimeStepInMilliseconds() < GetWeapon()->m_nTimer && GetWeapon()->m_eWeaponState != WEAPONSTATE_OUT_OF_AMMO) {
-		DMAudio.PlayFrontEndSound(SOUND_WEAPON_AK47_BULLET_ECHO, GetWeapon()->m_eWeaponType);
-	}
+	// The weapon fires from exactly one place per state: the mobile ADS keeps
+	// the attack state, so its attack animation fires the shot like the hip
+	// fire; only the stationary sight state has no attack animation, and the
+	// sight control fires the weapon itself.
+	if (m_nPedState == PED_SNIPER_MODE)
+		FireWeaponWhenHeld(padUsed);
 	GetWeapon()->Update(m_audioEntityId, nil);
 }
 
@@ -2274,6 +2309,12 @@ CPlayerPed::ProcessControl(void)
 				PlayerControlZelda(padUsed);
 			if (bIsLanding)
 				break;
+
+			// The airborne player keeps firing: the jump state owns the
+			// landing, so the shot comes straight from the weapon and the
+			// attack state stays off.
+			if (padUsed)
+				ProcessAirborneWeapon(padUsed);
 
 			// This has been added later it seems
 			return;
