@@ -211,6 +211,10 @@ struct CCarCreationPlacement
 };
 
 
+// VICE-130: the harness (tools/pathfind_check) reads this to tell a grid
+// build from the plain-scan fallback; the game does not use it.
+#define PATHFIND_HAS_NODE_GRID 1
+
 class CPathFind
 {
 public:
@@ -231,6 +235,24 @@ public:
 	uint8 m_numGroups[2];
 	CPathNode m_searchNodes[512];
 
+	// VICE-130: the uniform grid under FindNodeClosestToCoors. That lookup is
+	// a scan over every node of the type today, and it runs twice per path
+	// search; the grid visits only the cells the closest node can be in. Nodes
+	// never move after PreparePathData, so the grid is built once, on the
+	// first lookup after the path data is prepared. When a node falls outside
+	// the grid the lookup keeps the plain scan.
+	static const int PATHFIND_GRID_CELL = 32;	// metres per cell
+	static const int PATHFIND_GRID_DIM = 129;	// cells per axis, 4 km: the map is 3.6 km wide
+	static const int PATHFIND_GRID_CELLS = PATHFIND_GRID_DIM * PATHFIND_GRID_DIM;
+	int32 m_gridOriginX;	// world position of cell (0,0)
+	int32 m_gridOriginY;
+	bool m_gridValid;
+	uint16 m_gridCellStart[PATHFIND_GRID_CELLS + 1];	// cell -> range in m_gridNodes
+	int16 m_gridNodes[NUM_PATHNODES];
+
+	// VICE-130: the harness (tools/pathfind_check) reads this to tell a grid
+	// build from the plain-scan fallback; the game does not use it.
+	void BuildNodeGrid(void);
 	void Init(void);
 	void AllocatePathFindInfoMem(int16 numPathGroups);
 	void RegisterMapObject(CTreadable *mapObject);
