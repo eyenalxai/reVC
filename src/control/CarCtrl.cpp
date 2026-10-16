@@ -222,17 +222,18 @@ CCarCtrl::SpendFillBurstFrame(void)
 	for (int i = 0; i < attempts; i++) {
 		/* The pool is re-read inside the loop: a car brings its crew (a driver
 		 * and up to three passengers), so a frame that finds the pool down to
-		 * its reserve stops here (PopulationBudget.h, PED_POOL_RESERVE). */
+		 * its reserve stops here (PopulationBudget.h, PED_POOL_RESERVE). The
+		 * attempt counter follows the attempts the frame makes. */
 		if (i % FILL_BURST_POOL_CHECK_ATTEMPTS == 0 &&
 			CPools::GetPedPool()->GetNoOfFreeSpaces() < PED_POOL_RESERVE)
 			break;
+		ms_nFillBurstAttempts++;
 		int32 before = NumRandomCars;
 		GenerateOneRandomCar();
 		if (NumRandomCars > before)
 			placed++;
 	}
 
-	ms_nFillBurstAttempts += attempts;
 	ms_nFillBurstPlaced += placed;
 	FillBurstSpendFrame(&ms_FillBurst, true, placed > 0);
 }

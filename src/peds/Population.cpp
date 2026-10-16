@@ -764,7 +764,9 @@ SpendFillBurstFrame(void)
 
 	/* What the frame created: the pool used count before and after. The pool is
 	 * the one place every placement of the frame shows up, the gang groups and
-	 * the couples included. */
+	 * the couples included. The attempt counter follows the attempts the frame
+	 * makes, so a frame the pool or the stop line ends early counts what it
+	 * spent, not what it planned. */
 	int32 usedBefore = CPools::GetPedPool()->GetNoOfUsedSpaces();
 	for (int i = 0; i < attempts; i++) {
 		if (i % FILL_BURST_POOL_CHECK_ATTEMPTS == 0) {
@@ -773,12 +775,12 @@ SpendFillBurstFrame(void)
 			if (FillBurstTargetReached((float)CPopulation::ms_nTotalPeds, target))
 				break;
 		}
+		CPopulation::ms_nFillBurstAttempts++;
 		CPopulation::AddToPopulation(pcdm * rings.pedCreateMin, pcdm * rings.pedCreateMax,
 			pcdm * rings.pedOffScreenMax - rings.pedOffScreenPullBack, pcdm * rings.pedOffScreenMax);
 	}
 	int32 placed = CPools::GetPedPool()->GetNoOfUsedSpaces() - usedBefore;
 
-	CPopulation::ms_nFillBurstAttempts += attempts;
 	CPopulation::ms_nFillBurstPlaced += placed;
 	FillBurstSpendFrame(&CPopulation::ms_FillBurst, true, placed > 0);
 }
