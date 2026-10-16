@@ -2709,17 +2709,17 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		return;
 
 #ifdef FIRST_PERSON
-	// The first person car view uses the player's own ped camera: the ped sits in
-	// the car, so its head is at the driver's seat and the same camera serves both
-	// cases. There is no separate vehicle camera, so nothing moves when the player
+	// The first person view in a vehicle uses the player's own ped camera: the
+	// ped sits in the car or boat, so its head is at the driver's seat (or
+	// where it stands to drive a boat) and the same camera serves both cases.
+	// There is no separate vehicle camera, so nothing moves when the player
 	// gets in. The stock vehicle camera stays for a camera under script control.
 	CPlayerPed *pPlayer = FindPlayerPed();
 	CEntity *vehicleTarget = CamTargetEntity;
 	bool firstPersonCarView = (TheCamera.FirstPersonViewEnabled() ||
 	   TheCamera.WhoIsInControlOfTheCamera == CAMCONTROL_GAME) &&
 	   pPlayer && pPlayer->InVehicle() &&
-	   vehicleTarget == (CEntity*)pPlayer->m_pMyVehicle && ((CVehicle*)vehicleTarget)->pDriver &&
-	   !((CVehicle*)vehicleTarget)->IsBoat();
+	   vehicleTarget == (CEntity*)pPlayer->m_pMyVehicle && ((CVehicle*)vehicleTarget)->pDriver;
 	bool modeReset = ResetStatics;
 	if(firstPersonCarView)
 		CamTargetEntity = pPlayer;
@@ -2818,16 +2818,21 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 			Alpha += SQR(LookUpDown/150.0f)*ydir*1.0f/14.0f * FOV/80.0f * CTimer::GetTimeStep();
 #ifdef FIRST_PERSON
 		}
-		// In the car the view also turns with the vehicle, so the mouse look
-		// stays an offset from the car's heading.
+		// In a vehicle the view also turns with it, so the mouse look stays an
+		// offset from the vehicle's heading. The stored heading belongs to the
+		// last frame of the last vehicle, so the first frame in a vehicle must
+		// re-sync it: entering a vehicle no longer changes the camera mode, so
+		// nothing else would.
+		static float prevVehicleHeading = 0.0f;
+		static bool wasFirstPersonVehicle = false;
 		if(firstPersonCarView){
-			float carHeading = CGeneral::GetATanOfXY(vehicleTarget->GetForward().x, vehicleTarget->GetForward().y);
-			static float prevCarHeading = 0.0f;
-			if(modeReset)
-				prevCarHeading = carHeading;
-			Beta += carHeading - prevCarHeading;
-			prevCarHeading = carHeading;
+			float vehicleHeading = CGeneral::GetATanOfXY(vehicleTarget->GetForward().x, vehicleTarget->GetForward().y);
+			if(modeReset || !wasFirstPersonVehicle)
+				prevVehicleHeading = vehicleHeading;
+			Beta += vehicleHeading - prevVehicleHeading;
+			prevVehicleHeading = vehicleHeading;
 		}
+		wasFirstPersonVehicle = firstPersonCarView;
 #endif
 		while(Beta >= PI) Beta -= 2*PI;
 		while(Beta < -PI) Beta += 2*PI;
