@@ -298,3 +298,12 @@ hover tilt or the road tilt, and the wheel scale. One row of `aWheelPoses` drive
 it, so the rear, mid, Dodo, tank and front wheels share one pass. A row keeps its
 own hover splash order: the two random arguments are drawn in the order the row
 lists them, and swapping a pair would shift the global random stream.
+
+## Scene-graph sync
+
+The librw pass that turns a frame hierarchy into world-space matrices. A frame
+is marked when something in its hierarchy was written. The pass (the walk) then
+recomputes the local-to-world matrix (LTM) of every marked frame and of the
+frames below it, and syncs the objects that hang on those frames.
+`Frame::syncDirty` runs the pass once for each camera begin-update, so the walk
+is part of the frame cost. See ADR 0013.

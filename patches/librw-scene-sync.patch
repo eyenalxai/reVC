@@ -1,0 +1,177 @@
+diff --git a/src/base.cpp b/src/base.cpp
+index 3c3ca08..ed9b28d 100644
+--- a/src/base.cpp
++++ b/src/base.cpp
+@@ -263,6 +263,7 @@ void
+ Matrix::setIdentity(void)
+ {
+ 	*this = identMat;
++	flags |= CHANGED;
+ }
+ 
+ void
+@@ -353,6 +354,7 @@ Matrix::rotate(const V3d *axis, float32 angle, CombineOp op)
+ 		*this = tmp;
+ 		break;
+ 	}
++	flags |= CHANGED;
+ 	return this;
+ }
+ 
+@@ -374,6 +376,7 @@ Matrix::rotate(const Quat &q, CombineOp op)
+ 		*this = tmp;
+ 		break;
+ 	}
++	flags |= CHANGED;
+ 	return this;
+ }
+ Matrix*
+@@ -396,6 +399,7 @@ Matrix::translate(const V3d *translation, CombineOp op)
+ 		*this = tmp;
+ 		break;
+ 	}
++	flags |= CHANGED;
+ 	return this;
+ }
+ 
+@@ -421,6 +425,7 @@ Matrix::scale(const V3d *scale, CombineOp op)
+ 		*this = tmp;
+ 		break;
+ 	}
++	flags |= CHANGED;
+ 	return this;
+ }
+ 
+@@ -441,6 +446,7 @@ Matrix::transform(const Matrix *mat, CombineOp op)
+ 		*this = tmp;
+ 		break;
+ 	}
++	flags |= CHANGED;
+ 	return this;
+ }
+ 
+diff --git a/src/frame.cpp b/src/frame.cpp
+index c8dabd5..0edc97f 100644
+--- a/src/frame.cpp
++++ b/src/frame.cpp
+@@ -169,6 +169,18 @@ Frame::count(void)
+  * If attached objects need synching, the OBJ flags are set.
+  */
+ 
++/* True if the two matrices hold the same 12 floats. Used to tell whether a
++ * hierarchy root's matrix was really written since the last sync. */
++static bool
++matrixEquals(const Matrix *a, const Matrix *b)
++{
++	return a->right.x == b->right.x && a->right.y == b->right.y &&
++	       a->right.z == b->right.z &&
++	       a->up.x == b->up.x && a->up.y == b->up.y && a->up.z == b->up.z &&
++	       a->at.x == b->at.x && a->at.y == b->at.y && a->at.z == b->at.z &&
++	       a->pos.x == b->pos.x && a->pos.y == b->pos.y && a->pos.z == b->pos.z;
++}
++
+ /* Synch just LTM matrices in a hierarchy */
+ static void
+ syncLTMRecurse(Frame *frame, uint8 hierarchyFlags)
+@@ -205,17 +217,34 @@ static void
+ syncRecurse(Frame *frame, uint8 hierarchyFlags)
+ {
+ 	for(; frame; frame = frame->next){
+-		// If frame is dirty or any parent was dirty, update LTM
+-		hierarchyFlags |= frame->object.privateFlags;
+-		if(hierarchyFlags & Frame::SUBTREESYNCLTM)
++		uint8 flags = frame->object.privateFlags;
++		bool ancestorChanged = (hierarchyFlags & Frame::SUBTREESYNCLTM) != 0;
++		// The frame was written since the last sync. When an ancestor already
++		// changed, this frame's LTM has to be recomputed anyway, so the flag can
++		// stay set until a sync where it matters.
++		bool matrixChanged = false;
++		if(!ancestorChanged){
++			matrixChanged = (frame->matrix.flags & Matrix::CHANGED) != 0;
++			frame->matrix.flags &= ~Matrix::CHANGED;
++		}
++		// The LTM only has to be recomputed if the frame's own matrix was
++		// written or if the parent's LTM changed. A mark on the frame still
++		// forces the recompute.
++		bool needLTM = ancestorChanged ||
++		               (flags & Frame::SUBTREESYNCLTM) != 0 ||
++		               matrixChanged;
++		// Objects depend on the LTM, so they only have to be synched when the
++		// LTM changed or the frame itself has unsynched objects.
++		bool needObj = needLTM || (flags & Frame::SUBTREESYNCOBJ) != 0;
++		if(needLTM)
+ 			Matrix::mult(&frame->ltm, &frame->matrix,
+ 			             &frame->getParent()->ltm);
+-		// Synch attached objects
+-		FORLIST(lnk, frame->objectList)
+-			ObjectWithFrame::fromFrame(lnk)->sync();
++		if(needObj)
++			FORLIST(lnk, frame->objectList)
++				ObjectWithFrame::fromFrame(lnk)->sync();
+ 		frame->object.privateFlags &= ~Frame::SUBTREESYNC;
+-		// And synch all children
+-		syncRecurse(frame->child, hierarchyFlags);
++		// Only a new LTM forces the children's LTMs to be recomputed
++		syncRecurse(frame->child, needLTM ? (uint8)Frame::SUBTREESYNCLTM : 0);
+ 	}
+ }
+ 
+@@ -248,6 +277,12 @@ Frame::syncDirty(void)
+ 	FORLIST(lnk, engine->frameDirtyList){
+ 		frame = LLLinkGetData(lnk, Frame, inDirtyList);
+ 		if(frame->object.privateFlags & Frame::HIERARCHYSYNCLTM){
++			// The hierarchy root's LTM is a copy of its matrix, so this tells
++			// whether the root really moved since the last sync. If it did not,
++			// the children's LTMs are still up to date unless they were written
++			// themselves; syncRecurse checks each frame's CHANGED flag for that.
++			bool rootChanged = !matrixEquals(&frame->ltm, &frame->matrix);
++			frame->matrix.flags &= ~Matrix::CHANGED;
+ 			// Sync root's LTM
+ 			if(frame->object.privateFlags & Frame::SUBTREESYNCLTM)
+ 				frame->ltm = frame->matrix;
+@@ -255,7 +290,8 @@ Frame::syncDirty(void)
+ 			FORLIST(lnk, frame->objectList)
+ 				ObjectWithFrame::fromFrame(lnk)->sync();
+ 			// ...and children
+-			syncRecurse(frame->child, frame->object.privateFlags);
++			syncRecurse(frame->child,
++			            rootChanged ? (uint8)Frame::SUBTREESYNCLTM : 0);
+ 		}else{
+ 			// LTMs are clean, just synch objects
+ 			FORLIST(lnk, frame->objectList)
+@@ -323,6 +359,8 @@ cloneRecurse(Frame *old, Frame *newroot)
+ 		newroot = frame;
+ 	frame->object.copy(&old->object);
+ 	frame->matrix = old->matrix;
++	// the clone's LTMs have not been computed yet
++	frame->matrix.flags |= Matrix::CHANGED;
+ 	frame->root = newroot;
+ 	old->root = frame;	// Remember cloned frame
+ 	for(Frame *child = old->child; child; child = child->next){
+@@ -395,6 +433,8 @@ FrameList_::streamRead(Stream *stream)
+ 		f->matrix.optimize();
+ 		// RW always removes identity flag
+ 		f->matrix.flags &= ~Matrix::IDENTITY;
++		// the LTMs have not been computed yet
++		f->matrix.flags |= Matrix::CHANGED;
+ 		if(buf.parent >= 0)
+ 			this->frames[buf.parent]->addChild(f, rw::streamAppendFrames);
+ 	}
+diff --git a/src/rwbase.h b/src/rwbase.h
+index 6bc8a54..ac2633d 100644
+--- a/src/rwbase.h
++++ b/src/rwbase.h
+@@ -326,7 +326,12 @@ struct Matrix
+ 		TYPEMASK = 3
+ 	};
+ 	enum Flags {
+-		IDENTITY = 0x20000
++		IDENTITY = 0x20000,
++		// The matrix's values were written; the LTMs that depend on it must be
++		// recomputed. Set by the value-writing methods below (and by the
++		// RwMatrixUpdate wrapper in reVC), read and cleared by
++		// Frame::syncDirty/syncRecurse. RESERVED: no other librw code uses it.
++		CHANGED = 0x4
+ 	};
+ 	struct Tolerance {
+ 		float32 normal;

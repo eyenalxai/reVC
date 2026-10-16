@@ -181,6 +181,52 @@ if(NOT ${PROJECT}_AUDIO IN_LIST ${PROJECT}_AUDIOS)
 endif()
 
 option(${PROJECT}_VENDORED_LIBRW "Use vendored librw" ON)
+
+# VICE-129: the scene-graph sync fix lives in librw (see patches/librw-scene-sync.patch).
+# The submodule stays at the pinned upstream commit, so the patch is applied here,
+# before librw is configured. An already patched tree is left alone.
+option(${PROJECT}_LIBRW_PATCH "Apply patches/librw-*.patch to the vendored librw" ON)
+if(${PROJECT}_VENDORED_LIBRW AND ${PROJECT}_LIBRW_PATCH)
+    file(GLOB LIBRW_PATCHES "${PROJECT_SOURCE_DIR}/patches/librw-*.patch")
+    foreach(LIBRW_PATCH ${LIBRW_PATCHES})
+        get_filename_component(LIBRW_PATCH_NAME "${LIBRW_PATCH}" NAME)
+        set(LIBRW_DIR "${PROJECT_SOURCE_DIR}/vendor/librw")
+        if(EXISTS "${LIBRW_DIR}/.git")
+            set(LIBRW_PATCH_TOOL git)
+            set(LIBRW_PATCH_ARGS apply)
+            set(LIBRW_PATCH_CHECK --check)
+            set(LIBRW_PATCH_REVERSE --reverse --check)
+        else()
+            set(LIBRW_PATCH_TOOL patch)
+            set(LIBRW_PATCH_ARGS -p1)
+            set(LIBRW_PATCH_CHECK --dry-run)
+            set(LIBRW_PATCH_REVERSE --reverse --dry-run)
+        endif()
+        execute_process(COMMAND ${LIBRW_PATCH_TOOL} ${LIBRW_PATCH_ARGS} ${LIBRW_PATCH_REVERSE} "${LIBRW_PATCH}"
+            WORKING_DIRECTORY "${LIBRW_DIR}"
+            RESULT_VARIABLE LIBRW_PATCH_APPLIED
+            OUTPUT_QUIET ERROR_QUIET)
+        if(LIBRW_PATCH_APPLIED EQUAL 0)
+            message(STATUS "librw already carries ${LIBRW_PATCH_NAME}")
+        else()
+            execute_process(COMMAND ${LIBRW_PATCH_TOOL} ${LIBRW_PATCH_ARGS} ${LIBRW_PATCH_CHECK} "${LIBRW_PATCH}"
+                WORKING_DIRECTORY "${LIBRW_DIR}"
+                RESULT_VARIABLE LIBRW_PATCH_OK
+                OUTPUT_QUIET ERROR_QUIET)
+            if(NOT LIBRW_PATCH_OK EQUAL 0)
+                message(FATAL_ERROR "${LIBRW_PATCH} does not apply to vendor/librw")
+            endif()
+            execute_process(COMMAND ${LIBRW_PATCH_TOOL} ${LIBRW_PATCH_ARGS} "${LIBRW_PATCH}"
+                WORKING_DIRECTORY "${LIBRW_DIR}"
+                RESULT_VARIABLE LIBRW_PATCH_OK)
+            if(NOT LIBRW_PATCH_OK EQUAL 0)
+                message(FATAL_ERROR "Failed to apply ${LIBRW_PATCH}")
+            endif()
+            message(STATUS "Applied patches/${LIBRW_PATCH_NAME} to the vendored librw")
+        endif()
+    endforeach()
+endif()
+
 if(${PROJECT}_VENDORED_LIBRW)
     if(NOT DEFINED LIBRW_PLATFORM AND NOT PS2)
         set(LIBRW_PLATFORM "GL3" CACHE STRING "librw platform")
