@@ -437,6 +437,8 @@ public:
 	uint32 GetPedCommentSfx(CPed *ped, uint16 sound);
 	void GetPhrase(uint32 &phrase, uint32 &prevPhrase, uint32 sample, uint32 maxOffset);
 	uint32 GetPlayerTalkSfx(CPed *ped, uint16 sound);
+	uint32 GetPlayerShootSfx(CPed *ped);
+	uint32 GetPlayerCrashSfx(CPed *ped);
 	uint32 GetGenericMaleTalkSfx(CPed *ped, uint16 sound);   // inlined in vc
 	uint32 GetGenericFemaleTalkSfx(CPed *ped, uint16 sound); // inlined in vc
 	uint32 GetDefaultTalkSfx(CPed *ped, uint16 sound);

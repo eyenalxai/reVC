@@ -243,9 +243,12 @@ static Const uint8 OneShotPriority[] = {
 										3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 5, 4, 2, 5, 5, 3, 5, 2, 2, 1, 1, 3, 1, 3, 3, 1, 1, 1, 1, 4, 4, 4, 3, 1, 1, 1, 1, 1,
 										1, 1, 1, 1, 1, 1, 1, 1, 6, 1, 1, 1, 1, 1, 1, 3, 4, 2, 0, 0, 6, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 1, 0, 0, 0, 0, 0,
 										0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 3, 1, 1, 1, 9, 0, 0, 0, 1, 2, 2, 0, 0, 2, 3, 3, 3, 5, 1, 1,
-										1, 1, 1, 2, 2, 1, 2, 2, 2, 2, 2, 2, 2, 2, 3, 4, 7, 1, 4, 3, 4, 2, 2, 2, 3, 1, 2, 1, 3, 5, 3, 4, 6, 4, 6, 3, 0, 0, 0, 0, 0,
+										1, 1, 1, 2, 2, 1, 2, 2, 2, 2, 2, 2, 2, 2, 3, 4, 7, 1, 4, 3, 4, 2, 2, 2, 3, 1, 2, 1, 3, 5, 3, 4, 6, 4, 6, 3, 2, 2, 0, 0, 0, 0, 0,
 										0, 3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 3, 1, 1, 2, 1, 1, 0, 0, 0, 0, 0, 3, 3, 1, 0
 										};
+// One entry per sound id, so that the index of a sound still selects its
+// own priority. A short array shifts every priority after the mismatch.
+typedef char OneShotPriority_must_cover_every_sound[ARRAY_SIZE(OneShotPriority) == SOUND_TOTAL_SOUNDS ? 1 : -1];
 
 void
 cAudioManager::PlayOneShot(int32 index, uint16 sound, float vol)
