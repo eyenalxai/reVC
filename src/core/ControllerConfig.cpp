@@ -376,7 +376,8 @@ static const tDefaultMouseBinding aDefaultMouseBindings[] = {
 	{ VEHICLE_FIREWEAPON,           1 },
 #endif
 	{ PED_LOCK_TARGET,              3 },
-	{ VEHICLE_HANDBRAKE,            3 },
+	// The handbrake keeps its keys (Right Ctrl and Space) and its pad button:
+	// the right mouse aims, and in a car it aims the car ADS (VICE-110).
 	{ VEHICLE_LOOKBEHIND,           2 },
 	{ PED_LOOKBEHIND,               2 },
 	{ PED_CYCLE_WEAPON_LEFT,        4 },
@@ -820,6 +821,13 @@ void CControllerConfigManager::AffectControllerStateOn_ButtonDown_Driving(int32 
 		state.LeftShock = 255;
 	if (button == GetControllerKeyAssociatedWithAction(VEHICLE_HANDBRAKE, type))
 		state.RightShoulder1 = 255;
+	// The aim button aims in a vehicle too: the car ADS reads this field, so
+	// the right mouse aims freely while the player drives and the handbrake
+	// keeps its own field and keys (VICE-110). Only the mouse sets the field:
+	// a pad's aim button is also its only handbrake, so the pad keeps the
+	// stock layout and its handbrake.
+	if (type == MOUSE && button == GetControllerKeyAssociatedWithAction(PED_LOCK_TARGET, type))
+		state.DPadUp = 255;
 	if (button == GetControllerKeyAssociatedWithAction(VEHICLE_ACCELERATE, type))
 		state.Cross = 255;
 	if (button == GetControllerKeyAssociatedWithAction(VEHICLE_CHANGE_RADIO_STATION, type))
