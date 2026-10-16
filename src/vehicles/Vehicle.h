@@ -271,7 +271,11 @@ public:
 #if (!defined GTA_PS2 || defined FIX_BUGS)
 	CEntity* m_pBombRigger;
 #endif
-	uint32 m_nSetPieceExtendedRangeTime;
+	/* The vehicle may not be removed before this time (ms). A set piece or a
+	 * road block holds its own car until the player is gone, the wreck cull
+	 * reads it, and the traffic's fresh-spawn grace (NEAR_BUBBLE_GRACE_MS,
+	 * VICE-127) sets it on every car it creates. */
+	uint32 m_nRemovalProtectedUntil;
 	uint32 m_nGunFiringTime;    // last time when gun on vehicle was fired (used on boats)
 	uint32 m_nTimeOfDeath;
 	uint16 m_nTimeBlocked;

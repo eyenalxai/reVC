@@ -33,6 +33,13 @@ itself after a boot, an interior exit or a cutscene end. The attempts and the
 placements of the rows above them are the burst's totals since it was armed, and
 the target is the local line it stopped at (the 90 % stop line sits on it). The
 orchestrator reads those rows live across a transition.
+
+The near bubble rows (VICE-127) are the acceptance of the pop-in ticket: the two
+frustum counters count a car created or removed where the player could catch it
+and must stay 0; the fade rows are the fill burst's work, exempt by the screen;
+the fill and the target are the traffic inside the player's 90 m disc and the
+share of the car target that area asks for. The counters are cumulative, so the
+orchestrator notes them before a drive or a camera turn and reads them after.
 """
 
 import os
@@ -108,6 +115,26 @@ BURSTS = [
     ("burst peds: stalls",       "_ZN11CPopulation12ms_FillBurstE", 4),
     ("burst cars: frames left",  "_ZN8CCarCtrl12ms_FillBurstE",     0),
     ("burst cars: stalls",       "_ZN8CCarCtrl12ms_FillBurstE",     4),
+]
+
+# The near bubble (VICE-127). The two frustum counters are the acceptance of the
+# pop-in ticket and must stay 0; the fade rows are the fill burst's work (exempt
+# by the screen); the hidden and refused rows show the rule working; the rays
+# row is bounded by the frame's budget (4); the fill is the traffic inside the
+# player's disc and the target is its share of the car budget.
+NEAR_BUBBLE = [
+    ("bubble: creations in frustum", "_ZN8CCarCtrl32ms_nNearBubbleCreationsInFrustumE", "I"),
+    ("bubble: removals in frustum",  "_ZN8CCarCtrl31ms_nNearBubbleRemovalsInFrustumE",  "I"),
+    ("bubble: fade creations",       "_ZN8CCarCtrl27ms_nNearBubbleFadeCreationsE",      "I"),
+    ("bubble: fade removals",        "_ZN8CCarCtrl26ms_nNearBubbleFadeRemovalsE",       "I"),
+    ("bubble: hidden creations",     "_ZN8CCarCtrl29ms_nNearBubbleHiddenCreationsE",    "I"),
+    ("bubble: hidden removals",      "_ZN8CCarCtrl28ms_nNearBubbleHiddenRemovalsE",     "I"),
+    ("bubble: refused",              "_ZN8CCarCtrl21ms_nNearBubbleRefusedE",            "I"),
+    ("bubble: bypassed",             "_ZN8CCarCtrl22ms_nNearBubbleBypassedE",           "I"),
+    ("bubble: rays spent",           "_ZN8CCarCtrl18ms_nNearBubbleRaysE",               "I"),
+    ("bubble: rays left this frame", "_ZN8CCarCtrl22ms_nNearBubbleRaysLeftE",           "i"),
+    ("bubble: fill (cars in 90 m)",  "_ZN8CCarCtrl18ms_nNearBubbleFillE",               "I"),
+    ("bubble: fill target",          "_ZN8CCarCtrl20ms_fNearBubbleTargetE",             "f"),
 ]
 
 CONFIG = "src/core/config.h"
@@ -191,6 +218,19 @@ def main():
         print(f"  {label:44s} {v}")
 
     print()
+    for label, mangled, fmt in NEAR_BUBBLE:
+        off = sym.get(mangled)
+        if off is None:
+            print(f"  {label:44s} symbol missing")
+            continue
+        v = read(off, fmt)
+        values[label.split(': ')[1]] = v
+        if fmt == "f":
+            print(f"  {label:44s} {v:.4f}")
+        else:
+            print(f"  {label:44s} {v}")
+
+    print()
     for label, mangled, enum_name in POOLS:
         off = sym.get(mangled)
         if off is None:
@@ -222,6 +262,21 @@ def main():
         print(f"  the ring scale: about {(car_budget / (45.0 * density)) ** 0.5:.3f}")
     else:
         print("  the ring scale: not derivable (a symbol is missing)")
+
+    # The acceptance of the near bubble (VICE-127), as one line.
+    print()
+    creations = values.get("creations in frustum")
+    removals = values.get("removals in frustum")
+    fill = values.get("fill (cars in 90 m)")
+    target = values.get("fill target")
+    if creations is None or removals is None:
+        print("  the near bubble: a symbol is missing (the acceptance cannot be read)")
+    else:
+        verdict = "PASS" if creations == 0 and removals == 0 else "FAIL"
+        print(f"  the near bubble: creations in the frustum {creations}, "
+              f"removals in the frustum {removals} -> {verdict}")
+    if fill is not None and target is not None:
+        print(f"  the near bubble: fill {fill} against the target {target:.1f}")
 
 
 if __name__ == "__main__":

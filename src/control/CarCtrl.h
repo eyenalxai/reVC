@@ -5,9 +5,11 @@
 #include "Vehicle.h"
 /* The car budgets: RANDOM_CARS_PER_INI_UNIT, MAX_RANDOM_CARS, MAX_CARS_IN_USE,
  * the parked target and the fill rate (VICE-123). The fill burst of the traffic
- * lives in FillBurst.h (VICE-126). */
+ * lives in FillBurst.h (VICE-126); the near bubble of the spawns and the culls
+ * lives in NearBubble.h (VICE-127). */
 #include "PopulationBudget.h"
 #include "FillBurst.h"
+#include "NearBubble.h"
 
 #define GAME_SPEED_TO_METERS_PER_SECOND 50.0f
 #define METERS_PER_SECOND_TO_GAME_SPEED (1.0f / GAME_SPEED_TO_METERS_PER_SECOND)
@@ -134,6 +136,15 @@ public:
 	static int32 ChooseCarModelToLoad(int32 rating);
 	static bool BoatWithTallMast(int32 mi);
 	static void RemoveCarsIfThePoolGetsFull(void);
+
+	/* The near bubble (VICE-127): the gates of the spawns and the culls, and
+	 * the counters the acceptance reads (NearBubble.h, NearBubble.cpp). The
+	 * frame begins them once, from GenerateRandomCars. */
+	static void NearBubbleBeginFrame(void);
+	static bool NearBubbleAllowsCreation(const CVector &pos, const CVector &playerCentre, float radius, bool rayAllowed);
+	static bool NearBubbleAllowsRemoval(CVehicle *pVehicle, const CVector &playerCentre, float ringThreshold);
+	static void NearBubbleCountCreation(const CVector &pos, float radius);
+	static void NearBubbleCountRemoval(const CVector &pos, float radius, bool wasInvisible);
 	static void SteerAIBoatWithPhysicsHeadingForTarget(CVehicle*, float, float, float*, float*, float*);
 	static void SteerAIHeliTowardsTargetCoors(CAutomobile*);
 	static void SteerAIPlaneTowardsTargetCoors(CAutomobile*);
@@ -187,6 +198,24 @@ public:
 	static uint32 ms_nFillBurstAttempts;
 	static uint32 ms_nFillBurstPlaced;
 	static float ms_fFillBurstTarget;
+
+	/* The near bubble (VICE-127): the counters of the traffic's churn and the
+	 * state of the frame's line-of-sight budget. The two frustum counters are
+	 * the acceptance: a car placed or deleted where the player could catch it
+	 * is counted there, and both are zero while the bubble holds. The fade
+	 * counters are the fill burst's work (VICE-126), exempt by the screen. */
+	static uint32 ms_nNearBubbleCreationsInFrustum;
+	static uint32 ms_nNearBubbleRemovalsInFrustum;
+	static uint32 ms_nNearBubbleFadeCreations;
+	static uint32 ms_nNearBubbleFadeRemovals;
+	static uint32 ms_nNearBubbleHiddenCreations;
+	static uint32 ms_nNearBubbleHiddenRemovals;
+	static uint32 ms_nNearBubbleRefused;
+	static uint32 ms_nNearBubbleBypassed;
+	static uint32 ms_nNearBubbleRays;
+	static uint32 ms_nNearBubbleFill;
+	static float ms_fNearBubbleTarget;
+	static int32 ms_nNearBubbleRaysLeft;
 };
 
 extern CVehicle* apCarsToKeep[MAX_CARS_TO_KEEP];

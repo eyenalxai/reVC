@@ -313,6 +313,47 @@ the triggers are the two boot countdowns, the area writer
 (`CCutsceneMgr::DeleteCutsceneData`); ADR 0021 holds the decisions and the
 restated acceptance.
 
+## Near bubble
+
+The 360-degree disc of 90 m around the player that the traffic never creates or
+removes an entity inside (VICE-127). The radius is the car side band (120 m)
+less the placement reserve of the ring table (30 m), so no spawn band places
+inside it; the population inside the bubble is the traffic that drove in from
+outside. A creation outside the bubble is allowed only while the player cannot
+see the position - occluded by an occluder volume, beyond the visible range (the
+fade and the fog), or off the frustum and behind a blocked line-of-sight ray
+(bounded per frame). A removal needs the fresh-spawn grace, the removal distance
+(the bubble plus its reserve, at least the ring's despawn) and the same hidden
+condition. The rules live in `src/control/NearBubble.h`, the engine arms and the
+counters in `NearBubble.cpp`; ADR 0025 holds the decisions.
+
+## Frustum counter
+
+One of the two acceptance counters of the near bubble (VICE-127), read live by
+`utils/caps-audit/live-counters.py`: `ms_nNearBubbleCreationsInFrustum` and
+`ms_nNearBubbleRemovalsInFrustum`. An event at a position the player could catch
+- in the frustum, inside the fade, not occluded - moves them; the rule never
+allows one, so a path that bypasses the rule shows up there. Both must stay 0 in
+a play session; the events a fade covers are counted apart (fade creations and
+fade removals), so a transition does not read as a violation.
+
+## Fresh-spawn grace
+
+The 5 seconds a freshly created car is protected from every cull
+(`NEAR_BUBBLE_GRACE_MS`, VICE-127). The vehicle holds it in
+`m_nRemovalProtectedUntil`, the one field the set pieces, the road blocks and
+the wreck cull already used as a not-before clock; the grace is set where a car
+of the traffic (or a parked car) is created. It is the same 5 s the stuck cull
+waits, so a car that was just placed is never the one a cull gives up on.
+
+## Bubble fill
+
+The number of traffic cars (the random vehicles) inside the near bubble, read
+live as `ms_nNearBubbleFill` (VICE-127). The target is the share of the car
+budget the bubble's area takes of the despawn disc (`ms_fNearBubbleTarget`):
+about 6 cars at the stock settings and 10 at the owner's; the orchestrator
+compares the two while driving and during a camera turn.
+
 ## Pool
 
 The fixed storage for the entities and their list nodes: pedestrians, vehicles,

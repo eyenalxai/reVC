@@ -258,7 +258,7 @@ CRoadBlocks::CreateRoadBlockBetween2Points(CVector point1, CVector point2)
 				CWorld::Add(pVehicle);
 				pVehicle->bCreateRoadBlockPeds = true;
 				pVehicle->m_nRoadblockType = DotProduct(pVehicle->GetRight(), pVehicle->GetPosition() - FindPlayerCoors()) >= 0.0f;
-				pVehicle->m_nSetPieceExtendedRangeTime = CTimer::GetTimeInMilliseconds() + 7000;
+				pVehicle->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + 7000;
 			}
 			else {
 				delete pVehicle;

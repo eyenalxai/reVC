@@ -147,7 +147,7 @@ CVehicle::CVehicle(uint8 CreatedBy)
 	bDriverLastFrame = false;
 	m_pBombRigger = nil;
 
-	m_nSetPieceExtendedRangeTime = 0;
+	m_nRemovalProtectedUntil = 0;
 	m_nAlarmState = 0;
 	m_nDoorLock = CARLOCK_UNLOCKED;
 	m_nLastWeaponDamage = -1;

@@ -1108,7 +1108,7 @@ void
 CBoat::Render()
 {
 	((CVehicleModelInfo*)CModelInfo::GetModelInfo(GetModelIndex()))->SetVehicleColour(m_currentColour1, m_currentColour2);
-	m_nSetPieceExtendedRangeTime = CTimer::GetTimeInMilliseconds() + 3000;
+	m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + 3000;
 	if (!CVehicle::bWheelsOnlyCheat)
 		CEntity::Render();
 #ifdef NEW_RENDERER
