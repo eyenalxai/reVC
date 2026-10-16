@@ -52,7 +52,13 @@ uint32 CCarGenerator::CalcNextGen()
 void CCarGenerator::DoInternalProcessing()
 {
 	int mi;
-	if (CCarCtrl::NumParkedCars >= 20)
+	/* The parked cars follow the ring area like the traffic (PopulationCaps.h,
+	 * ParkedCarTarget): 20 at the stock ring, the map's generator count at the
+	 * top. They share the car budget with the traffic, so a full curb trades
+	 * with the random cars, and the whole budget stays inside the vehicle pool
+	 * (CCarCtrl::NumCarsInUse counts them all). */
+	if (CCarCtrl::NumParkedCars >= ParkedCarTarget(CurrentTrafficRings().scale) ||
+		CCarCtrl::NumCarsInUse() >= CCarCtrl::MaxNumberOfCarsInUse)
 		return;
 	if (m_nModelIndex >= 0) {
 		if (CheckForBlockage(m_nModelIndex)) {

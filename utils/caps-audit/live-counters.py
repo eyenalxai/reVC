@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""Read the population and traffic counters of a running reVC, read-only.
+
+The caps audit (VICE-123) needs live values while the owner plays. The game is a
+PIE, so the value of a static symbol lives at
+
+    (the base of the executable in /proc/<pid>/maps) + (the nm offset of <exe>)
+
+and the exe is read from /proc/<pid>/exe, which still works after the binary on
+disk was replaced (the running image is kept as a deleted file).
+
+Usage:
+    utils/caps-audit/live-counters.py [pid] [exe]
+
+With no pid, the first process named reVC is used. With no exe, the binary the
+process actually runs is used (the right one for the offsets). The program only
+reads: /proc/<pid>/mem is opened read-only and nothing is written or signalled.
+
+Measured values (VICE-123, 2026-10-16, max sliders in sunny weather, 2400 car
+budget, 5500 ped cap before this branch):
+    cars 149..201 of the 2400 budget, peds 2251..5500 of the 5500 cap,
+    parked 0..7, vehicles loaded 57..63 of 90, ped pool 5417/8192,
+    vehicle pool 153/2560, dummy pool 2338/2800, visible entities 361..1233.
+"""
+
+import os
+import struct
+import subprocess
+import sys
+
+# The symbols of the audit, with their mangled name and format. A missing
+# symbol is reported, not fatal: the table is worth reading even when one name
+# moved.
+SYMBOLS = [
+    ("cars: NumRandomCars",          "_ZN8CCarCtrl13NumRandomCarsE",                  "i"),
+    ("cars: NumLawEnforcerCars",     "_ZN8CCarCtrl18NumLawEnforcerCarsE",              "i"),
+    ("cars: NumParkedCars",          "_ZN8CCarCtrl13NumParkedCarsE",                   "i"),
+    ("cars: NumMissionCars",         "_ZN8CCarCtrl14NumMissionCarsE",                  "i"),
+    ("cars: NumPermanentCars",       "_ZN8CCarCtrl16NumPermanentCarsE",                "i"),
+    ("cars: NumAmbulancesOnDuty",    "_ZN8CCarCtrl19NumAmbulancesOnDutyE",             "i"),
+    ("cars: NumFiretrucksOnDuty",    "_ZN8CCarCtrl19NumFiretrucksOnDutyE",             "i"),
+    ("cars: MaxNumberOfCarsInUse",   "_ZN8CCarCtrl20MaxNumberOfCarsInUseE",            "i"),
+    ("cars: CarDensityMultiplier",   "_ZN8CCarCtrl20CarDensityMultiplierE",            "f"),
+    ("cars: CarNumberMultiplier",    "_ZN8CIniFile19CarNumberMultiplierE",             "f"),
+    ("peds: PedNumberMultiplier",    "_ZN8CIniFile19PedNumberMultiplierE",             "f"),
+    ("peds: MaxNumberOfPedsInUse",   "_ZN11CPopulation20MaxNumberOfPedsInUseE",        "i"),
+    ("peds: MaxNumberOfPedsInUseInterior", "_ZN11CPopulation28MaxNumberOfPedsInUseInteriorE", "i"),
+    ("peds: PedDensityMultiplier",   "_ZN11CPopulation20PedDensityMultiplierE",        "f"),
+    ("peds: ms_nTotalPeds",          "_ZN11CPopulation13ms_nTotalPedsE",               "I"),
+    ("peds: ms_nTotalCarPassengerPeds", "_ZN11CPopulation25ms_nTotalCarPassengerPedsE", "I"),
+    ("peds: ms_nNumDummy",           "_ZN11CPopulation12ms_nNumDummyE",                "I"),
+    ("peds: ms_nNumCop",             "_ZN11CPopulation10ms_nNumCopE",                  "I"),
+    ("peds: ms_nNumCivMale",         "_ZN11CPopulation14ms_nNumCivMaleE",              "I"),
+    ("stream: ms_numVehiclesLoaded", "_ZN10CStreaming20ms_numVehiclesLoadedE",        "i"),
+    ("stream: ms_numPedsLoaded",     "_ZN10CStreaming16ms_numPedsLoadedE",             "i"),
+    ("stream: desiredNumVehiclesLoaded", "desiredNumVehiclesLoaded",                   "i"),
+    ("generators: CurrentActiveCount", "_ZN17CTheCarGenerators18CurrentActiveCountE",  "I"),
+    ("generators: NumOfCarGenerators", "_ZN17CTheCarGenerators18NumOfCarGeneratorsE",  "I"),
+    ("render: ms_lodDistScale",      "_ZN9CRenderer15ms_lodDistScaleE",                "f"),
+    ("render: ms_nNoOfVisibleEntities", "_ZN9CRenderer23ms_nNoOfVisibleEntitiesE",     "i"),
+    ("weather: m_fCurrentFarClip",   "_ZN10CTimeCycle17m_fCurrentFarClipE",            "f"),
+    ("weather: gbNewRenderer",       "gbNewRenderer",                                  "B"),
+]
+
+# The pools (CPool<T>: entries*, flags*, size, allocPtr). The used count is the
+# number of flags without POOLFLAG_ISFREE; the flags are read in one go.
+POOLS = [
+    ("pool: Peds",            "_ZN6CPools11ms_pPedPoolE",           8192),
+    ("pool: Vehicles",        "_ZN6CPools15ms_pVehiclePoolE",       2560),
+    ("pool: Dummies",         "_ZN6CPools13ms_pDummyPoolE",         2800),
+    ("pool: Objects",         "_ZN6CPools14ms_pObjectPoolE",        460),
+    ("pool: PtrNodes",        "_ZN6CPools15ms_pPtrNodePoolE",       200000),
+    ("pool: EntryInfoNodes",  "_ZN6CPools21ms_pEntryInfoNodePoolE", 20000),
+    ("pool: Buildings",       "_ZN6CPools16ms_pBuildingPoolE",      7000),
+]
+
+
+def find_pid():
+    out = subprocess.run(["pgrep", "-x", "reVC"], capture_output=True, text=True).stdout.split()
+    if not out:
+        raise SystemExit("no reVC process found (start one, or pass a pid)")
+    return int(out[0])
+
+
+def exe_base(pid):
+    with open(f"/proc/{pid}/maps") as f:
+        for line in f:
+            parts = line.split(None, 5)
+            if len(parts) >= 6 and parts[2] == "00000000" and parts[5].rstrip().split("/")[-1].startswith("reVC"):
+                return int(parts[0].split("-")[0], 16)
+    raise SystemExit("the executable base is not in /proc/<pid>/maps")
+
+
+def nm_offsets(exe):
+    out = subprocess.run(["nm", exe], capture_output=True, text=True)
+    if out.returncode != 0:
+        raise SystemExit("nm failed: " + out.stderr)
+    table = {}
+    for line in out.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[0] != "U":
+            table[parts[2]] = int(parts[0], 16)
+    return table
+
+
+def main():
+    pid = int(sys.argv[1]) if len(sys.argv) > 1 else find_pid()
+    exe = sys.argv[2] if len(sys.argv) > 2 else f"/proc/{pid}/exe"
+    base = exe_base(pid)
+    sym = nm_offsets(exe)
+    mem = os.open(f"/proc/{pid}/mem", os.O_RDONLY)
+
+    def read(off, fmt):
+        return struct.unpack(fmt, os.pread(mem, struct.calcsize(fmt), base + off))[0]
+
+    print(f"reVC pid {pid}, base 0x{base:x}, image {exe}")
+    values = {}
+    for label, mangled, fmt in SYMBOLS:
+        off = sym.get(mangled)
+        if off is None:
+            print(f"  {label:44s} symbol missing")
+            continue
+        v = read(off, fmt)
+        values[label.split(': ')[1]] = v
+        if fmt == "f":
+            print(f"  {label:44s} {v:.4f}")
+        else:
+            print(f"  {label:44s} {v}")
+
+    print()
+    for label, mangled, size in POOLS:
+        off = sym.get(mangled)
+        if off is None:
+            print(f"  {label:44s} symbol missing")
+            continue
+        ptr = read(off, "Q")
+        if ptr == 0:
+            print(f"  {label:44s} not allocated")
+            continue
+        entries, flags, psize, allocptr = struct.unpack("<QQii", os.pread(mem, 24, ptr))
+        data = os.pread(mem, psize, flags)
+        used = sum(1 for b in data if not (b & 0x80))
+        print(f"  {label:44s} used {used:6d} / {psize:6d}  free {psize - used}")
+
+    # The ring scale: ApplyPopulationCaps gives min(45 x the car density x
+    # scale^2, 2400), so before the top binds, scale = sqrt(budget / (45 x the
+    # density). The traffic uses the same scale, so one derivation covers both.
+    print()
+    car_budget = values.get("MaxNumberOfCarsInUse", 0)
+    density = values.get("CarNumberMultiplier", 0.0)
+    if car_budget >= 2400:
+        print("  the ring scale: at or above 3.96 (the car budget is at its top)")
+    elif car_budget > 0 and density > 0:
+        print(f"  the ring scale: about {(car_budget / (45.0 * density)) ** 0.5:.3f}")
+    else:
+        print("  the ring scale: not derivable (a symbol is missing)")
+
+
+if __name__ == "__main__":
+    main()

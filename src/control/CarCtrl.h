@@ -3,13 +3,14 @@
 #include "PathFind.h"
 #include "Boat.h"
 #include "Vehicle.h"
+/* The car budgets: RANDOM_CARS_PER_INI_UNIT, MAX_RANDOM_CARS, MAX_CARS_IN_USE,
+ * the parked target and the fill rate (VICE-123). */
+#include "PopulationCaps.h"
 
 #define GAME_SPEED_TO_METERS_PER_SECOND 50.0f
 #define METERS_PER_SECOND_TO_GAME_SPEED (1.0f / GAME_SPEED_TO_METERS_PER_SECOND)
 #define GAME_SPEED_TO_CARAI_SPEED 60.0f
 #define TIME_COPS_WAIT_TO_EXIT_AFTER_STOPPING 2500
-#define RANDOM_CARS_PER_INI_UNIT 30.0f
-#define RANDOM_CAR_ATTEMPTS_PER_FRAME 3
 
 class CZoneInfo;
 class CAutomobile;
@@ -17,7 +18,6 @@ class CAutomobile;
 enum{
 	MAX_CARS_TO_KEEP = 2,
 	MAX_CAR_MODELS_IN_ARRAY = 25,
-	MAX_RANDOM_CARS = 1700,
 };
 
 #ifdef FIX_BUGS
@@ -64,6 +64,7 @@ public:
 	static void SwitchVehicleToRealPhysics(CVehicle*);
 	static void AddToCarArray(int32 id, int32 vehclass);
 	static void UpdateCarCount(CVehicle*, bool);
+	static int32 NumCarsInUse(void);
 	static int32 ChooseCarModel(int32 vehclass);
 	static bool JoinCarWithRoadSystemGotoCoors(CVehicle*, CVector, bool);
 	static void JoinCarWithRoadSystem(CVehicle*);

@@ -58,11 +58,6 @@
 
 #define ATTEMPTS_TO_FIND_NEXT_NODE (15)
 
-/* How many distinct placements GenerateOneRandomCar tries before it gives up
- * for this frame. Rejections that depend on one placement (blocked lane,
- * one-way road, unreachable target, ...) do not end the call. */
-#define CAR_SPAWN_ATTEMPTS (4)
-
 #define DISTANCE_TO_SWITCH_FROM_BLOCK_TO_STOP (5.0f)
 #define DISTANCE_TO_SWITCH_FROM_STOP_TO_BLOCK (10.0f)
 #define MAX_SPEED_TO_ACCOUNT_IN_INTERCEPTING (0.13f)
@@ -116,6 +111,16 @@ CCarCtrl::GetRandomCarTarget()
 	return Min(RANDOM_CARS_PER_INI_UNIT * CarDensityMultiplier * CIniFile::CarNumberMultiplier * SQR(CurrentTrafficRings().scale), (float)MAX_RANDOM_CARS);
 }
 
+int32
+CCarCtrl::NumCarsInUse(void)
+{
+	// Every car the car budget counts: the random ones (law enforcers included:
+	// a police random car is counted both here and in NumLawEnforcerCars), the
+	// parked ones, the mission and script cars and the emergency services.
+	return NumFiretrucksOnDuty + NumAmbulancesOnDuty + NumParkedCars + NumMissionCars
+		+ NumLawEnforcerCars + NumRandomCars;
+}
+
 void
 CCarCtrl::GenerateRandomCars()
 {
@@ -126,6 +131,14 @@ CCarCtrl::GenerateRandomCars()
 		CountDownToCarsAtStart = 2;
 		return;
 	}
+	/* A car brings a driver and can bring passengers, both of them pedestrians
+	 * of the same pool as the crowd (the emergency services of the frame
+	 * included). When the pool is down to its reserve, no car is created: the
+	 * crew of one more frame cannot take the pool the pedestrians need
+	 * (PopulationCaps.h, PED_POOL_RESERVE). The check is one pool scan a frame,
+	 * not one per call. */
+	if (CPools::GetPedPool()->GetNoOfFreeSpaces() < PED_POOL_RESERVE)
+		return;
 	if (NumRandomCars < MAX_RANDOM_CARS){
 		if (CountDownToCarsAtStart == 0) {
 			for (int i = 0; i < RANDOM_CAR_ATTEMPTS_PER_FRAME * rings.scale; i++)
@@ -158,7 +171,10 @@ CCarCtrl::GenerateOneRandomCar()
 	/* One table read per call: the spawn rings, the birth culls and the
 	 * camera rule of this call all come from it. */
 	const STrafficRings rings = CurrentTrafficRings();
-	if (NumFiretrucksOnDuty + NumAmbulancesOnDuty + NumParkedCars + NumMissionCars + NumLawEnforcerCars + NumRandomCars >= MaxNumberOfCarsInUse)
+	/* The whole car budget, the parked cars included: a random car waits for a
+	 * parked car to be removed, and the parked cars wait for a random car (the
+	 * generator checks the same count, CarGen.cpp). */
+	if (NumCarsInUse() >= MaxNumberOfCarsInUse)
 		return;
 	CWanted* pWanted = pPlayer->m_pPed->m_pWanted;
 	int carClass;
@@ -692,6 +708,12 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 		if (CModelInfo::IsCarModel(carModel) && (CModelInfo::GetModelInfo(carModel)->GetAnimFileIndex() == CAnimManager::GetAnimationBlockIndex("van") && passengers >= 1))
 			passengers = 1;
 		for (int i = 0; i < passengers; i++) {
+			/* The pool check of the frame is in GenerateRandomCars; this one
+			 * holds when the frame creates many cars, so the passengers of one
+			 * frame cannot spend the reserve the pedestrians need
+			 * (PopulationCaps.h, PED_POOL_RESERVE). */
+			if (CPools::GetPedPool()->GetNoOfFreeSpaces() < PED_POOL_RESERVE)
+				break;
 			CPed* pPassenger = pVehicle->SetupPassenger(i);
 			if (pPassenger) {
 				++CPopulation::ms_nTotalCarPassengerPeds;

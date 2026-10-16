@@ -44,6 +44,9 @@
 
 #include "invariant.h"
 #include "DrawDistance.h"
+/* The caps and the car target come from the cap table itself (VICE-123), so the
+ * sweep cannot print a number the game no longer uses. */
+#include "PopulationCaps.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -56,20 +59,14 @@
  * the header and fails when the two do not agree. */
 #define SLIDER_STEPS 16
 
-/* The constants the caps mirror: IniFile.cpp (the defaults and the hard tops)
- * and CarCtrl.cpp (the car target). The sweep prints the caps at the stock
- * densities (PedNumberMultiplier 1.0, CarNumberMultiplier 2.0) and at the
- * slider tops (3.4 / 3.4, the owner's maximum settings). */
+/* The density values the sweep prints the caps at: the stock densities
+ * (PedNumberMultiplier 1.0, CarNumberMultiplier 2.0) and the slider tops
+ * (3.4 / 3.4, the owner's maximum settings). The caps themselves come from the
+ * cap table (PopulationCaps.h). */
 #define PED_DENSITY_STOCK 1.0f
 #define CAR_DENSITY_STOCK 2.0f
 #define PED_DENSITY_MAX 3.4f
 #define CAR_DENSITY_MAX 3.4f
-#define DEFAULT_MAX_NUMBER_OF_PEDS 100.0f
-#define DEFAULT_MAX_NUMBER_OF_CARS 45.0f
-#define MAX_PEDS_IN_USE 5500
-#define MAX_CARS_IN_USE 2400
-#define RANDOM_CARS_PER_INI_UNIT 30.0f
-#define MAX_RANDOM_CARS 1700
 
 static int g_failures = 0;
 
