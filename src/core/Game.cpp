@@ -441,6 +441,17 @@ bool CGame::Initialise(const char* datFile)
 
 	LoadingScreen("Loading the Game", "Setup paths", nil);
 	ThePaths.PreparePathData();
+	/* The far traffic layer's path snapshot (VICE-133): the worker's copy of
+	 * the graph, taken here on the main thread, right after the graph is
+	 * prepared. The grid is built here too, deliberately: it used to be built
+	 * lazily by the first FindNodeClosestToCoors, i.e. by the first spawn of
+	 * the first played frame (one array allocation and the node walk), and the
+	 * ticket's contract puts the snapshot after PreparePathData and
+	 * BuildNodeGrid. Forcing it keeps the first frame free of it, under the
+	 * loading screen, and the placements read a grid that was already there.
+	 * The worker thread itself is created here, once. */
+	ThePaths.BuildNodeGrid();
+	CFarTraffic::BuildWorldSnapshot();
 	for (int i = 0; i < NUMPLAYERS; i++)
 		CWorld::Players[i].Clear();
 	CWorld::Players[0].LoadPlayerSkin();
@@ -561,6 +572,10 @@ bool CGame::Initialise(const char* datFile)
 
 bool CGame::ShutDown(void)
 {
+	/* The far traffic layer's worker (VICE-133): its thread is joined here, so
+	 * nothing of the layer survives the world it simulated. */
+	CFarTraffic::ShutDown();
+
 	CReplay::FinishPlayback();
 	CReplay::EmptyReplayBuffer();
 	CPlane::Shutdown();
@@ -802,6 +817,14 @@ void CGame::InitialiseWhenRestarting(void)
 
 void CGame::Process(void) 
 {
+	/* The far traffic layer's worker (VICE-133): its cycle of the previous
+	 * frame is complete here and its output is published, so the worker is idle
+	 * for the whole of this frame - in particular during CWorld::Process below
+	 * and the render after it (the contract in FarTrafficWorker.h; a debug
+	 * build asserts it). The cycle of this frame is handed back at the end of
+	 * Idle, after the render. */
+	CFarTraffic::JoinWorker();
+
 	CPad::UpdatePads();
 #ifdef USE_CUSTOM_ALLOCATOR
 	ProcessTidyUpMemory();

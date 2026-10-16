@@ -36,6 +36,7 @@
 #include "Camera.h"
 #include "World.h"
 #include "Ped.h"
+#include "FarTraffic.h"
 #include "Font.h"
 #include "Pad.h"
 #include "Hud.h"
@@ -1360,6 +1361,9 @@ if(gbRenderFadingInEntities)
 void
 RenderScene(void)
 {
+	/* The far traffic layer's worker must be idle (VICE-133): its window ends
+	 * at the join in CGame::Process, before this. Debug builds only. */
+	CFarTraffic::AssertWorkerIdle();
 #ifdef NEW_RENDERER
 	if(gbNewRenderer){
 		RenderScene_new();
@@ -1697,6 +1701,12 @@ Idle(void *arg)
 		tbDisplay();
 
 	DoRWStuffEndOfFrame();
+
+	/* The far traffic layer's worker (VICE-133): the cycle the applicator
+	 * stamped in CGame::Process is handed over here, after the render, and runs
+	 * while this frame ends and the next one begins (the join is at the top of
+	 * CGame::Process). A frame with no layer work does not wake it at all. */
+	CFarTraffic::RunWorker();
 
 	POP_MEMID();	// MEMID_RENDER
 

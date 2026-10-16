@@ -3,6 +3,7 @@
 #include "FarTraffic.h"
 
 #include "CarCtrl.h"
+#include "FarTrafficWorker.h"
 
 #include "Camera.h"
 #include "CutsceneMgr.h"
@@ -20,31 +21,52 @@
 #include "Zones.h"
 
 /*
- * The engine side of the far traffic layer (VICE-128). The rules, the band, the
- * cap and the switches live in FarTraffic.h; this file fills them from the
- * frame (the ring table, the player, the path network) and owns the cars and
- * the counters the live rig reads (utils/caps-audit/live-counters.py).
+ * The engine side of the far traffic layer (VICE-128): the applicator, and -
+ * since VICE-133 - the main thread's half of the worker's boundary.
  *
- * One frame of the layer is three passes and they are in this order on purpose:
+ * The rules, the band, the cap and the switches live in FarTraffic.h; the
+ * simulation and the worker live in FarTrafficWorker.h/.cpp. This file fills
+ * the rules from the frame (the ring table, the player, the pool), owns the
+ * cars and the counters the live rig reads (utils/caps-audit/live-counters.py),
+ * and is the **only** place a far car or the world is written.
  *
- *	the gate pass	runs every frame over every car of the layer, so a car
- *			that reached the near band is promoted (or given up) in
- *			the frame the player could come to it, and a car beyond
- *			the fog or of a closed band goes. It is a distance and a
- *			switch per car.
- *	the creations	at most FAR_TRAFFIC_CREATE_ATTEMPTS placements, only
- *			while the layer is under its cap: the fog site (a car
- *			forming out of the haze ahead) and the behind site (the
- *			traffic the player passed). The placement is the near
- *			spawner's own (CPathFind::CollectCarCreationCoors) and the
- *			car is the near spawner's own (CCarCtrl::
- *			CreateCarFromPlacement in its far mode), so a far car is
- *			born with the same path state a near car would get and a
- *			promotion changes the flags only.
- *	the stagger	moves the share of the layer the frame owns: the path
- *			curve of the car, the path's own height, the heading, the
- *			alpha reveal and the matrix/RW frame update. No collision
- *			query, no sector scan, no path search, no physics.
+ * The frame, with the worker (the contract is in FarTrafficWorker.h):
+ *
+ *	the path snapshot	BuildWorldSnapshot, once, at load, right after
+ *				ThePaths.PreparePathData (and BuildNodeGrid).
+ *				The script's road toggles and a save load are
+ *				copied over on the main thread when the graph's
+ *				flag version moves (FarTrafficRefreshWorldFlags).
+ *	the top of CGame::Process	CFarTraffic::JoinWorker: the previous
+ *				frame's cycle is done and its output is
+ *				published. This is the end of the worker's
+ *				window: from here to the end of the frame the
+ *				worker is idle, so it never runs during
+ *				CWorld::Process or the render (a debug build
+ *				asserts it).
+ *	the car block		CFarTraffic::Process, the applicator:
+ *				(a) the published poses are written into the
+ *				cars - position, heading, speed, the sector
+ *				re-insert, the RW frame, the alpha reveal, the
+ *				u-turn (the one decision of the pick that is a
+ *				world action);
+ *				(b) the gate pass, the reach gauge and the
+ *				creation attempts run exactly as VICE-128 wrote
+ *				them, and every list change queues its command
+ *				(ADD/DROP) for the worker;
+ *				(c) the frame's cycle is stamped (the game time
+ *				and the frame counter) and marked ready.
+ *	the end of Idle		CFarTraffic::RunWorker: the cycle is handed to
+ *				the worker (or, in the inline mode, run on the
+ *				main thread right there). A frame whose cycle
+ *				would do nothing (no commands, no car of the
+ *				stagger's share) does not wake the worker at
+ *				all.
+ *
+ * The cars' own facts (the pool slot) stay here: the worker's state is a mirror
+ * of the route state, keyed by the slot, and the published poses are checked
+ * against the slot before anything is written (a mismatch is counted, and must
+ * stay 0 - the acceptance row of the boundary).
  *
  * The switches are the layer's only writes to a car's state, and both of them
  * go through CFarTraffic::ApplyFarState and CFarTraffic::ApplyTrafficState:
@@ -80,10 +102,24 @@
  *	ms_nFarTrafficRefusedModel	those stopped by the streaming
  *	ms_nFarTrafficRefusedPool	those stopped by a pool reserve (or a driver)
  *	ms_nFarTrafficAttempts		the attempts
- *	ms_nFarTrafficUpdates		the car updates of the stagger
+ *	ms_nFarTrafficUpdates		the car updates the stagger applied
+ *	ms_nFarTrafficWorkerCycles	the cycles the worker ran (VICE-133; the
+ *					rate is this over the elapsed time)
+ *	ms_nFarTrafficWorkerLost	the cycle and the layer's list disagreed
+ *					(a command the worker could not apply, or a
+ *					pose whose slot did not match): must stay 0
+ *	ms_nFarTrafficShortCurves	the pick's clamped curves (the engine's own
+ *					"fout" diagnostic, counted instead of printed)
+ *	ms_nFarTrafficCatchUps		the pending cycle the applicator ran inline
+ *					because the window between two cycles grew
+ *					the command ring towards its water mark (0 in
+ *					normal play)
  *
  * The frame's work, exactly:
  *
+ *	the apply	the cars of the previous cycle's stagger share: the world
+ *			writes of one rail pose each, plus the alpha reveal and the
+ *			u-turn.
  *	the gate pass	every car, every frame: a distance, a switch, and - when a
  *			car must go - one gate answer from the frame's own bound of
  *			FAR_TRAFFIC_REMOVE_ATTEMPTS answers. A refused answer spends
@@ -94,7 +130,8 @@
  *	the creations	at most FAR_TRAFFIC_CREATE_ATTEMPTS placement scans, only
  *			while the layer is under its cap and the pool holds its
  *			reserves. A refused reserve is counted.
- *	the stagger	a third of the layer, moved.
+ *	the worker	everything else: the path pick, the curve, the heading and
+ *			the stagger's index, off the main thread.
  */
 
 /* The counters. Cumulative, like the fill burst's and the near bubble's; the
@@ -115,6 +152,10 @@ unsigned int CFarTraffic::ms_nFarTrafficRefusedModel;
 unsigned int CFarTraffic::ms_nFarTrafficRefusedPool;
 unsigned int CFarTraffic::ms_nFarTrafficAttempts;
 unsigned int CFarTraffic::ms_nFarTrafficUpdates;
+unsigned int CFarTraffic::ms_nFarTrafficWorkerCycles;
+unsigned int CFarTraffic::ms_nFarTrafficWorkerLost;
+unsigned int CFarTraffic::ms_nFarTrafficShortCurves;
+unsigned int CFarTraffic::ms_nFarTrafficCatchUps;
 
 /*
  * The layer. A compact list of the cars it holds, with the pool slot each one
@@ -125,6 +166,11 @@ unsigned int CFarTraffic::ms_nFarTrafficUpdates;
  * A slot that was freed and taken by another far car fails the pointer test,
  * and a slot taken by any other car fails the class test. Nothing else is
  * cached, so a stale entry can never be read.
+ *
+ * Since VICE-133 the slot is also the key the worker's sim state is matched
+ * with: every entry the list gains or loses queues its ADD/DROP for the
+ * worker's own array, which is what keeps the two lists in lockstep and makes
+ * the published poses' indices mean the same cars on both sides.
  */
 struct SFarTrafficEntry
 {
@@ -134,6 +180,26 @@ struct SFarTrafficEntry
 
 static SFarTrafficEntry ms_aFarCars[FAR_TRAFFIC_MAX];
 static int32 ms_nFarCars;
+
+/*
+ * The path snapshot (VICE-133): the parts of the path graph the worker's
+ * simulation reads, copied out of ThePaths on the main thread. It is built once
+ * by BuildWorldSnapshot and never written again, except for the node flags,
+ * which FarTrafficRefreshWorldFlags copies when the graph's own version moves.
+ */
+static SFarTrafficWorld ms_farWorld;
+static uint32 ms_nFarWorldFlagsVersion;
+
+/* The cycle number of the output block the applicator last applied. A frame
+ * whose cycle did nothing (no commands, no car of the stagger's share) is
+ * skipped by CFarTrafficWorker::Run and leaves the published block in place, so
+ * the block is read out exactly once, by its own cycle number. (The same guard
+ * makes a re-entrant Process - a resize callback's extra Idle - harmless.)
+ * CFarTrafficWorker::ResetCars zeroes the blocks and this marker together, so a
+ * load never reads a stale cycle. */
+static uint32 ms_nLastAppliedCycle;
+
+static void FarTrafficRefreshWorldFlags(void);
 
 /* The layer's own gate: the same world state the near spawner refuses to work
  * in. A cutscene owns the camera and the world and clears the cars; an interior
@@ -154,13 +220,93 @@ FarTrafficEntryIsLive(const SFarTrafficEntry &entry)
 		pAtSlot->VehicleCreatedBy == FAR_TRAFFIC_VEHICLE;
 }
 
+/* The live count (the entries whose cars are still there): what the cap reads,
+ * without moving the list. A stale entry (a cutscene, the valve, a delete) is
+ * dropped at the applicator, where the drop's swap cannot move an entry under
+ * the poses the worker published. */
+static int32
+FarTrafficCountLive(void)
+{
+	int32 live = 0;
+	for (int32 i = 0; i < ms_nFarCars; i++)
+		if (FarTrafficEntryIsLive(ms_aFarCars[i]))
+			live++;
+	return live;
+}
+
+/* The ring's water mark: before the layer queues past this, the pending cycle
+ * runs inline here and its output is applied, so the window between two cycles
+ * (the frames whose cycle the main loop never handed over - an early return
+ * from Idle) cannot grow the command queue past the ring. Half the ring is far
+ * beyond a real frame: one frame's worst case is a drop of every entry the
+ * layer holds plus the create attempts. */
+#define FAR_TRAFFIC_QUEUE_WATER (FAR_TRAFFIC_SIM_COMMANDS / 2)
+
+static void FarTrafficApplyOutput(void);
+
+static void
+FarTrafficCatchUpIfNeeded(void)
+{
+	if (CFarTrafficWorker::CommandsPending() < FAR_TRAFFIC_QUEUE_WATER)
+		return;
+	/* The pending cycle runs now, on the main thread (or on the worker, with
+	 * this thread waiting: the catch-up is the same cycle either way), and its
+	 * output is applied here. The worker's list and the layer's stay in
+	 * lockstep and no command is ever dropped. The one price: the frame's own
+	 * cycle runs again at the end of the frame, so the stagger's share of this
+	 * one frame moves twice. */
+	CFarTraffic::ms_nFarTrafficCatchUps++;
+	CFarTrafficWorker::EndCycle();
+	if (CFarTrafficWorker::Run()) {
+		CFarTrafficWorker::Join();
+		FarTrafficApplyOutput();
+	}
+	CFarTrafficWorker::BeginCycle(CTimer::GetTimeInMilliseconds(), CTimer::GetFrameCounter());
+}
+
 /* Drop one entry: the last one takes its place, which keeps the list compact
- * and makes the stagger share a real share of the layer. */
+ * and makes the stagger share a real share of the layer. The worker's own array
+ * drops by the same rule (FarTrafficSimRunCycle), so its entry indices stay the
+ * layer's. The catch-up first, so the command queue cannot grow past the ring. */
 static void
 FarTrafficDropEntry(int32 index)
 {
+	FarTrafficCatchUpIfNeeded();
+	CFarTrafficWorker::DropCar(ms_aFarCars[index].slot);
 	ms_aFarCars[index] = ms_aFarCars[ms_nFarCars - 1];
 	ms_nFarCars--;
+}
+
+/* The worker's seed for one car (VICE-133): the route state the simulation must
+ * carry on from, read here, on the main thread, and copied - never referenced.
+ * The worker's own random stream is seeded by the cycle from the car's identity
+ * (the slot and its two seeds). */
+static void
+FarTrafficSeedSimCar(CVehicle *pVehicle, int32 slot, SFarSimCar *pSim)
+{
+	memset(pSim, 0, sizeof(*pSim));
+	pSim->slot = slot;
+	pSim->currentRouteNode = pVehicle->AutoPilot.m_nCurrentRouteNode;
+	pSim->nextRouteNode = pVehicle->AutoPilot.m_nNextRouteNode;
+	pSim->prevRouteNode = pVehicle->AutoPilot.m_nPrevRouteNode;
+	pSim->timeEnteredCurve = pVehicle->AutoPilot.m_nTimeEnteredCurve;
+	pSim->timeToSpendOnCurrentCurve = pVehicle->AutoPilot.m_nTimeToSpendOnCurrentCurve;
+	pSim->currentPathNodeInfo = pVehicle->AutoPilot.m_nCurrentPathNodeInfo;
+	pSim->nextPathNodeInfo = pVehicle->AutoPilot.m_nNextPathNodeInfo;
+	pSim->previousPathNodeInfo = pVehicle->AutoPilot.m_nPreviousPathNodeInfo;
+	pSim->currentDirection = pVehicle->AutoPilot.m_nCurrentDirection;
+	pSim->nextDirection = pVehicle->AutoPilot.m_nNextDirection;
+	pSim->previousDirection = pVehicle->AutoPilot.m_nPreviousDirection;
+	pSim->currentLane = pVehicle->AutoPilot.m_nCurrentLane;
+	pSim->nextLane = pVehicle->AutoPilot.m_nNextLane;
+	pSim->routeSeed = pVehicle->m_nRouteSeed;
+	pSim->randomSeed = pVehicle->m_randomSeed;
+	pSim->bStayInCurrentLevel = pVehicle->AutoPilot.m_bStayInCurrentLevel;
+	pSim->bStayInFastLane = pVehicle->AutoPilot.m_bStayInFastLane;
+	pSim->maxTrafficSpeed = pVehicle->AutoPilot.m_fMaxTrafficSpeed;
+	pSim->heightAboveRoad = pVehicle->GetHeightAboveRoad();
+	pSim->forwardX = pVehicle->GetForward().x;
+	pSim->forwardY = pVehicle->GetForward().y;
 }
 
 static void
@@ -168,8 +314,13 @@ FarTrafficAddEntry(CVehicle *pVehicle)
 {
 	if (ms_nFarCars >= FAR_TRAFFIC_MAX)
 		return;
+	FarTrafficCatchUpIfNeeded();
+	SFarSimCar sim;
+
 	ms_aFarCars[ms_nFarCars].pVehicle = pVehicle;
 	ms_aFarCars[ms_nFarCars].slot = CPools::GetVehiclePool()->GetJustIndex(pVehicle);
+	FarTrafficSeedSimCar(pVehicle, ms_aFarCars[ms_nFarCars].slot, &sim);
+	CFarTrafficWorker::AddCar(sim);
 	ms_nFarCars++;
 }
 
@@ -310,16 +461,28 @@ FarTrafficRemoveCar(int32 index, const CVector &playerPos)
 }
 
 /*
- * The movement. The car follows the curve of its two path links - the same
- * arithmetic the on-rails simple car uses, through the shared core in CCarCtrl -
- * and the height comes from the path nodes themselves: the far layer touches no
- * collision query at all, which is the whole reason it is cheap. The car's
- * alpha reveal (VICE-127) runs on the same update, so a car created out of
- * sight holds its invisible frame until the player can see it and then fades in.
+ * The apply (VICE-133): write one published pose into its car. Everything here
+ * is a world write and is therefore on the main thread; the arithmetic behind
+ * the pose was the worker's. The order is the one FarTrafficUpdateCar had in
+ * VICE-128: the far state first (an explosion can un-static a car), then the
+ * pick's own world action (the u-turn), then the transform, the speed, the
+ * sector re-insert, the RW frame and the alpha reveal.
  */
 static void
-FarTrafficUpdateCar(CVehicle *pVehicle)
+FarTrafficApplyPose(const SFarSimPose &pose)
 {
+	if (pose.index >= ms_nFarCars || ms_aFarCars[pose.index].slot != pose.slot) {
+		/* The cycle and the layer's list disagreed: a boundary fault. A
+		 * mismatch is counted, and the pose is dropped (never written into
+		 * the wrong car). */
+		CFarTraffic::ms_nFarTrafficWorkerLost++;
+		return;
+	}
+	SFarTrafficEntry &entry = ms_aFarCars[pose.index];
+	if (!FarTrafficEntryIsLive(entry))
+		return;
+	CVehicle *pVehicle = entry.pVehicle;
+
 	/* The far state is re-asserted on every update: an explosion un-statices
 	 * what it touches (CWorld::TriggerExplosionSectorList) and puts it back on
 	 * the moving entity list, and a car that woke up would run the near AI
@@ -328,40 +491,19 @@ FarTrafficUpdateCar(CVehicle *pVehicle)
 	if (!pVehicle->GetIsStatic() || pVehicle->bUsesCollision)
 		CFarTraffic::ApplyFarState(pVehicle);
 
-	/* The curve is spent: the car picks its next node with the traffic AI's
-	 * own pick (CCarCtrl::PickNextNodeRandomly), so a far car drives the
-	 * paths the near traffic drives and a promotion lands on a valid rail.
-	 * The pick is a random draw from the shared stream, exactly like the
-	 * near traffic's own; see the ADR (docs/adr/0026). */
-	if ((uint32)(pVehicle->AutoPilot.m_nTimeEnteredCurve + pVehicle->AutoPilot.m_nTimeToSpendOnCurrentCurve)
-			<= CTimer::GetTimeInMilliseconds())
-		CCarCtrl::PickNextNodeRandomly(pVehicle);
+	/* The pick of the worker's cycle gave up and turns the car around: the
+	 * engine's own two calls, made here (the pick's only world action). */
+	if (pose.bUTurn) {
+		pVehicle->SetStatus(STATUS_PHYSICS);
+		CCarCtrl::SwitchVehicleToRealPhysics(pVehicle);
+	}
 
-	CVector position;
-	CVector direction;
-	CCarCtrl::ComputeCarOnRailPose(pVehicle, &position, &direction);
-
-	/* The height of the rail: the path nodes carry the road's own height, so
-	 * the interpolation between them is the road under the car, without a
-	 * ground cast (which would be two collision queries per update, the one
-	 * thing the layer must not spend). */
-	CPathNode *pCurNode = &ThePaths.m_pathNodes[pVehicle->AutoPilot.m_nCurrentRouteNode];
-	CPathNode *pNextNode = &ThePaths.m_pathNodes[pVehicle->AutoPilot.m_nNextRouteNode];
-	float between = CCarCtrl::GetPositionAlongCurrentCurve(pVehicle);
-	position.z = pCurNode->GetZ() * (1.0f - between) + pNextNode->GetZ() * between;
-	position.z += pVehicle->GetHeightAboveRoad();
-
-	CVector forward = direction;
-	forward.z = 0.0f;
-	if (forward.MagnitudeSqr() > 0.0001f)
-		forward.Normalise();
-	else
-		forward = pVehicle->GetForward();
+	CVector forward(pose.forwardX, pose.forwardY, 0.0f);
 	pVehicle->GetForward() = forward;
 	pVehicle->GetRight() = CVector(forward.y, -forward.x, 0.0f);
 	pVehicle->GetUp() = CVector(0.0f, 0.0f, 1.0f);
-	pVehicle->SetPosition(position);
-	pVehicle->SetMoveSpeed(direction / GAME_SPEED_TO_CARAI_SPEED);
+	pVehicle->SetPosition(CVector(pose.x, pose.y, pose.z));
+	pVehicle->SetMoveSpeed(CVector(pose.dirX, pose.dirY, 0.0f) / GAME_SPEED_TO_CARAI_SPEED);
 	/* The sector lists follow the position (the renderer and the occupancy
 	 * tests read them), and the RW frame follows the matrix. */
 	pVehicle->RemoveAndAdd();
@@ -369,11 +511,86 @@ FarTrafficUpdateCar(CVehicle *pVehicle)
 	pVehicle->UpdateRwFrame();
 	/* The reveal of a creation (VICE-127): an off-screen car holds alpha 0
 	 * until the camera can see it, and the ramp is the fade the player sees
-	 * instead of a car that appeared from nowhere. The far update is the only
-	 * thing stepping it, so the ramp runs at the layer's rate: sixteen steps
-	 * of the stagger, which is 1.6 s at 10 Hz. */
+	 * instead of a car that appeared from nowhere. The stagger's share is
+	 * stepped here, so the ramp runs at the layer's rate: sixteen steps of
+	 * the stagger, which is 1.6 s at 10 Hz. */
 	pVehicle->UpdateClumpAlpha();
 	CFarTraffic::ms_nFarTrafficUpdates++;
+}
+
+/*
+ * The path snapshot (VICE-133): the nodes, the links and the connections of the
+ * graph, copied out of ThePaths. Nothing here changes after PreparePathData
+ * except the two node flags, which FarTrafficRefreshWorldFlags follows. The
+ * worker is stopped for the copy, so no cycle can read a half-built snapshot.
+ */
+void
+CFarTraffic::BuildWorldSnapshot(void)
+{
+	CFarTrafficWorker::Stop();
+	ms_nFarCars = 0;
+	/* The blocks are zeroed by ResetCars, cycle number included: the marker
+	 * goes with them, so the fresh (empty) block is not even read out. */
+	ms_nLastAppliedCycle = 0;
+	CFarTrafficWorker::ResetCars();
+
+	ms_farWorld.numNodes = ThePaths.m_numPathNodes;
+	ms_farWorld.numLinks = ThePaths.m_numCarPathLinks;
+	ms_farWorld.numConnections = ThePaths.m_numConnections;
+	for (int32 i = 0; i < ThePaths.m_numPathNodes; i++) {
+		CPathNode *pNode = &ThePaths.m_pathNodes[i];
+		ms_farWorld.nodes[i].x = pNode->GetX();
+		ms_farWorld.nodes[i].y = pNode->GetY();
+		ms_farWorld.nodes[i].z = pNode->GetZ();
+		ms_farWorld.nodes[i].firstLink = pNode->firstLink;
+		ms_farWorld.nodes[i].numLinks = pNode->numLinks;
+		ms_farWorld.nodes[i].flags = 0;
+	}
+	for (int32 i = 0; i < ThePaths.m_numCarPathLinks; i++) {
+		CCarPathLink *pLink = &ThePaths.m_carPathLinks[i];
+		ms_farWorld.links[i].x = pLink->GetX();
+		ms_farWorld.links[i].y = pLink->GetY();
+		ms_farWorld.links[i].dirX = pLink->GetDirX();
+		ms_farWorld.links[i].dirY = pLink->GetDirY();
+		ms_farWorld.links[i].laneOffset = pLink->OneWayLaneOffset();
+		ms_farWorld.links[i].pathNodeIndex = pLink->pathNodeIndex;
+		ms_farWorld.links[i].numLeftLanes = pLink->numLeftLanes;
+		ms_farWorld.links[i].numRightLanes = pLink->numRightLanes;
+	}
+	for (int32 i = 0; i < ThePaths.m_numConnections; i++) {
+		ms_farWorld.connectionNode[i] = ThePaths.ConnectedNode(i);
+		ms_farWorld.connectionLink[i] = ThePaths.m_carPathConnections[i];
+	}
+	/* The flags of the nodes the graph has not written yet (the tail of the
+	 * arrays) stay zero: the simulation only walks the nodes the links reach. */
+	ms_nFarWorldFlagsVersion = ~0u;
+	FarTrafficRefreshWorldFlags();
+	CFarTrafficWorker::SetWorld(&ms_farWorld);
+	CFarTrafficWorker::Start();
+}
+
+/* The node flags of the snapshot, re-read when the graph's own flag version
+ * moved: the script's road toggles (CPathFind::SwitchRoadsOffInArea and its
+ * relatives, and the between-levels marks) and a save load are the only part of
+ * the graph that moves after PreparePathData, and all of them bump the version.
+ * Called with the worker joined, from the applicator. */
+static void
+FarTrafficRefreshWorldFlags(void)
+{
+	if (ms_nFarWorldFlagsVersion == ThePaths.m_nodeFlagsVersion)
+		return;
+	ms_nFarWorldFlagsVersion = ThePaths.m_nodeFlagsVersion;
+	for (int32 i = 0; i < ThePaths.m_numCarPathNodes; i++) {
+		CPathNode *pNode = &ThePaths.m_pathNodes[i];
+		uint8 flags = 0;
+		if (pNode->bDeadEnd)
+			flags |= FAR_SIM_NODE_DEADEND;
+		if (pNode->bDisabled)
+			flags |= FAR_SIM_NODE_DISABLED;
+		if (pNode->bBetweenLevels)
+			flags |= FAR_SIM_NODE_BETWEENLEVELS;
+		ms_farWorld.nodes[i].flags = flags;
+	}
 }
 
 /* What one site call found. The attempt's counters subdivide by the furthest
@@ -508,10 +725,12 @@ CFarTraffic::AdoptOnCull(CVehicle *pVehicle, const CVector &playerPos)
 	const SFarTrafficBand band = ComputeFarTrafficBand(rings);
 	if (!FarTrafficAdoptSiteIsInBand(band, (pVehicle->GetPosition() - playerPos).Magnitude2D()))
 		return false;
-	/* The list is pruned first: a car the layer lost (a cutscene, the valve)
-	 * leaves a stale entry, and the cap is the live count. */
-	FarTrafficPruneEntries();
-	if (ms_nFarCars >= FarTrafficCap(band))
+	/* The cap reads the live count, without pruning: a stale entry (a car the
+	 * layer lost to a cutscene or the valve) is dropped at the applicator,
+	 * where the drop cannot reorder the list under the worker's published
+	 * poses. A stale entry therefore reserves a place for at most the rest of
+	 * this frame. */
+	if (FarTrafficCountLive() >= FarTrafficCap(band))
 		return false;
 
 	/* The occupants go: the car is a viewed shell from here, and the driver
@@ -535,6 +754,76 @@ CFarTraffic::AdoptOnCull(CVehicle *pVehicle, const CVector &playerPos)
 	return true;
 }
 
+/* The worker thread's end (VICE-133): a shutdown joins it (a cycle in flight is
+ * joined with it) so the next load starts a fresh thread with a fresh snapshot.
+ * The cars are gone with the world; the lists are reset by
+ * CFarTraffic::BuildWorldSnapshot. */
+void
+CFarTraffic::ShutDown(void)
+{
+	CFarTrafficWorker::Stop();
+}
+
+/*
+ * The main thread's join (VICE-133): called at the top of CGame::Process, before
+ * CWorld::Process. The worker's cycle of the previous frame is complete here,
+ * and its output is published; from this point to the end of the frame the
+ * worker is idle. A debug build's CWorld::Process and RenderScene assert it.
+ */
+void
+CFarTraffic::JoinWorker(void)
+{
+	CFarTrafficWorker::Join();
+}
+
+/* The debug build's audit of the window (VICE-133): the worker is not inside a
+ * cycle. The assertion itself lives in the worker module (FarTrafficWorker.cpp)
+ * and compiles away in a release build, so this is a call to an empty function
+ * there. */
+void
+CFarTraffic::AssertWorkerIdle(void)
+{
+	CFarTrafficWorker::AssertIdle();
+}
+
+/*
+ * The hand-over (VICE-133): called from Idle at the end of the frame, after the
+ * render. The cycle the applicator stamped is handed to the worker, or run
+ * inline (the escape hatch's mode). A frame whose cycle would do nothing - no
+ * commands and no car of the stagger's share - wakes the worker not at all, so
+ * a layer that is off (the stock draw distance) costs the handshake nothing.
+ */
+void
+CFarTraffic::RunWorker(void)
+{
+	if (CFarTrafficWorker::Run())
+		ms_nFarTrafficWorkerCycles++;
+}
+
+/*
+ * The published cycle of the worker, applied to the cars: the stagger's share,
+ * every pose checked against its car first (the index, the slot and the live
+ * test), so a stale output can never touch a car that is not the one it
+ * describes. The block is read out once, by its cycle number. A command the
+ * cycle could not apply (the ring's bound) is reported into the lost row here
+ * too, so a divergence is never silent.
+ */
+static void
+FarTrafficApplyOutput(void)
+{
+	const SFarTrafficOutput *pOutput = CFarTrafficWorker::Published();
+
+	if (CFarTrafficWorker::TakeOverflow())
+		CFarTraffic::ms_nFarTrafficWorkerLost++;
+	if (pOutput->cycle == ms_nLastAppliedCycle)
+		return;
+	ms_nLastAppliedCycle = pOutput->cycle;
+	for (int32 i = 0; i < pOutput->numPoses; i++)
+		FarTrafficApplyPose(pOutput->poses[i]);
+	CFarTraffic::ms_nFarTrafficShortCurves += pOutput->numShortCurves;
+	CFarTraffic::ms_nFarTrafficWorkerLost += pOutput->numLost;
+}
+
 /*
  * One frame of the layer. The car block of CGame::Process calls it after the
  * near cull, so the frame's pool, bubble budget and fill are already decided.
@@ -542,14 +831,41 @@ CFarTraffic::AdoptOnCull(CVehicle *pVehicle, const CVector &playerPos)
 void
 CFarTraffic::Process(void)
 {
+	/* The contract's barrier: the worker is idle here (JoinWorker ran before
+	 * CWorld::Process) and stays idle until RunWorker. The reads below are
+	 * therefore plain reads of a published block. */
+	CFarTrafficWorker::Join();
+
+	/* The previous cycle's poses, first, while the layer's list is exactly
+	 * what the worker's simulation left it as: only an append may have
+	 * happened since (a cull hand-over, which moves no entry), because the
+	 * stale entries below are pruned after this and every other drop of the
+	 * frame is later still. */
+	FarTrafficApplyOutput();
+
+	/* The graph's flags moved (a script's road toggle, a save load): copy them
+	 * into the snapshot before this frame's cycle, with the worker idle. */
+	FarTrafficRefreshWorldFlags();
+
+	/* The stale entries (a cutscene's cleanup, the valve, a delete) go now,
+	 * with the apply already behind them: the drop's swap reorders the list,
+	 * and the worker's poses are read against the order its own list has. */
+	FarTrafficPruneEntries();
+
+	/* The frame's cycle is stamped; the events below queue their commands into
+	 * it. The stamp is the game time of this frame, so the poses the worker
+	 * computes from it land one frame later (the double buffer's own lag). */
+	CFarTrafficWorker::BeginCycle(CTimer::GetTimeInMilliseconds(), CTimer::GetFrameCounter());
+
 	if (!FarTrafficIsActive()) {
 		/* Paused: a cutscene or an interior owns the world, and a cutscene's
 		 * own cleanup deletes the cars (CanBeDeleted is true for a far car).
-		 * The list is pruned so the counters stay live; nothing is created,
-		 * moved or removed. */
-		FarTrafficPruneEntries();
+		 * The list was pruned above so the counters stay live (the drops
+		 * queued for the worker's own list); nothing is created, moved or
+		 * removed here. */
 		ms_nFarTrafficCars = ms_nFarCars;
 		ms_nFarTrafficCap = 0;
+		CFarTrafficWorker::EndCycle();
 		return;
 	}
 
@@ -629,7 +945,7 @@ CFarTraffic::Process(void)
 	 * is inside the player's reach - every car that reached it was promoted (or
 	 * made real without a driver). The gauge is read from the state the pass
 	 * decided on, which is the state the rule answers for: the frame's creations
-	 * land inside the band (280 m or more out) and the staggered move steps a
+	 * land inside the band (280 m or more out) and the worker's move steps a
 	 * car by under two metres between its updates, so a car that drifts across
 	 * the 120 m line is promoted by the next frame's pass. It must stay 0. */
 	CFarTraffic::ms_nFarTrafficInReach = 0;
@@ -655,13 +971,6 @@ CFarTraffic::Process(void)
 		}
 	}
 
-	/* The stagger: the share of the layer this frame owns moves. */
-	for (int32 i = 0; i < ms_nFarCars; i++) {
-		if (!FarTrafficUpdatesThisFrame(CTimer::GetFrameCounter(), i))
-			continue;
-		if (FarTrafficEntryIsLive(ms_aFarCars[i]))
-			FarTrafficUpdateCar(ms_aFarCars[i].pVehicle);
-	}
-
 	ms_nFarTrafficCars = ms_nFarCars;
+	CFarTrafficWorker::EndCycle();
 }

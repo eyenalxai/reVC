@@ -1940,6 +1940,11 @@ CWorld::RemoveStaticObjects()
 void
 CWorld::Process(void)
 {
+	/* The far traffic layer's worker must be idle (VICE-133): its window ends
+	 * at CFarTraffic::JoinWorker in CGame::Process, which runs before this.
+	 * Debug builds only. */
+	CFarTraffic::AssertWorkerIdle();
+
 	if(!(CTimer::GetFrameCounter() & 63)) CReferences::PruneAllReferencesInWorld();
 
 	if(bProcessCutsceneOnly) {

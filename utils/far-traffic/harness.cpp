@@ -668,10 +668,13 @@ Section4Events(void)
  * The numbers here are the layer's own arithmetic, mirrored, and they are a
  * LOWER BOUND of the update: the engine calls each update pays (the node pick's
  * branch, the alpha ramp's on-screen test, the sector re-insert and the RW-frame
- * write) are not in them. The creation attempt's placement scan is measured
- * separately, mirrored over a synthetic graph of the shipped node and link
- * counts, because the engine's own call is not linked here; the live frame read
- * is the measurement that decides.
+ * write) are not in them. Since VICE-133 the simulation itself runs on the
+ * worker thread (FarTrafficWorker.h), and utils/far-traffic-worker measures
+ * that real step (this mirror is not needed for it any more); what stays here is
+ * the mirror of the *applicator*'s arithmetic, which the worker's poses land in.
+ * The creation attempt's placement scan is measured separately, mirrored over a
+ * synthetic graph of the shipped node and link counts, because the engine's own
+ * call is not linked here; the live frame read is the measurement that decides.
  */
 
 /* Mirrors CCurves::CalcCurvePoint (src/control/Curves.cpp), which the near

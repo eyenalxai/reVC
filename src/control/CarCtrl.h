@@ -121,7 +121,8 @@ public:
 #endif
 	static bool PickNextNodeToFollowPath(CVehicle*);
 	static void PickNextNodeRandomly(CVehicle*);
-	static uint8 FindPathDirection(int32, int32, int32);
+	/* FindPathDirection moved into CarOnRails.h with the pick (VICE-133): the
+	 * car-on-rails rules are shared with the far traffic layer's worker. */
 	static void Init(void);
 	static void ReInit(void);
 	static float FindSpeedMultiplier(float, float, float, float);

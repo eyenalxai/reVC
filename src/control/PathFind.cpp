@@ -264,6 +264,10 @@ CPathFind::Init(void)
 	// next lookup builds it again. PreparePathData clears the flag the same
 	// way when it rebuilds the nodes.
 	m_gridValid = false;
+	// VICE-133: the node array is empty now, so the far layer's flag copy is
+	// stale until the next PreparePathData. Its build happens right after
+	// that call.
+	m_nodeFlagsVersion++;
 }
 
 void
@@ -1120,6 +1124,9 @@ CPathFind::SwitchOffNodeAndNeighbours(int32 nodeId, bool disable)
 	int i, next;
 
 	m_pathNodes[nodeId].bDisabled = disable;
+	/* The far traffic layer's worker reads a copy of the flags (VICE-133):
+	 * the version is what tells it to re-read them. */
+	m_nodeFlagsVersion++;
 	if(m_pathNodes[nodeId].numLinks < 3)
 		for(i = 0; i < m_pathNodes[nodeId].numLinks; i++){
 			next = ConnectedNode(m_pathNodes[nodeId].firstLink + i);
@@ -1216,6 +1223,7 @@ CPathFind::MarkRoadsBetweenLevelsNodeAndNeighbours(int32 nodeId)
 	int i, next;
 
 	m_pathNodes[nodeId].bBetweenLevels = true;
+	m_nodeFlagsVersion++;	// VICE-133, see SwitchOffNodeAndNeighbours
 	if(m_pathNodes[nodeId].numLinks < 3)
 		for(i = 0; i < m_pathNodes[nodeId].numLinks; i++){
 			next = ConnectedNode(m_pathNodes[nodeId].firstLink + i);
@@ -1998,6 +2006,9 @@ CPathFind::Load(uint8 *buf, uint32 size)
 	int i;
 	int n = m_numPathNodes/8 + 1;
 
+	/* VICE-133: a save carries the script's road toggles, so a load is a flag
+	 * write like any other and the far layer re-reads them. */
+	m_nodeFlagsVersion++;
 	for(i = 0; i < m_numPathNodes; i++)
 		if(buf[i/8] & (1 << i%8))
 			m_pathNodes[i].bDisabled = true;

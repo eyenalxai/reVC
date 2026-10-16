@@ -438,7 +438,33 @@ with the same curve arithmetic the on-rails simple car uses, on a stagger of a
 third of the layer a frame (about 10 Hz), and it asks the near bubble's rule for
 every creation and removal (a car the player can see goes by the in-view band's
 fade-out, VICE-146). The rules live in `src/control/FarTraffic.h`, the engine
-side in `FarTraffic.cpp`, and ADR 0026 holds the decisions.
+side (the applicator, and the only place a far car is written) in
+`FarTraffic.cpp`, the simulation in `FarTrafficWorker.{h,cpp}` (VICE-133, its own
+thread), and ADR 0026 and ADR 0027 hold the decisions.
+
+## Far traffic worker
+
+The thread the far traffic layer's simulation runs on (VICE-133): the path pick,
+the rail pose, the path's own height, the heading, the stagger's share and the
+car's own random stream, over the `FarTrafficWorld` snapshot of the graph and
+its own per-car state. It writes nothing but its published pose block; the
+applicator on the main thread does every creation, removal, promotion,
+hand-over and world write. The worker's window is one frame's tail: the cycle is
+handed over at the end of `Idle` (after the render) and joined at the top of
+`CGame::Process` (before `CWorld::Process`), so it never runs while the world is
+processed or the scene is drawn, and a frame with no layer work does not wake
+it. The car-on-rails arithmetic it runs is the near traffic's own, shared
+through `CarOnRails.h` and checked bit for bit by `utils/far-traffic-worker`;
+the worker's list of cars is kept in lockstep with the applicator's by the
+ADD/DROP command list, keyed by the pool slot, and the published poses are
+checked against both before they are applied. Its counters are
+`ms_nFarTrafficWorkerCycles` (the cycles), `ms_nFarTrafficWorkerLost` (a
+command or a pose the cycle and the layer disagreed about: must stay 0),
+`ms_nFarTrafficShortCurves` (the pick's clamped curves) and
+`ms_nFarTrafficCatchUps` (the pending cycle the applicator ran inline when the
+window between two cycles grew the command ring: 0 in normal play);
+`FAR_TRAFFIC_WORKER` (`FarTraffic.h`) selects the worker or the same cycle run
+inline.
 
 ## Far band
 
@@ -448,11 +474,15 @@ the visible range (`rings.visibleRange`, min(LOD distance, weather far clip)).
 The band is open only while it has width (`FAR_TRAFFIC_MIN_BAND`, 160 m); its
 count cap follows the band's area up to `FAR_TRAFFIC_MAX` (64), and the cars
 outside the car budget keep the rest of the vehicle pool's margin. The creation
-sites are the fog (a car forming out of the haze ahead) and the rear half of the
-camera (the traffic the player passed); a placement of the fog site's own
-segment that lands inside the fade is allowed by the in-view band (VICE-146,
-the car's own reveal covers it), and a car the player can see goes by the same
-band's fade-out.
+sites are tried farthest first: the fog (a car forming out of the haze ahead)
+and the near site - the band's inner edge plus `FAR_TRAFFIC_SITE_MARGIN` (50 m,
+the collector's placement lands at or inside its target, so a site aimed at the
+edge itself lands in the near band and is refused) - in both cones, ahead (the
+oncoming traffic) and behind (the traffic the player passed); a placement of the
+fog site's own segment that lands inside the fade is allowed by the in-view band
+(VICE-146, the car's own reveal covers it), and a car the player can see goes by
+the same band's fade-out. A refused attempt is counted by the stage it reached
+(`ms_nFarTrafficRefusedNoSite` / `...RefusedBand` / `...RefusedGate`).
 
 ## Promotion
 
