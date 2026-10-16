@@ -240,7 +240,6 @@ public:
 	void Process_FollowPedWithMouse(const CVector &CameraTarget, float TargetOrientation, float, float);
 	void Process_BehindCar(const CVector &CameraTarget, float TargetOrientation, float, float);
 	void Process_Cam_On_A_String(const CVector &CameraTarget, float TargetOrientation, float, float);
-	void Process_TopDown(const CVector &CameraTarget, float TargetOrientation, float SpeedVar, float TargetSpeedVar);
 	void Process_TopDownPed(const CVector &CameraTarget, float TargetOrientation, float, float);
 	void Process_Rocket(const CVector &CameraTarget, float, float, float);
 	void Process_M16_1stPerson(const CVector &CameraTarget, float, float, float);
@@ -339,8 +338,7 @@ enum
 enum
 {
 	CAMCONTROL_GAME,
-	CAMCONTROL_SCRIPT,
-	CAMCONTROL_OBBE
+	CAMCONTROL_SCRIPT
 };
 
 class CCamera : public CPlaceable
@@ -389,8 +387,6 @@ public:
 	bool m_bLookingAtPlayer;
 	bool m_bLookingAtVector;
 	bool m_bMoveCamToAvoidGeom;
-	bool m_bObbeCinematicPedCamOn;
-	bool m_bObbeCinematicCarCamOn;
 	bool m_bRestoreByJumpCut;
 	bool m_bUseNearClipScript;
 	bool m_bStartInterScript;
@@ -569,7 +565,6 @@ public:
 
 
 	int16   m_iFadingDirection;
-	int     m_iModeObbeCamIsInForCar;
 	int16   m_iModeToGoTo;
 	int16   m_iMusicFadingDirection;
 	int16   m_iTypeOfSwitch;
@@ -632,13 +627,6 @@ public:
 	void ProcessWideScreenOn(void);
 	void DrawBordersForWideScreen(void);
 
-	// Obbe's cam
-	bool IsItTimeForNewcam(int32 obbeMode, int32 time);
-	bool TryToStartNewCamMode(int32 obbeMode);
-	void DontProcessObbeCinemaCamera(void);
-	void ProcessObbeCinemaCameraCar(void);
-	void ProcessObbeCinemaCameraHeli(void);
-	void ProcessObbeCinemaCameraPed(void);
 
 	// Train
 	void LoadTrainCamNodes(char const *name);

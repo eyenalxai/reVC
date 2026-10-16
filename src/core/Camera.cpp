@@ -34,36 +34,6 @@
 #include "GenericGameStorage.h"
 #include "Camera.h"
 
-enum
-{
-	// car
-	OBBE_WHEEL,
-	OBBE_1,
-	OBBE_2,
-	OBBE_3,
-	OBBE_1STPERSON,	// unused
-	OBBE_5,
-	OBBE_ONSTRING,
-	OBBE_COPCAR,
-	OBBE_COPCAR_WHEEL,
-	// ped
-	OBBE_9,
-	OBBE_10,
-	OBBE_11,
-	OBBE_12,
-	OBBE_13,
-	// heli
-	OBBE_14,
-	OBBE_15,
-	OBBE_16,
-	OBBE_17,
-	OBBE_18,
-	OBBE_19,
-	OBBE_ONSTRING_HELI,
-
-	OBBE_INVALID
-};
-
 // abbreviate a few things
 #define PLAYER (CWorld::Players[CWorld::PlayerInFocus].m_pPed)
 // NB: removed explicit TheCamera from all functions
@@ -74,8 +44,6 @@ bool CCamera::m_bUseMouse3rdPerson = true;
 #else
 bool CCamera::m_bUseMouse3rdPerson = false;
 #endif
-bool bDidWeProcessAnyCinemaCam;
-static bool bSwitchedToObbeCam;
 float CCamera::m_fMouseAccelHorzntl;
 float CCamera::m_fMouseAccelVertical;
 float CCamera::m_f3rdPersonCHairMultX;
@@ -136,7 +104,6 @@ CCamera::Init(void)
 	m_bMoveCamToAvoidGeom = false;
 	ClearPlayerWeaponMode();
 	m_bInATunnelAndABigVehicle = false;
-	m_iModeObbeCamIsInForCar = OBBE_INVALID;
 	Cams[0].CamTargetEntity = nil;
 	Cams[1].CamTargetEntity = nil;
 	Cams[2].CamTargetEntity = nil;
@@ -157,7 +124,6 @@ CCamera::Init(void)
 	m_bScriptParametersSetForInterPol = false;
 	m_uiCamShakeStart = 0;
 	m_fCamShakeForce = 0.0f;
-	m_iModeObbeCamIsInForCar = OBBE_INVALID;
 	m_bIgnoreFadingStuffForMusic = false;
 	m_bWaitForInterpolToFinish = false;
 	pToGarageWeAreIn = nil;
@@ -274,7 +240,7 @@ CCamera::Process(void)
 	m_RealPreviousCameraPosition = GetPosition();
 
 	// Update target entity
-	if(m_bLookingAtPlayer || m_bTargetJustBeenOnTrain || WhoIsInControlOfTheCamera == CAMCONTROL_OBBE)
+	if(m_bLookingAtPlayer || m_bTargetJustBeenOnTrain)
 		UpdateTargetEntity();
 	if(pTargetEntity == nil)
 		pTargetEntity = FindPlayerPed();
@@ -741,15 +707,12 @@ CCamera::CamControl(void)
 	CVector garageCenterToDoor, garageCamPos;
 	int whichDoor;
 
-	m_bObbeCinematicPedCamOn = false;
-	m_bObbeCinematicCarCamOn = false;
 	m_bUseTransitionBeta = false;
 	m_bUseSpecialFovTrain = false;
 	m_bJustCameOutOfGarage = false;
 	m_bTargetJustCameOffTrain = false;
 	m_bInATunnelAndABigVehicle = false;
 	m_bJustJumpedOutOf1stPersonBecauseOfTarget = false;
-	bSwitchedToObbeCam = false;
 
 	if(Cams[ActiveCam].CamTargetEntity == nil && pTargetEntity == nil)
 		pTargetEntity = PLAYER;
@@ -820,8 +783,7 @@ CCamera::CamControl(void)
 							stairs = true;
 					}
 					if(CGarages::IsPointInAGarageCameraZone(pTargetEntity->GetPosition()) || stairs){
-						if(!m_bGarageFixedCamPositionSet && m_bLookingAtPlayer ||
-						   WhoIsInControlOfTheCamera == CAMCONTROL_OBBE){
+						if(!m_bGarageFixedCamPositionSet && m_bLookingAtPlayer){
 							if(pToGarageWeAreIn || stairsZone){
 								float ground;
 								bool foundGround;
@@ -915,7 +877,7 @@ CCamera::CamControl(void)
 						}
 
 						if(CGarages::CameraShouldBeOutside() && m_bGarageFixedCamPositionSet &&
-						   (m_bLookingAtPlayer || WhoIsInControlOfTheCamera == CAMCONTROL_OBBE)){
+						   m_bLookingAtPlayer){
 							if(pToGarageWeAreIn){
 								ReqMode = CCam::MODE_FIXED;
 								m_bPlayerIsInGarage = true;
@@ -1403,40 +1365,6 @@ CCamera::CamControl(void)
 	if(gbModelViewer)
 		ReqMode = CCam::MODE_MODELVIEW;
 
-	// Turn on Obbe's cam. The vehicle cinematic camera is gone from the player
-	// path; only the on-foot one stays.
-	bool canUseObbeCam = true;
-	if(pTargetEntity && !pTargetEntity->IsVehicle()){
-		if(PedZoomIndicator == CAM_ZOOM_CINEMATIC)
-			m_bObbeCinematicPedCamOn = true;
-	}
-	if(m_bTargetJustBeenOnTrain ||
-	   ReqMode == CCam::MODE_SYPHON || ReqMode == CCam::MODE_SYPHON_CRIM_IN_FRONT || ReqMode == CCam::MODE_SPECIAL_FIXED_FOR_SYPHON ||
-	   ReqMode == CCam::MODE_PED_DEAD_BABY || ReqMode == CCam::MODE_ARRESTCAM_ONE || ReqMode == CCam::MODE_ARRESTCAM_TWO ||
-	   ReqMode == CCam::MODE_FIGHT_CAM || ReqMode == CCam::MODE_PLAYER_FALLEN_WATER ||
-	   ReqMode == CCam::MODE_SNIPER || ReqMode == CCam::MODE_ROCKETLAUNCHER || ReqMode == CCam::MODE_M16_1STPERSON ||
-	   ReqMode == CCam::MODE_SNIPER_RUNABOUT || ReqMode == CCam::MODE_ROCKETLAUNCHER_RUNABOUT ||
-	   ReqMode == CCam::MODE_1STPERSON_RUNABOUT || ReqMode == CCam::MODE_M16_1STPERSON_RUNABOUT ||
-	   ReqMode == CCam::MODE_FIGHT_CAM_RUNABOUT || ReqMode == CCam::MODE_HELICANNON_1STPERSON || ReqMode == CCam::MODE_CAMERA ||
-	   WhoIsInControlOfTheCamera == CAMCONTROL_SCRIPT ||
-	   m_bJustCameOutOfGarage || m_bPlayerIsInGarage)
-		canUseObbeCam = false;
-
-	if(m_bObbeCinematicPedCamOn && canUseObbeCam)
-		ProcessObbeCinemaCameraPed();
-	else if(m_bObbeCinematicCarCamOn && canUseObbeCam){
-		if(pTargetEntity->IsVehicle() && ((CVehicle*)pTargetEntity)->GetVehicleAppearance() == VEHICLE_APPEARANCE_HELI ||
-		   ((CVehicle*)pTargetEntity)->IsBoat())
-			ProcessObbeCinemaCameraHeli();
-		else
-			ProcessObbeCinemaCameraCar();
-	}else{
-		if(m_bPlayerIsInGarage && m_bObbeCinematicCarCamOn)
-			switchByJumpCut = true;
-		canUseObbeCam = false;
-		DontProcessObbeCinemaCamera();
-	}
-
 	// Start the transition or do a jump cut
 	if(m_bLookingAtPlayer){
 		// Going into top down modes normally needs a jump cut (but see below)
@@ -1727,12 +1655,6 @@ CCamera::CamControl(void)
 		// the body, like the stock camera did
 		FindPlayerPed()->bIsVisible = false;
 
-	bool switchedFromObbe = false;
-	if(!canUseObbeCam && WhoIsInControlOfTheCamera == CAMCONTROL_OBBE){
-		RestoreWithJumpCut();
-		switchedFromObbe = true;
-		SetCameraDirectlyBehindForFollowPed_CamOnAString();
-	}
 
 }
 
@@ -1741,23 +1663,12 @@ void
 CCamera::UpdateTargetEntity(void)
 {
 	bool enteringCar = false;
-	bool obbeCam = false;
 
 	m_bPlayerWasOnBike = false;
 	if(pTargetEntity && pTargetEntity->IsVehicle() && ((CVehicle*)pTargetEntity)->IsBike())
 		m_bPlayerWasOnBike = true;
 
-	if(WhoIsInControlOfTheCamera == CAMCONTROL_OBBE){
-		obbeCam = true;
-		if(m_iModeObbeCamIsInForCar == OBBE_COPCAR_WHEEL || m_iModeObbeCamIsInForCar == OBBE_COPCAR){
-			if(FindPlayerPed()->GetPedState() != PED_ARRESTED)
-				obbeCam = false;
-			if(FindPlayerVehicle() == nil)
-				pTargetEntity = FindPlayerPed();
-		}
-	}
-
-	if((m_bLookingAtPlayer || obbeCam) && m_uiTransitionState == 0 ||
+	if(m_bLookingAtPlayer && m_uiTransitionState == 0 ||
 	   pTargetEntity == nil ||
 	   m_bTargetJustBeenOnTrain){
 		if(FindPlayerVehicle())
@@ -2211,10 +2122,7 @@ CCamera::GetScreenRect(CRect &rect)
 void
 CCamera::TakeControl(CEntity *target, int16 mode, int16 typeOfSwitch, int32 controller)
 {
-	bool doSwitch = true;
-	if(controller == CAMCONTROL_OBBE && WhoIsInControlOfTheCamera == CAMCONTROL_SCRIPT)
-		doSwitch = false;
-	if(doSwitch){
+	{
 		WhoIsInControlOfTheCamera = controller;
 		if(target){
 			if(mode == CCam::MODE_NONE){
@@ -2241,10 +2149,7 @@ CCamera::TakeControl(CEntity *target, int16 mode, int16 typeOfSwitch, int32 cont
 void
 CCamera::TakeControlNoEntity(const CVector &position, int16 typeOfSwitch, int32 controller)
 {
-	bool doSwitch = true;
-	if(controller == CAMCONTROL_OBBE && WhoIsInControlOfTheCamera == CAMCONTROL_SCRIPT)
-		doSwitch = false;
-	if(doSwitch){
+	{
 		WhoIsInControlOfTheCamera = controller;
 		m_bLookingAtVector = true;
 		m_bLookingAtPlayer = false;
@@ -2273,7 +2178,6 @@ CCamera::Restore(void)
 	m_bLookingAtVector = false;
 	m_iTypeOfSwitch = INTERPOLATION;
 	m_bUseNearClipScript = false;
-	m_iModeObbeCamIsInForCar = OBBE_INVALID;
 	m_fPositionAlongSpline = 0.0;
 	m_bStartingSpline = false;
 	m_bScriptParametersSetForInterPol = false;
@@ -2315,7 +2219,6 @@ CCamera::RestoreWithJumpCut(void)
 	m_bLookingAtVector = false;
 	m_iTypeOfSwitch = JUMP_CUT;
 	m_bUseNearClipScript = false;
-	m_iModeObbeCamIsInForCar = OBBE_INVALID;
 	m_fPositionAlongSpline = 0.0;
 	m_bStartingSpline = false;
 	m_bScriptParametersSetForInterPol = false;
@@ -2720,812 +2623,6 @@ CCamera::DrawBordersForWideScreen(void)
 
 
 
-bool
-CCamera::IsItTimeForNewcam(int32 obbeMode, int32 time)
-{
-	CVehicle *veh;
-	uint32 t = time;	// no annoying compiler warnings
-	CVector fwd;
-
-	if(obbeMode < 0)
-		return true;
-	switch(obbeMode){
-	case OBBE_WHEEL:
-		veh = FindPlayerVehicle();
-		if(veh){
-			if(veh->IsBoat() && pTargetEntity->GetModelIndex() != MI_SKIMMER)
-				return true;
-			if(veh->GetModelIndex() == MI_RHINO)
-				return true;
-			if(!CWorld::GetIsLineOfSightClear(pTargetEntity->GetPosition(), Cams[ActiveCam].Source, true, false, false, false, false, false, false))
-				return true;
-		}
-		if(CTimer::GetTimeInMilliseconds() > t+5000)
-			return true;
-		SetNearClipScript(0.6f);
-		return false;
-	case OBBE_1:
-		if(FindPlayerVehicle() && FindPlayerVehicle()->IsBoat() && pTargetEntity->GetModelIndex() != MI_SKIMMER)
-			return true;
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), m_vecFixedModeSource, true, false, false, false, false, false, false))
-			return true;
-
-		fwd = FindPlayerCoors() - m_vecFixedModeSource;
-		fwd.z = 0.0f;
-
-		// too far and driving away from cam
-		if(fwd.Magnitude() > 40.0f && DotProduct(FindPlayerSpeed(), fwd) > 0.0f)
-			return true;
-		// too close
-		if(fwd.Magnitude() < 1.6f)
-			return true;
-		return false;
-	case OBBE_2:
-		if(FindPlayerVehicle() && FindPlayerVehicle()->IsBoat() && pTargetEntity->GetModelIndex() != MI_SKIMMER)
-			return true;
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), m_vecFixedModeSource, true, false, false, false, false, false, false))
-			return true;
-
-		fwd = FindPlayerCoors() - m_vecFixedModeSource;
-		fwd.z = 0.0f;
-
-		if(fwd.Magnitude() < 2.0f)
-			// very close, fix near clip
-			SetNearClipScript(Max(fwd.Magnitude()*0.5f, 0.05f));
-		// too far and driving away from cam
-		if(fwd.Magnitude() > 29.0f && DotProduct(FindPlayerSpeed(), fwd) > 0.0f)
-			return true;
-		// too close
-		if(fwd.Magnitude() < 2.0f)
-			return true;
-		return false;
-	case OBBE_3:
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), m_vecFixedModeSource, true, false, false, false, false, false, false))
-			return true;
-
-		fwd = FindPlayerCoors() - m_vecFixedModeSource;
-		fwd.z = 0.0f;
-
-		// too far and driving away from cam
-		if(fwd.Magnitude() > 48.0f && DotProduct(FindPlayerSpeed(), fwd) > 0.0f)
-			return true;
-		return false;
-	case OBBE_1STPERSON:
-		return CTimer::GetTimeInMilliseconds() > t+3000;
-	case OBBE_5:
-		if(FindPlayerVehicle() && FindPlayerVehicle()->IsBoat() && pTargetEntity->GetModelIndex() != MI_SKIMMER)
-			return true;
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), m_vecFixedModeSource, true, false, false, false, false, false, false))
-			return true;
-
-		fwd = FindPlayerCoors() - m_vecFixedModeSource;
-		fwd.z = 0.0f;
-
-		// too far and driving away from cam
-		if(fwd.Magnitude() > 38.0f && DotProduct(FindPlayerSpeed(), fwd) > 0.0f)
-			return true;
-		return false;
-	case OBBE_ONSTRING:
-		return CTimer::GetTimeInMilliseconds() > t+3000;
-	case OBBE_COPCAR:
-		return CTimer::GetTimeInMilliseconds() > t+2000 && !FindPlayerVehicle()->GetIsOnScreen();
-	case OBBE_COPCAR_WHEEL:
-		if(FindPlayerVehicle() && FindPlayerVehicle()->IsBoat())
-			return true;
-		if(!CWorld::GetIsLineOfSightClear(pTargetEntity->GetPosition(), Cams[ActiveCam].Source, true, false, false, false, false, false, false))
-			return true;
-		if(CTimer::GetTimeInMilliseconds() > t+1000)
-			return true;
-		SetNearClipScript(0.6f);
-		return false;
-
-	// Ped modes
-	case OBBE_9:
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), m_vecFixedModeSource, true, false, false, false, false, false, false))
-			return true;
-
-		fwd = FindPlayerCoors() - m_vecFixedModeSource;
-		fwd.z = 0.0f;
-
-		// too far and driving away from cam
-		if(fwd.Magnitude() > 20.0f && DotProduct(FindPlayerSpeed(), fwd) > 0.0f)
-			return true;
-		return false;
-	case OBBE_10:
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), m_vecFixedModeSource, true, false, false, false, false, false, false))
-			return true;
-
-		fwd = FindPlayerCoors() - m_vecFixedModeSource;
-		fwd.z = 0.0f;
-
-		// too far and driving away from cam
-		if(fwd.Magnitude() > 8.0f && DotProduct(FindPlayerSpeed(), fwd) > 0.0f)
-			return true;
-		return false;
-	case OBBE_11:
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), m_vecFixedModeSource, true, false, false, false, false, false, false))
-			return true;
-
-		fwd = FindPlayerCoors() - m_vecFixedModeSource;
-		fwd.z = 0.0f;
-
-		// too far and driving away from cam
-		if(fwd.Magnitude() > 25.0f && DotProduct(FindPlayerSpeed(), fwd) > 0.0f)
-			return true;
-		return false;
-	case OBBE_12:
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), m_vecFixedModeSource, true, false, false, false, false, false, false))
-			return true;
-
-		fwd = FindPlayerCoors() - m_vecFixedModeSource;
-		fwd.z = 0.0f;
-
-		// too far and driving away from cam
-		if(fwd.Magnitude() > 8.0f && DotProduct(FindPlayerSpeed(), fwd) > 0.0f)
-			return true;
-		return false;
-	case OBBE_13:
-		return CTimer::GetTimeInMilliseconds() > t+5000;
-
-	// Heli modes
-	case OBBE_14:
-		if(FindPlayerVehicle())
-			if(!CWorld::GetIsLineOfSightClear(pTargetEntity->GetPosition(), Cams[ActiveCam].Source, true, false, false, false, false, false, false))
-				return true;
-		return CTimer::GetTimeInMilliseconds() > t+8000;
-	case OBBE_15:
-		if(FindPlayerVehicle()){
-			if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), m_vecFixedModeSource, true, false, false, false, false, false, false))
-				return true;
-			fwd = FindPlayerCoors() - m_vecFixedModeSource;
-			fwd.z = 0.0f;
-
-			// too far and driving away from cam
-			if(fwd.Magnitude() > 44.0f && DotProduct(FindPlayerSpeed(), fwd) > 0.0f)
-				return true;
-			// too close
-			if(fwd.Magnitude() < 2.0f)
-				return true;
-		}
-		return false;
-	case OBBE_16:
-		if(FindPlayerVehicle()){
-			if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), m_vecFixedModeSource, true, false, false, false, false, false, false))
-				return true;
-			fwd = FindPlayerCoors() - m_vecFixedModeSource;
-			fwd.z = 0.0f;
-
-			// too far and driving away from cam
-			if(fwd.Magnitude() > 50.0f && DotProduct(FindPlayerSpeed(), fwd) > 0.0f)
-				return true;
-			// too close
-			if(fwd.Magnitude() < 3.0f)
-				return true;
-		}
-		return false;
-	case OBBE_17:
-		if(FindPlayerVehicle()){
-			if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), m_vecFixedModeSource, true, false, false, false, false, false, false))
-				return true;
-			fwd = FindPlayerCoors() - m_vecFixedModeSource;
-			fwd.z = 0.0f;
-
-			// too far
-			if(fwd.Magnitude() > 50.0f)
-				return true;
-			// too close
-			if(fwd.Magnitude() < 2.0f)
-				return true;
-		}
-		return false;
-	case OBBE_18:
-		if(FindPlayerVehicle()){
-			if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), m_vecFixedModeSource, true, false, false, false, false, false, false))
-				return true;
-			fwd = FindPlayerCoors() - m_vecFixedModeSource;
-
-			// too far
-			if(fwd.Magnitude() > 57.0f)
-				return true;
-			// too close
-			if(fwd.Magnitude() < 1.0f)
-				return true;
-		}
-		return false;
-	case OBBE_19:
-		if(FindPlayerVehicle()){
-			if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), m_vecFixedModeSource, true, false, false, false, false, false, false))
-				return true;
-			fwd = FindPlayerCoors() - m_vecFixedModeSource;
-			fwd.z = 0.0f;
-
-			// too far
-			if(fwd.Magnitude() > 36.0f)
-				return true;
-			// too close
-			if(fwd.Magnitude() < 2.0f)
-				return true;
-		}
-		return false;
-	case OBBE_ONSTRING_HELI:
-		return CTimer::GetTimeInMilliseconds() > t+5000;
-
-	default:
-		return false;
-	}
-}
-
-bool
-CCamera::TryToStartNewCamMode(int obbeMode)
-{
-	CVehicle *veh;
-	CVector target, camPos, playerSpeed, fwd, fwd2;
-	float angle;
-	float ground;
-	bool foundGround;
-	int i;
-
-	if(obbeMode < 0)
-		return true;
-	switch(obbeMode){
-	case OBBE_WHEEL:
-		veh = FindPlayerVehicle();
-		if(veh == nil || (veh->IsBoat() && pTargetEntity->GetModelIndex() != MI_SKIMMER) || veh->GetModelIndex() == MI_RHINO)
-			return false;
-		target = Multiply3x3(FindPlayerVehicle()->GetMatrix(), CVector(-1.4f, -2.3f, 0.3f));
-		target += FindPlayerVehicle()->GetPosition();
-		if(!CWorld::GetIsLineOfSightClear(veh->GetPosition(), target, true, false, false, false, false, false, false))
-			return false;
-		TakeControl(veh, CCam::MODE_WHEELCAM, JUMP_CUT, CAMCONTROL_OBBE);
-		return true;
-	case OBBE_1:
-		camPos = FindPlayerCoors();
-		playerSpeed = FindPlayerSpeed();
-		playerSpeed.z = 0.0f;
-		playerSpeed.Normalise();
-		camPos += 20.0f*playerSpeed;
-		camPos += 3.0f*CVector(playerSpeed.y, -playerSpeed.x, 0.0f);
-		if(FindPlayerVehicle() && FindPlayerVehicle()->IsBoat() && pTargetEntity->GetModelIndex() != MI_SKIMMER)
-			return false;
-
-		ground = CWorld::FindGroundZFor3DCoord(camPos.x, camPos.y, camPos.z+5.0f, &foundGround);
-		if(foundGround)
-			camPos.z = ground + 1.5f;
-		else{
-			ground = CWorld::FindRoofZFor3DCoord(camPos.x, camPos.y, camPos.z-5.0f, &foundGround);
-			if(foundGround)
-				camPos.z = ground + 1.5f;
-		}
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), camPos, true, false, false, false, false, false, false))
-			return false;
-
-		fwd = FindPlayerCoors() - camPos;
-		fwd.z = 0.0f;
-		// too far and driving away from cam
-		if(fwd.Magnitude() > 40.0f && DotProduct(FindPlayerSpeed(), fwd) > 0.0f)
-			return false;
-		// too close
-		if(fwd.Magnitude() < 2.5f)
-			return true;
-
-		SetCamPositionForFixedMode(camPos, CVector(0.0f, 0.0f, 0.0f));
-		TakeControl(FindPlayerEntity(), CCam::MODE_FIXED, JUMP_CUT, CAMCONTROL_OBBE);
-		return true;
-	case OBBE_2:
-		if(FindPlayerVehicle() && FindPlayerVehicle()->IsBoat() && pTargetEntity->GetModelIndex() != MI_SKIMMER)
-			return false;
-		camPos = FindPlayerCoors();
-		playerSpeed = FindPlayerSpeed();
-		playerSpeed.z = 0.0f;
-		playerSpeed.Normalise();
-		camPos += 16.0f*playerSpeed;
-		camPos += 2.5f*CVector(playerSpeed.y, -playerSpeed.x, 0.0f);
-
-		ground = CWorld::FindGroundZFor3DCoord(camPos.x, camPos.y, camPos.z+5.0f, &foundGround);
-		if(foundGround)
-			camPos.z = ground + 0.5f;
-		else{
-			ground = CWorld::FindRoofZFor3DCoord(camPos.x, camPos.y, camPos.z-5.0f, &foundGround);
-			if(foundGround)
-				camPos.z = ground + 0.5f;
-		}
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), camPos, true, false, false, false, false, false, false))
-			return false;
-
-		fwd = FindPlayerCoors() - camPos;
-		fwd.z = 0.0f;
-		// too far and driving away from cam
-		if(fwd.Magnitude() > 29.0f && DotProduct(FindPlayerSpeed(), fwd) > 0.0f)
-			return false;
-		// too close
-		if(fwd.Magnitude() < 2.0f)
-			return true;
-
-		SetCamPositionForFixedMode(camPos, CVector(0.0f, 0.0f, 0.0f));
-		TakeControl(FindPlayerEntity(), CCam::MODE_FIXED, JUMP_CUT, CAMCONTROL_OBBE);
-		return true;
-	case OBBE_3:
-		camPos = FindPlayerCoors();
-		playerSpeed = FindPlayerSpeed();
-		playerSpeed.z = 0.0f;
-		playerSpeed.Normalise();
-		camPos += 30.0f*playerSpeed;
-		camPos += 8.0f*CVector(playerSpeed.y, -playerSpeed.x, 0.0f);
-
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), camPos, true, false, false, false, false, false, false))
-			return false;
-
-		SetCamPositionForFixedMode(camPos, CVector(0.0f, 0.0f, 0.0f));
-		TakeControl(FindPlayerEntity(), CCam::MODE_FIXED, JUMP_CUT, CAMCONTROL_OBBE);
-		return true;
-	case OBBE_1STPERSON:
-		TakeControl(FindPlayerEntity(), CCam::MODE_FIXED, JUMP_CUT, CAMCONTROL_OBBE);
-		return true;
-	case OBBE_5:
-		camPos = FindPlayerCoors();
-		playerSpeed = FindPlayerSpeed();
-		playerSpeed.z = 0.0f;
-		playerSpeed.Normalise();
-		camPos += 30.0f*playerSpeed;
-		camPos += 6.0f*CVector(playerSpeed.y, -playerSpeed.x, 0.0f);
-
-		ground = CWorld::FindGroundZFor3DCoord(camPos.x, camPos.y, camPos.z+5.0f, &foundGround);
-		if(foundGround)
-			camPos.z = ground + 3.5f;
-		else{
-			ground = CWorld::FindRoofZFor3DCoord(camPos.x, camPos.y, camPos.z-5.0f, &foundGround);
-			if(foundGround)
-				camPos.z = ground + 3.5f;
-		}
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), camPos, true, false, false, false, false, false, false))
-			return false;
-
-		SetCamPositionForFixedMode(camPos, CVector(0.0f, 0.0f, 0.0f));
-		TakeControl(FindPlayerEntity(), CCam::MODE_FIXED, JUMP_CUT, CAMCONTROL_OBBE);
-		return true;
-	case OBBE_ONSTRING:
-		TakeControl(FindPlayerEntity(), CCam::MODE_CAM_ON_A_STRING, JUMP_CUT, CAMCONTROL_OBBE);
-		return true;
-	case OBBE_COPCAR:
-#ifdef FIX_BUGS
-		if (CReplay::IsPlayingBack())
-			return false;
-#endif
-		if(FindPlayerPed()->m_pWanted->GetWantedLevel() < 1)
-			return false;
-		if(FindPlayerVehicle() == nil)
-			return false;
-		if(FindPlayerVehicle() && FindPlayerVehicle()->IsBoat() && pTargetEntity->GetModelIndex() != MI_SKIMMER)
-			return false;
-		i = CPools::GetVehiclePool()->GetSize();
-		while(--i >= 0){
-			veh = CPools::GetVehiclePool()->GetSlot(i);
-			if(veh && veh->IsCar() && veh != FindPlayerVehicle() && veh->bIsLawEnforcer){
-				float dx = veh->GetPosition().x - FindPlayerCoors().x;
-				float dy = veh->GetPosition().y - FindPlayerCoors().y;
-				float dist = (veh->GetPosition() - FindPlayerCoors()).Magnitude();
-				if(dist < 30.0f){
-					if(dx*FindPlayerVehicle()->GetForward().x + dy*FindPlayerVehicle()->GetForward().y < 0.0f &&
-					   veh->GetForward().x*FindPlayerVehicle()->GetForward().x + veh->GetForward().y*FindPlayerVehicle()->GetForward().y > 0.8f){
-						TakeControl(veh, CCam::MODE_CAM_ON_A_STRING, JUMP_CUT, CAMCONTROL_OBBE);
-						return true;
-					}
-				}
-			}
-		}
-		return false;
-	case OBBE_COPCAR_WHEEL:
-#ifdef FIX_BUGS
-		if (CReplay::IsPlayingBack())
-			return false;
-#endif
-		if(FindPlayerPed()->m_pWanted->GetWantedLevel() < 1)
-			return false;
-		if(FindPlayerVehicle() == nil)
-			return false;
-		if(FindPlayerVehicle() && FindPlayerVehicle()->IsBoat() && pTargetEntity->GetModelIndex() != MI_SKIMMER)
-			return false;
-		i = CPools::GetVehiclePool()->GetSize();
-		while(--i >= 0){
-			veh = CPools::GetVehiclePool()->GetSlot(i);
-			if(veh && veh->IsCar() && veh != FindPlayerVehicle() && veh->bIsLawEnforcer){
-				float dx = veh->GetPosition().x - FindPlayerCoors().x;
-				float dy = veh->GetPosition().y - FindPlayerCoors().y;
-				float dist = (veh->GetPosition() - FindPlayerCoors()).Magnitude();
-				if(dist < 30.0f){
-					if(dx*FindPlayerVehicle()->GetForward().x + dy*FindPlayerVehicle()->GetForward().y < 0.0f &&
-					   veh->GetForward().x*FindPlayerVehicle()->GetForward().x + veh->GetForward().y*FindPlayerVehicle()->GetForward().y > 0.8f){
-						target = Multiply3x3(veh->GetMatrix(), CVector(-1.4f, -2.3f, 0.3f));
-						target += veh->GetPosition();
-						if(!CWorld::GetIsLineOfSightClear(veh->GetPosition(), target, true, false, false, false, false, false, false))
-							return false;
-						TakeControl(veh, CCam::MODE_WHEELCAM, JUMP_CUT, CAMCONTROL_OBBE);
-						return true;
-					}
-				}
-			}
-		}
-		return false;
-
-	case OBBE_9:
-		camPos = FindPlayerCoors();
-		playerSpeed = FindPlayerSpeed();
-		playerSpeed.z = 0.0f;
-		playerSpeed.Normalise();
-		camPos += 15.0f*playerSpeed;
-		camPos += CVector(2.0f, 1.0f, 0.0f);
-
-		ground = CWorld::FindGroundZFor3DCoord(camPos.x, camPos.y, camPos.z+5.0f, &foundGround);
-		if(foundGround)
-			camPos.z = ground + 0.5f;
-		else{
-			ground = CWorld::FindRoofZFor3DCoord(camPos.x, camPos.y, camPos.z-5.0f, &foundGround);
-			if(foundGround)
-				camPos.z = ground + 0.5f;
-		}
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), camPos, true, false, false, false, false, false, false))
-			return false;
-
-		SetCamPositionForFixedMode(camPos, CVector(0.0f, 0.0f, 0.0f));
-		TakeControl(FindPlayerEntity(), CCam::MODE_FIXED, JUMP_CUT, CAMCONTROL_OBBE);
-		return true;
-	case OBBE_10:
-		camPos = FindPlayerCoors();
-		playerSpeed = FindPlayerSpeed();
-		playerSpeed.z = 0.0f;
-		playerSpeed.Normalise();
-		camPos += 5.0f*playerSpeed;
-		camPos += CVector(2.0f, 1.0f, 0.5f);
-
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), camPos, true, false, false, false, false, false, false))
-			return false;
-
-		SetCamPositionForFixedMode(camPos, CVector(0.0f, 0.0f, 0.0f));
-		TakeControl(FindPlayerEntity(), CCam::MODE_FIXED, JUMP_CUT, CAMCONTROL_OBBE);
-		return true;
-	case OBBE_11:
-		camPos = FindPlayerCoors();
-		playerSpeed = FindPlayerSpeed();
-		playerSpeed.z = 0.0f;
-		playerSpeed.Normalise();
-		camPos += 20.0f*playerSpeed;
-		camPos += CVector(2.0f, 1.0f, 20.0f);
-
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), camPos, true, false, false, false, false, false, false))
-			return false;
-
-		SetCamPositionForFixedMode(camPos, CVector(0.0f, 0.0f, 0.0f));
-		TakeControl(FindPlayerEntity(), CCam::MODE_FIXED, JUMP_CUT, CAMCONTROL_OBBE);
-		return true;
-	case OBBE_12:
-		camPos = FindPlayerCoors();
-		playerSpeed = FindPlayerSpeed();
-		playerSpeed.z = 0.0f;
-		playerSpeed.Normalise();
-		camPos += 5.0f*playerSpeed;
-		camPos += CVector(2.0f, 1.0f, 10.5f);
-
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), camPos, true, false, false, false, false, false, false))
-			return false;
-
-		SetCamPositionForFixedMode(camPos, CVector(0.0f, 0.0f, 0.0f));
-		TakeControl(FindPlayerEntity(), CCam::MODE_FIXED, JUMP_CUT, CAMCONTROL_OBBE);
-		return true;
-	case OBBE_13:
-#ifdef FIX_BUGS
-		TakeControl(FindPlayerEntity(), CCam::MODE_TOP_DOWN_PED, JUMP_CUT, CAMCONTROL_OBBE);
-#else
-		TakeControl(FindPlayerEntity(), CCam::MODE_TOPDOWN, JUMP_CUT, CAMCONTROL_OBBE);
-#endif
-		return true;
-
-	// Heli modes
-	case OBBE_14:
-		veh = FindPlayerVehicle();
-		if(veh == nil)
-			return false;
-		target = Multiply3x3(FindPlayerVehicle()->GetMatrix(), CVector(-1.4f, -2.3f, 0.3f));
-		target += FindPlayerVehicle()->GetPosition();
-		if(!veh->IsBoat() && !CWorld::GetIsLineOfSightClear(veh->GetPosition(), target, true, false, false, false, false, false, false))
-			return false;
-		TakeControl(veh, CCam::MODE_WHEELCAM, JUMP_CUT, CAMCONTROL_OBBE);
-		return true;
-	case OBBE_15:
-		if(FindPlayerVehicle() == nil)
-			return false;
-		camPos = FindPlayerCoors();
-		playerSpeed = FindPlayerSpeed();
-		playerSpeed.z = 0.0f;
-		playerSpeed.Normalise();
-		camPos += 34.0f*playerSpeed;
-		camPos.z = FindPlayerCoors().z + 0.5f;
-		if(FindPlayerVehicle()->IsBoat())
-			camPos.z += 1.0f;
-
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), camPos, true, false, false, false, false, false, false))
-			return false;
-
-		fwd = FindPlayerCoors() - camPos;
-		fwd2 = FindPlayerCoors() - camPos;
-		fwd2.z = 0.0f;
-		// too far and driving away from cam
-		if(fwd.Magnitude() > 44.0f && DotProduct(FindPlayerSpeed(), fwd2) > 0.0f)
-			return false;
-		// too close
-		if(fwd.Magnitude() < 3.0f)
-			return true;
-
-		SetCamPositionForFixedMode(camPos, CVector(0.0f, 0.0f, 0.0f));
-		TakeControl(FindPlayerEntity(), CCam::MODE_FIXED, JUMP_CUT, CAMCONTROL_OBBE);
-		return true;
-	case OBBE_16:
-		if(FindPlayerVehicle() == nil)
-			return false;
-		camPos = FindPlayerCoors();
-		playerSpeed = FindPlayerSpeed();
-		playerSpeed.z = 0.0f;
-		playerSpeed.Normalise();
-		angle = CGeneral::GetATanOfXY(playerSpeed.x, playerSpeed.y) + DEGTORAD(60.0f);
-		playerSpeed += CVector(Cos(angle), Sin(angle), 0.0f);
-		playerSpeed.Normalise();
-		camPos += 30.0f*playerSpeed;
-		camPos.z = FindPlayerCoors().z - 5.5f;
-
-		foundGround = false;
-		ground = CWorld::FindRoofZFor3DCoord(camPos.x, camPos.y, camPos.z+5.0f, &foundGround);
-		if(foundGround)
-			camPos.z = ground + 0.5f;
-		else if(CWaterLevel::GetWaterLevelNoWaves(camPos.x, camPos.y, camPos.z, &ground)){
-			float waterOffset = 1.0f;
-			if(FindPlayerVehicle() && FindPlayerVehicle()->IsBoat())
-				waterOffset = -2.0f;
-			if(camPos.z < ground + waterOffset)
-				camPos.z = ground + waterOffset;
-		}
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), camPos, true, false, false, false, false, false, false))
-			return false;
-
-		fwd = FindPlayerCoors() - camPos;
-		// too far
-		if(fwd.Magnitude() > 50.0f)
-			return false;
-		// too close
-		if(fwd.Magnitude() < 3.0f)
-			return true;
-
-		SetCamPositionForFixedMode(camPos, CVector(0.0f, 0.0f, 0.0f));
-		TakeControl(FindPlayerEntity(), CCam::MODE_FIXED, JUMP_CUT, CAMCONTROL_OBBE);
-		return true;
-	case OBBE_17:
-		if(FindPlayerVehicle() == nil)
-			return false;
-		camPos = FindPlayerCoors();
-		playerSpeed = FindPlayerSpeed();
-		playerSpeed.z = 0.0f;
-		playerSpeed.Normalise();
-		angle = CGeneral::GetATanOfXY(playerSpeed.x, playerSpeed.y) + DEGTORAD(190.0f);
-		playerSpeed += CVector(Cos(angle), Sin(angle), 0.0f);
-		playerSpeed.Normalise();
-		camPos += 25.0f*playerSpeed;
-		camPos.z = FindPlayerCoors().z - 1.0f;
-
-		foundGround = false;
-		ground = CWorld::FindRoofZFor3DCoord(camPos.x, camPos.y, camPos.z+5.0f, &foundGround);
-		if(foundGround)
-			camPos.z = ground + 0.5f;
-		else if(CWaterLevel::GetWaterLevelNoWaves(camPos.x, camPos.y, camPos.z, &ground)){
-			float waterOffset = 1.0f;
-			if(FindPlayerVehicle() && FindPlayerVehicle()->IsBoat())
-				waterOffset = -2.0f;
-			if(camPos.z < ground + waterOffset)
-				camPos.z = ground + waterOffset;
-		}
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), camPos, true, false, false, false, false, false, false))
-			return false;
-
-		fwd = FindPlayerCoors() - camPos;
-		fwd2 = FindPlayerCoors() - camPos;
-		fwd2.z = 0.0f;
-		// too far and driving away from cam
-		if(fwd.Magnitude() > 50.0f && DotProduct(FindPlayerSpeed(), fwd2) > 0.0f)
-			return false;
-		// too close
-		if(fwd.Magnitude() < 2.0f)
-			return true;
-
-		SetCamPositionForFixedMode(camPos, CVector(0.0f, 0.0f, 0.0f));
-		TakeControl(FindPlayerEntity(), CCam::MODE_FIXED, JUMP_CUT, CAMCONTROL_OBBE);
-		return true;
-	case OBBE_18:
-		camPos = FindPlayerCoors();
-		if(FindPlayerVehicle() && FindPlayerVehicle()->IsBoat())
-			camPos.z += 23.0f;
-		else
-			camPos.z -= 23.0f;
-		playerSpeed = FindPlayerSpeed();
-		angle = CGeneral::GetATanOfXY(playerSpeed.x, playerSpeed.y) + DEGTORAD(145.0f);
-		playerSpeed += CVector(Cos(angle), Sin(angle), 0.0f);
-		playerSpeed.Normalise();
-		camPos += 15.0f*playerSpeed;
-
-		foundGround = false;
-		ground = CWorld::FindGroundZFor3DCoord(camPos.x, camPos.y, camPos.z+5.0f, &foundGround);
-#ifdef FIX_BUGS
-		if(foundGround)
-#else
-		if(ground == true)
-#endif
-		{
-			if(camPos.z < ground)
-				camPos.z = ground + 0.5f;
-		}else if(CWaterLevel::GetWaterLevelNoWaves(camPos.x, camPos.y, camPos.z, &ground)){
-			float waterOffset = 1.0f;
-			if(FindPlayerVehicle() && FindPlayerVehicle()->IsBoat())
-				waterOffset = -2.0f;
-			if(camPos.z < ground + waterOffset)
-				camPos.z = ground + waterOffset;
-		}
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), camPos, true, false, false, false, false, false, false))
-			return false;
-
-		fwd = FindPlayerCoors() - camPos;
-		// too far
-		if(fwd.Magnitude() > 57.0f)
-			return false;
-		// too close
-		if(fwd.Magnitude() < 1.0f)
-			return true;
-
-		SetCamPositionForFixedMode(camPos, CVector(0.0f, 0.0f, 0.0f));
-		TakeControl(FindPlayerEntity(), CCam::MODE_FIXED, JUMP_CUT, CAMCONTROL_OBBE);
-		return true;
-	case OBBE_19:
-		camPos = FindPlayerCoors();
-		if(FindPlayerVehicle() && FindPlayerVehicle()->IsBoat())
-			camPos.z += 4.0f;
-		else
-			camPos.z -= 1.0f;
-		playerSpeed = FindPlayerSpeed();
-		angle = CGeneral::GetATanOfXY(playerSpeed.x, playerSpeed.y) + DEGTORAD(28.0f);
-		playerSpeed += CVector(Cos(angle), Sin(angle), 0.0f);
-		playerSpeed.Normalise();
-		camPos += 12.5f*playerSpeed;
-
-		foundGround = false;
-		ground = CWorld::FindGroundZFor3DCoord(camPos.x, camPos.y, camPos.z+5.0f, &foundGround);
-#ifdef FIX_BUGS
-		if(foundGround)
-#else
-		if(ground == true)
-#endif
-		{
-			if(camPos.z < ground)
-				camPos.z = ground + 0.5f;
-		}else if(CWaterLevel::GetWaterLevelNoWaves(camPos.x, camPos.y, camPos.z, &ground)){
-			float waterOffset = 1.0f;
-			if(FindPlayerVehicle() && FindPlayerVehicle()->IsBoat())
-				waterOffset = -2.0f;
-			if(camPos.z < ground + waterOffset)
-				camPos.z = ground + waterOffset;
-		}
-		if(!CWorld::GetIsLineOfSightClear(FindPlayerCoors(), camPos, true, false, false, false, false, false, false))
-			return false;
-
-		fwd = FindPlayerCoors() - camPos;
-		// too far
-		if(fwd.Magnitude() > 36.0f)
-			return false;
-		// too close
-		if(fwd.Magnitude() < 2.0f)
-			return true;
-
-		SetCamPositionForFixedMode(camPos, CVector(0.0f, 0.0f, 0.0f));
-		TakeControl(FindPlayerEntity(), CCam::MODE_FIXED, JUMP_CUT, CAMCONTROL_OBBE);
-		return true;
-	case OBBE_ONSTRING_HELI:
-		TakeControl(FindPlayerEntity(), CCam::MODE_CAM_ON_A_STRING, JUMP_CUT, CAMCONTROL_OBBE);
-		return true;
-	default:
-		return false;
-	}
-}
-
-int32 SequenceOfCarCams[16] = {
-	OBBE_WHEEL, OBBE_COPCAR, OBBE_3, OBBE_1, OBBE_3, OBBE_COPCAR_WHEEL,
-	OBBE_2, OBBE_3, OBBE_COPCAR_WHEEL, OBBE_COPCAR, OBBE_2, OBBE_3,
-	OBBE_5, OBBE_3,
-	OBBE_ONSTRING	// actually unused...
-};
-
-void
-CCamera::ProcessObbeCinemaCameraCar(void)
-{
-	static int OldMode = -1;
-	static int32 TimeForNext = 0;
-	int i = 0;
-
-	if(!bDidWeProcessAnyCinemaCam){
-		OldMode = -1;
-		bSwitchedToObbeCam = true;
-	}
-
-	if(!bDidWeProcessAnyCinemaCam || IsItTimeForNewcam(SequenceOfCarCams[OldMode], TimeForNext)){
-		// This is very strange code...
-		for(OldMode = (OldMode+1) % 14;
-		    !TryToStartNewCamMode(SequenceOfCarCams[OldMode]) && i <= 14;
-		    OldMode = (OldMode+1) % 14)
-			i++;
-		TimeForNext = CTimer::GetTimeInMilliseconds();
-		if(i >= 14){
-			OldMode = 14;
-			TryToStartNewCamMode(SequenceOfCarCams[14]);
-		}
-	}
-
-	m_iModeObbeCamIsInForCar = OldMode;
-	bDidWeProcessAnyCinemaCam = true;
-}
-
-int32 SequenceOfHeliCams[6] = { OBBE_14, OBBE_15, OBBE_16, OBBE_17, OBBE_18, OBBE_19 };
-
-void
-CCamera::ProcessObbeCinemaCameraHeli(void)
-{
-	static int OldMode = -1;
-	static int32 TimeForNext = 0;
-	int i = 0;
-
-	if(!bDidWeProcessAnyCinemaCam){
-		OldMode = -1;
-		bSwitchedToObbeCam = true;
-	}
-
-	if(!bDidWeProcessAnyCinemaCam || IsItTimeForNewcam(SequenceOfHeliCams[OldMode], TimeForNext)){
-		// This is very strange code...
-		for(OldMode = (OldMode+1) % 6;
-		    !TryToStartNewCamMode(SequenceOfCarCams[OldMode]) && i <= 6;
-		    OldMode = (OldMode+1) % 6)
-			i++;
-		if(i >= 6){
-			OldMode = 6;
-			if(Cams[ActiveCam].Mode != CCam::MODE_CAM_ON_A_STRING){
-				TryToStartNewCamMode(OBBE_ONSTRING_HELI);
-				TimeForNext = CTimer::GetTimeInMilliseconds();
-			}
-		}else
-			TimeForNext = CTimer::GetTimeInMilliseconds();
-	}
-
-	m_iModeObbeCamIsInForCar = OldMode;
-	bDidWeProcessAnyCinemaCam = true;
-}
-
-int32 SequenceOfPedCams[5] = { OBBE_9, OBBE_10, OBBE_11, OBBE_12, OBBE_13 };
-
-void
-CCamera::ProcessObbeCinemaCameraPed(void)
-{
-	// static bool bObbePedProcessed = false;	// unused
-	static int PedOldMode = -1;
-	static int32 PedTimeForNext = 0;
-
-	if(!bDidWeProcessAnyCinemaCam)
-		PedOldMode = -1;
-
-	if(!bDidWeProcessAnyCinemaCam || IsItTimeForNewcam(SequenceOfPedCams[PedOldMode], PedTimeForNext)){
-		for(PedOldMode = (PedOldMode+1) % 5;
-		    !TryToStartNewCamMode(SequenceOfPedCams[PedOldMode]);
-		    PedOldMode = (PedOldMode+1) % 5);
-		PedTimeForNext = CTimer::GetTimeInMilliseconds();
-	}
-	bDidWeProcessAnyCinemaCam = true;
-}
-
-void
-CCamera::DontProcessObbeCinemaCamera(void)
-{
-	bDidWeProcessAnyCinemaCam = false;
-}
 
 #ifdef GTA_TRAIN
 void
