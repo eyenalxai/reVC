@@ -230,3 +230,10 @@ prop.
 A vehicle collision with an object, a pedestrian, or a vegetation building. The
 vehicle's speed loss and collision damage from a soft hit are one tenth of the
 original values.
+
+## Car ADS
+
+Aiming from the driver's seat with the mouse aim button: the follow camera
+pulls in and the free aim fires along the camera instead of the stock sideways
+drive-by. Only the drive-by vehicles (car, bike, boat) and the drive-by weapon
+take it, and the bullets ignore the player's own car.
