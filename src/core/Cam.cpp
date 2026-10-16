@@ -2987,8 +2987,7 @@ CCam::Process_1rstPersonPedOnPC(const CVector&, float TargetOrientation, float, 
 		int32 idx = RpHAnimIDGetIndex(hier, ConvertPedNode2BoneTag(PED_HEAD));
 		RwMatrix *mats = RpHAnimHierarchyGetMatrixArray(hier);
 		RwV3dTransformPoints(&HeadPos, &HeadPos, 1, &mats[idx]);
-		RwV3d scl = { 0.0f, 0.0f, 0.0f };
-		RwMatrixScale(&mats[idx], &scl, rwCOMBINEPRECONCAT);
+		((CPed*)CamTargetEntity)->CollapseHeadBone();
 
 		if(ResetStatics){
 			Beta = TargetOrientation;

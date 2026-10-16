@@ -76,6 +76,13 @@ public:
 	// weapon, the player and the ActiveReload feature on. AI peds and the
 	// toggle off keep the stock automatic reload.
 	bool UsesManualReload(CEntity *shooter);
+	// True while the weapon uses the stock clip refill for this ped: the
+	// weapon switch, a weapon give and a pickup fill the clip by themselves,
+	// and an AI ped always refills. The player's manual reload (ADR 0010)
+	// turns the player's magazine refill off. The rule reads IsPlayer(), not
+	// FindPlayerPed() like UsesManualReload, so every player ped keeps the
+	// stock path. The toggle is read before the ped; both operands are pure.
+	static bool UsesStockClipRefill(CPed *ped);
 	// True while the player's reload key can start a reload: a magazine
 	// weapon, a clip that is not full, ammo in the reserve and a state that
 	// takes a reload.
