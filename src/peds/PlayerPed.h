@@ -103,6 +103,8 @@ public:
 	bool IsThisPedAnAimingPriority(CPed*);
 	void PlayerControlSniper(CPad*);
 	void PlayerControlM16(CPad*);
+	void FireWeaponWhenHeld(CPad*);
+	void ProcessAirborneWeapon(CPad*);
 	void PlayerControlFighter(CPad*);
 	void ProcessWeaponSwitch(CPad*);
 	void ProcessActiveReload(CPad*);
