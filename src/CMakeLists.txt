@@ -1,7 +1,7 @@
-find_package(Threads REQUIRED)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
 
-file(GLOB_RECURSE ${PROJECT}_SOURCES "*.cpp" "*.h" "*.rc")
+file(GLOB_RECURSE ${PROJECT}_SOURCES CONFIGURE_DEPENDS "*.cpp" "*.h" "*.rc")
 list(REMOVE_ITEM ${PROJECT}_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/extras/GitSHA1.cpp")
 
 function(header_directories RETURN_LIST)
@@ -139,8 +139,6 @@ if(${PROJECT}_WITH_LIBSNDFILE)
     target_compile_definitions(${EXECUTABLE} PRIVATE AUDIO_OAL_USE_SNDFILE)
 endif()
 
-target_compile_definitions(${EXECUTABLE} PRIVATE )
-
 option(${PROJECT}_WITH_SANITIZERS "Use UB sanitizers (better crash log)" OFF)
 option(${PROJECT}_WITH_ASAN "Use Address sanitizer (better crash log)" OFF)
 option(${PROJECT}_DISABLE_WARNINGS "Disable build warnings" ON)
@@ -151,10 +149,15 @@ if(${PROJECT}_DISABLE_WARNINGS)
 endif()
 
 if(${PROJECT}_WITH_SANITIZERS)
+    set(${PROJECT}_SANITIZERS "undefined,float-divide-by-zero")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        # GCC has no integer/implicit-conversion/local-bounds/nullability checks.
+        set(${PROJECT}_SANITIZERS "${${PROJECT}_SANITIZERS},integer,implicit-conversion,implicit-integer-truncation,implicit-integer-arithmetic-value-change,local-bounds,nullability")
+    endif()
     target_compile_options(${EXECUTABLE} PUBLIC
-            -fsanitize=undefined,float-divide-by-zero,integer,implicit-conversion,implicit-integer-truncation,implicit-integer-arithmetic-value-change,local-bounds,nullability
+            -fsanitize=${${PROJECT}_SANITIZERS}
             -g3 -fno-omit-frame-pointer)
-    target_link_options(${EXECUTABLE} PUBLIC -fsanitize=undefined,float-divide-by-zero,integer,implicit-conversion,implicit-integer-truncation,implicit-integer-arithmetic-value-change,local-bounds,nullability)
+    target_link_options(${EXECUTABLE} PUBLIC -fsanitize=${${PROJECT}_SANITIZERS})
 endif()
 
 if(${PROJECT}_WITH_ASAN)
@@ -167,7 +170,6 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang
         target_compile_options(${EXECUTABLE}
             PRIVATE
                 -pthread
-                -std=c++11
                 -fno-strict-aliasing
                 -fexceptions
                 -Wcast-align
@@ -208,7 +210,7 @@ else()
     set(${PROJECT}_C_CXX_EXTENSIONS OFF)
 endif()
 
-if(LIBRW_PLATFORM_GL3 AND LIBRW_GL3_GFXLIB STREQUAL "GLFW")
+if(LIBRW_PLATFORM_GL3 AND LIBRW_GL3_GFXLIB STREQUAL "GLFW" AND GET_KEYBOARD_INPUT_FROM_X11)
 	include(CheckSymbolExists)
 
 	set(CMAKE_REQUIRED_LIBRARIES glfw)
@@ -217,11 +219,12 @@ if(LIBRW_PLATFORM_GL3 AND LIBRW_GL3_GFXLIB STREQUAL "GLFW")
 	unset(CMAKE_REQUIRED_DEFINITIONS)
 	unset(CMAKE_REQUIRED_LIBRARIES)
 
-	if (GLFW_HAS_X11)
-		find_package(X11 REQUIRED)
-		target_link_libraries(${EXECUTABLE} PRIVATE X11::X11)
-		target_compile_definitions(${EXECUTABLE} PRIVATE GET_KEYBOARD_INPUT_FROM_X11)
-	endif (GLFW_HAS_X11)
+	if (NOT GLFW_HAS_X11)
+		message(FATAL_ERROR "GET_KEYBOARD_INPUT_FROM_X11 needs the X11 headers and glfwGetX11Display")
+	endif (NOT GLFW_HAS_X11)
+	find_package(X11 REQUIRED)
+	target_link_libraries(${EXECUTABLE} PRIVATE X11::X11)
+	target_compile_definitions(${EXECUTABLE} PRIVATE GET_KEYBOARD_INPUT_FROM_X11)
 endif()
 
 set_target_properties(${EXECUTABLE}
@@ -229,7 +232,7 @@ set_target_properties(${EXECUTABLE}
         C_STANDARD 11
         C_EXTENSIONS ${${PROJECT}_C_CXX_EXTENSIONS}
         C_STANDARD_REQUIRED ON
-        CXX_STANDARD 11
+        CXX_STANDARD 17
         CXX_EXTENSIONS ${${PROJECT}_C_CXX_EXTENSIONS}
         CXX_STANDARD_REQUIRED ON
 )

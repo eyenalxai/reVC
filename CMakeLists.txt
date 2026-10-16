@@ -30,6 +30,12 @@ project(${EXECUTABLE} C CXX)
 set(${PROJECT}_AUTHOR "${PROJECT} Team")
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Debug Release RelWithDebInfo MinSizeRel)
+endif()
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 include(GetGitRevisionDescription)
 get_git_head_revision(GIT_REFSPEC GIT_SHA1 "ALLOW_LOOKING_ABOVE_CMAKE_SOURCE_DIR")
 message(STATUS "Building ${CMAKE_PROJECT_NAME} GIT SHA1: ${GIT_SHA1}")
@@ -183,6 +189,16 @@ if(${PROJECT}_VENDORED_LIBRW)
 else()
     find_package(librw REQUIRED)
 endif()
+
+# librw sets LIBRW_PLATFORM_<platform> in its own directory scope. Publish the
+# selected one here so the platform conditions below and in src/ are live.
+if(DEFINED LIBRW_PLATFORM)
+    set("LIBRW_PLATFORM_${LIBRW_PLATFORM}" ON)
+endif()
+
+option(GET_KEYBOARD_INPUT_FROM_X11 "Read the raw keyboard input from X11 (GLFW on Linux)" OFF)
+
+option(${PROJECT}_INSTALL "Install ${EXECUTABLE} to the install prefix" OFF)
 add_subdirectory(src)
 
 if(${PROJECT}_INSTALL)
