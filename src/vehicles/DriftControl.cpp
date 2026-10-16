@@ -45,7 +45,7 @@
 #define DRIFT_BOOST_TIER1	0.04f	// boost of tier 1, fraction of top speed
 #define DRIFT_BOOST_TIER2	0.07f	// boost of tier 2, fraction of top speed
 #define DRIFT_BOOST_MAX		0.15f	// stacked boosts stop at 1.15x top speed
-#define DRIFT_BOOST_PUSH	0.35f	// boost acceleration, fraction of top speed per second
+#define DRIFT_BOOST_PUSH	0.5f	// boost acceleration, fraction of top speed per second
 #define DRIFT_BOOST_DRAIN	0.08f	// boost level that drains per second
 
 // The readout mirrors the player's drift for the debug menu (see re3.cpp).
@@ -298,25 +298,17 @@ CDriftControl::ApplyBoost(CAutomobile *car, float dt)
 	if(m_fBoostLevel <= 0.0f)
 		return;
 
-	// A stacked boost pushes along the direction the car travels, not the
-	// nose: with slip left on the exit it adds speed without steering the
-	// car. The headroom is measured on the total speed, so a chain stops at
-	// 1.15x the top speed whatever the slip is.
+	// A stacked boost pushes along the nose: at slip its sideways part works
+	// against the slide, so the boost pulls the car straight while it lands
+	// and the player feels the rear grip come back. The headroom is measured
+	// on the forward speed, so the level still reads as a fraction of the top
+	// speed; the total speed can pass that cap for a moment while a slide is
+	// scrubbed, and that is accepted.
 	float fMaxVelocity = GetMaxSpeed(car);
-	float speed = car->m_vecMoveSpeed.Magnitude();
-
-	// The push is level: only the horizontal part of the travel gives the
-	// direction. A speed too small to give one falls back to the nose.
-	CVector pushDir = car->m_vecMoveSpeed;
-	pushDir.z = 0.0f;
-	if(pushDir.Magnitude2D() > DRIFT_SPEED_MIN_DIR)
-		pushDir.Normalise2D();
-	else
-		pushDir = car->GetForward();
-
-	float push = Min(fMaxVelocity*(1.0f + m_fBoostLevel) - speed, DRIFT_BOOST_PUSH*fMaxVelocity*dt);
+	float fwdSpeed = DotProduct(car->m_vecMoveSpeed, car->GetForward());
+	float push = Min(fMaxVelocity*(1.0f + m_fBoostLevel) - fwdSpeed, DRIFT_BOOST_PUSH*fMaxVelocity*dt);
 	if(push > 0.0f)
-		car->ApplyMoveForce(pushDir * push * car->m_fMass);
+		car->ApplyMoveForce(car->GetForward() * push * car->m_fMass);
 
 	m_fBoostLevel = Max(m_fBoostLevel - DRIFT_BOOST_DRAIN*dt, 0.0f);
 }
