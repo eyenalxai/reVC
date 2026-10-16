@@ -13,9 +13,9 @@
 #define DRIFT_MIN_SPEED		0.05f	// below this the car blends back to normal grip
 #define DRIFT_TURN_YAW		45.0f	// yaw kick of a low-speed handbrake turn, degrees/s
 #define DRIFT_TURN_ENGAGE	0.1f	// rear grip ramp in of a handbrake turn
-#define DRIFT_GRIP_CUTOFF	0.22f	// rear grip at full effect, 1.0 = original handling
-#define DRIFT_GRIP_STICKY	5.0f	// below this slip angle the rear tyre is sticky
-#define DRIFT_GRIP_SLIDE	15.0f	// above this slip angle the rear tyre is let go
+#define DRIFT_GRIP_CUTOFF	0.28f	// rear grip at full effect, 1.0 = original handling
+#define DRIFT_GRIP_STICKY	8.0f	// below this slip angle the rear tyre is sticky
+#define DRIFT_GRIP_SLIDE	20.0f	// above this slip angle the rear tyre is let go
 #define DRIFT_ENGAGE_TIME	0.3f	// rear grip ramp in
 #define DRIFT_RELEASE_TIME	0.6f	// rear grip ramp out
 #define DRIFT_BLEND_TIME	0.5f	// ramp out when the drift got too slow
