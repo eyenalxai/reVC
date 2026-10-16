@@ -34,6 +34,7 @@
 #define DRIFT_STEERLOCK_MULT	1.3f	// front wheel lock while drifting
 #define DRIFT_SPEED_HOLD	1.0f	// fraction of the lost speed given back per second
 #define DRIFT_SPEED_MIN_DIR	0.01f	// below this speed the velocity cannot be normalised
+#define DRIFT_DEADSTOP		0.01f	// below this speed the car counts as stopped
 #define DRIFT_RECOVER_TIME	0.6f	// seconds of exit alignment after the handbrake
 #define DRIFT_RECOVER_ALIGN	4.0f	// exit counter-yaw per radian of slip, 1/s
 #define DRIFT_RECOVER_SLIP	2.0f	// below this remaining slip the assist stops
@@ -387,6 +388,33 @@ CDriftControl::PrintDebugState(CAutomobile *car)
 	CDebug::PrintAt(buf, 2, 5);
 }
 
+// The entry gate that INACTIVE and RECOVER share: handbrake + steering, on
+// the ground and moving forward. An entry from INACTIVE ramps the rear grip
+// in (the ENGAGE phase starts at a zero cut); an entry from RECOVER is a chain
+// or a flip (see ADR 0008), and it enters DRIFT at the full cut so the second
+// corner of a chicane bites at once.
+bool
+CDriftControl::TryStartDrift(CAutomobile *car, float fwdSpeed, bool onGround, bool handbrake, bool fromRecover)
+{
+	if(!handbrake || !onGround || fwdSpeed <= DRIFT_DEADSTOP ||
+	   Abs(car->m_fSteerInput) <= DRIFT_ENTRY_STEER)
+		return false;
+
+	m_Phase = fromRecover ? DRIFT_PHASE_DRIFT : DRIFT_PHASE_ENGAGE;
+	m_fGripCut = fromRecover ? 1.0f : 0.0f;
+	m_fPhaseTimer = 0.0f;
+	m_fDriftTime = 0.0f;
+	m_fEntrySpeed = car->m_vecMoveSpeed.Magnitude();
+	m_nEntryDir = car->m_fSteerInput > 0.0f ? 1 : -1;
+	// Above the entry speed that is a drift; below it the car turns on the
+	// handbrake, and there is no speed gate for that, only a direction check.
+	m_bHandbrakeTurn = fwdSpeed < DRIFT_ENTRY_SPEED*GetMaxSpeed(car);
+	// The drift starts at the base hold angle and the player modulates it
+	// from there.
+	m_fTargetSlip = m_nEntryDir*DEGTORAD(DRIFT_HOLD_ANGLE);
+	return true;
+}
+
 void
 CDriftControl::Update(CAutomobile *car, float timeStep)
 {
@@ -422,22 +450,9 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 
 	switch(m_Phase){
 	case DRIFT_PHASE_INACTIVE:
-		// Entry: handbrake + steering. Above the gate that is a drift; below
-		// it the car turns on the handbrake, and there is no speed gate for
-		// that, only a direction check.
-		if(handbrake && onGround &&
-		   fwdSpeed > 0.0f &&
-		   Abs(car->m_fSteerInput) > DRIFT_ENTRY_STEER){
-			m_Phase = DRIFT_PHASE_ENGAGE;
-			m_fPhaseTimer = 0.0f;
-			m_fDriftTime = 0.0f;
-			m_fEntrySpeed = car->m_vecMoveSpeed.Magnitude();
-			m_nEntryDir = car->m_fSteerInput > 0.0f ? 1 : -1;
-			m_bHandbrakeTurn = fwdSpeed < DRIFT_ENTRY_SPEED*fMaxVelocity;
-			// The drift starts at the base hold angle and the player
-			// modulates it from there.
-			m_fTargetSlip = m_nEntryDir*DEGTORAD(DRIFT_HOLD_ANGLE);
-		}
+		// Entry: the handbrake and the steering start a drift, or the car
+		// turns on the handbrake below the speed gate (see TryStartDrift).
+		TryStartDrift(car, fwdSpeed, onGround, handbrake, false);
 		break;
 
 	case DRIFT_PHASE_ENGAGE:
@@ -452,6 +467,10 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 		break;
 
 	case DRIFT_PHASE_RECOVER:
+		// A chain or a flip: a successful entry skips the recovery body for
+		// this frame (see TryStartDrift).
+		if(TryStartDrift(car, fwdSpeed, onGround, handbrake, true))
+			break;
 		m_fPhaseTimer += dt;
 		if(fwdSpeed < DRIFT_MIN_SPEED*fMaxVelocity)
 			m_fGripCut -= dt/DRIFT_BLEND_TIME;
@@ -478,7 +497,7 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 	if(m_Phase == DRIFT_PHASE_ENGAGE || m_Phase == DRIFT_PHASE_DRIFT){
 		// A handbrake turn keeps working below the drift floor; only the
 		// handbrake release or a dead stop ends it.
-		bool deadStop = m_bHandbrakeTurn && fwdSpeed < 0.01f;
+		bool deadStop = m_bHandbrakeTurn && fwdSpeed < DRIFT_DEADSTOP;
 		bool tooSlow = !m_bHandbrakeTurn && fwdSpeed < DRIFT_MIN_SPEED*fMaxVelocity;
 		if(!handbrake || tooSlow || deadStop){
 			// A charged drift gives its boost when the handbrake is released.
