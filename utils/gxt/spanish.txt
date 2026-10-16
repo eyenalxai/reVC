@@ -1474,6 +1474,9 @@ Cámara en primera persona
 [FEC_FOV]
 Campo de visión
 
+[FEC_CCD]
+Distancia cámara coche
+
 [FEC_LL]
 Mirar a la izquierda
 
