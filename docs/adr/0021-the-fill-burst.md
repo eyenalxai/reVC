@@ -152,11 +152,14 @@ Two facts bound any change here:
   of work, spread over frames.
 - **The work of a burst is bounded by construction**: 60 frames x 100 attempts
   at the very most, and the 90 % stop line ends it earlier. The wall clock is
-  not constructional: a frame the gates stop spends nothing, so the streaming,
-  the pool and a cutscene stretch the frames a run needs. The visible frames of
-  a burst add at most 25 pedestrian and 25 car attempts each, a few times the
-  trickle the ring already pays for; the hidden frames add the shipped boot
-  burst's own rate while the frame is not drawn.
+  not constructional: a frame the caller's gates stop (a cutscene, the pool
+  down to its reserve, a frame the frame-time watchdog skipped) is not consulted
+  at all, and a frame the streaming stops spends no window frame (it counts
+  against the give-up bound), so the streaming, the pool and a cutscene stretch
+  the frames a run needs. The visible frames of a burst add at most 25
+  pedestrian and 25 car attempts each, a few times the trickle the ring already
+  pays for; the hidden frames add the shipped boot burst's own rate while the
+  frame is not drawn.
 - **The acceptance, restated.** What is guaranteed: the burst asks for at most
   6000 attempts, it stops at 90 % of the local target, and it gives up after 30
   frames without a placement. What is *not* guaranteed by construction: the
