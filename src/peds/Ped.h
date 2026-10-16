@@ -712,6 +712,10 @@ public:
 	void CalculateNewOrientation(void);
 	float WorkOutHeadingForMovingFirstPerson(float);
 	void CalculateNewVelocity(void);
+	void OrientLegsForMovement(float localWalkAngle);
+	CVector2D GetSurfaceSpeed(void);
+	void CarryWithSurfaceTurn(void);
+	void PushOffSteepSlope(CVector2D &velocity);
 	bool CanSeeEntity(CEntity*, float threshold = CAN_SEE_ENTITY_ANGLE_THRESHOLD);
 	void RestorePreviousObjective(void);
 	void SetIdle(void);
