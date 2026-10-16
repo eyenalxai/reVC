@@ -260,8 +260,9 @@ CPathFind::Init(void)
 	for(i = 0; i < NUM_PATHNODES; i++)
 		m_pathNodes[i].distance = MAX_DIST;
 
-	// VICE-130: no grid is built yet. PreparePathData calls this again
-	// whenever the graph is rebuilt.
+	// VICE-130: the grid describes the node array this call just reset, so the
+	// next lookup builds it again. PreparePathData clears the flag the same
+	// way when it rebuilds the nodes.
 	m_gridValid = false;
 }
 
@@ -1287,11 +1288,13 @@ CPathFind::BuildNodeGrid(void)
 
 	memset(m_gridCellStart, 0, sizeof(m_gridCellStart));
 	for(i = 0; i < m_numPathNodes; i++){
-		int cell = PathGridCell(m_pathNodes[i].GetX(), (float)m_gridOriginX, 1.0f/PATHFIND_GRID_CELL) * PATHFIND_GRID_DIM
-			+ PathGridCell(m_pathNodes[i].GetY(), (float)m_gridOriginY, 1.0f/PATHFIND_GRID_CELL);
-		if(cell < 0 || cell >= PATHFIND_GRID_CELLS)
+		// The axes are checked apart: a node past the grid in one axis only
+		// (gx = 0, gy = DIM) must not pass as a valid combined index.
+		int gx = PathGridCell(m_pathNodes[i].GetX(), (float)m_gridOriginX, 1.0f/PATHFIND_GRID_CELL);
+		int gy = PathGridCell(m_pathNodes[i].GetY(), (float)m_gridOriginY, 1.0f/PATHFIND_GRID_CELL);
+		if(gx < 0 || gx >= PATHFIND_GRID_DIM || gy < 0 || gy >= PATHFIND_GRID_DIM)
 			return;	// a node outside the grid: keep the plain scan
-		m_gridCellStart[cell + 1]++;
+		m_gridCellStart[gx * PATHFIND_GRID_DIM + gy + 1]++;
 	}
 	for(i = 1; i <= PATHFIND_GRID_CELLS; i++)
 		m_gridCellStart[i] += m_gridCellStart[i - 1];
@@ -1299,9 +1302,9 @@ CPathFind::BuildNodeGrid(void)
 	uint16 *cursor = new uint16[PATHFIND_GRID_CELLS];
 	memcpy(cursor, m_gridCellStart, sizeof(uint16) * PATHFIND_GRID_CELLS);
 	for(i = 0; i < m_numPathNodes; i++){
-		int cell = PathGridCell(m_pathNodes[i].GetX(), (float)m_gridOriginX, 1.0f/PATHFIND_GRID_CELL) * PATHFIND_GRID_DIM
-			+ PathGridCell(m_pathNodes[i].GetY(), (float)m_gridOriginY, 1.0f/PATHFIND_GRID_CELL);
-		m_gridNodes[cursor[cell]++] = i;	// node order is kept inside a cell
+		int gx = PathGridCell(m_pathNodes[i].GetX(), (float)m_gridOriginX, 1.0f/PATHFIND_GRID_CELL);
+		int gy = PathGridCell(m_pathNodes[i].GetY(), (float)m_gridOriginY, 1.0f/PATHFIND_GRID_CELL);
+		m_gridNodes[cursor[gx * PATHFIND_GRID_DIM + gy]++] = i;	// node order is kept inside a cell
 	}
 	delete[] cursor;
 
@@ -1335,9 +1338,11 @@ CPathFind::FindNodeClosestToCoors(CVector coors, uint8 type, float distLimit, bo
 		// The rings of cells around the query point. A node in ring r is at
 		// least (r-1) cells away, so a ring past the closest distance found
 		// cannot hold a node that beats or ties it: the walk stops there.
-		// Every candidate takes the same expression and the same tie rule
-		// (the lowest node index wins) as the plain scan, so both return the
-		// same node.
+		// The bound is closestDist/cellSize + 1: the division truncates, and
+		// the +1 keeps the ring whose (r-1)-cell edge can still tie, so no
+		// tie is missed. Every candidate takes the same expression and the
+		// same tie rule (the lowest node index wins) as the plain scan, so
+		// both return the same node.
 		const float cellSize = (float)PATHFIND_GRID_CELL;
 		int cx = PathGridCell(coors.x, (float)m_gridOriginX, 1.0f/PATHFIND_GRID_CELL);
 		int cy = PathGridCell(coors.y, (float)m_gridOriginY, 1.0f/PATHFIND_GRID_CELL);
@@ -1817,7 +1822,9 @@ CPathFind::FindNextNodeWandering(uint8 type, CVector coors, CPathNode **lastNode
 	}
 }
 
-static int16 apNodesToBeCleared[NUM_PATHNODES];
+// The scratch label each node of one search set (a node index, not a pointer:
+// the search can touch every node of the array).
+static int16 aNodesToBeCleared[NUM_PATHNODES];
 
 void
 CPathFind::DoPathSearch(uint8 type, CVector start, int32 startNodeId, CVector target, CPathNode **nodes, int16 *pNumNodes, int16 maxNumNodes, CVehicle *vehicle, float *pDist, float distLimit, int32 targetNodeId)
@@ -1856,15 +1863,17 @@ CPathFind::DoPathSearch(uint8 type, CVector start, int32 startNodeId, CVector ta
 		m_searchNodes[i].SetNext(nil);
 	AddNodeToList(&m_pathNodes[targetNodeId], 0);
 	int numNodesToBeCleared = 0;
-	apNodesToBeCleared[numNodesToBeCleared++] = targetNodeId;
+	aNodesToBeCleared[numNodesToBeCleared++] = targetNodeId;
 
 	// Dijkstra's algorithm
-	// Find distances. The search stops the moment the start node comes up,
-	// as it always did. A start node that never comes up would leave this
-	// loop spinning for the rest of the session (the group test above
-	// normally makes that impossible, but a start node the graph does not
-	// connect must not hang the frame), so the bucket ring is also left after
-	// more than a whole ring of empty buckets: the queue is drained then.
+	// Find distances. The search stops the moment the start node comes up, as
+	// it always did. The group test above cannot promise that the start ever
+	// does come up: when a node that was already popped gets a better label,
+	// the unlink below runs through the node's stale list pointers and can
+	// orphan nodes that are still queued. The start node then never comes up,
+	// and the base revision spins on this loop for the rest of the session.
+	// The frame must not, so the ring is also left after more than a whole
+	// ring of empty buckets; the start is reported as unreachable below.
 	int numPathsFound = 0;
 	int emptyBuckets = 0;
 	for(i = 0; emptyBuckets <= (int)ARRAY_SIZE(m_searchNodes); i = (i+1) & 0x1FF){
@@ -1885,7 +1894,7 @@ CPathFind::DoPathSearch(uint8 type, CVector start, int32 startNodeId, CVector ta
 					if(m_pathNodes[next].distance != MAX_DIST)
 						RemoveNodeFromList(&m_pathNodes[next]);
 					if(m_pathNodes[next].distance == MAX_DIST)
-						apNodesToBeCleared[numNodesToBeCleared++] = next;
+						aNodesToBeCleared[numNodesToBeCleared++] = next;
 					AddNodeToList(&m_pathNodes[next], dist);
 				}
 			}
@@ -1901,33 +1910,32 @@ CPathFind::DoPathSearch(uint8 type, CVector start, int32 startNodeId, CVector ta
 	CPathNode *curNode;
 	curNode = &m_pathNodes[startNodeId];
 	*pNumNodes = 0;
-	if(pDist)
-		*pDist = m_pathNodes[startNodeId].distance;
 
-	// The start node never came up: no path, like the group test above.
-	if(m_pathNodes[startNodeId].distance == MAX_DIST){
-		*pNumNodes = 0;
+	if(numPathsFound){
+		if(pDist)
+			*pDist = m_pathNodes[startNodeId].distance;
+
+		if(maxNumNodes > 0)
+			nodes[(*pNumNodes)++] = curNode;
+		// Trace back to target and update list of nodes
+		while(*pNumNodes < maxNumNodes && curNode != &m_pathNodes[targetNodeId])
+			for(i = 0; i < curNode->numLinks; i++){
+				int next = ConnectedNode(curNode->firstLink + i);
+				if(curNode->distance - m_distances[curNode->firstLink + i] == m_pathNodes[next].distance){
+					curNode = &m_pathNodes[next];
+					nodes[(*pNumNodes)++] = curNode;
+					i = 29030;	// could have used a break...
+				}
+			}
+	}else{
+		// The escape above was taken: the start node never came up, so no
+		// route exists to report, whatever label a relaxation left on it.
+		// The trace back would spin on a label like that.
 		if(pDist) *pDist = 100000.0f;
-		for(i = 0; i < numNodesToBeCleared; i++)
-			m_pathNodes[apNodesToBeCleared[i]].distance = MAX_DIST;
-		return;
 	}
 
-	if(maxNumNodes > 0)
-		nodes[(*pNumNodes)++] = curNode;
-	// Trace back to target and update list of nodes
-	while(*pNumNodes < maxNumNodes && curNode != &m_pathNodes[targetNodeId])
-		for(i = 0; i < curNode->numLinks; i++){
-			int next = ConnectedNode(curNode->firstLink + i);
-			if(curNode->distance - m_distances[curNode->firstLink + i] == m_pathNodes[next].distance){
-				curNode = &m_pathNodes[next];
-				nodes[(*pNumNodes)++] = curNode;
-				i = 29030;	// could have used a break...
-			}
-		}
-
 	for(i = 0; i < numNodesToBeCleared; i++)
-		m_pathNodes[apNodesToBeCleared[i]].distance = MAX_DIST;
+		m_pathNodes[aNodesToBeCleared[i]].distance = MAX_DIST;
 }
 
 static int16 DummyResult;

@@ -83,6 +83,11 @@ struct Case
 	CVector target;
 };
 
+// The print halves of the modes, shared with the fallback mode below.
+static void ModeRunPrint(const std::vector<Case> &cases);
+static void ModeLookupPrint(const std::vector<Case> &cases);
+static void ModeStatPrintGrid(void);
+
 static std::vector<Case>
 LoadCases(const char *path)
 {
@@ -111,17 +116,14 @@ LoadCases(const char *path)
 // ---------------------------------------------------------------- modes
 
 static void
-ModeRun(const char *dump, const char *casefile)
+ModeRunPrint(const std::vector<Case> &cases)
 {
-	LoadGraph(dump);
-	std::vector<Case> cases = LoadCases(casefile);
-
 	CPathNode *nodes[32];
 	int16 numNodes;
 	float dist;
 
 	for (size_t i = 0; i < cases.size(); i++) {
-		Case &c = cases[i];
+		const Case &c = cases[i];
 		int targetNode = ThePaths.FindNodeClosestToCoors(c.target, c.type, 999999.88f);
 		int startNode = ThePaths.FindNodeClosestToCoors(c.start, c.type, 999999.88f);
 		printf("case %zu type %d targetNode %d startNode %d\n", i, c.type, targetNode, startNode);
@@ -143,6 +145,13 @@ ModeRun(const char *dump, const char *casefile)
 			close = ThePaths.TestCoorsCloseness(c.target, c.type, c.start);
 		printf("  closeness %d\n", close ? 1 : 0);
 	}
+}
+
+static void
+ModeRun(const char *dump, const char *casefile)
+{
+	LoadGraph(dump);
+	ModeRunPrint(LoadCases(casefile));
 }
 
 // Pick road points for a frame: the target is the node a driving car is on,
@@ -182,16 +191,25 @@ PickFramePoints(int targetNode, float ringDist, int count, int *out)
 // chase: CCarCtrl::PickNextNodeToChaseCar asks for a path to a moving car
 // (the player's position). The target node changes as it moves, so this
 // measures the cost when nothing repeats.
+//
+// The ring scale comes from the game's own table: the requested value is
+// capped there (RING_MAX_SCALE), and the bench uses what the table returns.
 static void
 ModeBench(const char *dump, const char *mode, int frames, float scale, uint32 seed)
 {
 	LoadGraph(dump);
 	g_rngState = seed;
 	extern STrafficRingInput g_ringInput;
-	g_ringInput = STrafficRingInput{ 300.0f * scale, 1.0f, 2000.0f };
+	// The requested scale is the ring scale the table is asked for, so the
+	// LOD distance that asks for it is the reference times that scale. The
+	// table caps it (RING_MAX_SCALE); the bench uses what it returns.
+	g_ringInput = STrafficRingInput{ RING_LOD_REFERENCE * scale, 1.0f, 2000.0f };
+	const STrafficRings rings = CurrentTrafficRings();
+	float effScale = rings.scale;
+	printf("bench %s requested scale %.1f, effective scale %.1f\n", mode, scale, effScale);
 
 	int carNodes = ThePaths.m_numCarPathNodes;
-	float ringDist = 250.0f * scale;
+	float ringDist = 250.0f * effScale;
 	int perFrame = strcmp(mode, "spawn") == 0 ? 24 : 8;
 	std::vector<int> startNodes((size_t)frames * perFrame);
 	for (int f = 0; f < frames; f++) {
@@ -211,7 +229,7 @@ ModeBench(const char *dump, const char *mode, int frames, float scale, uint32 se
 	if (strcmp(mode, "spawn") == 0) {
 		// RANDOM_CAR_ATTEMPTS_PER_FRAME * the ring scale calls per frame,
 		// CAR_SPAWN_ATTEMPTS placements each, one closeness test per placement.
-		int callsPerFrame = (int)(3.0f * scale);
+		int callsPerFrame = (int)(3.0f * effScale);
 		for (int f = 0; f < frames; f++) {
 			CVector target = ThePaths.m_pathNodes[(f * 7) % carNodes].GetPosition();
 			for (int c = 0; c < callsPerFrame; c++)
@@ -240,6 +258,26 @@ ModeBench(const char *dump, const char *mode, int frames, float scale, uint32 se
 	printf("bench %s scale %.1f: %d frames, %ld searches, %ld accepted\n", mode, scale, frames, searches, accepted);
 	printf("bench %s scale %.1f: %.3f ms total, %.1f ns per search\n",
 		mode, scale, (t1 - t0) * 1e3, (t1 - t0) * 1e9 / (searches ? searches : 1));
+}
+
+// The plain-scan fallback: move two nodes past the grid so the grid cannot be
+// built, then print the same results the grid path prints. Both builds must
+// agree here too (the base has no grid at all, so this compares the fallback
+// against the plain scan).
+static void
+ModeFallback(const char *dump, const char *casefile)
+{
+	LoadGraph(dump);
+	std::vector<Case> cases = LoadCases(casefile);
+	// The stored position is an int16 of metres x 8, so this is the far
+	// corner of the representable map, 6 km from the grid origin.
+	for (int i = 0; i < 2 && i < ThePaths.m_numPathNodes; i++)
+		ThePaths.m_pathNodes[i].SetPosition(CVector(4095.0f, 4095.0f, 0.0f));
+	printf("fallback: node 0 at %.1f %.1f\n",
+		ThePaths.m_pathNodes[0].GetX(), ThePaths.m_pathNodes[0].GetY());
+	ModeStatPrintGrid();
+	ModeRunPrint(cases);
+	ModeLookupPrint(cases);
 }
 
 static void
@@ -276,14 +314,9 @@ ModeGenCases(const char *dump, int count, const char *out)
 	printf("wrote %d cases to %s\n", count, out);
 }
 
-// The node lookup on its own, with every flag combination the callers use.
-// The plain single-precision scan of the base revision and the grid of the
-// change must return the same node for every query point.
 static void
-ModeLookup(const char *dump, const char *casefile)
+ModeLookupPrint(const std::vector<Case> &cases)
 {
-	LoadGraph(dump);
-	std::vector<Case> cases = LoadCases(casefile);
 	for (size_t i = 0; i < cases.size(); i++) {
 		CVector p = cases[i].target;
 		printf("point %zu %.3f %.3f %.3f\n", i, p.x, p.y, p.z);
@@ -298,6 +331,16 @@ ModeLookup(const char *dump, const char *casefile)
 		printf("  car %d near %d disabled %d between %d water %d ped %d pedNear %d pedFlags %d\n",
 			car, carNear, carDisabled, carBetween, carWater, ped, pedNear, pedDisabled);
 	}
+}
+
+// The node lookup on its own, with every flag combination the callers use.
+// The plain single-precision scan of the base revision and the grid of the
+// change must return the same node for every query point.
+static void
+ModeLookup(const char *dump, const char *casefile)
+{
+	LoadGraph(dump);
+	ModeLookupPrint(LoadCases(casefile));
 }
 
 // The node scan on its own: how much of a search is the closest-node lookup.
@@ -321,10 +364,30 @@ ModeScan(const char *dump, int iters)
 		iters, found, (t1 - t0) * 1e3, (t1 - t0) * 1e9 / iters);
 }
 
+// The state of the lookup grid: the equality harness cannot tell "the grid
+// returned the node" from "the plain scan returned the node" without it.
+static void
+ModeStatPrintGrid(void)
+{
+#ifdef PATHFIND_HAS_NODE_GRID
+	if(ThePaths.m_gridValid)
+		printf("grid: built (%d x %d cells of %d m, origin %d %d)\n",
+			CPathFind::PATHFIND_GRID_DIM, CPathFind::PATHFIND_GRID_DIM, CPathFind::PATHFIND_GRID_CELL,
+			ThePaths.m_gridOriginX, ThePaths.m_gridOriginY);
+	else
+		printf("grid: not built, the lookup uses the plain scan\n");
+#else
+	printf("grid: none in this build (the base revision scans)\n");
+#endif
+}
+
 static void
 ModeStat(const char *dump)
 {
 	LoadGraph(dump);
+	// One lookup forces the grid build, so the state printed below is the
+	// state the searches will use.
+	ThePaths.FindNodeClosestToCoors(ThePaths.m_pathNodes[0].GetPosition(), PATH_CAR, 999999.88f);
 	int carNodes = ThePaths.m_numCarPathNodes;
 	int pedNodes = ThePaths.m_numPedPathNodes;
 	int water = 0, disabled = 0, between = 0;
@@ -338,6 +401,7 @@ ModeStat(const char *dump)
 	printf("graph: %d nodes (%d car, %d ped), %ld links, %d connections, %d car path links\n",
 		ThePaths.m_numPathNodes, carNodes, pedNodes, links, ThePaths.m_numConnections, ThePaths.m_numCarPathLinks);
 	printf("flags: %d water, %d disabled, %d between levels\n", water, disabled, between);
+	ModeStatPrintGrid();
 }
 
 int
@@ -359,6 +423,8 @@ main(int argc, char **argv)
 		ModeScan(argv[2], atoi(argv[3]));
 	else if (strcmp(argv[1], "lookup") == 0 && argc == 4)
 		ModeLookup(argv[2], argv[3]);
+	else if (strcmp(argv[1], "fallback") == 0 && argc == 4)
+		ModeFallback(argv[2], argv[3]);
 	else {
 		fprintf(stderr, "bad arguments\n");
 		return 1;
