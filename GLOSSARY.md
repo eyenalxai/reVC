@@ -289,6 +289,30 @@ model budget, the pool each number protects and the arithmetic that ties them
 together; the table's invariants are checked at compile time. The caps stay
 below the pools.
 
+## Fill rate
+
+The spawn attempts a frame makes for a count: 3 pedestrian calls and 3 random car
+calls per frame, times the ring scale, so the rate follows the ring like the
+target does (`PED_ATTEMPTS_PER_FRAME`, `RANDOM_CAR_ATTEMPTS_PER_FRAME` in
+`src/core/PopulationBudget.h`). The rates are not caps: they bound the time a
+count takes to reach its top, and a count that is already at its top stops the
+attempts at the first check.
+
+## Fill burst
+
+The transition fill of the population and the traffic (VICE-126). After boot, an
+interior exit and a cutscene end, the counts reach 90 % of their local targets at
+once instead of trickling up. A burst is a bounded work window: 60 frames that
+each spend 25 spawn attempts, or 100 while the fade covers the screen (the black
+frames of a transition and the dark head of a fade), so a burst asks for at most
+6000 attempts. A frame the models cannot serve waits without spending its
+window, and 30 frames in a row without a placement give the burst up. The state
+machine is `src/core/FillBurst.h`, the bounds are in `PopulationBudget.h`, and
+the triggers are the two boot countdowns, the area writer
+(`CGame::SetCurrArea`) and the end of a cutscene
+(`CCutsceneMgr::DeleteCutsceneData`); ADR 0021 holds the decisions and the
+restated acceptance.
+
 ## Pool
 
 The fixed storage for the entities and their list nodes: pedestrians, vehicles,
