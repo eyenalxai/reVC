@@ -1821,7 +1821,7 @@ CAutomobile::PoseWheel(eWheelPose pose, CVehicleModelInfo *mi)
 			if(GetModelIndex() == MI_VOODOO)
 				groundOffset *= 0.6f;
 			// like the hover pose, the left wheels lean the other way
-			mat.RotateY(Asin(Clamp(fMirror*groundOffset, -1.0f, 1.0f)));
+			mat.RotateY(Asin(Clamp(-fMirror*groundOffset, -1.0f, 1.0f)));
 		}
 	}
 
