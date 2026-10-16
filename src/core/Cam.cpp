@@ -2593,9 +2593,6 @@ CCam::Process_M16_1stPerson(const CVector &CameraTarget, float, float, float)
 }
 
 float fBike1stPersonOffsetZ = 0.15f;
-#ifdef FIRST_PERSON
-float fVehicle1stPersonOffsetFwd = 0.1f;
-#endif
 
 void
 CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, float SpeedVar, float TargetSpeedVar)
@@ -2786,25 +2783,21 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		Source = Multiply3x3(*matrix, CamPos);
 		Source += CamTargetEntity->GetPosition();
 #ifdef FIRST_PERSON
-		// Sit at the player's own eyes, just behind the wheel. Use the player's
-		// head, not the AI driver's: a taxi passenger must see from the
-		// passenger seat. The model and the driving animation decide the side,
-		// so left and right hand drive models both work. Bikes use the same
-		// treatment, on top of the lean matrix set above.
+		// The first person car view keeps the stock seat position: the head bone
+		// of the driving animation sits too low. Use the first person FOV so
+		// nothing jumps when the player gets in, and keep the animation refresh
+		// so the player's own body shows.
 		CPlayerPed *pPlayer = FindPlayerPed();
-		if(TheCamera.FirstPersonViewEnabled() && pPlayer && pPlayer->InVehicle() &&
+		bool firstPersonCarView = TheCamera.FirstPersonViewEnabled() && pPlayer && pPlayer->InVehicle() &&
 		   pPlayer->m_pMyVehicle == (CVehicle*)CamTargetEntity && ((CVehicle*)CamTargetEntity)->pDriver &&
-		   !((CVehicle*)CamTargetEntity)->IsBoat()){
+		   !((CVehicle*)CamTargetEntity)->IsBoat();
+		if(firstPersonCarView){
 			// The world update has already placed the player inside the
 			// vehicle, so only the animation hierarchy needs a refresh here.
 			pPlayer->GetMatrix().UpdateRW();
 			pPlayer->UpdateRwFrame();
 			pPlayer->UpdateRpHAnim();
-			CVector Head(0.0f, 0.0f, 0.0f);
-			pPlayer->m_pedIK.GetComponentPosition(Head, PED_HEAD);
-			CVector Fwd = matrix->GetForward();
-			Fwd.Normalise();
-			Source = Head + fVehicle1stPersonOffsetFwd*Fwd;
+			FOV = FrontEndMenuManager.GetFirstPersonFOV();
 			// The interior and the player's own body sit close to the camera,
 			// so the near plane must be close too, like the on-foot view.
 			RwCameraSetNearClipPlane(Scene.camera, FIRST_PERSON_BODY_NEAR_CLIP);
@@ -2835,14 +2828,44 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 				DontLookThroughWorldFixer = 0.0f;
 		}
 		Source.z += DontLookThroughWorldFixer;
-		Front = matrix->GetForward();
-		Front.Normalise();
-		Up = matrix->GetUp();
-		Up.Normalise();
-		CVector Right = CrossProduct(Front, Up);
-		Right.Normalise();
-		Up = CrossProduct(Right, Front);
-		Up.Normalise();
+#ifdef FIRST_PERSON
+		if(firstPersonCarView){
+			// Look around the car with the mouse, like the on-foot branch does.
+			static float fLookYaw = 0.0f;
+			static float fLookPitch = 0.0f;
+			if(ResetStatics){
+				fLookYaw = 0.0f;
+				fLookPitch = 0.0f;
+			}
+			float MouseX = CPad::GetPad(0)->GetMouseX();
+			float MouseY = CPad::GetPad(0)->GetMouseY();
+			if((MouseX != 0.0f || MouseY != 0.0f) && !CPad::GetPad(0)->ArePlayerControlsDisabled()){
+				fLookYaw -= TheCamera.m_fMouseAccelHorzntl * 3.0f * MouseX * FOV/80.0f;
+				fLookPitch += TheCamera.m_fMouseAccelVertical * 4.0f * MouseY * FOV/80.0f;
+				if(fLookPitch > DEGTORAD(80.0f))
+					fLookPitch = DEGTORAD(80.0f);
+				else if(fLookPitch < -DEGTORAD(80.0f))
+					fLookPitch = -DEGTORAD(80.0f);
+			}
+			// The view turns with the car, the mouse adds the look offset.
+			CVector Fwd = matrix->GetForward();
+			Fwd.Normalise();
+			float heading = CGeneral::GetATanOfXY(Fwd.x, Fwd.y) + fLookYaw;
+			float horiz = Cos(fLookPitch);
+			Front = CVector(Cos(heading)*horiz, Sin(heading)*horiz, Sin(fLookPitch));
+			Up = CVector(0.0f, 0.0f, 1.0f);
+		}else
+#endif
+		{
+			Front = matrix->GetForward();
+			Front.Normalise();
+			Up = matrix->GetUp();
+			Up.Normalise();
+			CVector Right = CrossProduct(Front, Up);
+			Right.Normalise();
+			Up = CrossProduct(Right, Front);
+			Up.Normalise();
+		}
 	}
 
 	ResetStatics = false;
