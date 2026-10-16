@@ -150,9 +150,10 @@ CCarCtrl::GenerateRandomCars()
 	if (NumRandomCars < MAX_RANDOM_CARS){
 		if (CountDownToCarsAtStart != 0) {
 			// The countdown lets the world settle after boot and after a
-			// restart; its end arms the fill burst (VICE-126).
+			// restart; its end arms the fill burst (VICE-126), with the parked
+			// cars, exactly as the shipped burst of that path did.
 			if (--CountDownToCarsAtStart == 0)
-				ArmFillBurst();
+				ArmFillBurst(true);
 		} else if (FillBurstIsRunning(&ms_FillBurst)) {
 			SpendFillBurstFrame();
 		} else {
@@ -166,18 +167,22 @@ CCarCtrl::GenerateRandomCars()
 }
 
 /* Arm the car fill burst (VICE-126): a transition has happened and the traffic
- * may fill at once. The parked cars come with it: the timer of every generator
- * is bypassed for 20 frames (the shipped start-of-game burst did the same), so
- * the curb fills with the street. The generator ring of the table stays: a
- * parked car still appears only in its band, a few hundred metres out. */
+ * may fill at once. `withParkedCars` bypasses the timer of every car generator
+ * for 20 frames, exactly what the shipped burst of the boot, the restart and
+ * the cutscene end did. The interior exit does not ask for it: that trigger is
+ * new, and it would be an unasked change of the parked cars. The bypass is the
+ * timer only, never the ring: a generator still places its car inside its band
+ * of the table, a few hundred metres out (CCarGenerator::
+ * CheckIfWithinRangeOfAnyPlayers), so a parked car never appears at the player. */
 void
-CCarCtrl::ArmFillBurst(void)
+CCarCtrl::ArmFillBurst(bool withParkedCars)
 {
 	FillBurstArm(&ms_FillBurst);
 	ms_nFillBurstAttempts = 0;
 	ms_nFillBurstPlaced = 0;
 	ms_fFillBurstTarget = 0.0f;
-	CTheCarGenerators::GenerateEvenIfPlayerIsCloseCounter = 20;
+	if (withParkedCars)
+		CTheCarGenerators::GenerateEvenIfPlayerIsCloseCounter = 20;
 }
 
 /* The streaming gate of the car burst (VICE-126): a random car call chooses
@@ -196,8 +201,11 @@ CarModelsAreResident(void)
 
 /* One frame of the car fill burst (VICE-126). The attempts come from the burst
  * table: the whole budget while the screen hides the fill, the small one while
- * the player can see it. A car placement runs the collision queries of the
- * frame (VICE-121), so the budget is the work bound of the burst. */
+ * the player can see it. The stop line is re-read every attempt (the random car
+ * count is live, and one placement is one car), the pool every
+ * FILL_BURST_POOL_CHECK_ATTEMPTS attempts. A car placement runs the collision
+ * queries of the frame (VICE-121), so the budget is the work bound of the
+ * burst. */
 void
 CCarCtrl::SpendFillBurstFrame(void)
 {
@@ -211,7 +219,8 @@ CCarCtrl::SpendFillBurstFrame(void)
 		return;
 	}
 	/* The streaming: the frame waits for a car model instead of spending the
-	 * window on attempts that cannot choose one. */
+	 * window on attempts that cannot choose one. The wait does not spend the
+	 * window; it counts against the give-up bound of the helper. */
 	if (!CarModelsAreResident()) {
 		FillBurstSpendFrame(&ms_FillBurst, false, false);
 		return;
@@ -220,10 +229,13 @@ CCarCtrl::SpendFillBurstFrame(void)
 	int attempts = FillBurstAttempts(&ms_FillBurst, FillBurstIsHidden());
 	int32 placed = 0;
 	for (int i = 0; i < attempts; i++) {
-		/* The pool is re-read inside the loop: a car brings its crew (a driver
-		 * and up to three passengers), so a frame that finds the pool down to
-		 * its reserve stops here (PopulationBudget.h, PED_POOL_RESERVE). The
-		 * attempt counter follows the attempts the frame makes. */
+		// The stop line of this attempt, then the pool of the step: a car
+		// brings its crew (a driver and up to three passengers), so a frame
+		// that finds the pool down to its reserve stops here
+		// (PopulationBudget.h, PED_POOL_RESERVE). The attempt counter follows
+		// the attempts the frame makes.
+		if (FillBurstTargetReached((float)NumRandomCars, ms_fFillBurstTarget))
+			break;
 		if (i % FILL_BURST_POOL_CHECK_ATTEMPTS == 0 &&
 			CPools::GetPedPool()->GetNoOfFreeSpaces() < PED_POOL_RESERVE)
 			break;

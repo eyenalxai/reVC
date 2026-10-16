@@ -71,7 +71,7 @@ public:
 
 	static bool IsInInterior(void) { return currArea != AREA_MAIN_MAP; }
 	static void SetCurrArea(int32 area);
-	static void ArmFillBursts(void);
+	static void ArmFillBursts(bool withParkedCars);
 	static bool CanSeeWaterFromCurrArea(void);
 	static bool CanSeeOutSideFromCurrArea(void);
 	

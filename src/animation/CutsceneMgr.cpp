@@ -494,10 +494,11 @@ CCutsceneMgr::DeleteCutsceneData(void)
 	}
 
 	/* The cutscene is over and the player has the world back: the population
-	 * and the traffic fill at once (VICE-126). The fill waits out the
-	 * streaming itself, so it is armed here even when the biggest cutscene
-	 * removed the world and the models are still coming back. */
-	CGame::ArmFillBursts();
+	 * and the traffic fill at once (VICE-126), with the parked cars - the
+	 * shipped burst of this path bypassed the generator timers. The fill waits
+	 * out the streaming itself, so it is armed here even when the biggest
+	 * cutscene removed the world and the models are still coming back. */
+	CGame::ArmFillBursts(true);
 
 	CTimer::Resume();
 }

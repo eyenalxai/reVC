@@ -1326,14 +1326,21 @@ CGame::CanSeeWaterFromCurrArea(void)
 }
 
 /*
- * The one writer of the visible area (VICE-126).
+ * The writer of the visible area for the script and the restart (VICE-126).
  *
  * The script's COMMAND_SET_AREA_VISIBLE comes through here, so the area change
  * that *leaves an interior* is one place: the player steps out into the street
- * and the population and the traffic fill at once (ArmFillBursts). The boot and
- * the restart paths set the field directly - they have their own trigger, the
- * countdown of the two populations - and the replay player sets the field of
- * the recorded frame directly, because a recording is replayed, not played.
+ * and the population and the traffic fill at once (ArmFillBursts).
+ *
+ * It is not the only writer of CGame::currArea, and the ADR says so: the boot
+ * (CGame::Initialise), the reset (ReInitGameObjectVariables), the save load
+ * (CGenericGameStorage reads the field out of the save file) and the replay
+ * player (CReplay::Process and its restore) write the field directly. None of
+ * them arms a burst: the boot and the reset arm through the countdowns of the
+ * two populations, and a replay is a recording, not a fill. A loaded save that
+ * restores an interior therefore arms nothing; the exit from that interior
+ * comes back through here and arms the burst, which is the moment the street
+ * appears.
  *
  * The fill of an interior *entry* is not armed: an interior is small, its
  * budget is the flat one, and the interior transition usually hides the world
@@ -1347,7 +1354,7 @@ CGame::SetCurrArea(int32 area)
 	currArea = area;
 
 	if (leftInterior)
-		ArmFillBursts();
+		ArmFillBursts(false);
 }
 
 /*
@@ -1358,17 +1365,21 @@ CGame::SetCurrArea(int32 area)
  * CCarCtrl::GenerateRandomCars (the boot and restart countdowns) and in
  * CCutsceneMgr::DeleteCutsceneData (the end of a cutscene).
  *
+ * `withParkedCars` is the generator bypass of the car burst: the shipped arms
+ * (the countdowns, the restart, the cutscene end) had it, the interior exit
+ * does not. CCarCtrl::ArmFillBurst documents what it does.
+ *
  * A replay playback rebuilds the world from the recording: the fill is under
  * the same gate as the population and the streaming (Game.cpp), so the burst
  * of a transition is not armed there.
  */
 void
-CGame::ArmFillBursts(void)
+CGame::ArmFillBursts(bool withParkedCars)
 {
 	if (CReplay::IsPlayingBack())
 		return;
 	CPopulation::ArmFillBurst();
-	CCarCtrl::ArmFillBurst();
+	CCarCtrl::ArmFillBurst(withParkedCars);
 }
 
 bool

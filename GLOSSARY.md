@@ -302,14 +302,16 @@ attempts at the first check.
 
 The transition fill of the population and the traffic (VICE-126). After boot, an
 interior exit and a cutscene end, the counts reach 90 % of their local targets at
-once instead of trickling up. A burst is a bounded work window - 60 frames that
-each carry 25 spawn attempts, or 100 while the fade covers the screen (the black
-frames of a transition and the dark head of a fade) - and it waits for the
-streaming instead of spending itself on models that are not resident. The state
+once instead of trickling up. A burst is a bounded work window: 60 frames that
+each spend 25 spawn attempts, or 100 while the fade covers the screen (the black
+frames of a transition and the dark head of a fade), so a burst asks for at most
+6000 attempts. A frame the models cannot serve waits without spending its
+window, and 30 frames in a row without a placement give the burst up. The state
 machine is `src/core/FillBurst.h`, the bounds are in `PopulationBudget.h`, and
 the triggers are the two boot countdowns, the area writer
 (`CGame::SetCurrArea`) and the end of a cutscene
-(`CCutsceneMgr::DeleteCutsceneData`); ADR 0021 holds the decisions.
+(`CCutsceneMgr::DeleteCutsceneData`); ADR 0021 holds the decisions and the
+restated acceptance.
 
 ## Pool
 
