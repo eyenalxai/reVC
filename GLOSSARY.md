@@ -44,7 +44,8 @@ some forward motion.
 ## Counter-steer
 
 Steering against the slide. Counter-steer reduces the drift angle; a full flick
-past zero ends the drift.
+past zero ends the drift, or flips it into the opposite drift when the
+handbrake stays held (see Drift flip).
 
 ## Handbrake
 
@@ -92,14 +93,21 @@ thread owns the file. It changes nothing in the physics.
 The stack of drift boosts. A clean drift that ends while a boost is still
 running adds its tier on top of the level the boost is at.
 
+## Drift chain
+
+Two drifts back to back: the second starts from the recovery of the first,
+while its exit ramp is still running. The player either releases the handbrake
+and presses it again with steering, or keeps it held through a counter-steer
+(a drift flip). The second drift enters with the full rear grip cut, so a
+chicane passes without waiting for the recovery.
+
 ## Drift flip
 
-A drift that starts from the recovery when the handbrake stays held through a
-counter-steer. The flick ends the old drift and grants its boost, and the next
-frame the new drift starts in the other direction with the full rear grip cut,
-so the counter-steer of the first corner becomes the entry of the second. The
-same entry is a chain when the handbrake was released and pressed again; the
-entry bites at once in both cases. To end a drift, release the handbrake.
+A drift chain entered with the handbrake held through a counter-steer. The
+flick ends the old drift and grants its boost, and the next frame the new drift
+starts in the other direction with the full rear grip cut, so the counter-steer
+of the first corner becomes the entry of the second. To end a drift, release
+the handbrake.
 
 ## Friction circle
 

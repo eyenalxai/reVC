@@ -34,6 +34,7 @@
 #define DRIFT_STEERLOCK_MULT	1.3f	// front wheel lock while drifting
 #define DRIFT_SPEED_HOLD	1.0f	// fraction of the lost speed given back per second
 #define DRIFT_SPEED_MIN_DIR	0.01f	// below this speed the velocity cannot be normalised
+#define DRIFT_DEADSTOP		0.01f	// below this speed the car counts as stopped
 #define DRIFT_RECOVER_TIME	0.6f	// seconds of exit alignment after the handbrake
 #define DRIFT_RECOVER_ALIGN	4.0f	// exit counter-yaw per radian of slip, 1/s
 #define DRIFT_RECOVER_SLIP	2.0f	// below this remaining slip the assist stops
@@ -395,7 +396,7 @@ CDriftControl::PrintDebugState(CAutomobile *car)
 bool
 CDriftControl::TryStartDrift(CAutomobile *car, float fwdSpeed, bool onGround, bool handbrake, bool fromRecover)
 {
-	if(!handbrake || !onGround || fwdSpeed <= 0.0f ||
+	if(!handbrake || !onGround || fwdSpeed <= DRIFT_DEADSTOP ||
 	   Abs(car->m_fSteerInput) <= DRIFT_ENTRY_STEER)
 		return false;
 
@@ -466,11 +467,8 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 		break;
 
 	case DRIFT_PHASE_RECOVER:
-		// A chain or a flip: the player asked for a new drift while the exit
-		// ramp is still running. The entry skips the recovery for this frame,
-		// so the counter-yaw, the bleed and the grip decay do not run on top
-		// of the new drift; the exit block below runs the new drift's control
-		// in the same frame.
+		// A chain or a flip: a successful entry skips the recovery body for
+		// this frame (see TryStartDrift).
 		if(TryStartDrift(car, fwdSpeed, onGround, handbrake, true))
 			break;
 		m_fPhaseTimer += dt;
@@ -499,7 +497,7 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 	if(m_Phase == DRIFT_PHASE_ENGAGE || m_Phase == DRIFT_PHASE_DRIFT){
 		// A handbrake turn keeps working below the drift floor; only the
 		// handbrake release or a dead stop ends it.
-		bool deadStop = m_bHandbrakeTurn && fwdSpeed < 0.01f;
+		bool deadStop = m_bHandbrakeTurn && fwdSpeed < DRIFT_DEADSTOP;
 		bool tooSlow = !m_bHandbrakeTurn && fwdSpeed < DRIFT_MIN_SPEED*fMaxVelocity;
 		if(!handbrake || tooSlow || deadStop){
 			// A charged drift gives its boost when the handbrake is released.

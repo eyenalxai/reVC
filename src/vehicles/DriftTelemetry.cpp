@@ -308,17 +308,17 @@ CDriftTelemetry::Tick(CAutomobile *car, CDriftControl *ctrl)
 		// The edges come from the change since the previous call, so they are
 		// compared before this frame's snapshot is stored.
 		if(state->ePrevPhase != ctrl->m_Phase){
-			if(state->ePrevPhase == CDriftControl::DRIFT_PHASE_INACTIVE &&
-			   ctrl->m_Phase == CDriftControl::DRIFT_PHASE_ENGAGE)
+			// A drift entered from INACTIVE ramps through ENGAGE; a drift
+			// that chains or flips out of the recovery (see ADR 0008) skips
+			// straight to DRIFT. Both write the same entry token.
+			if((state->ePrevPhase == CDriftControl::DRIFT_PHASE_INACTIVE &&
+			    ctrl->m_Phase == CDriftControl::DRIFT_PHASE_ENGAGE) ||
+			   (state->ePrevPhase == CDriftControl::DRIFT_PHASE_RECOVER &&
+			    ctrl->m_Phase == CDriftControl::DRIFT_PHASE_DRIFT))
 				DriftTelemetryRow(car, ctrl, ctrl->m_bHandbrakeTurn ? "TURN" : "ENTER");
 			else if(state->ePrevPhase == CDriftControl::DRIFT_PHASE_ENGAGE &&
 			        ctrl->m_Phase == CDriftControl::DRIFT_PHASE_DRIFT)
 				DriftTelemetryRow(car, ctrl, "RUN");
-			else if(state->ePrevPhase == CDriftControl::DRIFT_PHASE_RECOVER &&
-			        ctrl->m_Phase == CDriftControl::DRIFT_PHASE_DRIFT)
-				// A drift that chains or flips out of the recovery (see ADR
-				// 0008) records the same entry token as a fresh entry.
-				DriftTelemetryRow(car, ctrl, ctrl->m_bHandbrakeTurn ? "TURN" : "ENTER");
 			else if(state->ePrevPhase == CDriftControl::DRIFT_PHASE_RECOVER &&
 			        ctrl->m_Phase == CDriftControl::DRIFT_PHASE_INACTIVE)
 				DriftTelemetryRow(car, ctrl, "END");

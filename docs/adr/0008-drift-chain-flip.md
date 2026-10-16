@@ -44,22 +44,30 @@ drift (FLICK) instead of turning it around.
 ## Consequences
 
 - A left 90 and then an instant right 90 work: after a FLICK the flip starts
-  on the next frame (20 ms at 50 fps), inside the 0.1 s the acceptance asks
-  for, against the 0.84-0.95 s of the 811bb735 capture. A release and a quick
-  re-press chains the same way, with no minimum gap.
+  on the next frame (20 ms at 50 fps), as long as the steering is still held
+  past the entry gate; inside the 0.1 s the acceptance asks for, against the
+  0.84-0.95 s of the 811bb735 capture. A release and a quick re-press chains
+  the same way, with no minimum gap. A flick that is released as it lands
+  fails the gate and the exit ramps out as before.
 - A held handbrake through a counter-steer flips the drift instead of ending
   it: the flick still ends the old drift and grants its boost, and the frame
   after the new opposite drift takes over at the full grip cut. To end a drift
   the player releases the handbrake. This refines ADR 0002 decision 1: the
   flick still unwinds the target through zero, but it is no longer the way to
   finish a drift while the handbrake is held.
-- The gate cannot tell a chain from a flip and does not try to; the steer
-  direction tells them apart. A chain in the same direction is a new drift
-  with a fresh hold angle, not a continuation of the old one.
+- The gate cannot tell a chain from a flip and does not try to: both are the
+  same RECOVER-to-DRIFT transition, and the steering at the entry sets the new
+  hold angle. A chain in the same direction is a new drift with a fresh hold
+  angle, not a continuation of the old one.
 - A drift that the SLOW exit ended restarts as a handbrake turn when the
   player keeps the handbrake and the steering held, because a slow car with
   the handbrake and the steering is a handbrake turn (ADR 0002 decision 2).
-  The player who wants the recovery releases the handbrake or the steering.
+  That restart skips the 0.1 s turn ramp with the rest of the flip rule, so
+  the new turn bites at once. The player who wants the recovery releases the
+  handbrake or the steering.
+- The entry gate now requires forward motion above `DRIFT_DEADSTOP`, the same
+  threshold the handbrake turn's dead stop uses, so a stopped car cannot start
+  a drift that the exit would end in the same frame.
 - The invariants of ADRs 0001-0007 still hold: the layer is player-only, off
   by default and inert when off, the drift never costs speed, surface adhesion
   and tyre temperature still multiply on top, and AI, bikes and missions keep
