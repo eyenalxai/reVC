@@ -26,7 +26,8 @@ an angle but is not arcade enough, and the map's narrow roads and straight
    most 0.22 of the normal grip above 15 degrees, instead of a constant cut.
    Surface adhesion and tyre temperature still multiply on top. (ADR 0007
    retunes the three values: sticky below 8 degrees and at most 0.28 above 20
-   degrees.)
+   degrees. The handbrake turn shares the floor through `GetMinGrip`, so it
+   gets the raised value too.)
 4. The yaw authority is absolute: it never scales with speed, and the layer
    keeps writing the car's turn speed directly.
 5. A finished drift stacks its boost (originally 0.05 or 0.09 of the top speed
