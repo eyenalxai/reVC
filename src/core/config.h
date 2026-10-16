@@ -27,7 +27,7 @@ enum Config {
 	VEHICLEMODELSIZE = 110,
 	TWODFXSIZE = 1210,
 	MAXVEHICLESLOADED = 90, // was 50 on PC, 70 on mobile
-	NUMOBJECTINFO = 210,
+	NUMOBJECTINFO = 1024,	// the installed object.dat needs 175 slots, mods can need more
 
 	// Pool sizes
 	NUMPTRNODES = 200000,
