@@ -3,6 +3,7 @@
 #include "AnimBlendSequence.h"
 #include "AnimBlendHierarchy.h"
 #include "AnimManager.h"
+#include "Bones.h"
 
 CAnimBlendHierarchy::CAnimBlendHierarchy(void)
 {
@@ -30,15 +31,28 @@ CAnimBlendHierarchy::SetName(char *name)
 	strncpy(this->name, name, 24);
 }
 
+// The ground speed of one root cycle: the net displacement of the root over the
+// cycle, in units per second. The engine moves the ped by this much per second
+// with association speed 1.0.
+static float
+RootCycleSpeed(const CVector &firstPos, const CVector &lastPos, float firstTime, float lastTime)
+{
+	float duration = lastTime - firstTime;
+	if(duration <= 0.0f)
+		return 0.0f;
+	return (lastPos - firstPos).Magnitude2D() / duration;
+}
+
 // The engine binds a sequence to the root bone by its bone tag; when the file
 // has no tags (the KRTS animations) it binds by the name. The root sequence
 // carries the ground motion of the animation.
 static bool
 IsRootSequence(CAnimBlendSequence *seq)
 {
-	if(seq->boneTag == 0)
+	if(seq->boneTag == BONE_root)
 		return true;
-	return seq->boneTag == -1 && strcmp(seq->name, "Root") == 0;
+	// -1 marks an untagged sequence (see CAnimBlendSequence::Shutdown)
+	return seq->boneTag == -1 && strcmp(seq->name, ConvertBoneTag2BoneName(BONE_root)) == 0;
 }
 
 void
@@ -55,15 +69,10 @@ CAnimBlendHierarchy::CalcTotalTime(void)
 			continue;
 #endif
 
-		// The ground speed of the animation: the net displacement of the root
-		// over one cycle, in units per second. The engine moves the ped by this
-		// much per second with association speed 1.0.
 		if(IsRootSequence(&sequences[i]) && sequences[i].HasTranslation()){
 			KeyFrameTrans *first = (KeyFrameTrans*)sequences[i].GetKeyFrame(0);
 			KeyFrameTrans *last = (KeyFrameTrans*)sequences[i].GetKeyFrame(sequences[i].numFrames-1);
-			float duration = last->deltaTime - first->deltaTime;
-			if(duration > 0.0f)
-				rootSpeed = (last->translation - first->translation).Magnitude2D() / duration;
+			rootSpeed = RootCycleSpeed(first->translation, last->translation, first->deltaTime, last->deltaTime);
 		}
 
 		totalLength = Max(totalLength, sequences[i].GetKeyFrame(sequences[i].numFrames-1)->deltaTime);
@@ -95,9 +104,7 @@ CAnimBlendHierarchy::CalcTotalTimeCompressed(void)
 			CVector firstPos, lastPos;
 			first->GetTranslation(&firstPos);
 			last->GetTranslation(&lastPos);
-			float duration = last->GetDeltaTime() - first->GetDeltaTime();
-			if(duration > 0.0f)
-				rootSpeed = (lastPos - firstPos).Magnitude2D() / duration;
+			rootSpeed = RootCycleSpeed(firstPos, lastPos, first->GetDeltaTime(), last->GetDeltaTime());
 		}
 
 		totalLength = Max(totalLength, sequences[i].GetKeyFrameCompressed(sequences[i].numFrames-1)->GetDeltaTime());
