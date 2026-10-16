@@ -39,13 +39,13 @@
 #define DRIFT_BLEED_GAIN	4.0f	// remaining slip to the exit bleed, 1/s
 #define DRIFT_BLEED_RATE	90.0f	// cap on the exit bleed, degrees/s
 #define DRIFT_SLIP_MIN		10.0f	// degrees of slide that charge the boost
-#define DRIFT_TIER1_TIME	0.6f	// drift seconds for boost tier 1
-#define DRIFT_TIER2_TIME	1.2f	// drift seconds for boost tier 2
-#define DRIFT_BOOST_TIER1	0.05f	// forward push of tier 1, fraction of top speed
-#define DRIFT_BOOST_TIER2	0.09f	// forward push of tier 2, fraction of top speed
-#define DRIFT_BOOST_MAX		0.25f	// stacked boosts stop at 1.25x top speed
-#define DRIFT_BOOST_PUSH	0.8f	// boost acceleration, fraction of top speed per second
-#define DRIFT_BOOST_DRAIN	0.04f	// boost level that drains per second
+#define DRIFT_TIER1_TIME	0.35f	// drift seconds for boost tier 1
+#define DRIFT_TIER2_TIME	0.8f	// drift seconds for boost tier 2
+#define DRIFT_BOOST_TIER1	0.04f	// boost of tier 1, fraction of top speed
+#define DRIFT_BOOST_TIER2	0.07f	// boost of tier 2, fraction of top speed
+#define DRIFT_BOOST_MAX		0.15f	// stacked boosts stop at 1.15x top speed
+#define DRIFT_BOOST_PUSH	0.35f	// boost acceleration, fraction of top speed per second
+#define DRIFT_BOOST_DRAIN	0.08f	// boost level that drains per second
 
 // The readout mirrors the player's drift for the debug menu (see re3.cpp).
 float gDriftDebugSlip;	// slip angle, degrees
@@ -297,14 +297,25 @@ CDriftControl::ApplyBoost(CAutomobile *car, float dt)
 	if(m_fBoostLevel <= 0.0f)
 		return;
 
-	// A stacked boost pushes towards the speed the stack asks for, on top of
-	// the normal top speed. It drains on its own, so a chain of clean drifts
-	// keeps the car fast while the player can hold the line.
+	// A stacked boost pushes along the direction the car travels, not the
+	// nose: with slip left on the exit it adds speed without steering the
+	// car. The headroom is measured on the total speed, so a chain stops at
+	// 1.15x the top speed whatever the slip is.
 	float fMaxVelocity = GetMaxSpeed(car);
-	float fwdSpeed = DotProduct(car->m_vecMoveSpeed, car->GetForward());
-	float push = Min(fMaxVelocity*(1.0f + m_fBoostLevel) - fwdSpeed, DRIFT_BOOST_PUSH*fMaxVelocity*dt);
+	float speed = car->m_vecMoveSpeed.Magnitude();
+
+	// The push is level: only the horizontal part of the travel gives the
+	// direction. A speed too small to give one falls back to the nose.
+	CVector pushDir = car->m_vecMoveSpeed;
+	pushDir.z = 0.0f;
+	if(pushDir.Magnitude2D() > 0.01f)
+		pushDir.Normalise2D();
+	else
+		pushDir = car->GetForward();
+
+	float push = Min(fMaxVelocity*(1.0f + m_fBoostLevel) - speed, DRIFT_BOOST_PUSH*fMaxVelocity*dt);
 	if(push > 0.0f)
-		car->ApplyMoveForce(car->GetForward() * push * car->m_fMass);
+		car->ApplyMoveForce(pushDir * push * car->m_fMass);
 
 	m_fBoostLevel = Max(m_fBoostLevel - DRIFT_BOOST_DRAIN*dt, 0.0f);
 }
