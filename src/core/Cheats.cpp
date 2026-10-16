@@ -321,7 +321,8 @@ void ChangePlayerCheat()
 	}
 }
 
-void ChangePlayerModel(const char* name) {
+static void ChangePlayerModel(const char *name)
+{
 	if (!FindPlayerVehicle()) {
 		FindPlayerPed()->Undress(name);
 		CStreaming::LoadAllRequestedModels(0);
@@ -404,7 +405,7 @@ void SunnyWeatherCheat()
 	CWeather::ForceWeatherNow(WEATHER_SUNNY);
 }
 
-void ExtraSunnyWeatherCheat()
+static void ExtraSunnyWeatherCheat()
 {
 	CHud::SetHelpMessage(TheText.Get("CHEAT7"), true);
 	CWeather::ForceWeatherNow(WEATHER_EXTRA_SUNNY);
@@ -462,34 +463,34 @@ void StrongGripCheat()
 	CPad::bHasPlayerCheated = true;
 }
 
-void FannyMagnetCheat()
+static void FannyMagnetCheat()
 {
 	CHud::SetHelpMessage(TheText.Get("CHEAT1"), true);
 	CPed::bFannyMagnetCheat = !CPed::bFannyMagnetCheat;
 	CPad::bHasPlayerCheated = true;
 }
 
-void BlackCarsCheat()
+static void BlackCarsCheat()
 {
 	CHud::SetHelpMessage(TheText.Get("CHEAT1"), true);
 	gbBlackCars = true;
 	gbPinkCars = false;
 }
 
-void PinkCarsCheat()
+static void PinkCarsCheat()
 {
 	CHud::SetHelpMessage(TheText.Get("CHEAT1"), true);
 	gbBlackCars = false;
 	gbPinkCars = true;
 }
 
-void TrafficLightsCheat()
+static void TrafficLightsCheat()
 {
 	CHud::SetHelpMessage(TheText.Get("CHEAT1"), true);
 	CTrafficLights::bGreenLightsCheat = true;
 }
 
-void MadCarsCheat()
+static void MadCarsCheat()
 {
 	CHud::SetHelpMessage(TheText.Get("CHEAT1"), true);
 	CCarCtrl::bMadDriversCheat = true;
@@ -508,19 +509,21 @@ void RenderWaterLayersCheat(void)
 			CWaterLevel::m_nRenderWaterLayers = 0;
 }
 
-void BackToTheFuture(void)
+static void BackToTheFuture(void)
 {
 	CHud::SetHelpMessage(TheText.Get("CHEAT1"), true);
 	CVehicle::bHoverCheat = !CVehicle::bHoverCheat;
 	CPad::bHasPlayerCheated = true;
 }
 
-void SuicideCheat(void) {
+static void SuicideCheat(void)
+{
 	CHud::SetHelpMessage(TheText.Get("CHEAT1"), true);
 	FindPlayerPed()->InflictDamage(nil, WEAPONTYPE_UNARMED, 1000.0f, PEDPIECE_TORSO, 0);
 }
 
-void DoChicksWithGunsCheat(void) {
+static void DoChicksWithGunsCheat(void)
+{
 	CHud::SetHelpMessage(TheText.Get("CHEAT1"), true);
 	CStreaming::SetModelIsDeletable(CGangs::GetGangPedModel1(GANG_PLAYER));
 	CStreaming::SetModelIsDeletable(CGangs::GetGangPedModel2(GANG_PLAYER));
@@ -589,19 +592,20 @@ void WallClimbingCheat(void)
 }
 #endif
 
-void FlyingFishCheat(void)
+static void FlyingFishCheat(void)
 {
 	CHud::SetHelpMessage(TheText.Get("CHEAT1"), true);
 	CVehicle::bCheat8 = !CVehicle::bCheat8;
 	CPad::bHasPlayerCheated = true;
 }
 
-void DoShowChaseStatCheat(void) {
+static void DoShowChaseStatCheat(void)
+{
 	CHud::SetHelpMessage(TheText.Get("CHEAT1"), true);
 	CStats::ShowChaseStatOnScreen = 1;
 }
 
-int Cheat_strncmp(char* sourceStr, char* origCheatStr)
+static int Cheat_strncmp(const char *sourceStr, const char *origCheatStr)
 {
 #define ccmp(n) if((uint8)sourceStr[i] != (uint8)origCheatStr[i] - n) return 1;
 	int i = 0;
