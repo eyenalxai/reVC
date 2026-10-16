@@ -3794,8 +3794,7 @@ CAutomobile::DoDriveByShootings(void)
 	// The car ADS: the aim button aims freely with the camera instead of the
 	// look keys. The free aim shot has no animation of its own, so the drive-by
 	// arm stands in.
-	bool aiming = false;
-	aiming = TheCamera.UsingCarAds();
+	bool aiming = TheCamera.UsingCarAds();
 
 	if(lookingLeft || lookingRight || aiming){
 		if(aiming)

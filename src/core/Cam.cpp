@@ -1466,8 +1466,6 @@ CCam::Process_FollowPedWithMouse(const CVector &CameraTarget, float TargetOrient
 	float CamDist;
 	CColPoint colPoint;
 	CEntity *entity;
-	float AdsDistScale = 1.0f;
-	float AdsFOVScale = 1.0f;
 
 	if(ResetStatics){
 		Rotating = false;
@@ -1495,8 +1493,8 @@ CCam::Process_FollowPedWithMouse(const CVector &CameraTarget, float TargetOrient
 			AdsAiming = TheCamera.UsingCarAds();
 	}
 	WellBufferMe(AdsAiming ? 1.0f : 0.0f, &m_fAdsAmount, &m_fAdsAmountSpeed, 0.2f, 0.1f, false);
-	AdsDistScale = 1.0f - (1.0f - fAdsDistanceScale)*m_fAdsAmount;
-	AdsFOVScale = 1.0f - (1.0f - fAdsFOVScale)*m_fAdsAmount;
+	float AdsDistScale = 1.0f - (1.0f - fAdsDistanceScale)*m_fAdsAmount;
+	float AdsFOVScale = 1.0f - (1.0f - fAdsFOVScale)*m_fAdsAmount;
 	FOV *= AdsFOVScale;
 
 	bool OnTrain = FindPlayerVehicle() && FindPlayerVehicle()->IsTrain();

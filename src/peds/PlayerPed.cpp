@@ -100,8 +100,8 @@ SteerVelocityTowards(const CVector2D &velocity, const CVector2D &target, float m
 	return CVector2D(Cos(newAngle), Sin(newAngle)) * velocity.Magnitude();
 }
 
-// The first person aim pose aims at a point this far along the aim ray
-#define FIRST_PERSON_AIM_DISTANCE 30.0f
+// The player's aim pose aims at a point this far along the aim ray
+#define PLAYER_AIM_DISTANCE 30.0f
 
 bool CPlayerPed::bDontAllowWeaponChange;
 #ifndef MASTER
@@ -977,7 +977,7 @@ CPlayerPed::UpdateFirstPersonAim(CPad *padUsed)
 	if (TheCamera.UsingFirstPersonSights()) {
 		// Aiming down the sights: the pose follows the camera front
 		CCam *cam = &TheCamera.Cams[TheCamera.ActiveCam];
-		AimAtPosition(cam->Source + FIRST_PERSON_AIM_DISTANCE * cam->Front);
+		AimAtPosition(cam->Source + PLAYER_AIM_DISTANCE * cam->Front);
 		return;
 	}
 
@@ -991,7 +991,7 @@ CPlayerPed::UpdateFirstPersonAim(CPad *padUsed)
 		&& CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_CANAIM)) {
 		// Third person mouse camera: Target raises the gun toward the crosshair
 		CVector source, target;
-		TheCamera.Find3rdPersonCamTargetVector(FIRST_PERSON_AIM_DISTANCE, GetPosition(), source, target);
+		TheCamera.Find3rdPersonCamTargetVector(PLAYER_AIM_DISTANCE, GetPosition(), source, target);
 		AimAtPosition(target);
 		return;
 	}

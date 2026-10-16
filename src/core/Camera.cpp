@@ -1290,8 +1290,7 @@ CCamera::CamControl(void)
 		stopArrestCam = true;
 		beingArrested = false;
 	}
-	bool firstPersonCarView = false;
-	firstPersonCarView = InFirstPersonCarView();
+	bool firstPersonCarView = InFirstPersonCarView();
 	if(LastPedState != PED_ARRESTED && PLAYER->GetPedState() == PED_ARRESTED){
 		if(!firstPersonCarView)
 			startArrestCam = true;
