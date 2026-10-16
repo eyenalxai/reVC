@@ -18,7 +18,7 @@ static uint32 ms_nDuration;		// D, the base duration
 static uint32 ms_nWindowStart;		// the window, absolute times
 static uint32 ms_nWindowEnd;
 static bool ms_bJudged;			// the first judging press came in
-static bool ms_bPerfect;		// and it hit the window
+static bool ms_bAnimationRequested;	// the reload animation is started
 static eActiveReloadResult ms_eResult;	// the last judgment, for the HUD
 static uint32 ms_nResultTime;
 
@@ -39,7 +39,9 @@ TrackedWeapon(void)
 
 // Drops a reload that cannot be running any more: the player switched weapon,
 // died, respawned or loaded a game. The result stays after the reload itself
-// ends, so the HUD can still flash it; it goes when the weapon is gone.
+// ends, so the HUD can still flash it; it goes when the weapon is gone. Every
+// entry point that acts on the state calls this first, so the healing needs no
+// separate per-frame step.
 void
 ActiveReload::ForgetStaleReload(void)
 {
@@ -57,14 +59,17 @@ ActiveReload::ForgetStaleReload(void)
 		return;
 	}
 
-	if (weapon->m_eWeaponState != WEAPONSTATE_RELOADING)
+	if (weapon->m_eWeaponState != WEAPONSTATE_RELOADING) {
 		ms_bActive = false;
+		ms_bAnimationRequested = false;
+	}
 }
 
 void
 ActiveReload::Reset(void)
 {
 	ms_bActive = false;
+	ms_bAnimationRequested = false;
 	ResetResult();
 }
 
@@ -88,7 +93,7 @@ ActiveReload::Start(eWeaponType weaponType, uint32 duration)
 	ms_nWindowStart = ms_nStart + (uint32)(ms_nDuration*ACTIVE_RELOAD_WINDOW_START);
 	ms_nWindowEnd = ms_nStart + (uint32)(ms_nDuration*ACTIVE_RELOAD_WINDOW_END);
 	ms_bJudged = false;
-	ms_bPerfect = false;
+	ms_bAnimationRequested = false;
 	ResetResult();
 }
 
@@ -107,24 +112,16 @@ ActiveReload::Judge(CWeapon *weapon)
 		// Too soon: the reload is jammed and takes half the base time more.
 		weapon->m_nTimer += (uint32)(ms_nDuration*ACTIVE_RELOAD_JAM_FRACTION);
 		ms_bJudged = true;
-		ms_bPerfect = false;
 		ms_eResult = ACTIVE_RELOAD_JAM;
 		ms_nResultTime = now;
 	} else if (now <= ms_nWindowEnd) {
 		// In the window: the reload finishes almost at once.
 		weapon->m_nTimer = now + ACTIVE_RELOAD_PERFECT_TAIL_MS;
 		ms_bJudged = true;
-		ms_bPerfect = true;
 		ms_eResult = ACTIVE_RELOAD_PERFECT;
 		ms_nResultTime = now;
 	}
 	// Later presses and presses after the window do nothing.
-}
-
-void
-ActiveReload::Update(void)
-{
-	ForgetStaleReload();
 }
 
 bool
@@ -135,12 +132,24 @@ ActiveReload::InProgress(void)
 }
 
 bool
-ActiveReload::JudgedPerfect(CWeapon *weapon)
+ActiveReload::Judged(CWeapon *weapon)
 {
-	if (!ms_bActive || !ms_bJudged || !ms_bPerfect)
+	if (!ms_bActive || !ms_bJudged)
 		return false;
 
 	return TrackedWeapon() == weapon;
+}
+
+bool
+ActiveReload::ClaimReloadAnimation(void)
+{
+	ForgetStaleReload();
+
+	if (!ms_bActive || ms_bAnimationRequested)
+		return false;
+
+	ms_bAnimationRequested = true;
+	return true;
 }
 
 ActiveReloadBar

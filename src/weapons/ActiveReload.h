@@ -34,12 +34,12 @@ enum eActiveReloadResult
 // The bar the HUD draws under the crosshair.
 struct ActiveReloadBar
 {
-	bool visible;		// a tracked reload is running
-	float progress;		// how far the reload is, 0..1 of D
-	float windowStart;	// the window zone, 0..1 of D
+	bool visible;			// a tracked reload is running
+	float progress;			// how far the reload is, 0..1 of D
+	float windowStart;		// the window zone, 0..1 of D
 	float windowEnd;
-	int result;		// the last judgment, eActiveReloadResult
-	uint32 resultAge;	// ms since that judgment
+	eActiveReloadResult result;	// the last judgment
+	uint32 resultAge;		// ms since that judgment
 };
 
 class ActiveReload
@@ -50,19 +50,23 @@ public:
 	static void Start(eWeaponType weaponType, uint32 duration);
 
 	// A judging press: the reload key went down while a reload runs. The
-	// press that started the reload does not come here.
+	// press that started the reload does not come here, and a press after
+	// the first judgment does nothing.
 	static void Judge(CWeapon *weapon);
 
-	// Per-frame upkeep: drops a reload that cannot be running any more, for
-	// example after a weapon switch, a death or a load.
-	static void Update(void);
-
-	// A tracked reload is running and its window can still be judged.
+	// A tracked reload is running. True after the first judging press too,
+	// until the reload ends or the state is forgotten.
 	static bool InProgress(void);
 
-	// True while this weapon's reload must keep the short timer a perfect
-	// press gave it: the reload animation must not stretch it back.
-	static bool JudgedPerfect(CWeapon *weapon);
+	// True while this weapon's reload already got its timing from a judging
+	// press: the reload animation must not stretch that timer back. An
+	// unjudged reload keeps the stock animation extension.
+	static bool Judged(CWeapon *weapon);
+
+	// The reload animation of the tracked reload: the first call claims it
+	// and returns true, later calls return false, so a long jam does not
+	// start the animation again. A new or forgotten reload clears the claim.
+	static bool ClaimReloadAnimation(void);
 
 	static ActiveReloadBar GetBarState(void);
 

@@ -211,7 +211,7 @@ CWeapon::Fire(CEntity *shooter, CVector *fireSource)
 			// The player reloads a magazine weapon by hand: an empty clip
 			// does not refill itself and the weapon does not fire either.
 			// AI peds keep the instant refill.
-			if (gActiveReloadEnabled && IsMagazineWeapon() && shooter == FindPlayerPed())
+			if (UsesManualReload(shooter))
 				return false;
 
 			Reload();
@@ -422,7 +422,7 @@ CWeapon::Fire(CEntity *shooter, CVector *fireSource)
 				// The player's magazine weapon goes READY with an empty
 				// clip: the reload key starts the next reload. AI peds and
 				// the other weapons keep the automatic reload.
-				if (gActiveReloadEnabled && IsMagazineWeapon() && shooter == FindPlayerPed()) {
+				if (UsesManualReload(shooter)) {
 					m_eWeaponState = WEAPONSTATE_READY;
 					return true;
 				}
@@ -3028,8 +3028,14 @@ CWeapon::StartReload(CEntity *shooter)
 	m_eWeaponState = WEAPONSTATE_RELOADING;
 	m_nTimer = CTimer::GetTimeInMilliseconds() + duration;
 
-	if (isPlayer && IsMagazineWeapon())
+	if (UsesManualReload(shooter))
 		ActiveReload::Start(m_eWeaponType, duration);
+}
+
+bool
+CWeapon::UsesManualReload(CEntity *shooter)
+{
+	return gActiveReloadEnabled && IsMagazineWeapon() && shooter == FindPlayerPed();
 }
 
 bool
@@ -3126,9 +3132,10 @@ CWeapon::Update(int32 audioEntity, CPed *pedToAdjustSound)
 					}
 					if (reloadAssoc->GetProgress() >= soundStart && (reloadAssoc->currentTime - reloadAssoc->timeStep) / reloadAssoc->hierarchy->totalLength < soundStart)
 						DMAudio.PlayOneShot(audioEntity, SOUND_WEAPON_RELOAD, m_eWeaponType);
-					// A reload the player finished inside the window keeps
-					// the short timer; the animation must not stretch it.
-					if (!ActiveReload::JudgedPerfect(this) && CTimer::GetTimeInMilliseconds() > m_nTimer && reloadAssoc->GetProgress() < 0.9f) {
+					// A reload the player already judged keeps its own timer:
+					// the animation must not stretch the perfect tail or the
+					// jam back. An unjudged reload keeps the stock extension.
+					if (!ActiveReload::Judged(this) && CTimer::GetTimeInMilliseconds() > m_nTimer && reloadAssoc->GetProgress() < 0.9f) {
 						m_nTimer = CTimer::GetTimeInMilliseconds();
 					}
 				} else {

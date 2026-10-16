@@ -236,6 +236,11 @@ CPlayerPed::MakeChangesForNewWeapon(eWeaponType weapon)
 	SetCurrentWeapon(weapon);
 	m_nSelectedWepSlot = m_currentWeapon;
 
+	// The stock weapon switch fills the clip. With the active reload on the
+	// player reloads by hand, so the clip keeps its rounds (VICE-74).
+	if (!gActiveReloadEnabled)
+		GetWeapon()->m_nAmmoInClip = Min(GetWeapon()->m_nAmmoTotal, CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->m_nAmountofAmmunition);
+
 	if (CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_CANAIM))
 		ClearWeaponTarget();
 
@@ -825,8 +830,6 @@ switchDetectDone:
 void
 CPlayerPed::ProcessActiveReload(CPad *padUsed)
 {
-	ActiveReload::Update();
-
 	CWeapon *weapon = GetWeapon();
 
 	if (padUsed->ReloadJustDown()) {
@@ -837,12 +840,14 @@ CPlayerPed::ProcessActiveReload(CPad *padUsed)
 	}
 
 	// Attack() starts the animation for the player who reloads in a fight;
-	// this covers the player who reloads while standing still. The helper
-	// skips a reload association that already runs. With the fast reload flag
-	// the stock code skips the animation completely, and the helper's side
-	// effects must not run every frame, so no per-frame attempt is made then.
+	// this covers the player who reloads while standing still. The claim keeps
+	// a long jam from starting the animation a second time. With the fast
+	// reload flag the stock code skips the animation completely, and the
+	// helper's side effects must not run every frame, so no per-frame attempt
+	// is made then.
 	if (weapon->m_eWeaponState == WEAPONSTATE_RELOADING
-		&& !CWorld::Players[CWorld::PlayerInFocus].m_bFastReload)
+		&& !CWorld::Players[CWorld::PlayerInFocus].m_bFastReload
+		&& ActiveReload::ClaimReloadAnimation())
 		TryStartReloadAnimation();
 }
 

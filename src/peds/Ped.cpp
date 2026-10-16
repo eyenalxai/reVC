@@ -4644,8 +4644,11 @@ CPed::GiveWeapon(eWeaponType weaponType, uint32 ammo, bool unused)
 		} else {
 			GetWeapon(slot).m_nAmmoTotal = Min(99999, GetWeapon(slot).m_nAmmoTotal);
 		}
-		// The pickup's ammo goes to the reserve. The clip keeps its rounds:
-		// the player reloads by hand with the active reload on.
+		// The player with the active reload on reloads by hand, so the
+		// pickup's ammo goes to the reserve and the clip keeps its rounds.
+		// AI peds and the toggle off keep the stock refill (VICE-74).
+		if (!IsPlayer() || !gActiveReloadEnabled)
+			GetWeapon(slot).Reload();
 		if (GetWeapon(slot).m_eWeaponState == WEAPONSTATE_OUT_OF_AMMO && GetWeapon(slot).m_nAmmoTotal > 0)
 			GetWeapon(slot).m_eWeaponState = WEAPONSTATE_READY;
 	} else {

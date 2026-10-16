@@ -384,9 +384,12 @@ CPickup::Update(CPlayerPed *player, CVehicle *vehicle, int playerId)
 							CPickups::PlayerOnWeaponPickup = 6;
 							if (CWeaponInfo::IsWeaponSlotAmmoMergeable(slot)) {
 								if (m_eType == PICKUP_ONCE_TIMEOUT || m_eType == PICKUP_ONCE || m_eType == PICKUP_ON_STREET) {
-									// The merged ammo goes to the reserve; the
-									// clip waits for the reload key (VICE-74).
+									// The merged ammo goes to the reserve; with the
+									// active reload on the clip waits for the reload
+									// key instead of refilling (VICE-74).
 									ExtractAmmoFromPickup(player);
+									if (!gActiveReloadEnabled)
+										FindPlayerPed()->GetWeapon(slot).Reload();
 								}
 							}
 							if (!m_bWasControlMessageShown) {

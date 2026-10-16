@@ -617,10 +617,11 @@ CPed::FinishedReloadCB(CAnimBlendAssociation *reloadAssoc, void *arg)
 
 // Plays the reload animation of a ped whose weapon is reloading. The attack
 // handler breaks out of the attack for it, and the player's per-frame path
-// calls it so an idle player plays the animation too. Returns true when the
-// caller must not continue the attack.
+// calls it so an idle player plays the animation too. reloadAnimAssoc is the
+// association the caller already holds, or nil to look it up. Returns true
+// when the caller must not continue the attack.
 bool
-CPed::TryStartReloadAnimation(void)
+CPed::TryStartReloadAnimation(CAnimBlendAssociation *reloadAnimAssoc)
 {
 	CWeaponInfo *ourWeapon = CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType);
 
@@ -631,10 +632,13 @@ CPed::TryStartReloadAnimation(void)
 		return false;
 
 	// An association that already runs must not be started twice.
-	if (RpAnimBlendClumpGetAssociation(GetClump(), GetReloadAnim(ourWeapon)))
-		return false;
+	if (reloadAnimAssoc == nil) {
+		reloadAnimAssoc = RpAnimBlendClumpGetAssociation(GetClump(), GetReloadAnim(ourWeapon));
+		if (reloadAnimAssoc == nil && GetCrouchReloadAnim(ourWeapon))
+			reloadAnimAssoc = RpAnimBlendClumpGetAssociation(GetClump(), GetCrouchReloadAnim(ourWeapon));
+	}
 
-	if (GetCrouchReloadAnim(ourWeapon) && RpAnimBlendClumpGetAssociation(GetClump(), GetCrouchReloadAnim(ourWeapon)))
+	if (reloadAnimAssoc)
 		return false;
 
 	if (!CWorld::Players[CWorld::PlayerInFocus].m_bFastReload) {
@@ -1013,7 +1017,7 @@ CPed::Attack(void)
 	if (weaponAnimTime > animLoopEnd || !weaponAnimAssoc->IsRunning() && ourWeapon->m_eWeaponFire != WEAPON_FIRE_PROJECTILE) {
 		// A reload takes over the attack: the ped plays the reload
 		// animation instead of another attack loop.
-		if (TryStartReloadAnimation())
+		if (TryStartReloadAnimation(reloadAnimAssoc))
 			return;
 		if (weaponAnimTime - 2.0f * weaponAnimAssoc->timeStep <= animLoopEnd
 			&& (bIsAttacking || CTimer::GetTimeInMilliseconds() < m_shootTimer)
