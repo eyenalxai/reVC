@@ -822,7 +822,17 @@ void CControllerConfigManager::AffectControllerStateOn_ButtonDown_Driving(int32 
 		state.RightShoulder1 = 255;
 	if (button == GetControllerKeyAssociatedWithAction(VEHICLE_ACCELERATE, type))
 		state.Cross = 255;
-	if (button == GetControllerKeyAssociatedWithAction(VEHICLE_CHANGE_RADIO_STATION, type))
+	// The reload key must win when one physical key serves both the reload
+	// and the radio: R is the reload key on the keyboard and the radio key
+	// on the optional-extra type, so pressing R in a car would both reload
+	// and change the station (VICE-90).
+	bool isReloadKey = false;
+	for (int32 i = 0; i < MAX_CONTROLLERTYPES; i++)
+	{
+		if (button == GetControllerKeyAssociatedWithAction(PED_RELOAD, (eControllerType)i))
+			isReloadKey = true;
+	}
+	if (!isReloadKey && button == GetControllerKeyAssociatedWithAction(VEHICLE_CHANGE_RADIO_STATION, type))
 		state.LeftShoulder1 = 255;
 	if (button == GetControllerKeyAssociatedWithAction(VEHICLE_BRAKE, type))
 		state.Square = 255;
@@ -910,6 +920,12 @@ void CControllerConfigManager::AffectControllerStateOn_ButtonDown_Driving(int32 
 		else
 			state.RightStickY = -128;
 	}
+
+	// The reload key works in a vehicle too: the pad field is set only by
+	// the on-foot mappers otherwise, so a driving player could not start or
+	// judge a reload (VICE-90).
+	if (button == GetControllerKeyAssociatedWithAction(PED_RELOAD, type))
+		state.Reload = 255;
 }
 
 void CControllerConfigManager::AffectControllerStateOn_ButtonDown_FirstPersonOnly(int32 button, eControllerType type, CControllerState &state)

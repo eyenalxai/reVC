@@ -499,7 +499,19 @@ CWeapon::FireFromCar(CVehicle *shooter, bool left, bool right)
 			if ( m_nAmmoTotal == 0 )
 				return true;
 
-			StartReload(shooter);
+			// The driver, not the vehicle, is the shooter of the reload: the
+			// fast-reload speed and the active reload window belong to the
+			// player, and the player's magazine weapons never refill on their
+			// own in a car (VICE-90). A vehicle without a driver keeps the
+			// stock path.
+			CPed *driver = shooter->pDriver;
+
+			if (driver && UsesManualReload(driver)) {
+				m_eWeaponState = WEAPONSTATE_READY;
+				return true;
+			}
+
+			StartReload(driver ? (CEntity*)driver : (CEntity*)shooter);
 
 			return true;
 		}
