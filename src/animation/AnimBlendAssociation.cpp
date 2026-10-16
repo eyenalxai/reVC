@@ -1,5 +1,6 @@
 #include "common.h"
 
+#include "Bones.h"
 #include "AnimBlendHierarchy.h"
 #include "AnimBlendClumpData.h"
 #include "RpAnimBlend.h"
@@ -107,6 +108,58 @@ CAnimBlendAssociation::SetBlend(float amount, float delta)
 {
 	blendAmount = amount;
 	blendDelta = delta;
+}
+
+// Whether a sequence drives a bone below the spine. Name-matched sequences
+// (boneTag < 0, the non-skinned clumps) count as upper body: their bones are
+// unknown here and the callers only use this on skinned ped clumps.
+static bool
+IsLowerBodyBone(int16 boneTag)
+{
+	if(boneTag < 0)
+		return false;
+	switch(boneTag){
+	case BONE_spine:
+	case BONE_spine1:
+	case BONE_neck:
+	case BONE_head:
+	case BONE_l_clavicle:
+	case BONE_l_upperarm:
+	case BONE_l_forearm:
+	case BONE_l_hand:
+	case BONE_l_finger:
+	case BONE_r_clavicle:
+	case BONE_r_upperarm:
+	case BONE_r_forearm:
+	case BONE_r_hand:
+	case BONE_r_finger:
+		return false;
+	default:
+		return true;
+	}
+}
+
+bool
+CAnimBlendAssociation::HasLowerBodySequences(void)
+{
+	int i;
+	for(i = 0; i < numNodes; i++)
+		if(nodes[i].sequence && IsLowerBodyBone(nodes[i].sequence->boneTag))
+			return true;
+	return false;
+}
+
+// Keep only the sequences that drive the upper body. A partial association
+// whose data covers the whole body otherwise overrides the legs of the
+// movement animation it layers over; dropping the lower body keys leaves the
+// legs to that animation (VICE-141).
+void
+CAnimBlendAssociation::RemoveLowerBodySequences(void)
+{
+	int i;
+	for(i = 0; i < numNodes; i++)
+		if(nodes[i].sequence && IsLowerBodyBone(nodes[i].sequence->boneTag))
+			nodes[i].sequence = nil;
 }
 
 void

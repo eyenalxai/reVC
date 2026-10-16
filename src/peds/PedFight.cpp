@@ -195,6 +195,14 @@ CPed::SetPointGunAt(CEntity *to)
 		aimAssoc->blendAmount = 0.0f;
 		aimAssoc->blendDelta = 8.0f;
 	}
+
+	// The player keeps the legs when the aim pose is up: the standing aim pose
+	// drives only the upper body, so the walk, run and sprint cycles carry the
+	// lower body (VICE-141). The crouch pose keeps its crouched legs, and the
+	// AI aim poses stay exactly as they are.
+	if (IsPlayer() && aimAssoc->animId == ANIM_WEAPON_FIRE)
+		aimAssoc->RemoveLowerBodySequences();
+
 	if (to && !IsPlayer())
 		Say(SOUND_PED_ATTACK);
 }

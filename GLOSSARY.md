@@ -274,6 +274,20 @@ pulls in and the free aim fires along the camera instead of the stock sideways
 drive-by. Only the drive-by vehicles (car, bike, boat) and the drive-by weapon
 take it, and the bullets ignore the player's own car.
 
+## Aim pose
+
+The pose of the player's upper body while the sights are up: the weapon's fire
+animation held at its loop start, the way the stock third person aim holds it.
+On the player it drives only the upper body, so the arms and the torso hold the
+aim while the legs keep the movement animation, the sprint cycle included.
+
+## Partial association
+
+An animation association that layers over the movement animation instead of
+replacing it (`ASSOC_PARTIAL`). It drives the bones its keyframes cover; the
+bones it has no keys for keep the animation below it. The weapon fire, reload
+and fight animations are partials.
+
 ## Replay block
 
 One of the eight fixed buffers of `REPLAYBUFFERSIZE` (100000) bytes that hold

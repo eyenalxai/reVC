@@ -957,6 +957,71 @@ CPlayerPed::ProcessActiveReload(CPad *padUsed)
 		TryStartReloadAnimation();
 }
 
+// Hold the weapon aim pose on the upper body while the player aims down the
+// sights or aims with the mouse camera (VICE-141). The pose is the weapon's
+// fire animation held at its loop start, like the stock/classic aim pose, but
+// the lower body sequences are dropped: the arms and the torso hold the aim
+// while the legs keep the walk, run or sprint cycle underneath. The pose is
+// the same association the fire animation uses, so a burst that reuses it
+// keeps the same rule.
+void
+CPlayerPed::HoldUpperBodyAimPose(void)
+{
+	CWeaponInfo *weaponInfo = CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType);
+	if (weaponInfo->m_AnimToPlay == ASSOCGRP_STD)
+		return;
+
+	// The crouch pose owns the upper body while the player ducks, and the
+	// reload owns it while it plays, with or without an animation
+	if (bIsDucking || GetWeapon()->m_eWeaponState == WEAPONSTATE_RELOADING)
+		return;
+
+	CAnimBlendAssociation *aimAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_WEAPON_FIRE);
+
+	// A running attack owns the association, and a fading one is on its way
+	// out: do not fight either of them
+	if (aimAssoc && (aimAssoc->IsRunning() || aimAssoc->blendDelta < 0.0f))
+		return;
+
+	// Any other partial animation that runs (a reload, a hit, the crouch pose)
+	// owns the upper body while it lasts: the aim pose waits for it
+	for (CAnimBlendAssociation *assoc = RpAnimBlendClumpGetFirstAssociation(GetClump(), ASSOC_PARTIAL);
+	     assoc; assoc = RpAnimBlendGetNextAssociation(assoc, ASSOC_PARTIAL)) {
+		if (assoc->animId != ANIM_WEAPON_FIRE && assoc->IsRunning())
+			return;
+	}
+
+	if (aimAssoc == nil) {
+		aimAssoc = CAnimManager::AddAnimation(GetClump(), weaponInfo->m_AnimToPlay, ANIM_WEAPON_FIRE);
+		if (aimAssoc == nil)
+			return;
+		aimAssoc->SetCurrentTime(weaponInfo->m_fAnimLoopStart);
+		aimAssoc->flags &= ~ASSOC_RUNNING;
+		aimAssoc->blendAmount = 0.0f;
+		aimAssoc->blendDelta = 8.0f;
+	}
+
+	// Several fire animations carry a standing leg stance; the lower body keys
+	// must not freeze the movement cycle. The pose is the same association the
+	// fire and reload animations layer on, so this only runs while it is held.
+	if (aimAssoc->HasLowerBodySequences())
+		aimAssoc->RemoveLowerBodySequences();
+}
+
+// Fade the held aim pose out again when the sights go down and no attack or
+// reload owns the association. The blend is the stock blend out of the aim
+// pose, so the arms return to the movement animation without a snap.
+void
+CPlayerPed::ReleaseHeldAimPose(void)
+{
+	CAnimBlendAssociation *aimAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_WEAPON_FIRE);
+	if (aimAssoc == nil || aimAssoc->IsRunning() || aimAssoc->blendDelta < 0.0f)
+		return;
+
+	aimAssoc->flags |= ASSOC_DELETEFADEDOUT;
+	aimAssoc->blendDelta = -4.0f;
+}
+
 #ifdef FIRST_PERSON
 // Aim the aim IK at a world position. The stock CPedIK::PointGunAtPosition works
 // the same way, but this path keeps the aim flag set so that CPed::AimGun applies
@@ -971,6 +1036,8 @@ CPlayerPed::AimAtPosition(const CVector &position)
 	m_fFPSMoveHeading = CGeneral::GetRadianAngleBetweenPoints(position.z,
 		Distance2D(GetPosition(), position.x, position.y), armPos.z, 0.0f);
 	m_bFirstPersonAimActive = true;
+
+	HoldUpperBodyAimPose();
 }
 
 // The first person aim pose: the sight view holds the pose toward the view, and
