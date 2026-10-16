@@ -207,10 +207,61 @@ where they come from.
 
 ## Spawn distance
 
-The distance from the player where the game creates and removes cars and
-pedestrians. The Display settings slider `SpawnDistance` scales it. The base is
-a ring around the player: pedestrians are created at 100-130 m and removed at
-131/145 m, cars spawn between 120 m and 250 m and despawn at 280 m.
+The old Display settings slider `SpawnDistance`. It scaled the ring around the
+player: pedestrians were created at 100-130 m and removed at 131/145 m, cars
+spawned between 120 m and 250 m and despawned at 280 m, all times the value.
+VICE-125 removed the slider, because the range is the draw distance now. An old
+file that raised the value and never moved the draw distance is loaded with the
+draw distance that asks for the same ring (`1.2 x` the old value, capped by the
+visible range like every ring); the file loses the old key with the next save,
+so until that save a later load maps it again.
+
+## Draw distance (range control)
+
+The Display settings slider `DrawDistance`, the one control of the range since
+VICE-125. It scales the LOD multiplier the renderer draws the world with
+(`CRenderer::ms_lodDistScale`, 0.925 to 16.0, 1.2 at stock), and the traffic
+ring follows it: the ring scale is the LOD distance over its stock value. The
+ring of a lowered draw distance stops at the stock ring, so the lower part of
+the slider moves the world only. Its bounds and the LOD distance base live in
+`src/core/DrawDistance.h`.
+
+## LOD distance
+
+The distance the world is drawn at: the LOD distance base (300 m) times the LOD
+multiplier, which is the FOV factor times the draw distance (`Camera.cpp` sets
+the multiplier; `Renderer.h` LOD_DISTANCE and the ring both read the base). The
+visible range takes the smaller of the LOD distance and the weather far clip,
+and the ring request is the LOD distance over its stock value (300 x 1.2).
+
+## Traffic ring
+
+One spawn or despawn radius of the traffic: the car side band, the car on-screen
+band, the car despawn, the camera minimum, the generator ring or the pedestrian
+band. The stock radii and the rules that build them live in
+`src/control/TrafficRings.h`; `CurrentTrafficRings()` returns the values of the
+frame.
+
+## Visible range
+
+The distance the traffic ring may reach: the smaller of the LOD distance and
+the weather far clip of the camera. The far clip is weather data (SUNNY 2000 m,
+FOGGY 150 m).
+
+## Ring scale
+
+The one number that scales the traffic ring table: the LOD distance over its
+stock value, capped so the on-screen car ring stays inside the visible range.
+1.0 at the stock settings (the default draw distance 1.2, FOV 70), where the
+stock LOD distance is 360 m (300 x 1.2).
+
+## Despawn reserve
+
+The 30 m between a spawn ring and the threshold that removes a car: the stock
+step from the on-screen ring (250 m) to the despawn (280 m) and down to the
+inner edge (220 m). It holds the vehicle half length, the lane offset and the
+curve placement of a fresh spawn, so a fresh spawn is never removed on the
+frame it is created.
 
 ## Density
 
@@ -233,6 +284,22 @@ The caps stay below the pools.
 
 The fixed storage for the entities and their list nodes: pedestrians, vehicles,
 audio entities. A pool never grows; the caps keep the counts below it.
+
+## Dummy object
+
+A `CDummyObject`: the stand-in for a map object that is far from the player, or
+for a far script object. It has no physics and no collision. A map instance
+whose model has an OBJECT.DAT row loads as a dummy. The dummy pool holds the
+far ones, the object pool the near ones, and
+`CPopulation::ConvertToDummyObject` and `CPopulation::ConvertToRealObject` move
+an object between the two pools as the player moves.
+
+## Dummy pool
+
+The fixed storage (`NUMDUMMIES` slots) for the dummy objects: the map's dummy
+instances plus every far object that is converted into one. The shipped map
+already fills 2336 of the 2800 slots, so a conversion can fail when the pool is
+full. That is not an error: the object stays real and the next scan retries.
 
 ## Destructible object
 
@@ -284,7 +351,8 @@ keeps moving and WASD stays with the movement in every movement state
 (VICE-137). The photo camera keeps its stock stationary viewfinder, because the
 photograph reads its mode. `CCamera::GetSightOverlayMode` names the overlay the
 HUD draws: the sniper scope and the rocket sight draw theirs over the player
-camera, the plain sights need none because the raised weapon is the sight.
+camera, and the plain first person view draws the on-foot reticle of the aim
+(VICE-143), the same sprite the stock sight camera draws.
 
 ## Scope zoom
 
@@ -320,6 +388,26 @@ pulls in and the free aim fires along the camera instead of the stock sideways
 drive-by. Only the drive-by vehicles (car, bike, boat) and the drive-by weapon
 take it, and the bullets ignore the player's own car.
 
+## First person sights
+
+Aiming down the sights on foot in the first person view. The plain first person
+camera keeps the player moving (the M16 camera mode is the stock stationary
+aim). The sight predicate, `CCamera::UsingFirstPersonSights`, drives the sight
+zoom, the shot ray and the reticle together.
+## Aim pose
+
+The pose of the player's upper body while the sights are up: the weapon's fire
+animation held at its loop start, the way the stock third person aim holds it.
+On the player it drives only the upper body, so the arms and the torso hold the
+aim while the legs keep the movement animation, the sprint cycle included.
+
+## Partial association
+
+An animation association that layers over the movement animation instead of
+replacing it (`ASSOC_PARTIAL`). It drives the bones its keyframes cover; the
+bones it has no keys for keep the animation below it. The weapon fire, reload
+and fight animations are partials.
+
 ## Replay block
 
 One of the eight fixed buffers of `REPLAYBUFFERSIZE` (100000) bytes that hold
@@ -344,3 +432,33 @@ hover tilt or the road tilt, and the wheel scale. One row of `aWheelPoses` drive
 it, so the rear, mid, Dodo, tank and front wheels share one pass. A row keeps its
 own hover splash order: the two random arguments are drawn in the order the row
 lists them, and swapping a pair would shift the global random stream.
+
+## Scene-graph sync
+
+The librw pass that turns a frame hierarchy into world-space matrices. A frame
+is marked when something in its hierarchy was written. The pass (the walk) then
+recomputes the local-to-world matrix (LTM) of a frame only when the frame is
+marked, when its own matrix was written (the `CHANGED` flag), or when the LTM of
+its parent changed, and syncs the objects that hang on the frame only when its
+LTM changed. `Frame::syncDirty` runs the pass once for each camera begin-update,
+so the walk is part of the frame cost. Marking a frame whose matrices did not
+change costs a visit but no LTM work. See ADR 0014.
+## Triangle basis
+
+The per-triangle frame the sphere/triangle tests work in: the normalized first
+edge, the in-plane vector at right angles to it, and the third vertex's
+coordinates in that frame. It depends only on the triangle, so the collision
+model computes it once (VICE-121).
+
+## Broad phase
+
+The part of `ProcessColModels` that picks which of model B's triangles are
+worth the narrow phase's math. It appends the candidates in ascending triangle
+index order, because the narrow phase keeps the first of equal distances.
+
+## Acceleration tree
+
+A per-model binary tree over contiguous, ascending runs of triangles. Each node
+bounds its run; the broad phase descends only into the nodes the query sphere
+can reach. The model builds it lazily, on its first collision.
+>>>>>>> origin/refactor/collision-cost

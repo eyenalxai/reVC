@@ -27,10 +27,12 @@
 #include "PlayerSkin.h"
 #include "PlayerInfo.h"
 #include "World.h"
+#include "DrawDistance.h"
 #include "Renderer.h"
 #include "CdStream.h"
 #include "Radar.h"
 #include "Stats.h"
+#include "IniFile.h"
 #include "Messages.h"
 #include "FileLoader.h"
 #include "User.h"
@@ -60,11 +62,10 @@ const CRGBA SCROLLBAR_COLOR = LABEL_COLOR;
 #define SCROLLBAR_MAX_HEIGHT 263.0f // not in end result
 #define SCROLLABLE_PAGES
 
-// Draw distance slider. The maximum is four times the old maximum (4.0). The
-// value 4.0 keeps the old distances; 16.0 gives four times the old distances.
-#define DRAWDIST_MIN 0.925f
-#define DRAWDIST_MAX 16.0f
-#define DRAWDIST_RANGE (DRAWDIST_MAX - DRAWDIST_MIN)
+// Draw distance slider: its bounds are in DrawDistance.h (DRAWDIST_MIN, MAX,
+// RANGE) with the value the game ships with (DRAWDIST_DEFAULT), because the
+// settings registry, the ring and the old spawn distance key read the same
+// range.
 
 #define hasNativeList(screen) (screen == MENUPAGE_SKIN_SELECT || screen == MENUPAGE_KEYBOARD_CONTROLS)
 
@@ -746,6 +747,9 @@ CMenuManager::CheckSliderMovement(int value)
 			m_PrefsLOD -= DRAWDIST_RANGE / MENUSLIDER_LOGICAL_BARS;
 		m_PrefsLOD = Clamp(m_PrefsLOD, DRAWDIST_MIN, DRAWDIST_MAX);
 		CRenderer::ms_lodDistScale = m_PrefsLOD;
+		// The draw distance is the range of the traffic ring (TrafficRings.h),
+		// so the population caps follow it in the same frame.
+		CIniFile::ApplyPopulationCaps();
 		break;
 
 	// I wonder the idea behind clamping those max to 65
@@ -4818,7 +4822,7 @@ CMenuManager::ProcessUserInput(uint8 goDown, uint8 goUp, uint8 optionSelected, u
 					SaveSettings();
 				} else if (m_nCurrScreen == MENUPAGE_DISPLAY_SETTINGS) {
 					m_PrefsBrightness = 256;
-					m_PrefsLOD = 1.2f;
+					m_PrefsLOD = DRAWDIST_DEFAULT;
 #ifdef LEGACY_MENU_OPTIONS
 					m_PrefsVsync = true;
 #endif

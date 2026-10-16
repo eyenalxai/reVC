@@ -53,6 +53,13 @@ target_compile_definitions(${EXECUTABLE}
         CMAKE_NO_AUTOLINK
 )
 
+# VICE-129: librw's Matrix::CHANGED flag only exists when the sync patch was
+# applied (see the top level CMakeLists.txt and patches/librw-scene-sync.patch).
+if(REVC_LIBRW_PATCH_APPLIED)
+    target_compile_definitions(${EXECUTABLE} PRIVATE REVC_LIBRW_PATCH_APPLIED)
+    message(STATUS "reVC marks written RwMatrices (librw sync patch is in effect)")
+endif()
+
 if(LIBRW_PLATFORM_D3D9)
     target_compile_definitions(${EXECUTABLE}
         PUBLIC

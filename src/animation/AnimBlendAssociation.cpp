@@ -1,5 +1,6 @@
 #include "common.h"
 
+#include "Bones.h"
 #include "AnimBlendHierarchy.h"
 #include "AnimBlendClumpData.h"
 #include "RpAnimBlend.h"
@@ -107,6 +108,42 @@ CAnimBlendAssociation::SetBlend(float amount, float delta)
 {
 	blendAmount = amount;
 	blendDelta = delta;
+}
+
+// Whether a sequence drives one of the 8 lower body bones. Everything else,
+// a name-matched sequence (boneTag < 0) included, stays: the default keeps
+// the bones this list does not know, which is the safe side for the removal.
+static bool
+IsLowerBodyBone(int16 boneTag)
+{
+	if(boneTag < 0)
+		return false;
+	switch(boneTag){
+	case BONE_root:
+	case BONE_pelvis:
+	case BONE_l_thigh:
+	case BONE_l_calf:
+	case BONE_l_foot:
+	case BONE_r_thigh:
+	case BONE_r_calf:
+	case BONE_r_foot:
+		return true;
+	default:
+		return false;
+	}
+}
+
+// Keep only the sequences that drive the upper body. A partial association
+// whose data covers the whole body otherwise overrides the legs of the
+// movement animation it layers over; dropping the lower body keys leaves the
+// legs to that animation (VICE-141).
+void
+CAnimBlendAssociation::MakeUpperBodyOnly(void)
+{
+	int i;
+	for(i = 0; i < numNodes; i++)
+		if(nodes[i].sequence && IsLowerBodyBone(nodes[i].sequence->boneTag))
+			nodes[i].sequence = nil;
 }
 
 void

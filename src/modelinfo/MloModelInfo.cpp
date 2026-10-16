@@ -22,6 +22,7 @@ CMloModelInfo::ConstructClump()
 			RwFrame *newFrame = RwFrameCreate();
 			if (newAtomic != nil && newFrame != nil) {
 				*RwFrameGetMatrix(newFrame) = *attMat;
+				RwMatrixUpdate(RwFrameGetMatrix(newFrame));
 				RpAtomicSetFrame(newAtomic, newFrame);
 				RwFrameAddChild(mainFrame, newFrame);
 				RpClumpAddAtomic(m_clump, newAtomic);

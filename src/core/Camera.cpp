@@ -4333,11 +4333,13 @@ CCamera::UsingCarAds(void)
 	       Cams[ActiveCam].CamTargetEntity == (CEntity*)vehicle;
 }
 
-// The overlay a stock sight camera mode draws, if the mode has one
+// The overlay a stock sight camera mode draws, if the mode has one. The plain
+// first person view draws the on-foot reticle while the player aims (VICE-143).
 static int16
 SightOverlayOfMode(int16 mode)
 {
 	switch(mode){
+	case CCam::MODE_1STPERSON:
 	case CCam::MODE_SNIPER:
 	case CCam::MODE_ROCKETLAUNCHER:
 	case CCam::MODE_M16_1STPERSON:
@@ -4369,18 +4371,17 @@ CCamera::GetSightCameraMode(void)
 int16
 CCamera::GetSightOverlayMode(void)
 {
-	// The first person player camera draws the overlay of the sight it serves
-	// only where the sight needs one: the sniper scope and the rocket sight.
-	// The plain sights need none in that view, because the raised weapon is the
-	// sight itself, exactly as it is for the weapons the stock game gives no
-	// sight camera to.
+	// The first person player camera draws the overlay of the sight it serves.
+	// The sniper scope and the rocket sight draw their own; every other aim
+	// draws the on-foot reticle of the plain first person view (VICE-143), and
+	// the caller raises its flag only while the player aims.
 	if(FirstPersonViewEnabled() && Cams[ActiveCam].Mode == CCam::MODE_1STPERSON){
 		switch(PlayerWeaponMode.Mode){
 		case CCam::MODE_SNIPER:
 		case CCam::MODE_ROCKETLAUNCHER:
 			return PlayerWeaponMode.Mode;
 		default:
-			return CCam::MODE_NONE;
+			return CCam::MODE_1STPERSON;
 		}
 	}
 

@@ -46,6 +46,7 @@ CSimpleModelInfo::CreateInstance(RwMatrix *matrix)
 	atomic = RpAtomicClone(m_atomics[0]);
 	frame = RwFrameCreate();
 	*RwFrameGetMatrix(frame) = *matrix;
+	RwMatrixUpdate(RwFrameGetMatrix(frame));
 	RpAtomicSetFrame(atomic, frame);
 	return (RwObject*)atomic;
 }

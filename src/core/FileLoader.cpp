@@ -291,6 +291,11 @@ CFileLoader::LoadCollisionModel(uint8 *buf, CColModel &model, char *modelname)
 {
 	int i;
 
+	// This overwrites the geometry of model in place (the streaming reload
+	// path in CColStore::LoadCol), so the per-triangle caches that describe
+	// the old geometry must go first; they are rebuilt lazily. See VICE-121.
+	model.RemoveTrianglePlanes();
+
 	model.boundingSphere.radius = *(float*)(buf);
 	model.boundingSphere.center.x = *(float*)(buf+4);
 	model.boundingSphere.center.y = *(float*)(buf+8);

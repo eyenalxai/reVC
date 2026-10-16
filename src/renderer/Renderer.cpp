@@ -1,6 +1,7 @@
 #define WITHD3D
 #include "common.h"
 
+#include "DrawDistance.h"
 #include "main.h"
 #include "Lights.h"
 #include "ModelInfo.h"
@@ -72,7 +73,7 @@ CEntity *CRenderer::ms_aVisibleBuildingPtrs[NUMVISIBLEENTITIES];
 CVUVECTOR CRenderer::ms_vecCameraPosition;
 CVehicle *CRenderer::m_pFirstPersonVehicle;
 bool CRenderer::m_loadingPriority;
-float CRenderer::ms_lodDistScale = 1.2f;
+float CRenderer::ms_lodDistScale = DRAWDIST_DEFAULT;
 
 void
 CRenderer::Init(void)
@@ -311,7 +312,15 @@ CRenderer::RenderEverythingBarRoads(void)
 				gSortedVehiclesAndPeds.InsertSorted(ei);
 			}else{
 				if(!CVisibilityPlugins::InsertEntityIntoSortedList(e, (ms_vecCameraPosition - e->GetPosition()).Magnitude())){
-					printf("Ran out of space in alpha entity list");
+					// A full list only loses the alpha sort for this entity; it
+					// is drawn right away instead. Warn once: a per-frame
+					// message with no newline flooded the terminal at max
+					// density (VICE-134).
+					static bool alphaListFullWarned = false;
+					if(!alphaListFullWarned){
+						alphaListFullWarned = true;
+						printf("Ran out of space in alpha entity list\n");
+					}
 					RenderOneNonRoad(e);
 				}
 			}
