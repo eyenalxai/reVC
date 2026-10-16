@@ -432,6 +432,17 @@ CWeapon::Fire(CEntity *shooter, CVector *fireSource)
 				return true;
 			}
 
+			// AI peds keep the stock per-shot pump or bolt cycle for the
+			// weapons the active reload gave a magazine: they fired one
+			// round and paid the reload in the shipped weapon.dat, so they
+			// still do, whatever the clip now holds (VICE-87). The player's
+			// manual rule is above.
+			if (CWeaponInfo::IsActiveReloadMagazine(m_eWeaponType) && !UsesManualReload(shooter)) {
+				StartReload(shooter);
+
+				return true;
+			}
+
 			if ( addFireRateAsDelay )
 				m_nTimer = CTimer::GetTimeInMilliseconds() + GetInfo()->m_nFiringRate;
 			else
