@@ -135,9 +135,9 @@ how the budget is spent; it does not change the wheel list.
 The module that owns the player's horizontal velocity on foot:
 `CPlayerPed::UpdatePlayerMovement` in `src/peds/PlayerPed.cpp`. Every on-foot
 control path calls it, in both views. The camera sets the view position and the
-direction basis only. The player's speed comes from the input and the physics;
-the fight state, the attached states and the states that hold a blocking
-animation keep the animation driven movement.
+direction basis only. The controller targets the reference speed and owns the
+velocity; the fight state, the attached states and the states that hold a
+blocking animation keep the animation driven movement.
 
 ## Movement state
 
@@ -155,8 +155,11 @@ measured speeds and accelerations by 50.
 
 ## Reference speed
 
-The speed the current walk/run/sprint animation blend moves the ped at with the
-association speed 1.0. The controller targets it and scales the animation
+The ground speed of the walk, run and sprint animation blend the ped plays: the
+net root motion of each playing animation over one cycle, at the playback speed
+the state forces on it. The animations of the strafe, backward and weapon groups
+carry their own speeds, so the reference follows the direction the legs move in
+and the weapon the ped holds. The controller targets it and scales the animation
 playback by (real speed / reference speed), so the legs stay planted while the
 speed changes.
 
