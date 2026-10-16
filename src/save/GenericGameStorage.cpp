@@ -716,6 +716,8 @@ GetSaveType(char *savename)
 
 	uint32 size;
 	CFileMgr::Read(file, (char *)&size, sizeof(size));
+	if (size > sizeof(work_buff))
+		size = sizeof(work_buff);
 
 	uint8 *buf = work_buff;
 	CFileMgr::Read(file, (char *)work_buff, size); // simple vars + scripts
