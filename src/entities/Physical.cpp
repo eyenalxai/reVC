@@ -579,10 +579,22 @@ CPhysical::ApplyAirResistance(void)
 bool
 CPhysical::IsSoftHitEntity(CEntity *entity)
 {
-	if(entity == nil || entity->IsObject() || entity->IsPed())
+	// The recorded damage source can be deleted before the recorded impulse is
+	// consumed. A missing entity must keep the full hit.
+	if(entity == nil)
+		return false;
+	if(entity->IsObject() || entity->IsPed())
 		return true;
-	// A palm or a tree placed as a building counts as a prop once smashed.
+	// A palm or a tree placed as a building is soft like a prop.
 	return entity->IsBuilding() && IsVegetationModel(entity->GetModelIndex());
+}
+
+float
+CPhysical::SoftHitDamageScale(CEntity *entity)
+{
+	if(IsSoftHitEntity(entity))
+		return HIT_OBJECT_DAMAGE_PENALTY;
+	return 1.0f;
 }
 
 bool
@@ -1022,18 +1034,15 @@ CPhysical::ApplyCollisionAlt(CEntity *B, CColPoint &colpoint, float &impulse, CV
 			else
 				impulse = -(m_fElasticity + 1.0f) * normalSpeed * mass;
 
-			// A car barely slows on an object or a pedestrian. A palm or a
-			// tree it hits hard smashes and counts as a soft hit too; a real
-			// building still stops the car.
+			// A car barely slows on an object, a pedestrian or a vegetation
+			// building. A vegetation building breaks above the smash impulse;
+			// a real building still stops the car.
 			bool bSoftHit = false;
 			if(IsVehicle()){
-				if(B->IsBuilding()){
-					if(IsVegetationModel(B->GetModelIndex()) &&
-					   (impulse > VEGETATION_SMASH_IMPULSE || !B->bUsesCollision)){
-						if(B->bUsesCollision)
-							SmashVegetation(B);
-						bSoftHit = true;
-					}
+				if(B->IsBuilding() && IsVegetationModel(B->GetModelIndex())){
+					if(impulse > VEGETATION_SMASH_IMPULSE && B->bUsesCollision)
+						SmashVegetation(B);
+					bSoftHit = true;
 				}else
 					bSoftHit = IsSoftHitEntity(B);
 			}

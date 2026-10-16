@@ -444,7 +444,8 @@ CObject::ObjectDamage(float amount)
 		switch (m_nCollisionDamageEffect) {
 			case DAMAGE_EFFECT_CHANGE_MODEL:
 			case DAMAGE_EFFECT_CHANGE_THEN_SMASH: {
-				// The first hit only swaps to the damaged model, the next one smashes.
+				// Both effects swap to the damaged model on the first hit;
+				// the next hit falls through and smashes the object.
 				if (!bRenderDamaged) {
 					bRenderDamaged = true;
 					return;

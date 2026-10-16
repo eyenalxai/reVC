@@ -183,3 +183,20 @@ The caps stay below the pools.
 
 The fixed storage for the entities and their list nodes: pedestrians, vehicles,
 audio entities. A pool never grows; the caps keep the counts below it.
+
+## Destructible object
+
+An object (`CObject`) that breaks when it takes enough damage. Every model with
+an OBJECT.DAT row is destructible; a building is not.
+
+## Vegetation model
+
+A model whose name identifies it as a tree or a palm. A vegetation model without
+an OBJECT.DAT row spawns as a building; a vehicle that hits it breaks it like a
+prop.
+
+## Soft hit
+
+A vehicle collision with an object, a pedestrian, or a vegetation building. The
+vehicle's speed loss and collision damage from a soft hit are one tenth of the
+original values.

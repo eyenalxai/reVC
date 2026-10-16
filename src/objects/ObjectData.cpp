@@ -95,14 +95,12 @@ CObjectData::Initialise(const char *filename)
 #endif
 
 		// Modded object.dat files can be longer than the table. Stop at the
-		// limit instead of writing past it, and say once why the row was skipped.
-		sscanf(line, "%s", name);
-		if (id >= NUMOBJECTINFO) {
-			debug("CObjectData: %s has more than NUMOBJECTINFO (%d) rows, %s and the rest are skipped\n", filename, NUMOBJECTINFO, name);
+		// limit instead of writing past it.
+		if(id >= NUMOBJECTINFO){
+			debug("CObjectData: %s has more rows than NUMOBJECTINFO (%d), the rest is skipped\n", filename, NUMOBJECTINFO);
 			break;
 		}
 
-		assert(id < NUMOBJECTINFO);
 		sscanf(line, "%s %f %f %f %f %f %f %f %d %d %d", name,
 			&ms_aObjectInfo[id].m_fMass,
 			&ms_aObjectInfo[id].m_fTurnMass,

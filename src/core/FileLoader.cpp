@@ -702,6 +702,16 @@ SetModelInfoFlags(CSimpleModelInfo *mi, uint32 flags)
 	mi->m_isArtistGlass =	!!(flags & 0x400);
 }
 
+// Marks a model as vegetation when its name identifies it as a tree or a palm.
+// A vegetation building is soft to a vehicle hit and breaks above the smash
+// impulse.
+static void
+SetVegetationFlag(CSimpleModelInfo *mi, const char *name)
+{
+	if(IsVegetationModelName(name))
+		mi->m_isVegetation = true;
+}
+
 int
 CFileLoader::LoadObject(const char *line)
 {
@@ -739,8 +749,7 @@ CFileLoader::LoadObject(const char *line)
 
 	mi = CModelInfo::AddSimpleModel(id);
 	mi->SetModelName(model);
-	if(IsVegetationModelName(model))
-		mi->m_isVegetation = true;
+	SetVegetationFlag(mi, model);
 	mi->SetNumAtomics(numObjs);
 	mi->SetLodDistances(dist);
 	SetModelInfoFlags(mi, flags);
@@ -789,8 +798,7 @@ CFileLoader::LoadTimeObject(const char *line)
 
 	mi = CModelInfo::AddTimeModel(id);
 	mi->SetModelName(model);
-	if(IsVegetationModelName(model))
-		mi->m_isVegetation = true;
+	SetVegetationFlag(mi, model);
 	mi->SetNumAtomics(numObjs);
 	mi->SetLodDistances(dist);
 	SetModelInfoFlags(mi, flags);
