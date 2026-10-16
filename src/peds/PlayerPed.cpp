@@ -33,7 +33,8 @@
 // one unit per 1/50 second, so one engine unit is 50 units per second; the
 // accelerations and the friction below are 20 and 4 units per second squared.
 // The ground turns the direction almost as fast as the body turns toward it, so
-// the legs stay with the movement; the air steers with a small authority.
+// the ped keeps its speed through a turn and the legs stay with the movement;
+// the air steers with a small authority.
 #define PLAYER_GROUND_ACCEL		(20.0f / 50.0f)
 #define PLAYER_GROUND_FRICTION		(20.0f / 50.0f)
 #define PLAYER_GROUND_TURN_RATE		12.0f	// radians per second
@@ -1828,6 +1829,8 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed, bool bCanSprint)
 		// The walk angle picks the strafe animation groups
 		m_fWalkAngle = bFacingCamera ? padHeading : 0.0f;
 
+		// m_fMoveSpeed stays the pad ramp: it picks the walk/run/sprint blend,
+		// and SetRealMoveAnim scales the animation playback to the real speed
 		m_fMoveSpeed = Min(padMoveInGameUnit, m_fMoveSpeed + 0.07f * CTimer::GetTimeStep());
 	} else {
 		m_fMoveSpeed = 0.0f;
