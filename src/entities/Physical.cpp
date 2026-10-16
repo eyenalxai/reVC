@@ -577,6 +577,27 @@ CPhysical::ApplyAirResistance(void)
 }
 
 bool
+CPhysical::IsSoftHitEntity(CEntity *entity)
+{
+	// The recorded damage source can be deleted before the recorded impulse is
+	// consumed. A missing entity must keep the full hit.
+	if(entity == nil)
+		return false;
+	if(entity->IsObject() || entity->IsPed())
+		return true;
+	// A palm or a tree placed as a building is soft like a prop.
+	return entity->IsBuilding() && IsVegetationModel(entity->GetModelIndex());
+}
+
+float
+CPhysical::SoftHitDamageScale(CEntity *entity)
+{
+	if(IsSoftHitEntity(entity))
+		return HIT_OBJECT_DAMAGE_PENALTY;
+	return 1.0f;
+}
+
+bool
 CPhysical::ApplyCollision(CPhysical *B, CColPoint &colpoint, float &impulseA, float &impulseB)
 {
 	float eA, eB;
@@ -663,8 +684,12 @@ CPhysical::ApplyCollision(CPhysical *B, CColPoint &colpoint, float &impulseA, fl
 						Bobj->ObjectDamage(impulseA);
 						if(!B->bUsesCollision){
 							if(!A->bInfiniteMass){
-								A->ApplyMoveForce(colpoint.normal*0.2f*impulseA);
-								A->ApplyTurnForce(colpoint.normal*0.2f*impulseA, pointposA);
+								CVector f = colpoint.normal*0.2f*impulseA;
+								// A car keeps its speed when the prop breaks.
+								if(A->IsVehicle())
+									f *= HIT_OBJECT_SPEED_PENALTY;
+								A->ApplyMoveForce(f);
+								A->ApplyTurnForce(f, pointposA);
 							}
 							return false;
 						}
@@ -691,6 +716,9 @@ CPhysical::ApplyCollision(CPhysical *B, CColPoint &colpoint, float &impulseA, fl
 						CVector f = colpoint.GetNormal() * impulseA;
 						if(A->IsVehicle() && colpoint.normal.z < 0.7f)
 							f.z *= 0.3f;
+						// A car barely slows on an object it cannot uproot.
+						if(A->IsVehicle())
+							f *= HIT_OBJECT_SPEED_PENALTY;
 						if(!A->bInfiniteMass){
 							A->ApplyMoveForce(f);
 							if(!A->IsVehicle() || !CWorld::bNoMoreCollisionTorque)
@@ -810,6 +838,10 @@ CPhysical::ApplyCollision(CPhysical *B, CColPoint &colpoint, float &impulseA, fl
 			impulseB = -(eB - speedB) * mB;
 			CVector fA = colpoint.normal*(impulseA/massFactorA);
 			CVector fB = colpoint.normal*(-impulseB/massFactorB);
+			// A car barely slows when it hits a pedestrian; the pedestrian
+			// keeps its own reply.
+			if(A->IsVehicle() && IsSoftHitEntity(B))
+				fA *= HIT_OBJECT_SPEED_PENALTY;
 			if(!A->bInfiniteMass && !ispedcontactA){
 				if(fA.z < 0.0f) fA.z = 0.0f;
 				A->ApplyMoveForce(fA);
@@ -850,6 +882,9 @@ CPhysical::ApplyCollision(CPhysical *B, CColPoint &colpoint, float &impulseA, fl
 			impulseB = -(eB - speedB) * mB;
 			CVector fA = colpoint.normal*(impulseA/massFactorA);
 			CVector fB = colpoint.normal*(-impulseB/massFactorB);
+			// A car barely slows on a moving prop; a vehicle keeps its reply.
+			if(A->IsVehicle() && IsSoftHitEntity(B))
+				fA *= HIT_OBJECT_SPEED_PENALTY;
 			if(A->IsVehicle() && !A->bHasHitWall){
 				fA.x *= 1.4f;
 				fA.y *= 1.4f;
@@ -999,8 +1034,23 @@ CPhysical::ApplyCollisionAlt(CEntity *B, CColPoint &colpoint, float &impulse, CV
 			else
 				impulse = -(m_fElasticity + 1.0f) * normalSpeed * mass;
 
+			// A car barely slows on an object, a pedestrian or a vegetation
+			// building. A vegetation building breaks above the smash impulse;
+			// a real building still stops the car.
+			bool bSoftHit = false;
+			if(IsVehicle()){
+				if(B->IsBuilding() && IsVegetationModel(B->GetModelIndex())){
+					if(impulse > VEGETATION_SMASH_IMPULSE && B->bUsesCollision)
+						SmashVegetation(B);
+					bSoftHit = true;
+				}else
+					bSoftHit = IsSoftHitEntity(B);
+			}
+
 			// ApplyMoveForce
 			vImpulse = colpoint.normal*impulse;
+			if(bSoftHit)
+				vImpulse *= HIT_OBJECT_SPEED_PENALTY;
 			if(IsVehicle()){
 				if(!bHasHitWall ||
 				   !(m_vecMoveSpeed.MagnitudeSqr() > 0.1 || !(B->IsBuilding() || ((CPhysical*)B)->bInfiniteMass)))
