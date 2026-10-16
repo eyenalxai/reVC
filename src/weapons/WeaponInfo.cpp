@@ -105,10 +105,13 @@ CWeaponInfo::GetWeaponInfo(eWeaponType weaponType)
 	return &aWeaponInfo[weaponType];
 }
 
-// The magazine follow-up of the active reload (spec VICE-85). weapon.dat is
-// not in the repository, so the new values ship as this table, applied after
-// the parse. With the ActiveReload feature off the table does not run and
-// the shipped weapon.dat behavior stays untouched.
+// The magazine rework of the active reload follow-up (spec VICE-85). weapon.dat
+// is not in the repository, so the new values ship as this table, applied after
+// the parse. The table is a weapon rework and always runs: the ActiveReload
+// toggle governs only the mechanics of the feature (the player's manual
+// reload, the window, the abort, the voice and the vehicle manual reload).
+// With the toggle off the player's shotgun still reloads one round per firing
+// cycle, like the shipped one-round weapon.
 struct ActiveReloadWeaponData
 {
 	eWeaponType type;
@@ -177,10 +180,9 @@ CWeaponInfo::Initialise(void)
 	}
 	debug("Loading weapon data...\n");
 	LoadWeaponData();
-	// The ini is read before the game starts, so the follow-up data follows
-	// the toggle: off means the stock one-round weapons.
-	if (gActiveReloadEnabled)
-		ApplyActiveReloadWeaponData();
+	// The magazine rework always applies; the ActiveReload toggle only turns
+	// the mechanics of the feature on and off.
+	ApplyActiveReloadWeaponData();
 	debug("CWeaponInfo ready\n");
 }
 

@@ -64,12 +64,15 @@ public:
 
 	static void Initialise(void);
 	static void LoadWeaponData(void);
-	// The magazine follow-up of the active reload (VICE-85): weapon.dat is
-	// not in the repository, so the new clip sizes, the sniper's bolt cycle
-	// and the reload flag of the two shotguns ship as this override.
+	// The magazine rework of the active reload follow-up (VICE-85):
+	// weapon.dat is not in the repository, so the new clip sizes, the
+	// sniper's bolt cycle and the reload flag of the two shotguns ship as
+	// this override. It always applies; the ActiveReload toggle governs the
+	// mechanics of the feature only.
 	static void ApplyActiveReloadWeaponData(void);
-	// True for the weapons that override gave a magazine. AI shooters keep
-	// the stock per-shot pump or bolt cycle for them (VICE-87).
+	// True for the three weapons the rework gave a magazine. AI shooters
+	// keep the stock per-shot pump or bolt cycle for them, whatever the
+	// ActiveReload toggle says (VICE-87).
 	static bool IsActiveReloadMagazine(eWeaponType weaponType);
 	static CWeaponInfo *GetWeaponInfo(eWeaponType weaponType);
 	static eWeaponFire FindWeaponFireType(char *name);

@@ -432,11 +432,11 @@ CWeapon::Fire(CEntity *shooter, CVector *fireSource)
 				return true;
 			}
 
-			// AI peds keep the stock per-shot pump or bolt cycle for the
-			// weapons the active reload gave a magazine: they fired one
-			// round and paid the reload in the shipped weapon.dat, so they
-			// still do, whatever the clip now holds (VICE-87). The player's
-			// manual rule is above.
+			// The reworked magazine weapons keep the stock per-shot pump or
+			// bolt cycle: their shooter fired one round and paid the reload
+			// in the shipped weapon.dat, so it still does, whatever the clip
+			// holds (VICE-87). The player's manual rule is above; with the
+			// feature off the player keeps the same one-round cycle.
 			if (CWeaponInfo::IsActiveReloadMagazine(m_eWeaponType) && !UsesManualReload(shooter)) {
 				StartReload(shooter);
 
@@ -499,19 +499,20 @@ CWeapon::FireFromCar(CVehicle *shooter, bool left, bool right)
 			if ( m_nAmmoTotal == 0 )
 				return true;
 
-			// The driver, not the vehicle, is the shooter of the reload: the
-			// fast-reload speed and the active reload window belong to the
-			// player, and the player's magazine weapons never refill on their
-			// own in a car (VICE-90). A vehicle without a driver keeps the
-			// stock path.
-			CPed *driver = shooter->pDriver;
+			// The driver, not the vehicle, is the reloader: the fast-reload
+			// speed and the active reload window belong to the player, and
+			// the player's magazine weapons never refill on their own in a
+			// car (VICE-90). A vehicle without a driver keeps the stock path.
+			CEntity *reloader = shooter;
+			if (shooter->pDriver)
+				reloader = shooter->pDriver;
 
-			if (driver && UsesManualReload(driver)) {
+			if (UsesManualReload(reloader)) {
 				m_eWeaponState = WEAPONSTATE_READY;
 				return true;
 			}
 
-			StartReload(driver ? (CEntity*)driver : (CEntity*)shooter);
+			StartReload(reloader);
 
 			return true;
 		}
@@ -520,6 +521,21 @@ CWeapon::FireFromCar(CVehicle *shooter, bool left, bool right)
 	}
 
 	return true;
+}
+
+// The drive-by fire attempt of the vehicle callers. The 70 ms drive-by
+// cadence belongs to a real shot, so the timer is written only when the state
+// became FIRING: a failed shot attempt, an empty clip and a started reload
+// leave the timer alone, and the write can never shorten a reload (VICE-90).
+void
+CWeapon::FireFromCarWithCadence(CVehicle *shooter, bool left, bool right)
+{
+	eWeaponState stateBefore = m_eWeaponState;
+
+	FireFromCar(shooter, left, right);
+
+	if (stateBefore != WEAPONSTATE_FIRING && m_eWeaponState == WEAPONSTATE_FIRING)
+		m_nTimer = CTimer::GetTimeInMilliseconds() + 70;
 }
 
 bool

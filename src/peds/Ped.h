@@ -690,6 +690,9 @@ public:
 	// reloadAnimAssoc: the association the caller already holds, or nil to
 	// look it up. Returns true when the caller must not continue the attack.
 	bool TryStartReloadAnimation(CAnimBlendAssociation *reloadAnimAssoc = nil);
+	// The reload association that runs on this ped: the reload slot first,
+	// then the crouch variant (VICE-88). nil when none runs.
+	CAnimBlendAssociation *GetRunningReloadAnimation(CWeaponInfo *weapon);
 	// Fades out a running reload animation: a perfect reload ended the timer
 	// early, and the fade lets the finish callback restore the pose
 	// (VICE-88). A no-op without a reload animation.

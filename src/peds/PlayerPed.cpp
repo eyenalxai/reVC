@@ -856,6 +856,8 @@ CPlayerPed::ProcessActiveReloadInput(CPad *padUsed)
 void
 CPlayerPed::ProcessActiveReload(CPad *padUsed)
 {
+	CWeapon *weapon = GetWeapon();
+
 	ProcessActiveReloadInput(padUsed);
 
 	// Attack() starts the animation for the player who reloads in a fight;
@@ -864,7 +866,7 @@ CPlayerPed::ProcessActiveReload(CPad *padUsed)
 	// reload flag the stock code skips the animation completely, and the
 	// helper's side effects must not run every frame, so no per-frame attempt
 	// is made then.
-	if (GetWeapon()->m_eWeaponState == WEAPONSTATE_RELOADING
+	if (weapon->m_eWeaponState == WEAPONSTATE_RELOADING
 		&& !CWorld::Players[CWorld::PlayerInFocus].m_bFastReload
 		&& ActiveReload::ClaimReloadAnimation())
 		TryStartReloadAnimation();

@@ -3953,13 +3953,8 @@ CAutomobile::DoDriveByShootings(void)
 		}
 
 		if (!anim || !anim->IsRunning()) {
-			if (CPad::GetPad(0)->GetCarGunFired() && CTimer::GetTimeInMilliseconds() > weapon->m_nTimer) {
-				weapon->FireFromCar(this, lookingLeft, true);
-				// A fired last round can start a reload; the 70 ms drive-by
-				// cadence must not clobber its timer (VICE-90).
-				if (weapon->m_eWeaponState != WEAPONSTATE_RELOADING)
-					weapon->m_nTimer = CTimer::GetTimeInMilliseconds() + 70;
-			}
+			if (CPad::GetPad(0)->GetCarGunFired() && CTimer::GetTimeInMilliseconds() > weapon->m_nTimer)
+				weapon->FireFromCarWithCadence(this, lookingLeft, true);
 		}
 	}else{
 		// The stock code refills the clip while the player does not aim.

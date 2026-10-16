@@ -101,22 +101,6 @@ ActiveReload::Start(eWeaponType weaponType, uint32 duration)
 	ResetResult();
 }
 
-// The lines the protagonist says on a judgment: the cocky shooting line on a
-// perfect reload and the annoyed line on a jam (VICE-89). Both are existing
-// player comment samples; CPed::Say applies the game's own cooldowns.
-static void
-SayJudgment(eActiveReloadResult result)
-{
-	CPed *player = FindPlayerPed();
-	if (player == nil)
-		return;
-
-	if (result == ACTIVE_RELOAD_PERFECT)
-		player->Say(SOUND_PED_ON_FIRE);
-	else if (result == ACTIVE_RELOAD_JAM)
-		player->Say(SOUND_PED_ANNOYED_DRIVER);
-}
-
 void
 ActiveReload::Judge(CWeapon *weapon)
 {
@@ -126,23 +110,28 @@ ActiveReload::Judge(CWeapon *weapon)
 	if (weapon == nil || weapon->m_eWeaponType != ms_eWeaponType || weapon->m_eWeaponState != WEAPONSTATE_RELOADING)
 		return;
 
+	CPed *player = FindPlayerPed();
 	uint32 now = CTimer::GetTimeInMilliseconds();
 
 	if (now < ms_nWindowStart) {
-		// Too soon: the reload is jammed and takes half the base time more.
+		// Too soon: the reload is jammed and takes half the base time more,
+		// and the protagonist makes the annoyed line (VICE-89).
 		weapon->m_nTimer += (uint32)(ms_nDuration*ACTIVE_RELOAD_JAM_FRACTION);
 		ms_bJudged = true;
 		ms_eResult = ACTIVE_RELOAD_JAM;
 		ms_nResultTime = now;
-		SayJudgment(ACTIVE_RELOAD_JAM);
+		if (player)
+			player->Say(SOUND_PED_ANNOYED_DRIVER);
 	} else if (now <= ms_nWindowEnd) {
-		// In the window: the reload finishes almost at once.
+		// In the window: the reload finishes almost at once, and the
+		// protagonist makes the cocky shooting line (VICE-89).
 		weapon->m_nTimer = now + ACTIVE_RELOAD_PERFECT_TAIL_MS;
 		ms_bJudged = true;
 		ms_eResult = ACTIVE_RELOAD_PERFECT;
 		ms_nResultTime = now;
 		ms_bPerfect = true;
-		SayJudgment(ACTIVE_RELOAD_PERFECT);
+		if (player)
+			player->Say(SOUND_PED_ON_FIRE);
 	}
 	// Later presses and presses after the window do nothing.
 }
