@@ -218,7 +218,13 @@ NEAR_BUBBLE = [
 # The "in reach" row is the acceptance gauge: the far cars inside the player's
 # reach after a frame, which must stay 0. The updates are the cars the stagger
 # moved (about a third of the layer a frame); the attempts are the frames that
-# tried to create (each attempt tries up to two sites).
+# tried to create (each attempt tries up to two sites). Since VICE-133 the
+# stagger's simulation runs on the layer's worker thread: the worker cycles row
+# is its cycles (the rate is the row over the elapsed wall time), the worker lost
+# row counts every time the worker's list and the layer's disagreed about a car
+# (a command it could not apply, or a pose whose slot did not match) and must
+# stay 0, and the short curves row counts the pick's clamped curves (the
+# engine's old "fout" case, which the worker counts instead of printing).
 FAR_TRAFFIC = [
     ("far: cars",                    "_ZN11CFarTraffic18ms_nFarTrafficCarsE",           "I"),
     ("far: cap",                     "_ZN11CFarTraffic17ms_nFarTrafficCapE",            "I"),
@@ -233,6 +239,9 @@ FAR_TRAFFIC = [
     ("far: refused pool",            "_ZN11CFarTraffic25ms_nFarTrafficRefusedPoolE",    "I"),
     ("far: attempts",                "_ZN11CFarTraffic22ms_nFarTrafficAttemptsE",       "I"),
     ("far: updates (stagger)",       "_ZN11CFarTraffic21ms_nFarTrafficUpdatesE",        "I"),
+    ("far: worker cycles",           "_ZN11CFarTraffic26ms_nFarTrafficWorkerCyclesE",   "I"),
+    ("far: worker lost (must be 0)", "_ZN11CFarTraffic24ms_nFarTrafficWorkerLostE",     "I"),
+    ("far: short curves",            "_ZN11CFarTraffic25ms_nFarTrafficShortCurvesE",    "I"),
 ]
 
 CONFIG = "src/core/config.h"
@@ -454,6 +463,15 @@ def main():
     if far_updates is not None:
         print(f"  the far layer: the stagger moved {far_updates} cars so far "
               f"(about a third of the layer a frame)")
+    far_cycles = values.get("far worker cycles")
+    far_lost = values.get("far worker lost (must be 0)")
+    if far_cycles is not None:
+        print(f"  the far layer: the worker ran {far_cycles} cycles "
+              f"(the rate is the row over the elapsed time)")
+    if far_lost is not None:
+        verdict = "PASS" if far_lost == 0 else "FAIL"
+        print(f"  the far layer: the worker and the layer disagreed about {far_lost} "
+              f"cars -> {verdict}")
 
 
 if __name__ == "__main__":

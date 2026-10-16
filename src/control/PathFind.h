@@ -2,11 +2,11 @@
 #define __GTA_PATHFIND_H__
 
 #include "Treadable.h"
+#include "CarOnRails.h"	/* LANE_WIDTH: the lane spacing the rails measure with */
 
 class CVehicle;
 class CPtrList;
 
-#define LANE_WIDTH 5.0f
 #define WIDTH_TO_PED_NODE_WIDTH (31.f/(500.f * 8.f))
 
 enum
@@ -232,6 +232,12 @@ public:
 	int16 m_numConnections;
 	int32 m_numCarPathLinks;
 	int32 unk;
+	/* VICE-133: the node flags (bDisabled, bBetweenLevels) are the only part
+	 * of the graph that moves after PreparePathData - the script's road
+	 * toggles and a save load. The far traffic layer's worker reads a copy of
+	 * them, so every writer bumps this version and the layer re-reads the
+	 * flags when it moved. The other fields of the graph never change. */
+	uint32 m_nodeFlagsVersion = 0;
 	uint8 m_numGroups[2];
 	CPathNode m_searchNodes[512];
 

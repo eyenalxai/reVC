@@ -36,10 +36,14 @@
  *
  * The far layer moves the car itself: along the path nodes with the same curve
  * arithmetic the on-rails simple car uses (the shared core of
- * CCarCtrl::UpdateCarOnRails), on a stagger, and the alpha reveal of a creation
- * (VICE-127) is stepped by the same update. All of it is arithmetic on the
- * car's own matrix: the layer touches no collision query, no sector scan, no
- * path search, no physics.
+ * CCarCtrl::UpdateCarOnRails, one copy of the rules in CarOnRails.h), on a
+ * stagger, and the alpha reveal of a creation (VICE-127) is stepped by the same
+ * update. All of it is arithmetic on the car's own matrix: the layer touches no
+ * collision query, no sector scan, no path search, no physics. Since VICE-133
+ * the arithmetic runs on the layer's worker thread (FarTrafficWorker.h) and
+ * this file writes the poses it publishes; the rules are the same on both sides
+ * of that boundary, and the boundary's contract is the worker header's first
+ * comment.
  *
  * The band
  * --------
@@ -195,6 +199,12 @@
  *					the driver of a promotion)
  *	ms_nFarTrafficAttempts		the creation attempts
  *	ms_nFarTrafficUpdates		the car updates of the stagger (the cost)
+ *	ms_nFarTrafficWorkerCycles	the worker's cycles (VICE-133)
+ *	ms_nFarTrafficWorkerLost	the boundary faults (a command or a pose the
+ *					cycle and the list disagreed about): must
+ *					stay 0
+ *	ms_nFarTrafficShortCurves	the pick's clamped curves (the engine's
+ *					"fout" case, counted instead of printed)
  *
  * The first four are the ticket's counters (the cap holds, the layer's churn);
  * the refusals split by cause so a live reading says why a road stays bare: an
@@ -202,6 +212,12 @@
  * is the second acceptance row next to the near bubble's two frustum counters:
  * it counts the cars that a frame of the layer left far where the player could
  * reach them, which the safety promotion of the switches makes impossible.
+ *
+ * Since VICE-133 the simulation of the stagger runs on a worker thread
+ * (FarTrafficWorker.h): the frame's own work is the applicator - the gate pass,
+ * the creations, the removals and the writing of the poses the worker
+ * published - and the worker's rows are the three above. The layer's rules are
+ * the same on both sides of the boundary: the worker only computes.
  *
  * No engine header is included here. The evidence program in utils/far-traffic
  * reads the band, the cap, the switches and the counters from this header
@@ -262,6 +278,19 @@ class CVector;
  * near spawner reads. */
 #define FAR_TRAFFIC_POOL_RESERVE	16
 #define FAR_TRAFFIC_PROMOTION_PEDS	2
+
+/* The simulation's home (VICE-133): 1 runs the layer's per-car simulation on
+ * the worker thread (FarTrafficWorker.h), 0 runs the same cycle inline on the
+ * main thread - the two paths are one implementation, so this constant only
+ * decides where it runs, and the evidence program measures both. The default is
+ * the measurement's: the worker's handshake costs about a microsecond of the
+ * main thread a frame while the simulation it takes off the frame is
+ * proportional to the cap (0.4-0.6 us at the current 64, several times that at
+ * the margins VICE-132 asks about), so the boundary pays for itself at the
+ * bigger layers and breaks even at this one - the same outcome the ticket's
+ * escape hatch describes. The switch exists so the owner can put the layer back
+ * on the frame thread with one edit if a future measurement says so. */
+#define FAR_TRAFFIC_WORKER		1
 
 /* The band of one frame. `known` is set once the time cycle has a far clip (a
  * visible range of zero is the boot path); `active` is the whole band: an
@@ -413,9 +442,39 @@ class CFarTraffic
 {
 public:
 	/* One frame of the layer: the gate pass (the switches), the creation
-	 * attempts, the staggered update. Called from the car block of
-	 * CGame::Process, after the near cull. */
+	 * attempts, the stagger, and - since VICE-133 - the application of the
+	 * poses the worker's simulation published, plus the frame's own cycle for
+	 * the worker. Called from the car block of CGame::Process, after the near
+	 * cull. */
 	static void Process(void);
+
+	/* The worker's boundary (VICE-133). `JoinWorker` runs at the top of
+	 * CGame::Process, before CWorld::Process: the worker's cycle is complete
+	 * and its output is published, so the worker is idle for the rest of the
+	 * frame (a debug build asserts it in CWorld::Process and RenderScene).
+	 * `RunWorker` runs at the end of the frame, after the render: the cycle
+	 * the applicator stamped is handed to the worker (or run inline). The two
+	 * are the whole of the worker's schedule; the contract, the double buffer
+	 * and the frame's order are in FarTrafficWorker.h. */
+	static void JoinWorker(void);
+	static void RunWorker(void);
+
+	/* A debug build's audit of the same window (VICE-133): the worker is not
+	 * inside a cycle. CWorld::Process and RenderScene assert it; a release
+	 * build compiles the call away. */
+	static void AssertWorkerIdle(void);
+
+	/* The path snapshot the worker's simulation reads (VICE-133): a copy of the
+	 * graph's nodes, links and connections, taken once, on the main thread,
+	 * right after ThePaths.PreparePathData (and BuildNodeGrid) in
+	 * CGame::Initialise. The script's road toggles and a save load are copied
+	 * over later by the applicator, when the graph's own flag version moves. */
+	static void BuildWorldSnapshot(void);
+
+	/* The worker thread's end: CGame::ShutDown joins it (it sleeps between
+	 * cycles, so the join is immediate) and the next Initialise starts a fresh
+	 * one with a fresh snapshot. */
+	static void ShutDown(void);
 
 	/* The near cull found a traffic car it is about to remove (out of the
 	 * bubble, hidden, past the grace): the layer takes it over as a far car
@@ -443,6 +502,15 @@ public:
 	static unsigned int ms_nFarTrafficRefusedPool;
 	static unsigned int ms_nFarTrafficAttempts;
 	static unsigned int ms_nFarTrafficUpdates;
+
+	/* The worker's own rows (VICE-133): the cycles it ran (the rate is this
+	 * over the elapsed time), the boundary faults (a command or a pose the
+	 * cycle and the layer's list disagreed about: must stay 0), and the pick's
+	 * clamped curves (the engine's own "fout" diagnostic, counted instead of
+	 * printed on the worker thread). */
+	static unsigned int ms_nFarTrafficWorkerCycles;
+	static unsigned int ms_nFarTrafficWorkerLost;
+	static unsigned int ms_nFarTrafficShortCurves;
 };
 
 #endif // __GTA_FARTRAFFIC_H__
