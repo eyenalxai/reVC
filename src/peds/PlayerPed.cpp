@@ -1159,7 +1159,7 @@ CPlayerPed::KeepAreaAroundPlayerClear(void)
 
 					veh->AutoPilot.m_nTimeTempAction = CTimer::GetTimeInMilliseconds() + 2000;
 				}
-				CCarCtrl::PossiblyRemoveVehicle(veh);
+				CCarCtrl::PossiblyRemoveVehicle(veh, FindPlayerCentreOfWorld(CWorld::PlayerInFocus));
 			}
 		}
 	}

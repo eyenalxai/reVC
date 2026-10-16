@@ -123,21 +123,22 @@ CReferences::PruneAllReferencesInWorld(void)
 	i = CPools::GetPedPool()->GetSize();
 	while(--i >= 0){
 		e = CPools::GetPedPool()->GetSlot(i);
-		if(e)
+		// An entity with no references has nothing to prune.
+		if(e && e->m_pFirstReference)
 			e->PruneReferences();
 	}
 
 	i = CPools::GetVehiclePool()->GetSize();
 	while(--i >= 0){
 		e = CPools::GetVehiclePool()->GetSlot(i);
-		if(e)
+		if(e && e->m_pFirstReference)
 			e->PruneReferences();
 	}
 
 	i = CPools::GetObjectPool()->GetSize();
 	while(--i >= 0){
 		e = CPools::GetObjectPool()->GetSlot(i);
-		if(e)
+		if(e && e->m_pFirstReference)
 			e->PruneReferences();
 	}
 }

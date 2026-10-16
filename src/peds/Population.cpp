@@ -1088,6 +1088,9 @@ CPopulation::ManagePopulation(void)
 	}
 
 	int pedPoolSize = CPools::GetPedPool()->GetSize();
+	// The multiplier only follows the player's vehicle speed and nothing in the
+	// loop below writes the player's vehicle, so one read covers the whole scan.
+	float pedCreationDistMultiplier = PedCreationDistMultiplier();
 #ifndef SQUEEZE_PERFORMANCE
 	for (int poolIndex = pedPoolSize-1; poolIndex >= 0; poolIndex--) {
 #else
@@ -1114,12 +1117,12 @@ CPopulation::ManagePopulation(void)
 			else if (ped->bDeadPedInFrontOfCar && ped->m_vehicleInAccident)
 				dist = 0.0f;
 
-			if (PedCreationDistMultiplier() * (PED_REMOVE_DIST_SPECIAL * TheCamera.GenerationDistMultiplier) < dist ||
-				(!ped->bCullExtraFarAway && PedCreationDistMultiplier() * PED_REMOVE_DIST * TheCamera.GenerationDistMultiplier < dist)) {
+			if (pedCreationDistMultiplier * (PED_REMOVE_DIST_SPECIAL * TheCamera.GenerationDistMultiplier) < dist ||
+				(!ped->bCullExtraFarAway && pedCreationDistMultiplier * PED_REMOVE_DIST * TheCamera.GenerationDistMultiplier < dist)) {
 				pedIsFarAway = true;
 			}
 #ifndef EXTENDED_OFFSCREEN_DESPAWN_RANGE
-			else if (PedCreationDistMultiplier() * (MIN_CREATION_DIST + CREATION_RANGE) * OFFSCREEN_CREATION_MULT < dist) {
+			else if (pedCreationDistMultiplier * (MIN_CREATION_DIST + CREATION_RANGE) * OFFSCREEN_CREATION_MULT < dist) {
 				if (CTimer::GetTimeInMilliseconds() > ped->m_nExtendedRangeTimer && !ped->GetIsOnScreen()) {
 					if (TheCamera.Cams[TheCamera.ActiveCam].Mode != CCam::MODE_SNIPER
 						&& TheCamera.Cams[TheCamera.ActiveCam].Mode != CCam::MODE_SNIPER_RUNABOUT
