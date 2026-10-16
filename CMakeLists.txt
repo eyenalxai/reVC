@@ -196,6 +196,7 @@ if(DEFINED LIBRW_PLATFORM)
     set("LIBRW_PLATFORM_${LIBRW_PLATFORM}" ON)
 endif()
 
+# The historical define name is kept on purpose: src/skel/glfw/glfw.cpp tests it.
 option(GET_KEYBOARD_INPUT_FROM_X11 "Read the raw keyboard input from X11 (GLFW on Linux)" OFF)
 
 option(${PROJECT}_INSTALL "Install ${EXECUTABLE} to the install prefix" OFF)

@@ -149,15 +149,15 @@ if(${PROJECT}_DISABLE_WARNINGS)
 endif()
 
 if(${PROJECT}_WITH_SANITIZERS)
-    set(${PROJECT}_SANITIZERS "undefined,float-divide-by-zero")
+    set(revc_sanitizers "undefined,float-divide-by-zero")
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         # GCC has no integer/implicit-conversion/local-bounds/nullability checks.
-        set(${PROJECT}_SANITIZERS "${${PROJECT}_SANITIZERS},integer,implicit-conversion,implicit-integer-truncation,implicit-integer-arithmetic-value-change,local-bounds,nullability")
+        set(revc_sanitizers "${revc_sanitizers},integer,implicit-conversion,implicit-integer-truncation,implicit-integer-arithmetic-value-change,local-bounds,nullability")
     endif()
     target_compile_options(${EXECUTABLE} PUBLIC
-            -fsanitize=${${PROJECT}_SANITIZERS}
+            -fsanitize=${revc_sanitizers}
             -g3 -fno-omit-frame-pointer)
-    target_link_options(${EXECUTABLE} PUBLIC -fsanitize=${${PROJECT}_SANITIZERS})
+    target_link_options(${EXECUTABLE} PUBLIC -fsanitize=${revc_sanitizers})
 endif()
 
 if(${PROJECT}_WITH_ASAN)
@@ -210,21 +210,25 @@ else()
     set(${PROJECT}_C_CXX_EXTENSIONS OFF)
 endif()
 
-if(LIBRW_PLATFORM_GL3 AND LIBRW_GL3_GFXLIB STREQUAL "GLFW" AND GET_KEYBOARD_INPUT_FROM_X11)
-	include(CheckSymbolExists)
+if(GET_KEYBOARD_INPUT_FROM_X11)
+	if(LIBRW_PLATFORM_GL3 AND LIBRW_GL3_GFXLIB STREQUAL "GLFW")
+		include(CheckSymbolExists)
 
-	set(CMAKE_REQUIRED_LIBRARIES glfw)
-	set(CMAKE_REQUIRED_DEFINITIONS -DGLFW_EXPOSE_NATIVE_X11)
-	check_symbol_exists(glfwGetX11Display "GLFW/glfw3.h;GLFW/glfw3native.h" GLFW_HAS_X11)
-	unset(CMAKE_REQUIRED_DEFINITIONS)
-	unset(CMAKE_REQUIRED_LIBRARIES)
+		set(CMAKE_REQUIRED_LIBRARIES glfw)
+		set(CMAKE_REQUIRED_DEFINITIONS -DGLFW_EXPOSE_NATIVE_X11)
+		check_symbol_exists(glfwGetX11Display "GLFW/glfw3.h;GLFW/glfw3native.h" GLFW_HAS_X11)
+		unset(CMAKE_REQUIRED_DEFINITIONS)
+		unset(CMAKE_REQUIRED_LIBRARIES)
 
-	if (NOT GLFW_HAS_X11)
-		message(FATAL_ERROR "GET_KEYBOARD_INPUT_FROM_X11 needs the X11 headers and glfwGetX11Display")
-	endif (NOT GLFW_HAS_X11)
-	find_package(X11 REQUIRED)
-	target_link_libraries(${EXECUTABLE} PRIVATE X11::X11)
-	target_compile_definitions(${EXECUTABLE} PRIVATE GET_KEYBOARD_INPUT_FROM_X11)
+		if (NOT GLFW_HAS_X11)
+			message(FATAL_ERROR "GET_KEYBOARD_INPUT_FROM_X11 needs the X11 headers and glfwGetX11Display")
+		endif (NOT GLFW_HAS_X11)
+		find_package(X11 REQUIRED)
+		target_link_libraries(${EXECUTABLE} PRIVATE X11::X11)
+		target_compile_definitions(${EXECUTABLE} PRIVATE GET_KEYBOARD_INPUT_FROM_X11)
+	else()
+		message(STATUS "GET_KEYBOARD_INPUT_FROM_X11=ON is ignored: it needs librw GL3 with the GLFW gfxlib")
+	endif()
 endif()
 
 set_target_properties(${EXECUTABLE}
