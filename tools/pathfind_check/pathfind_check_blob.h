@@ -61,6 +61,9 @@ LoadGraph(const char *path)
 	ReadExact(f, ThePaths.m_carPathLinks, sizeof(CCarPathLink) * NUM_CARPATHLINKS);
 	fclose(f);
 
+	// Init() first: it makes the scratch labels and the search caches of the
+	// build under test match a freshly started game.
+	ThePaths.Init();
 	ThePaths.m_numPathNodes = h.numPathNodes;
 	ThePaths.m_numCarPathNodes = h.numCarPathNodes;
 	ThePaths.m_numPedPathNodes = h.numPedPathNodes;

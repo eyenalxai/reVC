@@ -259,6 +259,10 @@ CPathFind::Init(void)
 
 	for(i = 0; i < NUM_PATHNODES; i++)
 		m_pathNodes[i].distance = MAX_DIST;
+
+	// VICE-130: no grid is built yet. PreparePathData calls this again
+	// whenever the graph is rebuilt.
+	m_gridValid = false;
 }
 
 void
@@ -524,6 +528,9 @@ CPathFind::PreparePathData(void)
 		delete[] TempExternalNodes;
 		TempExternalNodes = nil;
 	}
+	// VICE-130: the nodes moved, so the lookup grid describes a graph that no
+	// longer exists.
+	m_gridValid = false;
 	printf("Done with PreparePathData\n");
 }
 
@@ -1245,6 +1252,62 @@ CPathFind::PedMarkRoadsBetweenLevelsInArea(float x1, float x2, float y1, float y
 	}
 }
 
+// VICE-130: the uniform grid under FindNodeClosestToCoors. Runtime data and
+// not an index built from the file: a node enters the grid of the cell it
+// stands in, in node order, and only that cell is looked up later.
+static inline int
+PathGridCell(float coord, float origin, float invCell)
+{
+	float f = (coord - origin) * invCell;
+	int cell = (int)f;
+	if(f < 0.0f && (float)cell != f)
+		cell--;	// the cast truncates towards zero, the cell index floors
+	return cell;
+}
+
+void
+CPathFind::BuildNodeGrid(void)
+{
+	int i;
+
+	m_gridValid = false;
+	if(m_numPathNodes <= 0)
+		return;
+
+	// The grid bounds, one cell of margin, so every node has a cell.
+	float minX = 1.0e9f, minY = 1.0e9f;
+	for(i = 0; i < m_numPathNodes; i++){
+		float x = m_pathNodes[i].GetX();
+		float y = m_pathNodes[i].GetY();
+		if(x < minX) minX = x;
+		if(y < minY) minY = y;
+	}
+	m_gridOriginX = (int32)minX - PATHFIND_GRID_CELL;
+	m_gridOriginY = (int32)minY - PATHFIND_GRID_CELL;
+
+	memset(m_gridCellStart, 0, sizeof(m_gridCellStart));
+	for(i = 0; i < m_numPathNodes; i++){
+		int cell = PathGridCell(m_pathNodes[i].GetX(), (float)m_gridOriginX, 1.0f/PATHFIND_GRID_CELL) * PATHFIND_GRID_DIM
+			+ PathGridCell(m_pathNodes[i].GetY(), (float)m_gridOriginY, 1.0f/PATHFIND_GRID_CELL);
+		if(cell < 0 || cell >= PATHFIND_GRID_CELLS)
+			return;	// a node outside the grid: keep the plain scan
+		m_gridCellStart[cell + 1]++;
+	}
+	for(i = 1; i <= PATHFIND_GRID_CELLS; i++)
+		m_gridCellStart[i] += m_gridCellStart[i - 1];
+
+	uint16 *cursor = new uint16[PATHFIND_GRID_CELLS];
+	memcpy(cursor, m_gridCellStart, sizeof(uint16) * PATHFIND_GRID_CELLS);
+	for(i = 0; i < m_numPathNodes; i++){
+		int cell = PathGridCell(m_pathNodes[i].GetX(), (float)m_gridOriginX, 1.0f/PATHFIND_GRID_CELL) * PATHFIND_GRID_DIM
+			+ PathGridCell(m_pathNodes[i].GetY(), (float)m_gridOriginY, 1.0f/PATHFIND_GRID_CELL);
+		m_gridNodes[cursor[cell]++] = i;	// node order is kept inside a cell
+	}
+	delete[] cursor;
+
+	m_gridValid = true;
+}
+
 int32
 CPathFind::FindNodeClosestToCoors(CVector coors, uint8 type, float distLimit, bool ignoreDisabled, bool ignoreBetweenLevels, bool ignoreSelected, bool bWaterPath)
 {
@@ -1263,6 +1326,57 @@ CPathFind::FindNodeClosestToCoors(CVector coors, uint8 type, float distLimit, bo
 		firstNode = m_numCarPathNodes;
 		lastNode = m_numPathNodes;
 		break;
+	}
+
+	if(!m_gridValid)
+		BuildNodeGrid();
+
+	if(m_gridValid){
+		// The rings of cells around the query point. A node in ring r is at
+		// least (r-1) cells away, so a ring past the closest distance found
+		// cannot hold a node that beats or ties it: the walk stops there.
+		// Every candidate takes the same expression and the same tie rule
+		// (the lowest node index wins) as the plain scan, so both return the
+		// same node.
+		const float cellSize = (float)PATHFIND_GRID_CELL;
+		int cx = PathGridCell(coors.x, (float)m_gridOriginX, 1.0f/PATHFIND_GRID_CELL);
+		int cy = PathGridCell(coors.y, (float)m_gridOriginY, 1.0f/PATHFIND_GRID_CELL);
+		int r;
+		for(r = 0; r <= (int)(closestDist/cellSize) + 1; r++){
+			int x0 = cx - r, x1 = cx + r;
+			int y0 = cy - r, y1 = cy + r;
+			int gx, gy;
+			if(x1 < 0 || x0 >= PATHFIND_GRID_DIM || y1 < 0 || y0 >= PATHFIND_GRID_DIM)
+				continue;
+			// When the whole ring is inside the grid, its inner cells were
+			// visited by the earlier rings, so only the perimeter is new.
+			// A clipped ring is scanned whole: its inner cells may never have
+			// been reachable before.
+			bool perimeterOnly = r > 0 && x0 >= 0 && x1 < PATHFIND_GRID_DIM && y0 >= 0 && y1 < PATHFIND_GRID_DIM;
+			for(gx = Max(x0, 0); gx <= Min(x1, PATHFIND_GRID_DIM - 1); gx++){
+				for(gy = Max(y0, 0); gy <= Min(y1, PATHFIND_GRID_DIM - 1); gy++){
+					if(perimeterOnly && gx != x0 && gx != x1 && gy != y0 && gy != y1)
+						continue;
+					int cell = gx * PATHFIND_GRID_DIM + gy;
+					for(int k = m_gridCellStart[cell]; k < m_gridCellStart[cell + 1]; k++){
+						i = m_gridNodes[k];
+						if(i < firstNode || i >= lastNode) continue;
+						if(ignoreDisabled && m_pathNodes[i].bDisabled) continue;
+						if(ignoreBetweenLevels && m_pathNodes[i].bBetweenLevels) continue;
+						if(ignoreSelected && m_pathNodes[i].bSelected) continue;
+						if(bWaterPath != m_pathNodes[i].bWaterPath) continue;
+						dist = Abs(m_pathNodes[i].GetX() - coors.x) +
+						       Abs(m_pathNodes[i].GetY() - coors.y) +
+						       3.0f*Abs(m_pathNodes[i].GetZ() - coors.z);
+						if(dist < closestDist || (dist == closestDist && i < closestNode)){
+							closestDist = dist;
+							closestNode = i;
+						}
+					}
+				}
+			}
+		}
+		return closestDist < distLimit ? closestNode : -1;
 	}
 
 	for(i = firstNode; i < lastNode; i++){
@@ -1703,7 +1817,7 @@ CPathFind::FindNextNodeWandering(uint8 type, CVector coors, CPathNode **lastNode
 	}
 }
 
-static CPathNode *apNodesToBeCleared[6525];
+static int16 apNodesToBeCleared[NUM_PATHNODES];
 
 void
 CPathFind::DoPathSearch(uint8 type, CVector start, int32 startNodeId, CVector target, CPathNode **nodes, int16 *pNumNodes, int16 maxNumNodes, CVehicle *vehicle, float *pDist, float distLimit, int32 targetNodeId)
@@ -1742,13 +1856,24 @@ CPathFind::DoPathSearch(uint8 type, CVector start, int32 startNodeId, CVector ta
 		m_searchNodes[i].SetNext(nil);
 	AddNodeToList(&m_pathNodes[targetNodeId], 0);
 	int numNodesToBeCleared = 0;
-	apNodesToBeCleared[numNodesToBeCleared++] = &m_pathNodes[targetNodeId];
+	apNodesToBeCleared[numNodesToBeCleared++] = targetNodeId;
 
 	// Dijkstra's algorithm
-	// Find distances
+	// Find distances. The search stops the moment the start node comes up,
+	// as it always did. A start node that never comes up would leave this
+	// loop spinning for the rest of the session (the group test above
+	// normally makes that impossible, but a start node the graph does not
+	// connect must not hang the frame), so the bucket ring is also left after
+	// more than a whole ring of empty buckets: the queue is drained then.
 	int numPathsFound = 0;
-	for(i = 0; numPathsFound == 0; i = (i+1) & 0x1FF){
+	int emptyBuckets = 0;
+	for(i = 0; emptyBuckets <= (int)ARRAY_SIZE(m_searchNodes); i = (i+1) & 0x1FF){
 		CPathNode *node;
+		if(m_searchNodes[i].GetNext() == nil){
+			emptyBuckets++;
+			continue;
+		}
+		emptyBuckets = 0;
 		for(node = m_searchNodes[i].GetNext(); node; node = node->GetNext()){
 			if(node == &m_pathNodes[startNodeId])
 				numPathsFound = 1;
@@ -1760,13 +1885,16 @@ CPathFind::DoPathSearch(uint8 type, CVector start, int32 startNodeId, CVector ta
 					if(m_pathNodes[next].distance != MAX_DIST)
 						RemoveNodeFromList(&m_pathNodes[next]);
 					if(m_pathNodes[next].distance == MAX_DIST)
-						apNodesToBeCleared[numNodesToBeCleared++] = &m_pathNodes[next];
+						apNodesToBeCleared[numNodesToBeCleared++] = next;
 					AddNodeToList(&m_pathNodes[next], dist);
 				}
 			}
 
 			RemoveNodeFromList(node);
 		}
+
+		if(numPathsFound)
+			break;
 	}
 
 	// Find out whence to start tracing back
@@ -1776,7 +1904,17 @@ CPathFind::DoPathSearch(uint8 type, CVector start, int32 startNodeId, CVector ta
 	if(pDist)
 		*pDist = m_pathNodes[startNodeId].distance;
 
-	nodes[(*pNumNodes)++] = curNode;
+	// The start node never came up: no path, like the group test above.
+	if(m_pathNodes[startNodeId].distance == MAX_DIST){
+		*pNumNodes = 0;
+		if(pDist) *pDist = 100000.0f;
+		for(i = 0; i < numNodesToBeCleared; i++)
+			m_pathNodes[apNodesToBeCleared[i]].distance = MAX_DIST;
+		return;
+	}
+
+	if(maxNumNodes > 0)
+		nodes[(*pNumNodes)++] = curNode;
 	// Trace back to target and update list of nodes
 	while(*pNumNodes < maxNumNodes && curNode != &m_pathNodes[targetNodeId])
 		for(i = 0; i < curNode->numLinks; i++){
@@ -1789,10 +1927,9 @@ CPathFind::DoPathSearch(uint8 type, CVector start, int32 startNodeId, CVector ta
 		}
 
 	for(i = 0; i < numNodesToBeCleared; i++)
-		apNodesToBeCleared[i]->distance = MAX_DIST;
+		m_pathNodes[apNodesToBeCleared[i]].distance = MAX_DIST;
 }
 
-static CPathNode *pNodeList[32];
 static int16 DummyResult;
 static int16 DummyResult2;
 
@@ -1801,8 +1938,10 @@ CPathFind::TestCoorsCloseness(CVector target, uint8 type, CVector start)
 {
 	float dist;
 
+	// VICE-130: only the distance matters here, so no search wastes a trace
+	// back into a list nobody reads.
 	if(type == PATH_CAR)
-		DoPathSearch(type, start, -1, target, pNodeList, &DummyResult, 32, nil, &dist, 999999.88f, -1);
+		DoPathSearch(type, start, -1, target, nil, &DummyResult, 0, nil, &dist, 999999.88f, -1);
 	else
 		DoPathSearch(type, start, -1, target, nil, &DummyResult2, 0, nil, &dist, 50.0f, -1);
 #ifdef FIX_BUGS

@@ -25,22 +25,25 @@ if [ -n "$REV" ] && [ -z "$TAG" ]; then
 	TAG="$(echo "$REV" | tr '/: ' '___')"
 fi
 BIN="$BUILD/pathfind_check${TAG:+.$TAG}"
+DUMPBIN="$BUILD/pathfind_dump${TAG:+.$TAG}"
 
 if [ ! -f "$BUILD/compile_commands.json" ]; then
 	echo "configure the build first: cmake -S $ROOT -B $BUILD -G Ninja -DCMAKE_BUILD_TYPE=Release" >&2
 	exit 1
 fi
 
+# The sources under test always come from a private directory: a git revision
+# is extracted into it, the working tree is copied into it. The trap is only
+# allowed to see that directory.
 SRCDIR="$(mktemp -d)"
 trap 'rm -rf "$SRCDIR"' EXIT
 if [ -n "$REV" ]; then
 	git -C "$ROOT" show "$REV:src/control/PathFind.cpp" > "$SRCDIR/PathFind.cpp"
 	git -C "$ROOT" show "$REV:src/control/PathFind.h" > "$SRCDIR/PathFind.h"
-	PATHFIND="$SRCDIR/PathFind.cpp"
 else
-	SRCDIR="$ROOT/src/control"
-	PATHFIND="$ROOT/src/control/PathFind.cpp"
+	cp "$ROOT/src/control/PathFind.cpp" "$ROOT/src/control/PathFind.h" "$SRCDIR/"
 fi
+PATHFIND="$SRCDIR/PathFind.cpp"
 
 python3 - > "$OUT.inc" <<EOF
 import json
@@ -63,5 +66,6 @@ c++ $DEFS $FLAGS -I"$SRCDIR" $INCS -c "$PATHFIND" -o "$OUT/PathFind.o"
 c++ $DEFS $FLAGS -I"$SRCDIR" $INCS -c "$ROOT/tools/pathfind_check/check.cpp" -o "$OUT/check.o"
 c++ $DEFS $FLAGS -I"$SRCDIR" $INCS -c "$ROOT/tools/pathfind_check/dump.cpp" -o "$OUT/dump.o"
 c++ $DEFS $FLAGS -I"$SRCDIR" $INCS -c "$ROOT/tools/pathfind_check/stubs.cpp" -o "$OUT/stubs.o"
-c++ -o "$BIN" "$OUT"/*.o -Wl,--gc-sections -lm
-echo "built $BIN"
+c++ -o "$BIN" "$OUT/PathFind.o" "$OUT/check.o" "$OUT/stubs.o" -Wl,--gc-sections -lm
+c++ -o "$DUMPBIN" "$OUT/PathFind.o" "$OUT/dump.o" "$OUT/stubs.o" -Wl,--gc-sections -lm
+echo "built $BIN and $DUMPBIN"

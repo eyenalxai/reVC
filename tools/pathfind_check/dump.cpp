@@ -173,7 +173,8 @@ main(int argc, char **argv)
 	}
 
 	// Read the small scalars first: they say how much of the arrays is live.
-	int32_t numPathNodes, numCarPathNodes, numPedPathNodes, numConnections, numCarPathLinks;
+	int32_t numPathNodes, numCarPathNodes, numPedPathNodes, numCarPathLinks;
+	int16_t numConnections;
 	ReadMem(thePaths + offsetof(CPathFind, m_numPathNodes), &numPathNodes, sizeof(numPathNodes));
 	ReadMem(thePaths + offsetof(CPathFind, m_numCarPathNodes), &numCarPathNodes, sizeof(numCarPathNodes));
 	ReadMem(thePaths + offsetof(CPathFind, m_numPedPathNodes), &numPedPathNodes, sizeof(numPedPathNodes));

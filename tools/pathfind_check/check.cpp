@@ -6,8 +6,11 @@
 //
 // Modes
 //   run   <dump> <cases>       print the result of every stored case
-//   bench <dump> <iters> <scale> <seed>
-//                              replay the car-spawn call pattern, print the cost
+//   lookup <dump> <cases>      print the closest-node result of every point,
+//                              with the flag and limit combinations callers use
+//   bench <dump> <spawn|chase> <frames> <scale>
+//                              replay a call pattern, print the cost
+//   scan  <dump> <iterations>  time the closest-node lookup alone
 //   gencases <dump> <count> <out>
 //                              write deterministic cases taken from the real graph
 //   stat  <dump>               print graph statistics
@@ -18,11 +21,21 @@
 //
 // The equality check is: build this tool once from the base revision and once
 // from the change, run both over the same dump and cases, and diff the output.
-// Every line of the output (node counts, distances, node index lists) must be
-// identical.
+// Every line of the output (node counts, distances, node index lists, the
+// closeness verdict, the closest node of a lookup) must be identical. The
+// graph comes from a running game:
+//
+//   build/pathfind_dump <game pid> /tmp/pathgraph.bin
+//   build/pathfind_check.miami run /tmp/pathgraph.bin cases.txt > base.txt
+//   build/pathfind_check       run /tmp/pathgraph.bin cases.txt > new.txt
+//   diff base.txt new.txt
+//
+// Rebuild both builds between runs if the dump is retaken (the game may have
+// restarted on another build), and keep the dump with the runs it belongs to.
 
 #include "common.h"
 #include "PathFind.h"
+#include "TrafficRings.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -122,49 +135,111 @@ ModeRun(const char *dump, const char *casefile)
 			printf(" %d", (int)(nodes[j] ? nodes[j] - ThePaths.m_pathNodes : -1));
 		printf("\n");
 
-		bool close = ThePaths.TestCoorsCloseness(c.target, c.type, c.start);
+		bool close = false;
+		if (c.type == PATH_CAR)
+			// The game calls TestCoorsCloseness with PATH_CAR only; the ped
+			// branch is dead code (and one no-callers path in it writes to a
+			// zero-length node list, which is why this line guards the type).
+			close = ThePaths.TestCoorsCloseness(c.target, c.type, c.start);
 		printf("  closeness %d\n", close ? 1 : 0);
 	}
 }
 
-// The spawn path of CCarCtrl::CreateCarFromPlacement: the target is the
-// player centre, the starts are the placements the spawn scan picked. One
-// target is queried from several starts, and the same target comes back on
-// the next call while the player stands still: this is the repeated work
-// VICE-130 measures.
+// Pick road points for a frame: the target is the node a driving car is on,
+// the starts are nodes in the same flood-fill group at about the ring
+// distance, which is what a spawn placement is. The scan is outside the
+// measured loop.
 static void
-ModeBench(const char *dump, int iters, float scale, uint32 seed)
+PickFramePoints(int targetNode, float ringDist, int count, int *out)
+{
+	int carNodes = ThePaths.m_numCarPathNodes;
+	int group = ThePaths.m_pathNodes[targetNode].group;
+	CVector target = ThePaths.m_pathNodes[targetNode].GetPosition();
+	int found = 0;
+	for (int i = 0; i < carNodes && found < count; i++) {
+		if (ThePaths.m_pathNodes[i].group != group)
+			continue;
+		float d = (ThePaths.m_pathNodes[i].GetPosition() - target).Magnitude2D();
+		if (d < ringDist * 0.5f || d > ringDist * 1.5f)
+			continue;
+		out[found++] = i;
+	}
+	if (found == 0) {
+		for (int i = 0; i < count; i++)
+			out[i] = targetNode;
+		return;
+	}
+	for (int i = found; i < count; i++)
+		out[i] = out[i % found];
+}
+
+// The two patterns the ticket names.
+//
+// spawn: CCarCtrl::GenerateRandomCars calls GenerateOneRandomCar a few times
+// per frame, and every call asks TestCoorsCloseness for the same target (the
+// player centre) from its own placements. That is the repeated search.
+//
+// chase: CCarCtrl::PickNextNodeToChaseCar asks for a path to a moving car
+// (the player's position). The target node changes as it moves, so this
+// measures the cost when nothing repeats.
+static void
+ModeBench(const char *dump, const char *mode, int frames, float scale, uint32 seed)
 {
 	LoadGraph(dump);
 	g_rngState = seed;
 	extern STrafficRingInput g_ringInput;
 	g_ringInput = STrafficRingInput{ 300.0f * scale, 1.0f, 2000.0f };
 
-	const int placementsPerCall = 4;
-	CCarCreationPlacement placements[placementsPerCall];
-	long searched = 0, accepted = 0, placementTotal = 0;
+	int carNodes = ThePaths.m_numCarPathNodes;
+	float ringDist = 250.0f * scale;
+	int perFrame = strcmp(mode, "spawn") == 0 ? 24 : 8;
+	std::vector<int> startNodes((size_t)frames * perFrame);
+	for (int f = 0; f < frames; f++) {
+		// The target node walks the car node list: that is a car driving the
+		// graph, and it changes the target node the way driving does.
+		int targetNode = (f * 7) % carNodes;
+		PickFramePoints(targetNode, strcmp(mode, "spawn") == 0 ? ringDist : 120.0f,
+			perFrame, &startNodes[(size_t)f * perFrame]);
+	}
+
+	CPathNode *nodes[32];
+	int16 numNodes;
+	float dist;
+	long searches = 0, accepted = 0;
 	double t0 = NowSeconds();
-	for (int i = 0; i < iters; i++) {
-		// A player centre that moves slowly, like a driving player. The
-		// target node changes only when the point crosses a node boundary.
-		float px = -300.0f + (float)(i % 100) * 3.0f;
-		float py = 400.0f - (float)(i % 50) * 2.0f;
-		CVector target(px, py, 10.0f);
-		float frontX = 1.0f, frontY = 0.0f;
-		int32 numPlacements = ThePaths.CollectCarCreationCoors(px, py, frontX, frontY,
-			250.0f * scale, 0.707f, true, false, placements, placementsPerCall);
-		placementTotal += numPlacements;
-		for (int32 j = 0; j < numPlacements; j++) {
-			searched++;
-			if (ThePaths.TestCoorsCloseness(target, PATH_CAR, placements[j].position))
-				accepted++;
+
+	if (strcmp(mode, "spawn") == 0) {
+		// RANDOM_CAR_ATTEMPTS_PER_FRAME * the ring scale calls per frame,
+		// CAR_SPAWN_ATTEMPTS placements each, one closeness test per placement.
+		int callsPerFrame = (int)(3.0f * scale);
+		for (int f = 0; f < frames; f++) {
+			CVector target = ThePaths.m_pathNodes[(f * 7) % carNodes].GetPosition();
+			for (int c = 0; c < callsPerFrame; c++)
+				for (int k = 0; k < 4; k++) {
+					searches++;
+					if (ThePaths.TestCoorsCloseness(target, PATH_CAR,
+						ThePaths.m_pathNodes[startNodes[(size_t)f * perFrame + (c * 4 + k) % perFrame]].GetPosition()))
+						accepted++;
+				}
+		}
+	} else {
+		// One chase search per frame per car; the start is a road point near
+		// the target, as a chasing car is.
+		for (int f = 0; f < frames; f++) {
+			CVector target = ThePaths.m_pathNodes[(f * 7) % carNodes].GetPosition();
+			for (int c = 0; c < perFrame; c++) {
+				searches++;
+				ThePaths.DoPathSearch(PATH_CAR,
+					ThePaths.m_pathNodes[startNodes[(size_t)f * perFrame + c]].GetPosition(),
+					-1, target, nodes, &numNodes, 2, nil, &dist, 999999.9f, -1);
+			}
 		}
 	}
+
 	double t1 = NowSeconds();
-	printf("bench: %d calls, %ld placements, %ld searches, %ld accepted\n",
-		iters, (long)placementTotal, searched, accepted);
-	printf("bench: %.3f ms total, %.1f ns per call, %.1f ns per search\n",
-		(t1 - t0) * 1e3, (t1 - t0) * 1e9 / iters, (t1 - t0) * 1e9 / (searched ? searched : 1));
+	printf("bench %s scale %.1f: %d frames, %ld searches, %ld accepted\n", mode, scale, frames, searches, accepted);
+	printf("bench %s scale %.1f: %.3f ms total, %.1f ns per search\n",
+		mode, scale, (t1 - t0) * 1e3, (t1 - t0) * 1e9 / (searches ? searches : 1));
 }
 
 static void
@@ -201,6 +276,51 @@ ModeGenCases(const char *dump, int count, const char *out)
 	printf("wrote %d cases to %s\n", count, out);
 }
 
+// The node lookup on its own, with every flag combination the callers use.
+// The plain single-precision scan of the base revision and the grid of the
+// change must return the same node for every query point.
+static void
+ModeLookup(const char *dump, const char *casefile)
+{
+	LoadGraph(dump);
+	std::vector<Case> cases = LoadCases(casefile);
+	for (size_t i = 0; i < cases.size(); i++) {
+		CVector p = cases[i].target;
+		printf("point %zu %.3f %.3f %.3f\n", i, p.x, p.y, p.z);
+		int car = ThePaths.FindNodeClosestToCoors(p, PATH_CAR, 999999.88f);
+		int carNear = ThePaths.FindNodeClosestToCoors(p, PATH_CAR, 60.0f);
+		int carDisabled = ThePaths.FindNodeClosestToCoors(p, PATH_CAR, 999999.88f, true);
+		int carBetween = ThePaths.FindNodeClosestToCoors(p, PATH_CAR, 999999.88f, false, true);
+		int carWater = ThePaths.FindNodeClosestToCoors(p, PATH_CAR, 999999.88f, false, false, false, true);
+		int ped = ThePaths.FindNodeClosestToCoors(p, PATH_PED, 999999.9f);
+		int pedNear = ThePaths.FindNodeClosestToCoors(p, PATH_PED, 50.0f);
+		int pedDisabled = ThePaths.FindNodeClosestToCoors(p, PATH_PED, 999999.9f, true, true);
+		printf("  car %d near %d disabled %d between %d water %d ped %d pedNear %d pedFlags %d\n",
+			car, carNear, carDisabled, carBetween, carWater, ped, pedNear, pedDisabled);
+	}
+}
+
+// The node scan on its own: how much of a search is the closest-node lookup.
+static void
+ModeScan(const char *dump, int iters)
+{
+	LoadGraph(dump);
+	int carNodes = ThePaths.m_numCarPathNodes;
+	long found = 0;
+	double t0 = NowSeconds();
+	for (int i = 0; i < iters; i++) {
+		CVector target = ThePaths.m_pathNodes[(i * 7) % carNodes].GetPosition();
+		target.x += 3.5f;
+		target.y -= 2.5f;
+		int car = ThePaths.FindNodeClosestToCoors(target, PATH_CAR, 999999.88f);
+		int ped = ThePaths.FindNodeClosestToCoors(target, PATH_PED, 50.0f);
+		found += car + (ped >= 0);
+	}
+	double t1 = NowSeconds();
+	printf("scan: %d iterations (%ld results), %.3f ms total, %.1f ns per iteration\n",
+		iters, found, (t1 - t0) * 1e3, (t1 - t0) * 1e9 / iters);
+}
+
 static void
 ModeStat(const char *dump)
 {
@@ -230,11 +350,15 @@ main(int argc, char **argv)
 	if (strcmp(argv[1], "run") == 0 && argc == 4)
 		ModeRun(argv[2], argv[3]);
 	else if (strcmp(argv[1], "bench") == 0 && argc == 6)
-		ModeBench(argv[2], atoi(argv[3]), (float)atof(argv[4]), (uint32)strtoul(argv[5], nil, 0));
+		ModeBench(argv[2], argv[3], atoi(argv[4]), (float)atof(argv[5]), 0x1234);
 	else if (strcmp(argv[1], "gencases") == 0 && argc == 5)
 		ModeGenCases(argv[2], atoi(argv[3]), argv[4]);
 	else if (strcmp(argv[1], "stat") == 0 && argc == 3)
 		ModeStat(argv[2]);
+	else if (strcmp(argv[1], "scan") == 0 && argc == 4)
+		ModeScan(argv[2], atoi(argv[3]));
+	else if (strcmp(argv[1], "lookup") == 0 && argc == 4)
+		ModeLookup(argv[2], argv[3]);
 	else {
 		fprintf(stderr, "bad arguments\n");
 		return 1;

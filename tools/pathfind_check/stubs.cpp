@@ -14,21 +14,21 @@
 
 // ---------------------------------------------------------------- random
 
-static uint32 g_stubRandomState = 0x9e3779b9u;
+static uint32 g_stubRandomSeed = 1;
 
-uint32
-CGeneral::GetRandomNumber(void)
+// The game's CGeneral::GetRandomNumber is inline in General.h and calls these
+// two; the game defines them in re3.cpp. The checker only needs a
+// deterministic stream, shared by the base and the changed build.
+int
+myrand(void)
 {
-	g_stubRandomState ^= g_stubRandomState << 13;
-	g_stubRandomState ^= g_stubRandomState >> 17;
-	g_stubRandomState ^= g_stubRandomState << 5;
-	return g_stubRandomState;
+	return (int)(g_stubRandomSeed = g_stubRandomSeed * 1103515245u + 12345u) & 0x7FFF;
 }
 
 void
-CGeneral::SetRandomSeed(uint32 seed)
+mysrand(unsigned int seed)
 {
-	g_stubRandomState = seed ? seed : 0x9e3779b9u;
+	g_stubRandomSeed = seed;
 }
 
 // ---------------------------------------------------------------- traffic rings
@@ -43,7 +43,35 @@ CurrentTrafficRings(void)
 	return ComputeTrafficRings(g_ringInput);
 }
 
-// ---------------------------------------------------------------- camera
+// ---------------------------------------------------------------- placeable / camera
+
+// The camera object is only the carrier of GenerationDistMultiplier for the
+// checker; its constructor builds sub-objects the checker never reads, so
+// their constructors are the empty stand-ins below.
+CMatrix::CMatrix()
+{
+}
+
+CMatrix::~CMatrix()
+{
+}
+
+void
+CCam::Init(void)
+{
+}
+
+CCamPathSplines::CCamPathSplines(void)
+{
+}
+
+CPlaceable::CPlaceable(void)
+{
+}
+
+CCamera::CCamera(void)
+{
+}
 
 CCamera TheCamera;
 
@@ -51,12 +79,6 @@ CCamera TheCamera;
 
 bool
 CWorld::GetIsLineOfSightClear(const CVector &, const CVector &, bool, bool, bool, bool, bool, bool, bool)
-{
-	return true;
-}
-
-bool
-CWorld::GetIsLineOfSightClear(const CVector &, const CVector &, bool, bool, bool, bool, bool, bool)
 {
 	return true;
 }
