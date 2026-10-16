@@ -251,9 +251,12 @@ FOGGY 150 m).
 ## Ring scale
 
 The one number that scales the traffic ring table: the LOD distance over its
-stock value, capped so the on-screen car ring stays inside the visible range.
-1.0 at the stock settings (the default draw distance 1.2, FOV 70), where the
-stock LOD distance is 360 m (300 x 1.2).
+stock value, capped so the on-screen car ring stays inside the visible range and
+inside the local cap (`RING_MAX_SCALE` 2, so the front band is at most 500 m:
+the budgets are fixed, so a ring that follows a 2 km draw distance would spread
+the same cars thin and empty the near streets). 1.0 at the stock settings (the
+default draw distance 1.2, FOV 70), where the stock LOD distance is 360 m (300 x
+1.2); the draw distance drives the ring up to the cap.
 
 ## Despawn reserve
 
@@ -270,20 +273,76 @@ Car Density settings scale it.
 
 ## Population budget
 
-The number of pedestrians an area keeps. It comes from the zone density, the
-road density and the density settings, and it grows with the square of the
-spawn distance, because the ring area does. The game stops adding pedestrians
-when the budget is reached.
+The number of pedestrians an area keeps ON FOOT. It comes from the zone density,
+the road density and the density settings, and it grows with the square of the
+ring scale, because the ring area does. The game stops adding pedestrians when
+the budget is reached. The drivers of the cars count in `ms_nTotalPeds` with the
+pedestrians, so the budget adds them back before the comparison: the drivers and
+the passengers of the cars do not shrink the crowd on the sidewalk.
 
 ## Cap
 
-The hard top for a budget or a count: pedestrians, cars in use, random cars.
-The caps stay below the pools.
+The hard top for a budget or a count: pedestrians, cars in use, random cars, the
+parked cars of a generator set. The caps live in one table,
+`src/core/PopulationBudget.h` (VICE-123), with the fill rates and the streaming
+model budget, the pool each number protects and the arithmetic that ties them
+together; the table's invariants are checked at compile time. The caps stay
+below the pools.
 
 ## Pool
 
 The fixed storage for the entities and their list nodes: pedestrians, vehicles,
-audio entities. A pool never grows; the caps keep the counts below it.
+audio entities. A pool never grows; the caps keep the counts below it. The
+population paths of the caps also refuse to create when the free spaces of the
+ped pool fall below the pool reserve, because the passenger count is a random
+draw and the police crews are not counted at all.
+
+## Driver
+
+The pedestrian that drives a car of the traffic: a `CPed` of the ped pool, one
+per car, created with the car (`CVehicle::SetUpDriver`). A driver counts in
+`ms_nTotalPeds` with the pedestrians, so the on-foot budget adds the drivers of
+the cars back; the car it drives counts in the car budget.
+
+## Parked car
+
+A car a car generator holds at its fixed map position (`CCarGenerator`), not a
+car of the traffic. The generator holds it while the player is inside its ring
+and the car stays until the car despawn, so the curbs fill along the route the
+player drives. A parked car counts in the car budget (`NumParkedCars`) and
+carries no driver while it is parked.
+
+## Pedestrian node network
+
+The ped path nodes (`PATH_PED`): the walkable network of the map. The game
+creates pedestrians on it (`GeneratePedCreationCoors`) and walks them along it
+(`FindNextNodeWandering`). The closest-node search has no radius of its own, so
+an area without nodes stays empty: nothing spawns there before VICE-122.
+
+## Off-network spawn
+
+A pedestrian created off the pedestrian node network. The population picks a
+random point in the creation ring and takes it only if it is free: ground at
+the level of the ring, no surface more than a step above it (no roof or
+canopy), ground above the water line, a clearance sphere clear of the static
+world, clear of other pedestrians, and a ped node inside the walk bound and on
+the same level. The wander state walks the pedestrian to the closest node from
+there. A bounded fraction of the spawns takes this path
+(`PED_OFF_NETWORK_FRACTION`, a fraction of zero draws no random number); the
+rest keeps the node path (VICE-122).
+
+## Stray (off-network pedestrian)
+
+An off-network pedestrian that has not reached the network yet. The population
+watches the strays in a bounded table until each reaches a node. The cull
+removes a stray that walks for the stall budget without coming closer to its
+node, or one whose feet are under the water line; it only removes a pedestrian
+the camera does not see, and each counter carries one removal
+(`CPopulation::ms_nOffNetworkSpawns`, `ms_nOffNetworkStuck`,
+`ms_nOffNetworkDrowned`). A stray with no node to head for keeps its watch for
+the no-target time and is then left alone, uncounted. The members of a gang or
+couple group are validated at their own spots and watched like any other stray;
+a pedestrian that follows another leaves the watch (VICE-122).
 
 ## Dummy object
 
@@ -333,6 +392,53 @@ only hidden, never removed.
 A vehicle collision with an object, a pedestrian, or a vegetation building. The
 vehicle's speed loss and collision damage from a soft hit are one tenth of the
 original values.
+
+## First person view
+
+The fork's persistent first person camera, on foot and in a vehicle: the view
+setting keeps the camera at the player's eyes, the mouse aims and WASD stays
+with the movement. The stock look-around view (the setting off) is a separate,
+stock path and stays as it is.
+
+## Sight view
+
+The view the shot leaves from and the weapon holds its pose at while the player
+aims down the sights. `CCamera::GetSightCameraMode` names it: the stock sight
+camera mode, or the first person player camera standing in for it. The first
+person view serves every aiming weapon with the player camera, so the player
+keeps moving and WASD stays with the movement in every movement state
+(VICE-137). The photo camera keeps its stock stationary viewfinder, because the
+photograph reads its mode. `CCamera::GetSightOverlayMode` names the overlay the
+HUD draws: the sniper scope and the rocket sight draw theirs over the player
+camera, and the plain first person view draws the on-foot reticle of the aim
+(VICE-143), the same sprite the stock sight camera draws.
+
+## Scope zoom
+
+The zoom of the sniper and the laser scope in the sight view. The first person
+view keeps the wheel zoom and the range of the stock sniper camera and starts
+at the FOV of the view the scope takes over, so the scope looks and zooms like
+the scope it stands in for.
+
+## Camera handover
+
+One glide of the game camera with an ease out curve. A view change that would
+snap in one frame takes it: entering or leaving a vehicle in the first person
+view, the view switching on or off, a sight camera or a script taking the view
+over, and the handback. The from pose is the pose the last frame presented and
+the target is the live pose of the new view, so input during the glide works on
+the live pose and the glide ends exactly on the new pose. The view changes take
+`CAMERA_HANDOVER_TIME` (650 ms) and the sight zoom takes
+`CAMERA_SIGHTS_HANDOVER_TIME` (250 ms).
+
+## Look recenter
+
+The return of the first person vehicle look to straight ahead of the car. The
+mouse look is an offset from the car's heading; when the look rests for
+`CAMERA_LOOK_RECENTER_IDLE` (400 ms) the offset returns to zero over
+`CAMERA_LOOK_RECENTER_TIME` (800 ms) with an ease out curve. New look input
+cancels the return at once and takes the live offset over, and a held aim keeps
+the view where the mouse put it.
 
 ## Car ADS
 

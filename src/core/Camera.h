@@ -29,6 +29,19 @@ enum
 
 const float DefaultFOV = 70.0f; // beta: 80.0f
 
+// The camera handover: a view change that would snap in one frame glides from
+// the pose the last frame presented to the new pose over this long, with an
+// ease out curve. The first person view switching on or off, a vehicle entry
+// and exit and a camera handback all take it.
+#define CAMERA_HANDOVER_TIME		650	// milliseconds
+// The sight zoom of the first person view: entering or leaving the sights is
+// the same glide, only short.
+#define CAMERA_SIGHTS_HANDOVER_TIME	250	// milliseconds
+// The scope zoom of the first person view, the stock step and range of the
+// sniper camera
+#define FIRST_PERSON_SCOPE_ZOOM_STEP	10.0f
+#define FIRST_PERSON_SCOPE_FOV_MIN	15.0f
+
 class CCam
 {
 public:
@@ -114,6 +127,15 @@ public:
 	// Third person aim down the sights: 0.0 is stock, 1.0 is fully pulled in
 	float   m_fAdsAmount;
 	float   m_fAdsAmountSpeed;
+	// The look recenter of the first person vehicle view: the mouse look is an
+	// offset from the car's heading and this returns it to straight ahead after
+	// the look rests. From is the offset the return started at, so new input
+	// takes the live offset over at once.
+	bool    m_bRecenteringLook;
+	uint32  m_uiLookInputTime;
+	uint32  m_uiRecenterStart;
+	float   m_fRecenterFromYaw;
+	float   m_fRecenterFromPitch;
 	float   m_fAlphaSpeedOverOneFrame;
 	float   m_fBetaSpeedOverOneFrame;
 	float   m_fBufferedTargetBeta;
@@ -339,6 +361,26 @@ public:
 	bool m_bCullZoneChecksOn;
 	bool m_bFirstPersonBeingUsed;
 	bool m_bFirstPersonViewWasOn;
+	// The camera handover: the glide of the view when it would snap in one
+	// frame. From is the pose the last frame presented, so the glide never
+	// jumps and player input keeps working on the live pose underneath.
+	bool m_bHandoverActive;
+	bool m_bHavePresentedPose;
+	uint32 m_uiHandoverStart;
+	uint32 m_uiHandoverDuration;
+	CVector m_vecHandoverFromSource;
+	CVector m_vecHandoverFromFront;
+	float m_fHandoverFromFOV;
+	// The pose the last frame presented to the player
+	CVector m_vecPresentedSource;
+	CVector m_vecPresentedFront;
+	float m_fPresentedFOV;
+	// The scope zoom of the first person view: the wheel steps the target FOV
+	// and the camera eases the value the way the stock sniper camera does
+	bool m_bScopeZoomRunning;
+	float m_fScopeFOV;
+	float m_fScopeFOVTarget;
+	float m_fScopeFOVSpeed;
 	bool m_bJustJumpedOutOf1stPersonBecauseOfTarget;
 	bool m_bIdleOn;
 	bool m_bInATunnelAndABigVehicle;
@@ -561,6 +603,14 @@ public:
 	// m_bFirstPersonBeingUsed, m_bFirstPersonViewWasOn, the last input time
 	// and the camera bit of the pad's DisablePlayerControls.
 	bool UpdateFirstPersonView(bool targetIsPed);
+	// The camera handover: start the glide from the pose the last frame
+	// presented. Every caller that changes the view in one frame (the first
+	// person camera entering or leaving a vehicle, the view switching on or
+	// off, a sight camera taking the view and giving it back) calls this.
+	void StartCameraHandover(uint32 duration);
+	// Glide the camera values from the handover start toward the pose the new
+	// view computed. One call per frame from Process.
+	void ApplyCameraHandover(CVector &source, CVector &front, CVector &up, float &fov);
 	void UpdateSoundDistances(void);
 	void InitialiseCameraForDebugMode(void);
 	void CamShake(float strength, float x, float y, float z);
@@ -649,6 +699,31 @@ public:
 	// The car ADS: the aim button held while the camera serves the player's
 	// vehicle, the third person mouse camera or the first person car view
 	bool UsingCarAds(void);
+	// The weapon aim modes the first person player camera serves with its own
+	// view: the plain sights (the M16 camera mode serves the assault rifles and
+	// every other aiming weapon), the sniper scope (the sniper and the laser
+	// scope) and the rocket sight. The stock cameras of these modes are
+	// stationary and drive the view from the movement keys, so the first person
+	// view runs them on the player camera instead. The photo camera is not one
+	// of them: the photograph reads its mode.
+	static bool FirstPersonServesSightMode(int16 weaponMode);
+	// The scope of the sniper and the laser scope aiming through the first
+	// person player camera: the view zooms like the stock scope and the scope
+	// overlay draws, but the player keeps moving (VICE-137)
+	bool UsingFirstPersonScope(void);
+	// The FOV of the first person view this frame: the plain view FOV, the
+	// sight zoom, and the scope zoom, which keeps the stock wheel zoom and
+	// starts at the view the scope came from.
+	float UpdateFirstPersonViewFOV(float previousFOV, bool usingSights, bool usingScope);
+	// The stock sight camera the current view stands in for. The first person
+	// player camera serves the aiming weapons, so while a weapon aims down its
+	// sights it answers with the sight camera mode of that weapon. The weapon
+	// fire paths ask this, so the shot follows the view in both views.
+	int16 GetSightCameraMode(void);
+	// The sight overlay the current view draws, as a stock sight camera mode,
+	// or MODE_NONE for no overlay. The HUD asks this, so the overlay follows
+	// the weapon the view aims with.
+	int16 GetSightOverlayMode(void);
 
 	// Physical camera
 	void SetRwCamera(RwCamera *cam);
@@ -668,5 +743,9 @@ extern CCamera TheCamera;
 void CamShakeNoPos(CCamera*, float);
 void MakeAngleLessThan180(float &Angle);
 void WellBufferMe(float Target, float *CurrentValue, float *CurrentSpeed, float MaxSpeed, float Acceleration, bool IsAngle);
+
+// The ease out curve of the camera glides: quick at the start and settling into
+// the target, which it reaches exactly at fraction 1.
+float EaseOutCubic(float fraction);
 
 #endif // __GTA_CAMERA_H__

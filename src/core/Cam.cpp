@@ -103,6 +103,11 @@ CCam::Init(void)
 	m_fBufferedTargetOrientationSpeed = 0.0f;
 	m_fAdsAmount = 0.0f;
 	m_fAdsAmountSpeed = 0.0f;
+	m_bRecenteringLook = false;
+	m_uiLookInputTime = 0;
+	m_uiRecenterStart = 0;
+	m_fRecenterFromYaw = 0.0f;
+	m_fRecenterFromPitch = 0.0f;
 	m_fDimensionOfHighestNearCar = 0.0f;
 }
 
@@ -413,6 +418,12 @@ MakeAngleLessThan180(float &Angle)
 {
 	while(Angle >= PI) Angle -= 2*PI;
 	while(Angle < -PI) Angle += 2*PI;
+}
+
+float
+EaseOutCubic(float fraction)
+{
+	return 1.0f - (1.0f - fraction)*(1.0f - fraction)*(1.0f - fraction);
 }
 
 void
@@ -2470,6 +2481,14 @@ float fDuckingBackOffset = 0.5f;
 float fDuckingRightOffset = 0.18f;
 float fFirstPersonEyeOffsetFwd = 0.1f;	// the first person camera sits at the eyes, just in front of the head bone
 
+// The look recenter of the first person vehicle view: the mouse look is an
+// offset from the car's heading, and it returns to straight ahead after a short
+// idle, over this long, with an ease out curve. The idle keeps a steady aim
+// from snapping back the moment the mouse stops.
+#define CAMERA_LOOK_RECENTER_IDLE		400	// milliseconds of no look input
+#define CAMERA_LOOK_RECENTER_TIME		800	// the return itself, milliseconds
+#define CAMERA_LOOK_RECENTER_MIN_OFFSET	DEGTORAD(0.5f)	// already straight ahead
+
 void
 CCam::Process_M16_1stPerson(const CVector &CameraTarget, float, float, float)
 {
@@ -2683,6 +2702,9 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 	static float DontLookThroughWorldFixer = 0.0f;
 	CVector TargetCoors;
 
+	// The FOV of the last frame: the scope starts where the view it takes over
+	// was, the way the stock sniper camera starts at the FOV it had
+	float previousFOV = FOV;
 	FOV = DefaultFOV;
 	TargetCoors = CameraTarget;
 	if(CamTargetEntity->m_rwObject == nil)
@@ -2700,6 +2722,21 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 	   pPlayer && pPlayer->InVehicle() &&
 	   vehicleTarget == (CEntity*)pPlayer->m_pMyVehicle && ((CVehicle*)vehicleTarget)->pDriver;
 	bool modeReset = ResetStatics;
+	// The view anchor: the camera serves the walking player or a vehicle the
+	// player rides in (for the driver the camera serves the seated ped below).
+	// The anchor changes in one frame when the player sits down or steps out,
+	// so the camera handover glides from the pose the last frame presented, for
+	// the driver and the passenger alike. The stock view (the setting off)
+	// keeps its own switch and its own feel.
+	static bool wasVehicleAnchor = false;
+	bool vehicleAnchor = !vehicleTarget->IsPed();
+	if(TheCamera.FirstPersonViewEnabled() && (modeReset || vehicleAnchor != wasVehicleAnchor)){
+		TheCamera.StartCameraHandover(CAMERA_HANDOVER_TIME);
+		// The new view starts on the car's heading with no look return running
+		m_bRecenteringLook = false;
+		m_uiLookInputTime = CTimer::GetTimeInMilliseconds();
+	}
+	wasVehicleAnchor = vehicleAnchor;
 	if(firstPersonCarView)
 		CamTargetEntity = pPlayer;
 
@@ -2720,12 +2757,21 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		static bool FailedTestTwelveFramesAgo = false;
 		RwV3d HeadPos;
 
-		// The first person view setting overrides the default FOV
+		// The first person view setting overrides the default FOV; aiming down
+		// the sights zooms in, the car ADS zooms the car view too, and the
+		// sniper and the laser scope keep the wheel zoom of the stock scope.
+		// The zoom is a view change in one frame, so it glides like the others.
+		bool carAds = firstPersonCarView && TheCamera.UsingCarAds();
+		bool usingScope = TheCamera.UsingFirstPersonScope();
+		bool usingSights = TheCamera.UsingFirstPersonSights() || carAds;
+		static bool wasUsingSights = false;
+		if(TheCamera.FirstPersonViewEnabled() && usingSights != wasUsingSights)
+			TheCamera.StartCameraHandover(CAMERA_SIGHTS_HANDOVER_TIME);
+		wasUsingSights = usingSights;
 		if(TheCamera.FirstPersonViewEnabled())
-			FOV = FrontEndMenuManager.GetFirstPersonFOV();
-		// Aiming down the sights zooms in; the car ADS zooms the car view too
-		if(TheCamera.UsingFirstPersonSights() ||
-		   (firstPersonCarView && TheCamera.UsingCarAds()))
+			FOV = TheCamera.UpdateFirstPersonViewFOV(previousFOV, usingSights, usingScope);
+		else if(usingSights)
+			// The stock vehicle first person view keeps its own ADS zoom
 			FOV = TheCamera.GetFirstPersonSightsFOV();
 
 		TargetCoors = CameraTarget;
@@ -2801,6 +2847,47 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 				prevVehicleHeading = vehicleHeading;
 			Beta += vehicleHeading - prevVehicleHeading;
 			prevVehicleHeading = vehicleHeading;
+
+			// The mouse look stays an offset from the car's heading: new look
+			// input takes the offset over and cancels a return at once, and a
+			// look that rests for a moment returns to straight ahead with an
+			// ease out curve. A held aim owns the look: it stops a running
+			// return, and the next return starts from where the aim left the
+			// offset. The stock view (the setting off) keeps its own feel.
+			if(TheCamera.FirstPersonViewEnabled()){
+				uint32 now = CTimer::GetTimeInMilliseconds();
+				float yawOffset = Beta - vehicleHeading;
+				while(yawOffset >= PI) yawOffset -= 2*PI;
+				while(yawOffset < -PI) yawOffset += 2*PI;
+
+				if(carAds || LookLeftRight != 0.0f || LookUpDown != 0.0f){
+					m_uiLookInputTime = now;
+					m_bRecenteringLook = false;
+				}
+
+				if(!carAds){
+					if(m_bRecenteringLook){
+						float fraction = (float)(now - m_uiRecenterStart)/CAMERA_LOOK_RECENTER_TIME;
+						if(fraction >= 1.0f){
+							m_bRecenteringLook = false;
+							yawOffset = 0.0f;
+							Alpha = 0.0f;
+						}else{
+							float amount = EaseOutCubic(fraction);
+							yawOffset = m_fRecenterFromYaw*(1.0f - amount);
+							Alpha = m_fRecenterFromPitch*(1.0f - amount);
+						}
+					}else if(now - m_uiLookInputTime > CAMERA_LOOK_RECENTER_IDLE &&
+					          (Abs(yawOffset) > CAMERA_LOOK_RECENTER_MIN_OFFSET ||
+					           Abs(Alpha) > CAMERA_LOOK_RECENTER_MIN_OFFSET)){
+						m_bRecenteringLook = true;
+						m_uiRecenterStart = now;
+						m_fRecenterFromYaw = yawOffset;
+						m_fRecenterFromPitch = Alpha;
+					}
+					Beta = vehicleHeading + yawOffset;
+				}
+			}
 		}
 		wasFirstPersonVehicle = firstPersonCarView;
 		while(Beta >= PI) Beta -= 2*PI;

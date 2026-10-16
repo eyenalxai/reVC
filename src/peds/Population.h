@@ -47,6 +47,13 @@ public:
 	static uint32 ms_nTotalCarPassengerPeds;
 	static uint32 NumMiamiViceCops;
 
+	/* The off-network pedestrian spawns (VICE-122): the pedestrians created on
+	 * a free position off the node network, and the strays the cull took. The
+	 * counters are live for the measurement rig. */
+	static uint32 ms_nOffNetworkSpawns;
+	static uint32 ms_nOffNetworkStuck;
+	static uint32 ms_nOffNetworkDrowned;
+
 	static void Initialise();
 	static void Update(bool);
 	static void LoadPedGroups();
@@ -80,10 +87,10 @@ public:
 	static bool CanSolicitPlayerInCar(int32);
 	static bool CanSolicitPlayerOnFoot(int32);
 	static bool IsSecurityGuard(ePedType);
-	static void PlaceGangMembers(ePedType, int32, CVector const&);
-	static void PlaceGangMembersInFormation(ePedType, int32, CVector const&);
-	static void PlaceGangMembersInCircle(ePedType, int32, CVector const&);
-	static void PlaceCouple(ePedType, int32, ePedType, int32, CVector);
+	static void PlaceGangMembers(ePedType, int32, CVector const&, bool offNetwork);
+	static void PlaceGangMembersInFormation(ePedType, int32, CVector const&, bool offNetwork);
+	static void PlaceGangMembersInCircle(ePedType, int32, CVector const&, bool offNetwork);
+	static void PlaceCouple(ePedType, int32, ePedType, int32, CVector, bool offNetwork);
 	static void PlaceMallPedsAsStationaryGroup(CVector const&, int32);
 	static CPed* AddDeadPedInFrontOfCar(const CVector& pos, CVehicle* pCulprit);
 };

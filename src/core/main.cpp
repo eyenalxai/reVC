@@ -1455,8 +1455,11 @@ Render2dStuff(void)
 	if(player)
 		weaponType = player->GetWeapon()->m_eWeaponType;
 
+	// The sight overlay the view draws, not the raw camera mode: the first
+	// person player camera serves the sniper, the laser scope and the rocket
+	// launcher, and their border must draw over it too
 	bool firstPersonWeapon = false;
-	int cammode = TheCamera.Cams[TheCamera.ActiveCam].Mode;
+	int cammode = TheCamera.GetSightOverlayMode();
 	if(cammode == CCam::MODE_SNIPER ||
 	   cammode == CCam::MODE_SNIPER_RUNABOUT ||
 	   cammode == CCam::MODE_ROCKETLAUNCHER ||

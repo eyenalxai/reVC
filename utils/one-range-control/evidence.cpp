@@ -44,6 +44,9 @@
 
 #include "invariant.h"
 #include "DrawDistance.h"
+/* The caps and the car target come from the cap table itself (VICE-123), so the
+ * sweep cannot print a number the game no longer uses. */
+#include "PopulationBudget.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -56,20 +59,14 @@
  * the header and fails when the two do not agree. */
 #define SLIDER_STEPS 16
 
-/* The constants the caps mirror: IniFile.cpp (the defaults and the hard tops)
- * and CarCtrl.cpp (the car target). The sweep prints the caps at the stock
- * densities (PedNumberMultiplier 1.0, CarNumberMultiplier 2.0) and at the
- * slider tops (3.4 / 3.4, the owner's maximum settings). */
+/* The density values the sweep prints the caps at: the stock densities
+ * (PedNumberMultiplier 1.0, CarNumberMultiplier 2.0) and the slider tops
+ * (3.4 / 3.4, the owner's maximum settings). The caps themselves come from the
+ * cap table (PopulationBudget.h). */
 #define PED_DENSITY_STOCK 1.0f
 #define CAR_DENSITY_STOCK 2.0f
 #define PED_DENSITY_MAX 3.4f
 #define CAR_DENSITY_MAX 3.4f
-#define DEFAULT_MAX_NUMBER_OF_PEDS 100.0f
-#define DEFAULT_MAX_NUMBER_OF_CARS 45.0f
-#define MAX_PEDS_IN_USE 5500
-#define MAX_CARS_IN_USE 2400
-#define RANDOM_CARS_PER_INI_UNIT 30.0f
-#define MAX_RANDOM_CARS 1700
 
 static int g_failures = 0;
 
@@ -153,6 +150,78 @@ static void SweepCapsAtMaxDensity(void)
 			(double)dd, (double)r.scale, (double)pedCap, (double)carCap, (double)carTarget);
 	}
 	printf("\n");
+}
+
+/*
+ * VICE-145: the owner's settings, and the ring/budget numbers of the states
+ * around this fix. The road estimate is an assumption, labelled as one: a
+ * district whose streets take 6% of the ground, 14 m wide, so 1 km^2 holds
+ * 4.3 km of street.
+ */
+#define ROAD_AREA_FRACTION 0.06f
+#define ROAD_WIDTH 14.0f
+
+static void PrintState(const char *name, float scale, float side, float front, float despawn, float target, const char *note)
+{
+	float area = 3.14159265f * despawn * despawn / 1e6f;	/* the ring out to the despawn, km^2 */
+	float roadKm = area * ROAD_AREA_FRACTION * 1e6f / ROAD_WIDTH / 1000.0f;
+	printf("  %-26s scale %5.2f | side %5.0f front %5.0f despawn %5.0f m | target %5.0f | %5.0f cars/km^2 | one car per %5.1f m of street%s\n",
+		name, (double)scale, (double)side, (double)front, (double)despawn, (double)target,
+		(double)(target / area), (double)(target > 0.0f ? roadKm * 1000.0f / target : 0.0f), note);
+}
+
+static void SectionOwner(void)
+{
+	/* the fixed table at the owner's settings */
+	STrafficRings owner = RingsAt(16.0f, 70.0f / 110.0f, 2000.0f);
+	float ownerTarget = RANDOM_CARS_PER_INI_UNIT * CAR_DENSITY_MAX * owner.scale * owner.scale;
+	if (ownerTarget > MAX_RANDOM_CARS) ownerTarget = MAX_RANDOM_CARS;
+	/* the two states around the fix, from their own rules */
+	float fov = 70.0f / 110.0f;
+	float oldRequest = 4.0f * fov;						/* 494888ff: the spawn distance slider at 4.0 */
+	float oldVisibleCap = (TrafficRingsMin(300.0f * fov * 16.0f, 2000.0f) - RING_CAR_DESPAWN_RESERVE) / RING_CAR_ONSCREEN_SPAWN_MAX;
+	float oldScale = TrafficRingsMin(oldRequest, TrafficRingsMax(oldVisibleCap, fov));
+	float oldFront = RING_CAR_ONSCREEN_SPAWN_MAX * oldScale;
+	float oldDespawn = TrafficRingsMax(RING_CAR_DESPAWN * oldScale, oldFront + RING_CAR_DESPAWN_RESERVE);
+	float oldTarget = RANDOM_CARS_PER_INI_UNIT * CAR_DENSITY_MAX * oldScale * oldScale;
+	if (oldTarget > MAX_RANDOM_CARS) oldTarget = MAX_RANDOM_CARS;
+	float brokenRequest = 16.0f * fov / DRAWDIST_DEFAULT;	/* cc064267: no control slider, no cap */
+	float brokenScale = TrafficRingsMin(brokenRequest, TrafficRingsMax(oldVisibleCap, fov));
+	float brokenFront = RING_CAR_ONSCREEN_SPAWN_MAX * brokenScale;
+	float brokenDespawn = TrafficRingsMax(RING_CAR_DESPAWN * brokenScale, brokenFront + RING_CAR_DESPAWN_RESERVE);
+	float brokenTarget = RANDOM_CARS_PER_INI_UNIT * CAR_DENSITY_MAX * brokenScale * brokenScale;
+	if (brokenTarget > MAX_RANDOM_CARS) brokenTarget = MAX_RANDOM_CARS;
+	float stock = 1.0f;
+	float stockTarget = RANDOM_CARS_PER_INI_UNIT * CAR_DENSITY_STOCK * stock * stock;
+
+	printf("== C. VICE-145: the owner's settings and the states around the fix\n\n");
+	printf("  the owner: DrawDistance 16, FirstPersonFOV 110 (factor %.3f), sunny, densities %.1f/%.1f\n",
+		(double)fov, (double)PED_DENSITY_MAX, (double)CAR_DENSITY_MAX);
+	printf("  the spacing assumes the streets take %.0f%% of the ground, %.0f m wide\n\n",
+		(double)(ROAD_AREA_FRACTION * 100.0f), (double)ROAD_WIDTH);
+	PrintState("stock (1.2, 70)", 1.0f, 120.0f, 250.0f, 280.0f, stockTarget, "");
+	PrintState("494888ff (slider 4.0)", oldScale, 120.0f * oldScale, oldFront, oldDespawn, oldTarget, "  <- the state the owner liked");
+	PrintState("cc064267 (VICE-125)", brokenScale, 120.0f * brokenScale, brokenFront, brokenDespawn, brokenTarget, "  <- the regression");
+	PrintState("now (VICE-145 cap)", owner.scale, owner.carSideSpawn, owner.carOnScreenSpawnMax, owner.carDespawn, ownerTarget, "  <- the fix");
+	printf("\n  the fixed target %.0f sits in a %.2f km^2 ring; the regressed %.0f sat in %.1f km^2.\n",
+		(double)ownerTarget, (double)(3.14159265f * owner.carDespawn * owner.carDespawn / 1e6f),
+		(double)brokenTarget, (double)(3.14159265f * brokenDespawn * brokenDespawn / 1e6f));
+
+	/* the parked cars: the generator band, the reason NumParkedCars was 0 */
+	printf("\n  the car generator band [near, far) of the same three states (CarGen.cpp):\n");
+	printf("    gen ring = %.0f x the scale, near = far - %.0f; the generator creates its car\n",
+		(double)RING_GENERATOR_FAR, (double)RING_GENERATOR_NEAR_GAP);
+	printf("    only while the player is inside that band.\n");
+	printf("    494888ff (230 x the FOV factor):      [%.0f, %.0f) m\n",
+		(double)(RING_GENERATOR_FAR * fov - RING_GENERATOR_NEAR_GAP), (double)(RING_GENERATOR_FAR * fov));
+	printf("    cc064267 (230 x the uncapped scale):  [%.0f, %.0f) m   <- the player never gets there;\n",
+		(double)(RING_GENERATOR_FAR * brokenScale - RING_GENERATOR_NEAR_GAP), (double)(RING_GENERATOR_FAR * brokenScale));
+	printf("    now (230 x the capped scale):         [%.0f, %.0f) m   <- a local band, crossed while driving.\n",
+		(double)owner.generatorNear, (double)owner.generatorFar);
+	printf("    And the parked car was never *removed*: the lifetime cull of the regressed state\n");
+	printf("    sat at %.0f m, above the %.0f m band, so a car created there would have survived.\n",
+		(double)brokenDespawn, (double)(RING_GENERATOR_FAR * brokenScale));
+	printf("    It was never created: the player was outside the band.\n\n");
 }
 
 static void SectionSweep(void)
@@ -567,12 +636,16 @@ static void SectionRoundTrip(void)
 	}
 	{
 		float mapped = LegacyRangeDrawDistance(4.0f, DRAWDIST_DEFAULT);
-		STrafficRings oldRing = RingsAt(mapped, 1.0f, 2000.0f);
+		STrafficRings mappedRing = RingsAt(mapped, 1.0f, 2000.0f);
 		STrafficRings stock = RingsAt(DRAWDIST_DEFAULT, 1.0f, 2000.0f);
-		printf("    the mapped value %.2f gives the ring %.1f m, four times the stock ring %.1f m\n\n",
-			(double)mapped, (double)oldRing.carOnScreenSpawnMax, (double)stock.carOnScreenSpawnMax);
-		if (fabsf(oldRing.carOnScreenSpawnMax - 4.0f * stock.carOnScreenSpawnMax) > 0.05f)
-			Fail("the mapped draw distance does not give the old ring");
+		float request = 4.0f * stock.carOnScreenSpawnMax;
+		float capped = TrafficRingsMin(request, RING_CAR_ONSCREEN_SPAWN_MAX * RING_MAX_SCALE);
+		printf("    the mapped value %.2f asks for the old ring %.1f m; the table holds it at %.1f m\n",
+			(double)mapped, (double)request, (double)mappedRing.carOnScreenSpawnMax);
+		printf("    (the local cap of VICE-145: %.1f m = %.0f m x %.1f)\n\n",
+			(double)(RING_CAR_ONSCREEN_SPAWN_MAX * RING_MAX_SCALE), (double)RING_CAR_ONSCREEN_SPAWN_MAX, (double)RING_MAX_SCALE);
+		if (fabsf(mappedRing.carOnScreenSpawnMax - capped) > 0.05f)
+			Fail("the mapped draw distance is not the old request under the table's caps");
 	}
 }
 
@@ -582,6 +655,7 @@ int main(void)
 	printf("the ring comes from src/control/TrafficRings.h, the control bounds from src/core/DrawDistance.h\n\n");
 
 	SectionSweep();
+	SectionOwner();
 	SectionRoundTrip();
 
 	printf("== result\n\n");
