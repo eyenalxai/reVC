@@ -381,7 +381,8 @@ CPopulation::Update(bool addPeds)
 			ms_nTotalPeds -= ms_nTotalCarPassengerPeds;
 			if (!CCutsceneMgr::IsRunning() && addPeds) {
 				float pcdm = PedCreationDistMultiplier();
-				for (int i = 0; i < PED_ATTEMPTS_PER_FRAME; i++) {
+				// The ring fills from the target and the lifetime, so the rate follows the spawn distance.
+				for (int i = 0; i < PED_ATTEMPTS_PER_FRAME * CIniFile::SpawnDistanceMultiplier; i++) {
 					AddToPopulation(pcdm * (MIN_CREATION_DIST * TheCamera.GenerationDistMultiplier),
 						pcdm * ((MIN_CREATION_DIST + CREATION_RANGE) * TheCamera.GenerationDistMultiplier),
 						pcdm * (MIN_CREATION_DIST + CREATION_RANGE) * OFFSCREEN_CREATION_MULT - CREATION_RANGE,
