@@ -80,7 +80,7 @@ public:
 	static int32 ChoosePoliceCarModel(void);
 	static int32 ChooseGangCarModel(int32 gang);
 	static void RemoveDistantCars(void);
-	static void PossiblyRemoveVehicle(CVehicle*);
+	static void PossiblyRemoveVehicle(CVehicle*, CVector vecPlayerPos);
 	static bool IsThisVehicleInteresting(CVehicle*);
 	static void RegisterVehicleOfInterest(CVehicle*);
 	static int32 CountCarsOfType(int32 mi);

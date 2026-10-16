@@ -247,3 +247,20 @@ prop.
 A vehicle collision with an object, a pedestrian, or a vegetation building. The
 vehicle's speed loss and collision damage from a soft hit are one tenth of the
 original values.
+
+## Replay block
+
+One of the eight fixed buffers of `REPLAYBUFFERSIZE` (100000) bytes that hold
+the replay. A frame is written into the current block; a frame that does not
+fit the block starts the next one. No frame may write past its block.
+
+## Replay record radius
+
+The distance from the camera (120 m, `REPLAY_RECORD_RADIUS`) inside which the
+replay records vehicles and pedestrians. Entities outside it are left out, so
+the per-frame size does not grow with the whole world.
+
+## Replay entity cap
+
+The most entities (`MAX_REPLAY_ENTITIES`, 500) one replay frame records. It
+keeps the worst case frame well inside one replay block.
