@@ -29,7 +29,8 @@ an angle but is not arcade enough, and the map's narrow roads and straight
    keeps writing the car's turn speed directly.
 5. A finished drift stacks its boost (0.05 or 0.09 of the top speed per tier,
    cap 0.25) on a boost level that pushes and drains, instead of one impulse.
-   The cap lets a chain run at 1.25x the top speed.
+   The cap lets a chain run at 1.25x the top speed. The numbers and the push
+   direction were tuned in ADR 0005.
 
 ## Consequences
 
