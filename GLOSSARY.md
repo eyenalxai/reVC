@@ -303,7 +303,9 @@ lists them, and swapping a pair would shift the global random stream.
 
 The librw pass that turns a frame hierarchy into world-space matrices. A frame
 is marked when something in its hierarchy was written. The pass (the walk) then
-recomputes the local-to-world matrix (LTM) of every marked frame and of the
-frames below it, and syncs the objects that hang on those frames.
-`Frame::syncDirty` runs the pass once for each camera begin-update, so the walk
-is part of the frame cost. See ADR 0013.
+recomputes the local-to-world matrix (LTM) of a frame only when the frame is
+marked, when its own matrix was written (the `CHANGED` flag), or when the LTM of
+its parent changed, and syncs the objects that hang on the frame only when its
+LTM changed. `Frame::syncDirty` runs the pass once for each camera begin-update,
+so the walk is part of the frame cost. Marking a frame whose matrices did not
+change costs a visit but no LTM work. See ADR 0014.
