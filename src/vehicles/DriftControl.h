@@ -65,6 +65,7 @@ private:
 	void StartRecover(void);
 	float GetMinGrip(void);
 	float GetMaxSpeed(CAutomobile *car);
+	float GetForwardSpeed(CAutomobile *car);
 };
 
 #endif // __GTA_DRIFTCONTROL_H__

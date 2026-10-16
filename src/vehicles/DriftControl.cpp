@@ -33,7 +33,7 @@
 #define DRIFT_VEL_ALIGN_RATE	120.0f	// cap on the velocity alignment, degrees/s
 #define DRIFT_STEERLOCK_MULT	1.3f	// front wheel lock while drifting
 #define DRIFT_SPEED_HOLD	1.0f	// fraction of the lost speed given back per second
-#define DRIFT_SPEED_MIN_DIR	0.01f	// below this speed a direction of travel is not usable
+#define DRIFT_SPEED_MIN_DIR	0.01f	// below this speed the velocity cannot be normalised
 #define DRIFT_RECOVER_TIME	0.6f	// seconds of exit alignment after the handbrake
 #define DRIFT_RECOVER_ALIGN	4.0f	// exit counter-yaw per radian of slip, 1/s
 #define DRIFT_RECOVER_SLIP	2.0f	// below this remaining slip the assist stops
@@ -45,7 +45,7 @@
 #define DRIFT_BOOST_TIER1	0.04f	// boost of tier 1, fraction of top speed
 #define DRIFT_BOOST_TIER2	0.07f	// boost of tier 2, fraction of top speed
 #define DRIFT_BOOST_MAX		0.15f	// stacked boosts stop at 1.15x top speed
-#define DRIFT_BOOST_PUSH	0.35f	// boost acceleration, fraction of top speed per second
+#define DRIFT_BOOST_PUSH	0.5f	// boost acceleration, fraction of top speed per second
 #define DRIFT_BOOST_DRAIN	0.08f	// boost level that drains per second
 
 // The readout mirrors the player's drift for the debug menu (see re3.cpp).
@@ -87,6 +87,14 @@ float
 CDriftControl::GetMaxSpeed(CAutomobile *car)
 {
 	return car->pHandling->Transmission.fMaxVelocity;
+}
+
+// The car's speed along its nose: the share the boost cap and the entry gate
+// use.
+float
+CDriftControl::GetForwardSpeed(CAutomobile *car)
+{
+	return DotProduct(car->m_vecMoveSpeed, car->GetForward());
 }
 
 float
@@ -133,7 +141,7 @@ CDriftControl::UpdateTargetAngle(CAutomobile *car, float dt)
 	// can carry the car past the entry gate. Then the turn becomes a real
 	// drift that holds the angle the car has.
 	if(m_bHandbrakeTurn){
-		float fwdSpeed = DotProduct(car->m_vecMoveSpeed, car->GetForward());
+		float fwdSpeed = GetForwardSpeed(car);
 		if(fwdSpeed < DRIFT_ENTRY_SPEED*GetMaxSpeed(car)){
 			// Keep the target on the angle the car has, so a promotion above
 			// the gate happens without a kick.
@@ -298,25 +306,17 @@ CDriftControl::ApplyBoost(CAutomobile *car, float dt)
 	if(m_fBoostLevel <= 0.0f)
 		return;
 
-	// A stacked boost pushes along the direction the car travels, not the
-	// nose: with slip left on the exit it adds speed without steering the
-	// car. The headroom is measured on the total speed, so a chain stops at
-	// 1.15x the top speed whatever the slip is.
+	// A stacked boost pushes along the nose: at slip its sideways part works
+	// against the slide, so the boost pulls the car straight while it lands
+	// and the player feels the rear grip come back. The headroom is measured
+	// on the forward speed, so the level still reads as a fraction of the top
+	// speed; the total speed can pass that cap for a moment while a slide is
+	// scrubbed, and that is accepted.
 	float fMaxVelocity = GetMaxSpeed(car);
-	float speed = car->m_vecMoveSpeed.Magnitude();
-
-	// The push is level: only the horizontal part of the travel gives the
-	// direction. A speed too small to give one falls back to the nose.
-	CVector pushDir = car->m_vecMoveSpeed;
-	pushDir.z = 0.0f;
-	if(pushDir.Magnitude2D() > DRIFT_SPEED_MIN_DIR)
-		pushDir.Normalise2D();
-	else
-		pushDir = car->GetForward();
-
-	float push = Min(fMaxVelocity*(1.0f + m_fBoostLevel) - speed, DRIFT_BOOST_PUSH*fMaxVelocity*dt);
+	CVector forward = car->GetForward();
+	float push = Min(fMaxVelocity*(1.0f + m_fBoostLevel) - DotProduct(car->m_vecMoveSpeed, forward), DRIFT_BOOST_PUSH*fMaxVelocity*dt);
 	if(push > 0.0f)
-		car->ApplyMoveForce(pushDir * push * car->m_fMass);
+		car->ApplyMoveForce(forward * push * car->m_fMass);
 
 	m_fBoostLevel = Max(m_fBoostLevel - DRIFT_BOOST_DRAIN*dt, 0.0f);
 }
@@ -397,7 +397,7 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 
 	float dt = timeStep / DRIFT_TICK_RATE;	// the time step is 1.0 at 50 fps
 
-	float fwdSpeed = DotProduct(car->m_vecMoveSpeed, car->GetForward());
+	float fwdSpeed = GetForwardSpeed(car);
 	float rightSpeed = DotProduct(car->m_vecMoveSpeed, car->GetRight());
 	m_fSlipAngle = Atan2(rightSpeed, fwdSpeed);
 
