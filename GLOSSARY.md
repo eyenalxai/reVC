@@ -143,3 +143,9 @@ counted from the start of the reload, when a press gives the fast reload.
 
 The longer reload after a press before the reload window. The press adds half
 the weapon's reload time once, so the reload takes about 1.5 times as long.
+
+## Cheat
+
+A word that the player types during play to change the world. The game
+compares the newest typed characters against an obfuscated word list in
+`CPad::AddToPCCheatString`. A hit runs the cheat effect.

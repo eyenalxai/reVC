@@ -1364,6 +1364,11 @@ void CPad::AddToPCCheatString(char c)
 		KeyBoardCheatString[0] = ' ';
 		VehicleCheat(MI_RHINO);
 	}
+	// "TAKETOTHESKIES"
+	else if (!Cheat_strncmp(KeyBoardCheatString, "VJPL``K[P_RSHt")) {
+		KeyBoardCheatString[0] = ' ';
+		VehicleCheat(MI_MAVERICK);
+	}
 	// "LIFEISPASSINGMEBY"
 	else if (!Cheat_strncmp(KeyBoardCheatString, "\\GLNTiLZTL][PeSOh")) {
 		KeyBoardCheatString[0] = ' ';
