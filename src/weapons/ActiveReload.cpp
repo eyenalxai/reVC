@@ -1,6 +1,7 @@
 #include "common.h"
 #include "main.h"
 
+#include "DMAudio.h"
 #include "Timer.h"
 #include "Weapon.h"
 #include "Ped.h"
@@ -100,6 +101,22 @@ ActiveReload::Start(eWeaponType weaponType, uint32 duration)
 	ResetResult();
 }
 
+// The lines the protagonist says on a judgment: the cocky shooting line on a
+// perfect reload and the annoyed line on a jam (VICE-89). Both are existing
+// player comment samples; CPed::Say applies the game's own cooldowns.
+static void
+SayJudgment(eActiveReloadResult result)
+{
+	CPed *player = FindPlayerPed();
+	if (player == nil)
+		return;
+
+	if (result == ACTIVE_RELOAD_PERFECT)
+		player->Say(SOUND_PED_ON_FIRE);
+	else if (result == ACTIVE_RELOAD_JAM)
+		player->Say(SOUND_PED_ANNOYED_DRIVER);
+}
+
 void
 ActiveReload::Judge(CWeapon *weapon)
 {
@@ -117,6 +134,7 @@ ActiveReload::Judge(CWeapon *weapon)
 		ms_bJudged = true;
 		ms_eResult = ACTIVE_RELOAD_JAM;
 		ms_nResultTime = now;
+		SayJudgment(ACTIVE_RELOAD_JAM);
 	} else if (now <= ms_nWindowEnd) {
 		// In the window: the reload finishes almost at once.
 		weapon->m_nTimer = now + ACTIVE_RELOAD_PERFECT_TAIL_MS;
@@ -124,6 +142,7 @@ ActiveReload::Judge(CWeapon *weapon)
 		ms_eResult = ACTIVE_RELOAD_PERFECT;
 		ms_nResultTime = now;
 		ms_bPerfect = true;
+		SayJudgment(ACTIVE_RELOAD_PERFECT);
 	}
 	// Later presses and presses after the window do nothing.
 }
