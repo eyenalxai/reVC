@@ -48,6 +48,10 @@
 #define PLAYER_ADRENALINE_ANIM_SPEED		2.0f
 #define PLAYER_FIXED_CAM_SPRINT_ANIM_SPEED	0.7f
 
+// The measured animation speeds are in units per second; the controller and the
+// playback scaling work in engine units (one unit per 1/50 second).
+#define PLAYER_ENGINE_UNITS_PER_SECOND		50.0f
+
 // The animation playback follows the real speed between these bounds; the clamp
 // keeps a large mismatch from looking wrong
 #define PLAYER_ANIM_SPEED_MIN		0.4f
@@ -1761,7 +1765,9 @@ CPlayerPed::GetMoveAnimReferenceSpeed(void)
 		if (moveAssoc)
 			referenceSpeed += moveAssoc->blendAmount * moveAssoc->hierarchy->rootSpeed * GetMoveAnimPlayback(moveAnims[i]);
 	}
-	return referenceSpeed;
+	// The measured root speeds are in units per second; the movement and the
+	// playback scaling use engine units (one unit per 1/50 second).
+	return referenceSpeed / PLAYER_ENGINE_UNITS_PER_SECOND;
 }
 
 // One movement controller for the player, called by every on-foot control path
