@@ -1731,7 +1731,7 @@ CBike::Render(void)
 {
 	CVehicleModelInfo *mi = (CVehicleModelInfo*)CModelInfo::GetModelInfo(GetModelIndex());
 
-	m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + 3000;
+	m_nRemovalProtectedUntil = Max(m_nRemovalProtectedUntil, CTimer::GetTimeInMilliseconds() + VEHICLE_RENDERED_GRACE_MS);
 	mi->SetVehicleColour(m_currentColour1, m_currentColour2);
 	CEntity::Render();
 }

@@ -38,8 +38,10 @@ The near bubble rows (VICE-127) are the acceptance of the pop-in ticket: the two
 frustum counters count a car created or removed where the player could catch it
 and must stay 0; the fade rows are the fill burst's work, exempt by the screen;
 the fill and the target are the traffic inside the player's 90 m disc and the
-share of the car target that area asks for. The counters are cumulative, so the
-orchestrator notes them before a drive or a camera turn and reads them after.
+share of the car target that area asks for (the other fill is the rest of the
+target: the cars outside the traffic spawner, whose creations the "other"
+rows carry apart). The counters are cumulative, so the orchestrator notes them
+before a drive or a camera turn and reads them after.
 """
 
 import os
@@ -118,10 +120,16 @@ BURSTS = [
 ]
 
 # The near bubble (VICE-127). The two frustum counters are the acceptance of the
-# pop-in ticket and must stay 0; the fade rows are the fill burst's work (exempt
-# by the screen); the hidden and refused rows show the rule working; the rays
-# row is bounded by the frame's budget (4); the fill is the traffic inside the
-# player's disc and the target is its share of the car budget.
+# pop-in ticket and must stay 0; the fade rows are the catchable events a fade
+# covered (the fill burst's work, exempt by the screen); the hidden and refused
+# rows show the rule working; the rays row is the frame's budget (4) and the
+# total follows it; the fill is the traffic inside the player's disc, the other
+# fill is the rest of the car target (the cars outside the traffic spawner), and
+# the target is the share of the car budget the disc asks for. The other
+# creations (and the catchable ones of them) are the scripted, set-piece, road
+# block, car park, garage and cheat cars: the ticket's counters carry them apart
+# so a scripted car that appears in view is visible here and never inside the
+# traffic's rows. The valve row is the pool's own last line.
 NEAR_BUBBLE = [
     ("bubble: creations in frustum", "_ZN8CCarCtrl32ms_nNearBubbleCreationsInFrustumE", "I"),
     ("bubble: removals in frustum",  "_ZN8CCarCtrl31ms_nNearBubbleRemovalsInFrustumE",  "I"),
@@ -131,10 +139,15 @@ NEAR_BUBBLE = [
     ("bubble: hidden removals",      "_ZN8CCarCtrl28ms_nNearBubbleHiddenRemovalsE",     "I"),
     ("bubble: refused",              "_ZN8CCarCtrl21ms_nNearBubbleRefusedE",            "I"),
     ("bubble: bypassed",             "_ZN8CCarCtrl22ms_nNearBubbleBypassedE",           "I"),
-    ("bubble: rays spent",           "_ZN8CCarCtrl18ms_nNearBubbleRaysE",               "I"),
+    ("bubble: rays this frame",      "_ZN8CCarCtrl18ms_nNearBubbleRaysE",               "I"),
+    ("bubble: rays total",           "_ZN8CCarCtrl23ms_nNearBubbleRaysTotalE",          "I"),
     ("bubble: rays left this frame", "_ZN8CCarCtrl22ms_nNearBubbleRaysLeftE",           "i"),
-    ("bubble: fill (cars in 90 m)",  "_ZN8CCarCtrl18ms_nNearBubbleFillE",               "I"),
+    ("bubble: fill (traffic in 90 m)", "_ZN8CCarCtrl18ms_nNearBubbleFillE",             "I"),
+    ("bubble: other fill (rest)",    "_ZN8CCarCtrl23ms_nNearBubbleOtherFillE",          "I"),
     ("bubble: fill target",          "_ZN8CCarCtrl20ms_fNearBubbleTargetE",             "f"),
+    ("bubble: other creations",      "_ZN8CCarCtrl28ms_nNearBubbleOtherCreationsE",     "I"),
+    ("bubble: other creations in frustum", "_ZN8CCarCtrl37ms_nNearBubbleOtherCreationsInFrustumE", "I"),
+    ("bubble: valve removals",       "_ZN8CCarCtrl27ms_nNearBubbleValveRemovalsE",      "I"),
 ]
 
 CONFIG = "src/core/config.h"
@@ -267,7 +280,7 @@ def main():
     print()
     creations = values.get("creations in frustum")
     removals = values.get("removals in frustum")
-    fill = values.get("fill (cars in 90 m)")
+    fill = values.get("fill (traffic in 90 m)")
     target = values.get("fill target")
     if creations is None or removals is None:
         print("  the near bubble: a symbol is missing (the acceptance cannot be read)")
@@ -275,8 +288,20 @@ def main():
         verdict = "PASS" if creations == 0 and removals == 0 else "FAIL"
         print(f"  the near bubble: creations in the frustum {creations}, "
               f"removals in the frustum {removals} -> {verdict}")
+    other = values.get("other fill (rest)")
     if fill is not None and target is not None:
-        print(f"  the near bubble: fill {fill} against the target {target:.1f}")
+        if other is None:
+            print(f"  the near bubble: fill {fill} against the target {target:.1f}")
+        else:
+            print(f"  the near bubble: fill {fill} + other {other} against the target {target:.1f}")
+    valve = values.get("valve removals")
+    other_creations = values.get("other creations")
+    other_in_frustum = values.get("other creations in frustum")
+    if other_creations is not None and other_in_frustum is not None:
+        print(f"  the near bubble: the cars outside the spawner {other_creations}, "
+              f"of them catchable {other_in_frustum}")
+    if valve:
+        print(f"  the near bubble: the pool valve removed {valve} (its own last line)")
 
 
 if __name__ == "__main__":

@@ -124,6 +124,7 @@ CVehicle::CVehicle(uint8 CreatedBy)
 	bVehicleColProcessed = false;
 	m_numPedsUseItAsCover = 0;
 	bIsCarParkVehicle = false;
+	bIsTrafficCar = false;
 	bHasAlreadyBeenRecorded = false;
 	m_bSirenOrAlarm = false;
 	m_nCarHornTimer = 0;

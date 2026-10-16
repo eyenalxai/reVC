@@ -19,6 +19,9 @@ int16 COcclusion::PreviousListWalkThroughFA;
 int16 COcclusion::NumActiveOccluders;
 COccluder COcclusion::aOccluders[NUMOCCLUSIONVOLUMES];
 CActiveOccluder COcclusion::aActiveOccluders[NUMACTIVEOCCLUDERS];
+CVector COcclusion::ms_vecProcessedCameraPos;
+CVector COcclusion::ms_vecProcessedCameraForward;
+float COcclusion::ms_fProcessedCameraFOV;
 
 CVector gCenterOnScreen;
 
@@ -292,6 +295,15 @@ COcclusion::OccluderHidesBehind(CActiveOccluder *occl1, CActiveOccluder *occl2) 
 void
 COcclusion::ProcessBeforeRendering(void)
 {
+	/* The stamp of the view this set is built for (VICE-127): the near
+	 * bubble's gates read the set a frame later and trust it only while the
+	 * camera still matches. The stamp is written before any early return, so
+	 * a frame that builds nothing still tells the gates that the set is now
+	 * older than the camera. */
+	ms_vecProcessedCameraPos = TheCamera.GetPosition();
+	ms_vecProcessedCameraForward = TheCamera.GetForward();
+	ms_fProcessedCameraFOV = TheCamera.Cams[TheCamera.ActiveCam].FOV;
+
 	NumActiveOccluders = 0;
 
 #ifndef MASTER

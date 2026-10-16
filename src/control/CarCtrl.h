@@ -145,6 +145,8 @@ public:
 	static bool NearBubbleAllowsRemoval(CVehicle *pVehicle, const CVector &playerCentre, float ringThreshold);
 	static void NearBubbleCountCreation(const CVector &pos, float radius);
 	static void NearBubbleCountRemoval(const CVector &pos, float radius, bool wasInvisible);
+	static void NearBubbleCountOtherCreation(const CVector &pos, float radius);
+	static void NearBubbleCountValveRemoval(void);
 	static void SteerAIBoatWithPhysicsHeadingForTarget(CVehicle*, float, float, float*, float*, float*);
 	static void SteerAIHeliTowardsTargetCoors(CAutomobile*);
 	static void SteerAIPlaneTowardsTargetCoors(CAutomobile*);
@@ -203,7 +205,9 @@ public:
 	 * state of the frame's line-of-sight budget. The two frustum counters are
 	 * the acceptance: a car placed or deleted where the player could catch it
 	 * is counted there, and both are zero while the bubble holds. The fade
-	 * counters are the fill burst's work (VICE-126), exempt by the screen. */
+	 * counters are the catchable events a fade covered (the fill burst's
+	 * work); the other pair counts the cars created outside the traffic
+	 * spawner, and their fill is the rest of the car target. */
 	static uint32 ms_nNearBubbleCreationsInFrustum;
 	static uint32 ms_nNearBubbleRemovalsInFrustum;
 	static uint32 ms_nNearBubbleFadeCreations;
@@ -213,7 +217,12 @@ public:
 	static uint32 ms_nNearBubbleRefused;
 	static uint32 ms_nNearBubbleBypassed;
 	static uint32 ms_nNearBubbleRays;
+	static uint32 ms_nNearBubbleRaysTotal;
 	static uint32 ms_nNearBubbleFill;
+	static uint32 ms_nNearBubbleOtherFill;
+	static uint32 ms_nNearBubbleOtherCreations;
+	static uint32 ms_nNearBubbleOtherCreationsInFrustum;
+	static uint32 ms_nNearBubbleValveRemovals;
 	static float ms_fNearBubbleTarget;
 	static int32 ms_nNearBubbleRaysLeft;
 };

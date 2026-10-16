@@ -1108,7 +1108,7 @@ void
 CBoat::Render()
 {
 	((CVehicleModelInfo*)CModelInfo::GetModelInfo(GetModelIndex()))->SetVehicleColour(m_currentColour1, m_currentColour2);
-	m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + 3000;
+	m_nRemovalProtectedUntil = Max(m_nRemovalProtectedUntil, CTimer::GetTimeInMilliseconds() + VEHICLE_RENDERED_GRACE_MS);
 	if (!CVehicle::bWheelsOnlyCheat)
 		CEntity::Render();
 #ifdef NEW_RENDERER

@@ -272,6 +272,7 @@ void VehicleCheat(int model)
 			vehicle->SetStatus(STATUS_ABANDONED);
 			vehicle->m_nDoorLock = CARLOCK_UNLOCKED;
 			CWorld::Add(vehicle);
+			CCarCtrl::NearBubbleCountOtherCreation(vehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 		}
 	}
 	CStats::CheatedCount += 1000;

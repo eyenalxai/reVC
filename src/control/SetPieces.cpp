@@ -3,6 +3,7 @@
 #include "SetPieces.h"
 #include "Automobile.h"
 #include "CarAI.h"
+#include "CarCtrl.h"
 #include "CopPed.h"
 #include "GenericGameStorage.h"
 #include "PlayerPed.h"
@@ -302,6 +303,9 @@ CVehicle* CSetPiece::TryToGenerateCopCar(CVector2D vSpawn, CVector2D vTarget)
 	}
 	pVehicle->ChangeLawEnforcerState(true);
 	CWorld::Add(pVehicle);
+	/* The chase car is created outside the traffic spawner (VICE-127): it is
+	 * counted apart and never moves the traffic's own counters. */
+	CCarCtrl::NearBubbleCountOtherCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 	return pVehicle;
 }
 

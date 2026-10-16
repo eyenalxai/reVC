@@ -791,6 +791,10 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 	/* The fresh-spawn grace: the culls of the frame may not take this car
 	 * before it has lived NEAR_BUBBLE_GRACE_MS. */
 	pVehicle->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + NEAR_BUBBLE_GRACE_MS;
+	/* The car is the traffic spawner's own: the bubble's fill counts it, and
+	 * the cars the scripts and the set pieces create (RANDOM_VEHICLE too, so
+	 * part of the car target) are the fill's other half (VICE-127). */
+	pVehicle->bIsTrafficCar = true;
 	CVehicleModelInfo* pVehicleModel = pVehicle->GetModelInfo();
 	float radiusToTest = pVehicleModel->GetColModel()->boundingSphere.radius;
 	if (testForCollision){
@@ -1104,18 +1108,25 @@ CCarCtrl::RemoveDistantCars()
 	 * CCarCtrl::Init and its script opcode, and neither the player's own car nor
 	 * the remote vehicle can be removed here. */
 	CVector vecPlayerPos = FindPlayerCentreOfWorld(CWorld::PlayerInFocus);
-	/* The fill of the near bubble (VICE-127): the traffic (the random cars) the
-	 * player's own 90 m disc holds. The scan is the one this function already
-	 * makes: the count is free, and ms_fNearBubbleTarget (NearBubbleBeginFrame)
-	 * is the share of the car target the disc asks for. */
+	/* The fill of the near bubble (VICE-127): the traffic the spawner created
+	 * (the random cars, the emergency services) the player's own 90 m disc
+	 * holds, and the other half - the RANDOM_VEHICLEs the scripts, the set
+	 * pieces, the road blocks, the car parks, the garages and the cheats put
+	 * there. The car target counts both, so the two together are what the
+	 * target describes. The scan is the one this function already makes. */
 	int32 nearBubbleFill = 0;
+	int32 nearBubbleOtherFill = 0;
 	for (int i = CPools::GetVehiclePool()->GetSize()-1; i >= 0; i--) {
 		CVehicle* pVehicle = CPools::GetVehiclePool()->GetSlot(i);
 		if (!pVehicle)
 			continue;
 		if (pVehicle->VehicleCreatedBy == RANDOM_VEHICLE &&
-			(pVehicle->GetPosition() - vecPlayerPos).Magnitude2D() <= NEAR_BUBBLE_RADIUS)
-			nearBubbleFill++;
+			(pVehicle->GetPosition() - vecPlayerPos).Magnitude2D() <= NEAR_BUBBLE_RADIUS) {
+			if (pVehicle->bIsTrafficCar)
+				nearBubbleFill++;
+			else
+				nearBubbleOtherFill++;
+		}
 		// PossiblyRemoveVehicle may delete the vehicle, so handle the road
 		// block peds first, while the pointer is still valid.
 		if (pVehicle->bCreateRoadBlockPeds){
@@ -1127,6 +1138,7 @@ CCarCtrl::RemoveDistantCars()
 		PossiblyRemoveVehicle(pVehicle, vecPlayerPos);
 	}
 	ms_nNearBubbleFill = nearBubbleFill;
+	ms_nNearBubbleOtherFill = nearBubbleOtherFill;
 }
 
 void
@@ -1173,7 +1185,13 @@ CCarCtrl::RemoveCarsIfThePoolGetsFull(void)
 		pClosestCandidate = nil;
 	CVehicle* pRemove = pClosestCandidate ? pClosestCandidate : pClosestVehicle;
 	if (pRemove) {
-		NearBubbleCountRemoval(pRemove->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, false);
+		if (pClosestCandidate)
+			NearBubbleCountRemoval(pRemove->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, false);
+		else
+			/* The fallback: no car passes the rule and the pool is at its
+			 * last slots. The removal is the pool's own line, counted
+			 * apart from the culls the acceptance watches (VICE-127). */
+			NearBubbleCountValveRemoval();
 		CWorld::Remove(pRemove);
 		delete pRemove;
 	}
@@ -3526,15 +3544,22 @@ bool CCarCtrl::GenerateOneEmergencyServicesCar(uint32 mi, CVector vecPos)
 	pVehicle->SetMoveSpeed(CVector(0.0f, 0.0f, 0.0f));
 	pVehicle->SetStatus(STATUS_PHYSICS);
 	/* The near bubble (VICE-127): the ambulance or the fire truck appears only
-	 * where the player cannot see it. The placement search above tried its
-	 * candidates; a refusal here costs the call (the timer of the emergency
-	 * service asks again in 30 s), which is the same price the other
-	 * rejections of this path pay. */
+	 * where the player cannot see it. The rule's soft arm (a position behind
+	 * the camera) is what keeps the service alive on an open road: the
+	 * placement search above picks any crossing of the on-screen ring, and
+	 * the ones behind the camera pass. A refusal costs the call (the timer of
+	 * the emergency service asks again in 30 s), which is the same price the
+	 * other rejections of this path pay. */
 	if (!NearBubbleAllowsCreation(pVehicle->GetPosition(), pPlayerPos, NEAR_BUBBLE_ENTITY_RADIUS, true)) {
 		delete pVehicle;
 		return false;
 	}
 	pVehicle->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + NEAR_BUBBLE_GRACE_MS;
+	/* The service car starts invisible and fades in like every fresh car the
+	 * traffic creates (the same treatment as the road blocks and the set
+	 * pieces): the soft arm's appearance is a fade, not a hard cut. */
+	CVisibilityPlugins::SetClumpAlpha(pVehicle->GetClump(), 0);
+	pVehicle->bIsTrafficCar = true;
 	switch (mi){
 	case MI_FIRETRUCK:
 		pVehicle->bIsFireTruckOnDuty = true;

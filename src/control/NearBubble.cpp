@@ -27,15 +27,34 @@
  *
  *	ms_nNearBubbleCreationsInFrustum	the acceptance counter, must stay 0
  *	ms_nNearBubbleRemovalsInFrustum		the acceptance counter, must stay 0
- *	ms_nNearBubbleFadeCreations		the fill burst's work: exempt
- *	ms_nNearBubbleFadeRemovals		a removal the fade covered: exempt
- *	ms_nNearBubbleHiddenCreations		the placements the rule allowed
- *	ms_nNearBubbleHiddenRemovals		the removals the rule allowed
+ *	ms_nNearBubbleFadeCreations		the fade's work: the catchable
+ *						events a fade covered, exempt
+ *	ms_nNearBubbleFadeRemovals
+ *	ms_nNearBubbleHiddenCreations		the events outside the
+ *	ms_nNearBubbleHiddenRemovals		catchable set the rule allowed
  *	ms_nNearBubbleRefused			the events the rule stopped
- *	ms_nNearBubbleBypassed			the events the view bypassed (the top-down camera)
- *	ms_nNearBubbleRays			the rays spent since the frame began
+ *	ms_nNearBubbleBypassed			the events the top-down camera's
+ *						view allowed
+ *	ms_nNearBubbleRays			the rays of the current frame (<=
+ *						the budget)
+ *	ms_nNearBubbleRaysTotal			the rays since the counters were
+ *						last zeroed
  *	ms_nNearBubbleFill			the traffic inside the bubble
- *	ms_fNearBubbleTarget			the share of the car target its area asks for
+ *	ms_fNearBubbleTarget			the share of the car target its
+ *						area asks for
+ *	ms_nNearBubbleOtherFill			the cars inside the bubble that the
+ *						traffic spawner did not create
+ *	ms_nNearBubbleOtherCreations		those cars' creations, and the
+ *	ms_nNearBubbleOtherCreationsInFrustum	catchable ones of them
+ *	ms_nNearBubbleValveRemovals		the pool valve's own deletions
+ *
+ * The fill split (the traffic against the other cars) holds the acceptance
+ * honest: the car target counts every RANDOM_VEHICLE, so the scripts, the set
+ * pieces, the road blocks, the car parks, the garages and the cheat cars are
+ * part of it, but only the spawner's own cars are the traffic the bubble
+ * watches. A scripted car that appears in view moves the "other creations in
+ * frustum" counter, never the traffic's, and the fill plus the other fill is
+ * what the target describes.
  */
 
 uint32 CCarCtrl::ms_nNearBubbleCreationsInFrustum;
@@ -47,19 +66,45 @@ uint32 CCarCtrl::ms_nNearBubbleHiddenRemovals;
 uint32 CCarCtrl::ms_nNearBubbleRefused;
 uint32 CCarCtrl::ms_nNearBubbleBypassed;
 uint32 CCarCtrl::ms_nNearBubbleRays;
+uint32 CCarCtrl::ms_nNearBubbleRaysTotal;
 uint32 CCarCtrl::ms_nNearBubbleFill;
+uint32 CCarCtrl::ms_nNearBubbleOtherFill;
+uint32 CCarCtrl::ms_nNearBubbleOtherCreations;
+uint32 CCarCtrl::ms_nNearBubbleOtherCreationsInFrustum;
+uint32 CCarCtrl::ms_nNearBubbleValveRemovals;
 float CCarCtrl::ms_fNearBubbleTarget;
 int32 CCarCtrl::ms_nNearBubbleRaysLeft;
 
 /* The view of this frame is not the player's: the top-down camera looks at the
  * map from above, where the street level is not the subject and the traffic
- * must keep flowing. The rule steps aside (the events are counted as bypassed,
- * so nothing hides in the counters). The flag is the one the spawner's
- * top-down branch uses. */
+ * must keep flowing. The rule's visibility arms step aside (the events are
+ * counted as bypassed, so nothing hides in the counters); the bubble does not.
+ * The flag is the one the spawner's top-down branch uses. */
 static bool
 NearBubbleViewIsBypassed(void)
 {
 	return TheCamera.GetForward().z < -0.9f;
+}
+
+/* The active occluder set is built during the render, one frame after the
+ * gates read it (COcclusion::ProcessBeforeRendering, Renderer.cpp, runs after
+ * the car block of Game.cpp). An "occluded" answer counts only while the
+ * camera still matches the view the set was built for; past the
+ * NEAR_BUBBLE_OCCLUDER_* thresholds it is ignored and the other arms decide -
+ * a refused spawn, not a pop the counters cannot see. */
+static bool
+NearBubbleOccluderSetIsCurrent(void)
+{
+	if (COcclusion::NumActiveOccluders == 0)
+		/* No set, no answer: IsPositionOccluded says false anyway. */
+		return true;
+	if ((TheCamera.GetPosition() - COcclusion::ms_vecProcessedCameraPos).Magnitude() > NEAR_BUBBLE_OCCLUDER_MAX_MOVE)
+		return false;
+	if (DotProduct(TheCamera.GetForward(), COcclusion::ms_vecProcessedCameraForward) < NEAR_BUBBLE_OCCLUDER_MIN_DOT)
+		return false;
+	if (Abs(TheCamera.Cams[TheCamera.ActiveCam].FOV - COcclusion::ms_fProcessedCameraFOV) > NEAR_BUBBLE_OCCLUDER_MAX_FOV)
+		return false;
+	return true;
 }
 
 /* One candidate of this frame, from the position and the live view. */
@@ -72,7 +117,7 @@ NearBubbleCandidateAt(const CVector &pos, const CVector &playerCentre, float rad
 	c.distToCamera = (pos - TheCamera.GetPosition()).Magnitude();
 	c.visibleRange = CurrentTrafficRings().visibleRange;
 	c.inFrustum = TheCamera.IsSphereVisible(pos, radius);
-	c.occluded = COcclusion::IsPositionOccluded(pos, radius);
+	c.occluded = NearBubbleOccluderSetIsCurrent() && COcclusion::IsPositionOccluded(pos, radius);
 	c.fadeHides = FillBurstIsHidden();
 	c.bypassView = NearBubbleViewIsBypassed();
 	return c;
@@ -95,7 +140,12 @@ NearBubblePositionIsHiddenByBuilding(const CVector &pos)
 void
 CCarCtrl::NearBubbleBeginFrame(void)
 {
+	/* The frame's budget and the frame's ray counter. The gates that run
+	 * before this point (the parked-car gate of CTheCarGenerators::Process,
+	 * Game.cpp) cannot spend a ray: the gate below tests `rayAllowed` before
+	 * it reads the budget, so their stale view is irrelevant. */
 	ms_nNearBubbleRaysLeft = NEAR_BUBBLE_LOS_RAYS_PER_FRAME;
+	ms_nNearBubbleRays = 0;
 	ms_fNearBubbleTarget = NearBubbleTarget((float)GetRandomCarTarget(), CurrentTrafficRings().carDespawn);
 }
 
@@ -117,6 +167,7 @@ CCarCtrl::NearBubbleAllowsCreation(const CVector &pos, const CVector &playerCent
 		if (rayAllowed && ms_nNearBubbleRaysLeft > 0) {
 			ms_nNearBubbleRaysLeft--;
 			ms_nNearBubbleRays++;
+			ms_nNearBubbleRaysTotal++;
 			if (NearBubblePositionIsHiddenByBuilding(pos))
 				answer = NEAR_BUBBLE_ALLOWED;
 			else
@@ -168,23 +219,25 @@ CCarCtrl::NearBubbleAllowsRemoval(CVehicle *pVehicle, const CVector &playerCentr
 	return answer != NEAR_BUBBLE_REFUSED;
 }
 
-/* The acceptance counters, read after a car of the traffic entered the world
- * (any path: the trickle, the fill burst, an emergency car, a generator). An
- * event the fade covered is exempt and counted as such; an event at a
- * catchable position moves the counter the acceptance watches. The gate above
- * never allows one, so the counter catches the paths that bypass it. */
+/* The acceptance counters, read after a car of the traffic entered the world.
+ * The catchable set of the rule decides the row: an event the player could
+ * catch is a violation unless the fade covered it (the fill burst's
+ * exemption), and everything else is the rule's own work. A path that bypasses
+ * the gate shows up in the frustum row. */
 void
 CCarCtrl::NearBubbleCountCreation(const CVector &pos, float radius)
 {
 	SNearBubbleCandidate c = NearBubbleCandidateAt(pos, FindPlayerCentreOfWorld(CWorld::PlayerInFocus), radius);
-	if (c.bypassView)
+	if (c.bypassView) {
 		ms_nNearBubbleBypassed++;
-	else if (c.fadeHides)
-		ms_nNearBubbleFadeCreations++;
-	else if (NearBubblePositionIsCatchable(c))
-		ms_nNearBubbleCreationsInFrustum++;
-	else
+	} else if (NearBubblePositionIsCatchable(c)) {
+		if (c.fadeHides)
+			ms_nNearBubbleFadeCreations++;
+		else
+			ms_nNearBubbleCreationsInFrustum++;
+	} else {
 		ms_nNearBubbleHiddenCreations++;
+	}
 }
 
 /* A removal the caller made. `wasInvisible` tells the counter the car was
@@ -194,12 +247,40 @@ void
 CCarCtrl::NearBubbleCountRemoval(const CVector &pos, float radius, bool wasInvisible)
 {
 	SNearBubbleCandidate c = NearBubbleCandidateAt(pos, FindPlayerCentreOfWorld(CWorld::PlayerInFocus), radius);
-	if (c.bypassView)
+	if (c.bypassView) {
 		ms_nNearBubbleBypassed++;
-	else if (c.fadeHides)
-		ms_nNearBubbleFadeRemovals++;
-	else if (!wasInvisible && NearBubblePositionIsCatchable(c))
-		ms_nNearBubbleRemovalsInFrustum++;
-	else
+	} else if (NearBubblePositionIsCatchable(c)) {
+		if (c.fadeHides)
+			ms_nNearBubbleFadeRemovals++;
+		else if (!wasInvisible)
+			ms_nNearBubbleRemovalsInFrustum++;
+		else
+			ms_nNearBubbleHiddenRemovals++;
+	} else {
 		ms_nNearBubbleHiddenRemovals++;
+	}
+}
+
+/* A car that entered the world outside the traffic spawner (a script, a set
+ * piece, a road block, a car park, a garage, a cheat, the RC car). It is not
+ * the traffic the bubble fills, so it never moves the traffic's counters; the
+ * pair below carries it: the total and the catchable ones, so a car that
+ * appears in view is visible in the live numbers. */
+void
+CCarCtrl::NearBubbleCountOtherCreation(const CVector &pos, float radius)
+{
+	ms_nNearBubbleOtherCreations++;
+	SNearBubbleCandidate c = NearBubbleCandidateAt(pos, FindPlayerCentreOfWorld(CWorld::PlayerInFocus), radius);
+	if (!c.fadeHides && NearBubblePositionIsCatchable(c))
+		ms_nNearBubbleOtherCreationsInFrustum++;
+}
+
+/* The pool valve's own deletion (RemoveCarsIfThePoolGetsFull): the pool is
+ * down to its last slots and no car passes the rule, so the closest car goes.
+ * It is the pool's last line, not the cull path, and it is counted apart so
+ * the acceptance counters stay the rule's own. */
+void
+CCarCtrl::NearBubbleCountValveRemoval(void)
+{
+	ms_nNearBubbleValveRemovals++;
 }

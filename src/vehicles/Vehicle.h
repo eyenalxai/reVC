@@ -23,6 +23,13 @@ enum {
 	PERMANENT_VEHICLE = 4,
 };
 
+/* A bike or a boat that was drawn may not be removed for this long: the
+ * original per-render guard of CBike::Render and CBoat::Render, where a render
+ * means the player can see the vehicle. The clock it writes never moves
+ * backwards, so the longer fresh-spawn grace of a car (NEAR_BUBBLE_GRACE_MS,
+ * VICE-127) survives a render. */
+#define VEHICLE_RENDERED_GRACE_MS 3000
+
 enum eCarNodes
 {
 	CAR_WHEEL_RF = 1,
@@ -245,6 +252,7 @@ public:
 	uint8 bGunSwitchedOff : 1;  // Level designers can use this to switch off guns on boats
 	uint8 bVehicleColProcessed : 1;// Has ProcessEntityCollision been processed for this car?
 	uint8 bIsCarParkVehicle : 1; // Car has been created using the special CAR_PARK script command
+	uint8 bIsTrafficCar : 1; // Created by the traffic spawner (the ring, the burst, the emergency services): the near bubble's fill counts these (VICE-127)
 	uint8 bHasAlreadyBeenRecorded : 1; // Used for replays
 	uint8 bPartOfConvoy : 1;
 	uint8 bHeliMinimumTilt : 1; // This heli should have almost no tilt really

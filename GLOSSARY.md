@@ -320,12 +320,24 @@ removes an entity inside (VICE-127). The radius is the car side band (120 m)
 less the placement reserve of the ring table (30 m), so no spawn band places
 inside it; the population inside the bubble is the traffic that drove in from
 outside. A creation outside the bubble is allowed only while the player cannot
-see the position - occluded by an occluder volume, beyond the visible range (the
-fade and the fog), or off the frustum and behind a blocked line-of-sight ray
+see the position: occluded by an occluder volume (trusted only while the
+occluder set belongs to the current view), beyond the visible range (the fade
+and the fog), behind the soft distance (the traffic behind the camera, which
+starts at alpha 0), or off the frustum and behind a blocked line-of-sight ray
 (bounded per frame). A removal needs the fresh-spawn grace, the removal distance
 (the bubble plus its reserve, at least the ring's despawn) and the same hidden
 condition. The rules live in `src/control/NearBubble.h`, the engine arms and the
 counters in `NearBubble.cpp`; ADR 0025 holds the decisions.
+
+## Soft distance
+
+The removal gap of the near bubble (120 m) that the creation rule also uses
+(VICE-127): a car off the frustum at or beyond it may be created - the traffic
+behind the camera, below the detail the draw distance gives it. It is the arm
+that keeps a street with no occluders alive, because the ring's bands sit inside
+the visible range by the ring table's design; inside it, the close line-of-sight
+ray decides. The side band places exactly on it (`NEAR_BUBBLE_SOFT_DISTANCE` =
+`NEAR_BUBBLE_REMOVE_DISTANCE`).
 
 ## Frustum counter
 
@@ -334,8 +346,11 @@ One of the two acceptance counters of the near bubble (VICE-127), read live by
 `ms_nNearBubbleRemovalsInFrustum`. An event at a position the player could catch
 - in the frustum, inside the fade, not occluded - moves them; the rule never
 allows one, so a path that bypasses the rule shows up there. Both must stay 0 in
-a play session; the events a fade covers are counted apart (fade creations and
-fade removals), so a transition does not read as a violation.
+a play session; the catchable events a fade covers are counted apart (fade
+creations and fade removals), and the cars created outside the traffic spawner
+have their own rows (`ms_nNearBubbleOtherCreations` and its in-frustum
+subdivision), so neither a transition nor a scripted car reads as a traffic
+violation.
 
 ## Fresh-spawn grace
 
@@ -348,11 +363,14 @@ waits, so a car that was just placed is never the one a cull gives up on.
 
 ## Bubble fill
 
-The number of traffic cars (the random vehicles) inside the near bubble, read
-live as `ms_nNearBubbleFill` (VICE-127). The target is the share of the car
-budget the bubble's area takes of the despawn disc (`ms_fNearBubbleTarget`):
-about 6 cars at the stock settings and 10 at the owner's; the orchestrator
-compares the two while driving and during a camera turn.
+The number of cars the traffic spawner created (the random cars and the
+emergency services) inside the near bubble, read live as `ms_nNearBubbleFill`
+(VICE-127). The target is the share of the car budget the bubble's area takes of
+the despawn disc (`ms_fNearBubbleTarget`): about 6 cars at the stock settings
+and 10 at the owner's. The cars of the same budget that the spawner did not
+create (the scripts, the set pieces, the road blocks, the car parks, the
+garages, the cheats) are `ms_nNearBubbleOtherFill`; the orchestrator compares
+the sum of the two against the target while driving and during a camera turn.
 
 ## Pool
 
