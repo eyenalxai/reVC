@@ -602,6 +602,7 @@ struct MenuTrapezoid
 #endif
 
 // The follow camera sits this much further back in a vehicle, in metres
+#define CAR_CAMERA_DISTANCE_DEFAULT 3
 #define CAR_CAMERA_DISTANCE_MIN 0
 #define CAR_CAMERA_DISTANCE_MAX 10
 

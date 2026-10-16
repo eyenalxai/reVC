@@ -508,7 +508,7 @@ CMenuManager::CMenuManager()
 	m_bFirstPersonView = false;
 	m_nFirstPersonFOV = 70;
 #endif
-	m_nCarCameraDistance = 3;
+	m_nCarCameraDistance = CAR_CAMERA_DISTANCE_DEFAULT;
 #ifdef PC_PLAYER_CONTROLS
 	CCamera::m_bUseMouse3rdPerson = true;
 #else

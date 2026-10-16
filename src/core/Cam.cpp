@@ -595,13 +595,43 @@ CCam::GetBoatLook_L_R_HeightOffset(float &Offset)
 	return false;	// can't happen, we always get a boat pointer back
 }
 
+// Tuning values of the follow camera in a vehicle (see Process_FollowPed and
+// the look keys)
+float fFollowCamVehicleHeight = 0.8f;			// aim this fraction of the car body height above the car's origin
+float fFollowCamVehicleLookMinDist = 2.0f;		// the look keys keep the camera at least this far from the car
+float fFollowCamVehicleLookDown = 1.1f;			// the side view looks this much down at the car
+float fFollowCamVehicleSwingSpeed = 0.02f;		// a car that drives forward at least this fast swings the camera behind it
+float fFollowCamVehicleSwingAngle = DEGTORAD(20.0f);	// ... when the camera is further than this off the car's heading
+float fFollowCamVehicleDistStep = 0.2f;			// how fast the camera takes up the car camera distance
+float fFollowCamVehicleDistAccel = 0.07f;		// and how fast that speed changes
+
 // The follow camera aims this high above a vehicle's origin; the origin sits
 // on the ground, so the camera looks at the middle of the car body.
 static float
 FollowCamVehicleTargetHeight(CEntity *vehicle)
 {
 	CBaseModelInfo *mi = CModelInfo::GetModelInfo(vehicle->GetModelIndex());
-	return 0.8f * mi->GetColModel()->boundingBox.GetSize().z;
+	return fFollowCamVehicleHeight * mi->GetColModel()->boundingBox.GetSize().z;
+}
+
+// The follow camera in a vehicle: move it to the given bearing around the car,
+// at the distance it is at now, and look at the car. The look keys differ only
+// in the bearing and how much the view looks down at the car.
+void
+CCam::LookAroundVehicle(float bearing, float frontZOffset)
+{
+	CVector TargetCoors = CamTargetEntity->GetPosition();
+	float Dist = Max((Source - TargetCoors).Magnitude2D(), fFollowCamVehicleLookMinDist);
+
+	Source.x = Dist*Cos(bearing) + TargetCoors.x;
+	Source.y = Dist*Sin(bearing) + TargetCoors.y;
+	Source.z = FollowCamVehicleTargetHeight(CamTargetEntity) + TargetCoors.z;
+
+	CVector OrigSource = Source;
+	TheCamera.AvoidTheGeometry(OrigSource, TargetCoors, Source, FOV);
+	Front = TargetCoors - Source;
+	Front.z += frontZOffset;
+	GetVectorsReadyForRW();
 }
 
 void
@@ -637,15 +667,7 @@ CCam::LookBehind(void)
 		// The follow camera in a vehicle: mirror the camera to the other side
 		// of the car, like the on-foot look-behind does
 		LookingBehind = true;
-		Dist = Max((Source - TargetCoors).Magnitude2D(), 2.0f);
-		Angle = CGeneral::GetATanOfXY(Source.x - TargetCoors.x, Source.y - TargetCoors.y) + PI;
-		Source.x = Dist*Cos(Angle) + TargetCoors.x;
-		Source.y = Dist*Sin(Angle) + TargetCoors.y;
-		Source.z = FollowCamVehicleTargetHeight(CamTargetEntity) + TargetCoors.z;
-		CVector OrigSource = Source;
-		TheCamera.AvoidTheGeometry(OrigSource, TargetCoors, Source, FOV);
-		Front = TargetCoors - Source;
-		GetVectorsReadyForRW();
+		LookAroundVehicle(CGeneral::GetATanOfXY(Source.x - TargetCoors.x, Source.y - TargetCoors.y) + PI, 0.0f);
 	}
 	if(Mode == MODE_1STPERSON && CamTargetEntity->IsVehicle()){
 		LookingBehind = true;
@@ -734,18 +756,9 @@ CCam::LookLeft(void)
 		// The follow camera in a vehicle: swing to the car's left side at the
 		// distance the camera is at now
 		LookingLeft = true;
-		Dist = Max((Source - TargetCoors).Magnitude2D(), 2.0f);
 		TargetFwd = CamTargetEntity->GetForward();
 		TargetFwd.Normalise();
-		TargetOrientation = CGeneral::GetATanOfXY(TargetFwd.x, TargetFwd.y);
-		Source.x = Dist*Cos(TargetOrientation - HALFPI) + TargetCoors.x;
-		Source.y = Dist*Sin(TargetOrientation - HALFPI) + TargetCoors.y;
-		Source.z = FollowCamVehicleTargetHeight(CamTargetEntity) + TargetCoors.z;
-		CVector OrigSource = Source;
-		TheCamera.AvoidTheGeometry(OrigSource, TargetCoors, Source, FOV);
-		Front = CamTargetEntity->GetPosition() - Source;
-		Front.z += 1.1f;
-		GetVectorsReadyForRW();
+		LookAroundVehicle(CGeneral::GetATanOfXY(TargetFwd.x, TargetFwd.y) - HALFPI, fFollowCamVehicleLookDown);
 	}
 	if(Mode == MODE_1STPERSON && CamTargetEntity->IsVehicle()){
 		LookingLeft = true;
@@ -823,18 +836,9 @@ CCam::LookRight(void)
 		// The follow camera in a vehicle: swing to the car's right side at the
 		// distance the camera is at now
 		LookingRight = true;
-		Dist = Max((Source - TargetCoors).Magnitude2D(), 2.0f);
 		TargetFwd = CamTargetEntity->GetForward();
 		TargetFwd.Normalise();
-		TargetOrientation = CGeneral::GetATanOfXY(TargetFwd.x, TargetFwd.y);
-		Source.x = Dist*Cos(TargetOrientation + HALFPI) + TargetCoors.x;
-		Source.y = Dist*Sin(TargetOrientation + HALFPI) + TargetCoors.y;
-		Source.z = FollowCamVehicleTargetHeight(CamTargetEntity) + TargetCoors.z;
-		CVector OrigSource = Source;
-		TheCamera.AvoidTheGeometry(OrigSource, TargetCoors, Source, FOV);
-		Front = CamTargetEntity->GetPosition() - Source;
-		Front.z += 1.1f;
-		GetVectorsReadyForRW();
+		LookAroundVehicle(CGeneral::GetATanOfXY(TargetFwd.x, TargetFwd.y) + HALFPI, fFollowCamVehicleLookDown);
 	}
 	if(Mode == MODE_1STPERSON && CamTargetEntity->IsVehicle()){
 		LookingRight = true;
@@ -1241,16 +1245,16 @@ CCam::Process_FollowPed(const CVector &CameraTarget, float TargetOrientation, fl
 				BetaSpeed = 0.0f;
 		}
 	}else if(!Rotating &&
-	         DotProduct(CamTargetEntity->GetForward(), ((CVehicle*)CamTargetEntity)->GetMoveSpeed()) > 0.02f){
+	         DotProduct(CamTargetEntity->GetForward(), ((CVehicle*)CamTargetEntity)->GetMoveSpeed()) > fFollowCamVehicleSwingSpeed){
 		// A car drives much faster than a ped, so the camera must also swing
 		// behind it while it drives forward; the string drag alone cannot
 		// resolve the camera ending up in front of the car. This is the stock
-		// car camera's rule (see RotCamIfInFrontCar) in this camera's bearing
-		// convention.
+		// car camera's rule (see RotCamIfInFrontCar), written in this camera's
+		// bearing convention (behind the car is the heading plus PI).
 		DeltaBeta = TargetOrientation + PI - Beta;
 		while(DeltaBeta >= PI) DeltaBeta -= 2*PI;
 		while(DeltaBeta < -PI) DeltaBeta += 2*PI;
-		if(Abs(DeltaBeta) > DEGTORAD(20.0f)){
+		if(Abs(DeltaBeta) > fFollowCamVehicleSwingAngle){
 			FixedTargetOrientation = TargetOrientation + PI;
 			Rotating = true;
 		}
@@ -1508,7 +1512,8 @@ CCam::Process_FollowPedWithMouse(const CVector &CameraTarget, float TargetOrient
 	static float VehicleDistance = 0.0f;
 	static float VehicleDistanceSpeed = 0.0f;
 	WellBufferMe(CamTargetEntity->IsVehicle() ? (float)FrontEndMenuManager.GetCarCameraDistance() : 0.0f,
-	             &VehicleDistance, &VehicleDistanceSpeed, 0.2f, 0.07f, false);
+	             &VehicleDistance, &VehicleDistanceSpeed,
+	             fFollowCamVehicleDistStep, fFollowCamVehicleDistAccel, false);
 
 	TargetCoors = CameraTarget;
 	TargetCoors.z += CamTargetEntity->IsVehicle() ?

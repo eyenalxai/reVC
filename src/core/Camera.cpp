@@ -920,7 +920,7 @@ CCamera::CamControl(void)
 				}
 
 				// The first person view serves the vehicle too
-				if(!m_bPlayerIsInGarage && ChooseFirstPersonView(false))
+				if(!m_bPlayerIsInGarage && UpdateFirstPersonView(false))
 					ReqMode = CCam::MODE_1STPERSON;
 
 				// Fallen into water
@@ -975,7 +975,7 @@ CCamera::CamControl(void)
 			ReqMode = CCam::MODE_FOLLOWPED;
 
 			// Check 1st person mode
-			if(ChooseFirstPersonView(true))
+			if(UpdateFirstPersonView(true))
 				ReqMode = CCam::MODE_1STPERSON;
 
 			// Zoom value
@@ -1816,11 +1816,13 @@ CCamera::GetVehicleCameraMode(void)
 	return CCam::MODE_FOLLOWPED;
 }
 
-// Chooses between the follow camera and the first person view for this frame.
-// The setting applies on foot and in a vehicle; the stock look-around toggle
-// only applies on foot. Returns true when the first person view is in use.
+// Updates the first person view state for this frame and returns whether the
+// view is first person. The setting applies on foot and in a vehicle; the
+// stock look-around toggle only applies on foot. Side effects:
+// m_bFirstPersonBeingUsed, m_bFirstPersonViewWasOn, the last input time and
+// the camera bit of the pad's DisablePlayerControls.
 bool
-CCamera::ChooseFirstPersonView(bool targetIsPed)
+CCamera::UpdateFirstPersonView(bool targetIsPed)
 {
 	if((m_bLookingAtPlayer || m_bEnable1rstPersonCamCntrlsScript) &&
 	   (!m_WideScreenOn || m_bEnable1rstPersonCamCntrlsScript)
