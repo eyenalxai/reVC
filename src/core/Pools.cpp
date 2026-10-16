@@ -252,24 +252,21 @@ IsVehicleSaved(CVehicle *pVehicle)
 	}
 #ifdef MISSION_REPLAY
 	bool bForceSaving = CWorld::Players[CWorld::PlayerInFocus].m_pPed->m_pMyVehicle == pVehicle && IsQuickSave;
-#ifdef FIX_BUGS
+#endif
+#if defined FIX_BUGS && defined MISSION_REPLAY
 	if ((pVehicle->pDriver || bHasPassenger) && !bForceSaving)
 		return false;
 #else
 	if (pVehicle->pDriver || bHasPassenger)
 		return false;
 #endif
-#else
-	if (pVehicle->pDriver || bHasPassenger)
-		return false;
-#endif
 	if (!pVehicle->IsCar() && !pVehicle->IsBoat() && !pVehicle->IsBike())
 		return false;
-	return pVehicle->VehicleCreatedBy == MISSION_VEHICLE
 #ifdef MISSION_REPLAY
-		|| bForceSaving
+	if (bForceSaving)
+		return true;
 #endif
-		;
+	return pVehicle->VehicleCreatedBy == MISSION_VEHICLE;
 }
 
 void CPools::SaveVehiclePool(uint8* buf, uint32* size)
