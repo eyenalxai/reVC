@@ -27,10 +27,10 @@ an angle but is not arcade enough, and the map's narrow roads and straight
    Surface adhesion and tyre temperature still multiply on top.
 4. The yaw authority is absolute: it never scales with speed, and the layer
    keeps writing the car's turn speed directly.
-5. A finished drift stacks its boost (0.05 or 0.09 of the top speed per tier,
-   cap 0.25) on a boost level that pushes and drains, instead of one impulse.
-   The cap lets a chain run at 1.25x the top speed. The numbers and the push
-   direction were tuned in ADR 0005.
+5. A finished drift stacks its boost (originally 0.05 or 0.09 of the top speed
+   per tier, cap 0.25, a chain to 1.25x) on a boost level that pushes and
+   drains, instead of one impulse. The numbers and the push direction were
+   tuned in ADR 0005 (0.04 or 0.07 per tier, cap 0.15, a chain to 1.15x).
 
 ## Consequences
 

@@ -60,4 +60,5 @@ miss the 0.6 s tier. Holding the angle is not enough: the path must turn.
   target, and only its angle-only statement about the direction of travel is
   replaced. The next capture should show, in a held drift, the slip inside
   about 10 degrees of the target and a yaw near the curve rate instead of a
-  collapse to zero; a release at 0.6 s or later still comes back with a boost.
+  collapse to zero; a release at 0.6 s or later still comes back with a boost
+  (the tiers were shortened in ADR 0005).

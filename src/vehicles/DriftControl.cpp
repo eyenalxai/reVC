@@ -33,6 +33,7 @@
 #define DRIFT_VEL_ALIGN_RATE	120.0f	// cap on the velocity alignment, degrees/s
 #define DRIFT_STEERLOCK_MULT	1.3f	// front wheel lock while drifting
 #define DRIFT_SPEED_HOLD	1.0f	// fraction of the lost speed given back per second
+#define DRIFT_SPEED_MIN_DIR	0.01f	// below this speed a direction of travel is not usable
 #define DRIFT_RECOVER_TIME	0.6f	// seconds of exit alignment after the handbrake
 #define DRIFT_RECOVER_ALIGN	4.0f	// exit counter-yaw per radian of slip, 1/s
 #define DRIFT_RECOVER_SLIP	2.0f	// below this remaining slip the assist stops
@@ -285,7 +286,7 @@ CDriftControl::HoldDriftSpeed(CAutomobile *car, float dt)
 	// back. The push never goes past the entry speed and follows the current
 	// velocity, so it cannot make the car faster than it entered.
 	float speed = car->m_vecMoveSpeed.Magnitude();
-	if(speed > 0.01f && speed < m_fEntrySpeed){
+	if(speed > DRIFT_SPEED_MIN_DIR && speed < m_fEntrySpeed){
 		CVector dir = car->m_vecMoveSpeed*(1.0f/speed);
 		car->ApplyMoveForce(dir * ((m_fEntrySpeed - speed)*DRIFT_SPEED_HOLD*car->m_fMass*dt));
 	}
@@ -308,7 +309,7 @@ CDriftControl::ApplyBoost(CAutomobile *car, float dt)
 	// direction. A speed too small to give one falls back to the nose.
 	CVector pushDir = car->m_vecMoveSpeed;
 	pushDir.z = 0.0f;
-	if(pushDir.Magnitude2D() > 0.01f)
+	if(pushDir.Magnitude2D() > DRIFT_SPEED_MIN_DIR)
 		pushDir.Normalise2D();
 	else
 		pushDir = car->GetForward();

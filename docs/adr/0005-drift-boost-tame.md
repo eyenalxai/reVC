@@ -57,7 +57,7 @@ also spreads the tier 1 bonus over 1.25 s.
   untouched, and the invariants of ADRs 0001-0004 still hold: player only,
   off by default, inert when off, surfaces and temperature unchanged, and
   AI, bikes and missions keep the original handling.
-- The next capture should show tier 2 boosts and each level spent in about
-  half a second; the owner re-tests the wheel feel.
+- The next capture should show tier 2 boosts, and each level spent in about
+  0.5 s for tier 1 and 0.9 s for tier 2; the owner re-tests the wheel feel.
 - This tunes ADR 0002 decision 5: the stack, the drain and the push of that
   decision keep their shape, and its numbers move here.
