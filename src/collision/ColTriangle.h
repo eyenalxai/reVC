@@ -77,4 +77,64 @@ struct CColTrianglePlane
 #endif
 };
 
+// Per-triangle data for the sphere tests, see VICE-121. It depends only on
+// the vertices and the plane normal, so a colmodel computes it once and
+// TestSphereTriangle and ProcessSphereTriangle both reuse it. The values are
+// computed with the same expressions in the same order those tests used to
+// compute by themselves, so the results are bit-identical.
+// vec2 is b-a normalized, vec1 is the in-plane vector orthogonal to vec2 that
+// forms the (vec1, vec2, normal) basis, len is |b-a| and c holds the
+// coordinates of the third vertex in the (vec1, vec2) basis. The second
+// vertex has the coordinates (0, len).
+struct CColTriangleBasis
+{
+	CVector vec1;
+	CVector vec2;
+	float len;
+	CVector2D c;
+
+	// These are the very expressions TestSphereTriangle and
+	// ProcessSphereTriangle used to compute for every sphere they were called
+	// with. The order matters for the bit-identical result, so do not reorder
+	// them. Inline so the fallback (no cache) path compiles to the same code
+	// as before.
+	void Set(const CompressedVector *verts, const CColTriangle &tri, const CColTrianglePlane &plane)
+	{
+		const CVector &va = verts[tri.a].Get();
+		const CVector &vb = verts[tri.b].Get();
+		const CVector &vc = verts[tri.c].Get();
+
+		vec2 = vb - va;
+		len = vec2.Magnitude();
+		vec2 = vec2 * (1.0f/len);
+
+		CVector normal;
+		plane.GetNormal(normal);
+		vec1 = CrossProduct(vec2, normal);
+
+		CVector vac = vc - va;
+		c = CVector2D(DotProduct(vec1, vac), DotProduct(vec2, vac));
+	}
+};
+
+// One node of the per-colmodel triangle broad phase. A node bounds a
+// contiguous, ascending run of triangles, either directly (leaf) or through
+// its two children. The two children of an internal node are adjacent, at
+// `child` and `child+1`. Leaves are enumerated in ascending triangle index
+// order, which keeps the candidate order of the unaccelerated scan.
+struct CColTriangleAccelNode
+{
+	float min[3];
+	float max[3];
+	float maxEdge;	// longest edge of any triangle in the subtree
+	int32 child;	// internal: first child; leaf: first triangle index
+	int32 count;	// internal: 0; leaf: number of triangles in the leaf
+};
+
+// Stack bound for the acceleration tree. Every split keeps at least a quarter
+// of the range, so the depth stays below log4/3(numTriangles) — 51 for ten
+// million triangles — and both the builder and a query walk need one entry
+// per level.
+static const int32 TRIANGLE_ACCEL_MAX_DEPTH = 128;
+
 #endif // __GTA_COLTRIANGLE_H__

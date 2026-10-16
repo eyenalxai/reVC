@@ -829,6 +829,15 @@ void CGame::Process(void)
 	CWindModifiers::Number = 0;
 	if (!CTimer::GetIsPaused())
 	{
+		// The population caps follow the ring, and the ring follows the draw
+		// distance and the weather (TrafficRings.h). The menu above is where the
+		// range control moves, so refresh the caps here, once a frame: before the
+		// population and the traffic of this frame read them, and with the draw
+		// distance of this frame (CurrentTrafficRings composes it live; the
+		// camera runs later in the frame). The far clip is the one of the last
+		// time cycle, one frame old, exactly as it is for every reader of the
+		// frame.
+		CIniFile::ApplyPopulationCaps();
 #ifndef MASTER
 		if (VarUpdatePlayerCoords) {
 			FindPlayerPed()->Teleport(PlayerCoords);
@@ -898,12 +907,6 @@ void CGame::Process(void)
 		CSpecialFX::Update();
 		CRopes::Update();
 		CTimeCycle::Update();
-
-		// The population caps follow the ring, and the ring follows the weather
-		// far clip (TrafficRings.h). The time cycle of this frame just landed,
-		// so refresh them here, once a frame: a cap that lags the ring starves
-		// the streets at maximum settings.
-		CIniFile::ApplyPopulationCaps();
 
 		// The drift feedback is stepped once a frame here: after the physics
 		// step wrote the drift state, and before the camera below reads the
@@ -1107,6 +1110,10 @@ MoveColModelMemory(CColModel& colModel, bool onlyOne)
 	if (MoveMem((void**)&colModel.triangles) && onlyOne)
 		return true;
 	if (MoveMem((void**)&colModel.trianglePlanes) && onlyOne)
+		return true;
+	if (MoveMem((void**)&colModel.triangleBasis) && onlyOne)
+		return true;
+	if (MoveMem((void**)&colModel.triangleAccel) && onlyOne)
 		return true;
 	return false;
 }
