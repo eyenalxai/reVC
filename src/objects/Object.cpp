@@ -83,6 +83,7 @@ CObject::CObject(void)
 	m_pCollidingEntity = nil;
 	m_nBeachballBounces = 0;
 	bIsStreetLight = false;
+	bIsFelled = false;
 	m_area = AREA_EVERYWHERE;
 }
 
@@ -94,6 +95,10 @@ CObject::CObject(int32 mi, bool createRW)
 		SetModelIndexNoCreate(mi);
 	Init();
 }
+
+// Gives a felled plant the physics it topples with again; the helper is defined
+// with the other vegetation code below. The restore path needs it right here.
+static void SetVegetationFallPhysics(CObject *object);
 
 CObject::CObject(CDummyObject *dummy)
 {
@@ -117,6 +122,14 @@ CObject::CObject(CDummyObject *dummy)
 		bUsesCollision = dummy->bObjectUsesCollision;
 		bRenderDamaged = dummy->bObjectRenderDamaged;
 		bExplosionProof = dummy->bObjectExplosionProof;
+		// A plant that fell comes back fallen. Init() restored the OBJECT.DAT
+		// row (an infinite-mass palm) or left a building copy at whatever the
+		// pool slot held, so the fall physics go on top. The object stays
+		// non-static and CWorld::Add puts it on the moving list itself.
+		if (dummy->bObjectFelled) {
+			SetVegetationFallPhysics(this);
+			bIsFelled = true;
+		}
 	}
 	m_level = dummy->m_level;
 	m_area = dummy->m_area;
@@ -220,6 +233,12 @@ CObject::ProcessControl(void)
 	if (bIsBIGBuilding) {
 		bIsInSafePosition = true;
 	}
+	// A felled plant keeps its fall pose in the object matrix: the physics move
+	// only the placeable matrix, and the 80 m dummy round trip rebuilds the
+	// plant from the object matrix. Without the copy the plant comes back
+	// standing up at its placement.
+	if (bIsFelled)
+		m_objectMatrix = GetMatrix();
 }
 
 void
@@ -513,6 +532,7 @@ FellVegetation(CEntity *entity, const CVector &hitPos, const CVector &hitDir, fl
 		CWorld::Add(plant);
 	}
 
+	plant->bIsFelled = true;
 	PushFelledVegetation(plant, hitPos, dir, impulse);
 	const CVector &debrisPos = hitPos.IsZero() ? entity->GetPosition() : hitPos;
 	SpawnVegetationDebris(debrisPos, entity->GetColModel()->boundingSphere.radius, VEGETATION_FALL_DEBRIS_PARTICLES);
@@ -929,6 +949,7 @@ CObject::Init(void)
 	m_colour2 = 0;
 	m_nBonusValue = 0;
 	bIsWeapon = false;
+	bIsFelled = false;
 	m_nCostValue = 0;
 	m_pCollidingEntity = nil;
 	CColPoint point;
