@@ -1430,50 +1430,20 @@ CBoat::DoDriveByShootings(void)
 	if (pDriver->IsPlayer())
 		((CPlayerPed*)pDriver)->ProcessActiveReloadInput(CPad::GetPad(0));
 
-	bool lookingLeft = false;
-	bool lookingRight = false;
-	if(TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_TOPDOWN ||
-	   TheCamera.m_bObbeCinematicCarCamOn){
-		if(CPad::GetPad(0)->GetLookLeft())
-			lookingLeft = true;
-		if(CPad::GetPad(0)->GetLookRight())
-			lookingRight = true;
-	}else{
-		if(TheCamera.Cams[TheCamera.ActiveCam].LookingLeft)
-			lookingLeft = true;
-		if(TheCamera.Cams[TheCamera.ActiveCam].LookingRight)
-			lookingRight = true;
-	}
-
-	// The car ADS: the aim button aims freely with the camera instead of the
-	// look keys. The free aim shot has no animation of its own, so the drive-by
-	// arm stands in.
+	// The car ADS: the aim button aims freely with the camera. The free aim
+	// shot has no animation of its own, so the drive-by arm stands in. The
+	// stock side look and its drive-by are gone (VICE-138), so only the aim
+	// fires from a boat.
 	bool aiming = TheCamera.UsingCarAds();
 
-	if(lookingLeft || lookingRight || aiming){
-		if(aiming)
-			anim = UpdateDriveByAimAnim(ASSOCGRP_STD, ANIM_STD_CAR_DRIVEBY_LEFT, ANIM_STD_CAR_DRIVEBY_RIGHT);
-		else if(lookingLeft){
-			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_STD_CAR_DRIVEBY_RIGHT);
-			if(anim)
-				anim->blendDelta = -1000.0f;
-			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_STD_CAR_DRIVEBY_LEFT);
-			if(anim == nil || anim->blendDelta < 0.0f)
-				anim = CAnimManager::AddAnimation(pDriver->GetClump(), ASSOCGRP_STD, ANIM_STD_CAR_DRIVEBY_LEFT);
-		}else if(pDriver->m_pMyVehicle->pPassengers[0] == nil || TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_1STPERSON){
-			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_STD_CAR_DRIVEBY_LEFT);
-			if(anim)
-				anim->blendDelta = -1000.0f;
-			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_STD_CAR_DRIVEBY_RIGHT);
-			if(anim == nil || anim->blendDelta < 0.0f)
-				anim = CAnimManager::AddAnimation(pDriver->GetClump(), ASSOCGRP_STD, ANIM_STD_CAR_DRIVEBY_RIGHT);
-		}
+	if(aiming){
+		anim = UpdateDriveByAimAnim(ASSOCGRP_STD, ANIM_STD_CAR_DRIVEBY_LEFT, ANIM_STD_CAR_DRIVEBY_RIGHT);
 
 		// The free aim fires at once: the drive-by arm is only a stand-in and
 		// the first person car view does not show it
-		if (aiming || !anim || !anim->IsRunning()) {
+		if(!anim || !anim->IsRunning()){
 			if (CPad::GetPad(0)->GetCarGunFired() && CTimer::GetTimeInMilliseconds() > weapon->m_nTimer)
-				weapon->FireFromCarWithCadence(this, lookingLeft, true, aiming);
+				weapon->FireFromCarWithCadence(this, aiming);
 		}
 	}else{
 		// The stock code refills the clip while the player does not aim.

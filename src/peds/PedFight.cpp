@@ -4178,12 +4178,6 @@ CPed::DriveVehicle(void)
 		lbAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_CAR_LOOKBEHIND);
 	}
 
-	if (lbAssoc &&
-		TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_1STPERSON
-		&& TheCamera.Cams[TheCamera.ActiveCam].DirectionWasLooking == LOOKING_LEFT) {
-		lbAssoc->blendDelta = -1000.0f;
-	}
-
 	CAnimBlendAssociation* driveByAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_CAR_DRIVEBY_LEFT);
 	if (!driveByAssoc)
 		driveByAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_CAR_DRIVEBY_RIGHT);
@@ -4231,9 +4225,7 @@ CPed::DriveVehicle(void)
 			lbAssoc->blendDelta = -4.0f;
 	} else {
 
-		if ((TheCamera.Cams[TheCamera.ActiveCam].Mode != CCam::MODE_1STPERSON
-			|| TheCamera.Cams[TheCamera.ActiveCam].DirectionWasLooking != LOOKING_LEFT)
-			&& (!lbAssoc || lbAssoc->blendAmount < 1.0f && lbAssoc->blendDelta <= 0.0f)) {
+		if (!lbAssoc || lbAssoc->blendAmount < 1.0f && lbAssoc->blendDelta <= 0.0f) {
 
 			if (m_pMyVehicle->IsBoat() && !(m_pMyVehicle->pHandling->Flags & HANDLING_SIT_IN_BOAT))
 				CAnimManager::BlendAnimation(GetClump(), ASSOCGRP_STD, ANIM_STD_BOAT_LOOKBEHIND, 4.0f);

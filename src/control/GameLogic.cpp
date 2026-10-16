@@ -390,7 +390,10 @@ CGameLogic::RestorePlayerStuffDuringResurrection(CPlayerPed *pPlayerPed, CVector
 	CTheScripts::ClearSpaceForMissionEntity(pos, pPlayerPed);
 	CWorld::ClearExcitingStuffFromArea(pos, 4000.0f, true);
 	pPlayerPed->RestoreHeadingRate();
-	CGame::currArea = AREA_MAIN_MAP;
+	/* The restart puts the player back on the main map through the area writer:
+	 * a player who died inside an interior arms the fill burst here, and the
+	 * restart countdowns arm it again 10 frames later (VICE-126). */
+	CGame::SetCurrArea(AREA_MAIN_MAP);
 	CStreaming::RemoveBuildingsNotInArea(AREA_MAIN_MAP);
 	TheCamera.SetCameraDirectlyInFrontForFollowPed_CamOnAString();
 	TheCamera.Restore();

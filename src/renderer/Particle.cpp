@@ -1313,8 +1313,6 @@ void CParticle::Update()
 					
 					switch ( TheCamera.GetLookDirection() )
 					{
-						case LOOKING_LEFT:
-						case LOOKING_RIGHT:
 						case LOOKING_FORWARD:
 							nMaxDrops /= 2;
 							break;
@@ -1982,34 +1980,12 @@ void CParticle::Render()
 				if ( i == PARTICLE_HEATHAZE )
 				{
 					RwRect rect;
-					
-					switch ( TheCamera.GetLookDirection() )
-					{
-						case LOOKING_LEFT:
-							rect.x = int32(particle->m_vecPosition.x - SCREEN_STRETCH_X(particle->m_fSize * psystem->m_vecTextureStretch.x * 2.0f));
-							rect.y = int32(particle->m_vecPosition.y - SCREEN_STRETCH_Y(particle->m_fSize * psystem->m_vecTextureStretch.y));
-							rect.w = int32(particle->m_vecPosition.x - SCREEN_STRETCH_X(particle->m_fSize * psystem->m_vecTextureStretch.x));
-							rect.h = int32(particle->m_vecPosition.y + SCREEN_STRETCH_Y(particle->m_fSize * psystem->m_vecTextureStretch.y));
-					
-							break;
 
-						case LOOKING_RIGHT:
-							rect.x = int32(particle->m_vecPosition.x + SCREEN_STRETCH_X(particle->m_fSize * psystem->m_vecTextureStretch.x));
-							rect.y = int32(particle->m_vecPosition.y - SCREEN_STRETCH_Y(particle->m_fSize * psystem->m_vecTextureStretch.y));
-							rect.w = int32(particle->m_vecPosition.x + SCREEN_STRETCH_X(particle->m_fSize * psystem->m_vecTextureStretch.x * 4.0f));
-							rect.h = int32(particle->m_vecPosition.y + SCREEN_STRETCH_Y(particle->m_fSize * psystem->m_vecTextureStretch.y));
-					
-							break;
+					rect.x = int32(particle->m_vecPosition.x - SCREEN_STRETCH_X(particle->m_fSize * psystem->m_vecTextureStretch.x));
+					rect.y = int32(particle->m_vecPosition.y - SCREEN_STRETCH_Y(particle->m_fSize * psystem->m_vecTextureStretch.y));
+					rect.w = int32(particle->m_vecPosition.x + SCREEN_STRETCH_X(particle->m_fSize * psystem->m_vecTextureStretch.x));
+					rect.h = int32(particle->m_vecPosition.y + SCREEN_STRETCH_Y(particle->m_fSize * psystem->m_vecTextureStretch.y));
 
-						default:
-							rect.x = int32(particle->m_vecPosition.x - SCREEN_STRETCH_X(particle->m_fSize * psystem->m_vecTextureStretch.x));
-							rect.y = int32(particle->m_vecPosition.y - SCREEN_STRETCH_Y(particle->m_fSize * psystem->m_vecTextureStretch.y));
-							rect.w = int32(particle->m_vecPosition.x + SCREEN_STRETCH_X(particle->m_fSize * psystem->m_vecTextureStretch.x));
-							rect.h = int32(particle->m_vecPosition.y + SCREEN_STRETCH_Y(particle->m_fSize * psystem->m_vecTextureStretch.y));
-					
-							break;
-					}
-														 
 					CMBlur::AddRenderFx(Scene.camera, &rect, screenZ, FXTYPE_HEATHAZE);
 					
 					canDraw = false;
@@ -2066,19 +2042,8 @@ void CParticle::Render()
 						|| i == PARTICLE_RUBBER_SMOKE
 						|| i == PARTICLE_BURNINGRUBBER_SMOKE )
 					{
-						switch ( TheCamera.GetLookDirection() )
-						{
-							case LOOKING_LEFT:
-							case LOOKING_RIGHT:
-								w += CGeneral::GetRandomNumberInRange(1.0f, 7.5f) * psystem->m_vecTextureStretch.x;
-								h += CGeneral::GetRandomNumberInRange(0.1f, 1.0f) * psystem->m_vecTextureStretch.y;
-								break;
-
-							default:
-								w += CGeneral::GetRandomNumberInRange(0.1f, 1.0f) * psystem->m_vecTextureStretch.x;
-								h += CGeneral::GetRandomNumberInRange(0.1f, 1.0f) * psystem->m_vecTextureStretch.y;
-								break;
-						}
+						w += CGeneral::GetRandomNumberInRange(0.1f, 1.0f) * psystem->m_vecTextureStretch.x;
+						h += CGeneral::GetRandomNumberInRange(0.1f, 1.0f) * psystem->m_vecTextureStretch.y;
 					}
 					else if ( i == PARTICLE_WATER_HYDRANT )
 					{

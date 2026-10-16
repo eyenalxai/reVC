@@ -3833,9 +3833,6 @@ MIKE BLACKBURN
 [CRED358]
 TIM MCGAFF
 
-[CINCAM]
-Camera mobile
-
 [RC4]
 'LA FURIA DI RUMPO'
 
@@ -5463,7 +5460,7 @@ NON NECESSARIO
 NON NECESSARIO
 
 [HELP31]
-Per eseguire un assalto in macchina, guarda a destra o a sinistra premendo il tasto L2 o il tasto R2.
+Per eseguire un assalto in macchina, tieni premuto ~h~~k~~PED_LOCK_TARGET~~w~ per mirare liberamente con il mouse, poi spara.
 
 [HELP34]
 Hai bisogno di una mitragliatrice per eseguire un assalto in macchina.
@@ -14244,7 +14241,7 @@ Premi il ~h~~k~~VEHICLE_LOOKLEFT~~w~ per ruotare l'elicottero in senso orario.
 ~r~Hai distrutto il van contenente le bombe e l'elicottero radiocomandato!
 
 [TEX3_32:SERG3]
-Puoi ~h~guardare indietro~w~ premendo ~h~simultaneamente ~k~~VEHICLE_LOOKLEFT~ e ~k~~VEHICLE_LOOKRIGHT~~w~.
+Puoi ~h~guardare indietro~w~ premendo ~h~~k~~VEHICLE_LOOKBEHIND~~w~.
 
 [TEX3_4:SERG3] { reVC update }
 ~g~Per sganciare una bomba, premi il ~h~~k~~VEHICLE_FIREWEAPON~~g~.

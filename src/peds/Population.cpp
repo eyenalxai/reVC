@@ -30,6 +30,7 @@
 #include "Clock.h"
 #include "WaterLevel.h"
 #include "TrafficRings.h"
+#include "FillBurst.h"
 
 // The pedestrian ring comes from the one table (TrafficRings.h): the creation
 // ring, the off-screen band and the removal distances scale with it. The
@@ -101,6 +102,83 @@ CEntity *gCoupleObstacles[3];
 uint32 CPopulation::ms_nOffNetworkSpawns;
 uint32 CPopulation::ms_nOffNetworkStuck;
 uint32 CPopulation::ms_nOffNetworkDrowned;
+
+/* The fill burst (VICE-126). The state of the window and the counters the live
+ * rig reads (utils/caps-audit/live-counters.py, the same rig the caps audit
+ * uses). */
+SFillBurst CPopulation::ms_FillBurst;
+uint32 CPopulation::ms_nFillBurstAttempts;
+uint32 CPopulation::ms_nFillBurstPlaced;
+float CPopulation::ms_fFillBurstTarget;
+
+/* Arm the pedestrian fill burst (VICE-126). The burst of every trigger has the
+ * bands of the ring table: the creation ring and the off-screen band of the
+ * trickle, so a pedestrian never appears closer than the off-screen band
+ * behind the player. (The shipped one-frame boot burst had its own wider band,
+ * from 10 m; that band dies with it, because a spawn that close is a pop-in on
+ * the first turn of the camera - VICE-127 forbids it.) */
+void
+CPopulation::ArmFillBurst(void)
+{
+	FillBurstArm(&ms_FillBurst);
+	ms_nFillBurstAttempts = 0;
+	ms_nFillBurstPlaced = 0;
+	ms_fFillBurstTarget = 0.0f;
+}
+
+/* The local on-foot budget of the area this frame: the expression
+ * AddToPopulation compares its count against, in one place, so the burst stops
+ * at the same line the trickle stops at. The live values the caller already
+ * holds come in as arguments: the per-attempt path of AddToPopulation and the
+ * burst frame both call this, and neither may fetch the player centre, the zone
+ * info or the rings a second time. */
+static float
+AreaPedBudget(const CVector &playerCentreOfWorld, const CZoneInfo &zoneInfo, const STrafficRings &rings)
+{
+	CPlayerInfo *playerInfo = &CWorld::Players[CWorld::PlayerInFocus];
+
+	float missionAndWeatherMult = -0.8f * Sqrt(CWeather::Rain) + 1.0f;
+	// Taxi side mission
+	if (CTheScripts::IsPlayerOnAMission()) {
+		CPed *player = FindPlayerPed();
+		if (player && player->InVehicle() && player->m_pMyVehicle->IsTaxi())
+			missionAndWeatherMult = 1.0f;
+	}
+	if (CDarkel::FrenzyOnGoing())
+		missionAndWeatherMult = 1.0f;
+	int selectedMaxPeds = CGame::IsInInterior() ? CPopulation::MaxNumberOfPedsInUseInterior : CPopulation::MaxNumberOfPedsInUse;
+
+	float budget = (zoneInfo.pedDensity + zoneInfo.carDensity) * playerInfo->m_fRoadDensity * CPopulation::PedDensityMultiplier
+		* (CDarkel::FrenzyOnGoing() ? 1.f : CIniFile::PedNumberMultiplier) * missionAndWeatherMult * PED_AREA_DENSITY_SCALE
+		* SQR(rings.scale);
+	return Min(budget, (float)selectedMaxPeds);
+}
+
+/* The totals the budget is compared against, from the per-type counters. The
+ * frame of CPopulation::Update reads them once, and the burst asks for a fresh
+ * set every attempt (the shipped start-of-game burst recomputed them per
+ * iteration), so the stop line and the gate of AddToPopulation are never stale
+ * while a burst is placing. */
+static void
+ComputePedTotals(void)
+{
+	CPopulation::ms_nTotalCivPeds = CPopulation::ms_nNumCivFemale + CPopulation::ms_nNumCivMale;
+	CPopulation::ms_nTotalGangPeds = CPopulation::ms_nNumGang9 + CPopulation::ms_nNumGang8 + CPopulation::ms_nNumGang7
+		+ CPopulation::ms_nNumGang6 + CPopulation::ms_nNumGang5 + CPopulation::ms_nNumGang4 + CPopulation::ms_nNumGang3
+		+ CPopulation::ms_nNumGang2 + CPopulation::ms_nNumGang1;
+	CPopulation::ms_nTotalPeds = CPopulation::ms_nNumDummy + CPopulation::ms_nNumEmergency + CPopulation::ms_nNumCop
+		+ CPopulation::ms_nTotalGangPeds + CPopulation::ms_nNumCivFemale + CPopulation::ms_nNumCivMale;
+	CPopulation::ms_nTotalPeds -= CPopulation::ms_nTotalCarPassengerPeds;
+}
+
+/* The line the population stops at: the on-foot budget of the area plus the
+ * drivers and law enforcers, which count in ms_nTotalPeds and are added back
+ * so they do not shrink the crowd (PopulationBudget.h). */
+static float
+AreaPedCountTarget(const CVector &playerCentreOfWorld, const CZoneInfo &zoneInfo, const STrafficRings &rings)
+{
+	return AreaPedBudget(playerCentreOfWorld, zoneInfo, rings) + CCarCtrl::NumRandomCars + CCarCtrl::NumLawEnforcerCars;
+}
 
 /* The strays: the off-network pedestrians that have not reached the network yet
  * (VICE-122). The table is bounded and the frame checks a fixed number of
@@ -591,69 +669,132 @@ CPopulation::DealWithZoneChange(eLevelName oldLevel, eLevelName newLevel, bool f
 {
 }
 
+/* The fill burst of the pedestrians, defined below the trickle it replaces. */
+static bool PedModelsAreResident(void);
+static void SpendFillBurstFrame(void);
+
 void
 CPopulation::Update(bool addPeds)
 {
-	if (!CReplay::IsPlayingBack()) {
-		ManagePopulation();
-		RemovePedsIfThePoolGetsFull();
-		MoveCarsAndPedsOutOfAbandonedZones();
-		// The strays wait out a cutscene: the camera there is not the game view.
-		if (!CCutsceneMgr::IsRunning())
-			ProcessOffNetworkStrays();
-		if (m_CountDownToPedsAtStart != 0) {
-			if (--m_CountDownToPedsAtStart == 0)
-				GeneratePedsAtStartOfGame();
-		} else {
-			ms_nTotalCivPeds = ms_nNumCivFemale + ms_nNumCivMale;
-			ms_nTotalGangPeds = ms_nNumGang9 + ms_nNumGang8 + ms_nNumGang7
-				+ ms_nNumGang6 + ms_nNumGang5 + ms_nNumGang4 + ms_nNumGang3
-				+ ms_nNumGang2 + ms_nNumGang1;
-			ms_nTotalPeds = ms_nNumDummy + ms_nNumEmergency + ms_nNumCop
-				+ ms_nTotalGangPeds + ms_nNumCivFemale + ms_nNumCivMale;
-			ms_nTotalPeds -= ms_nTotalCarPassengerPeds;
-			// The pool is the hard resource behind the budget: a frame whose
-			// free spaces are down to the reserve adds no pedestrian
-			// (PopulationBudget.h, PED_POOL_RESERVE). One scan a frame.
-			if (!CCutsceneMgr::IsRunning() && addPeds &&
-				CPools::GetPedPool()->GetNoOfFreeSpaces() >= PED_POOL_RESERVE) {
-				float pcdm = PedCreationDistMultiplier();
-				const STrafficRings rings = CurrentTrafficRings();
-				// The ring fills from the target and the lifetime, so the rate follows the ring scale.
-				for (int i = 0; i < PED_ATTEMPTS_PER_FRAME * rings.scale; i++) {
-					// The vehicle-speed multiplier widens the off-screen band's outer
-					// edge; the pull-back stays the width of the creation ring.
-					AddToPopulation(pcdm * rings.pedCreateMin,
-						pcdm * rings.pedCreateMax,
-						pcdm * rings.pedOffScreenMax - rings.pedOffScreenPullBack,
-						pcdm * rings.pedOffScreenMax);
-				}
-			}
+	if (CReplay::IsPlayingBack())
+		return;
+
+	ManagePopulation();
+	RemovePedsIfThePoolGetsFull();
+	MoveCarsAndPedsOutOfAbandonedZones();
+	// The strays wait out a cutscene: the camera there is not the game view.
+	if (!CCutsceneMgr::IsRunning())
+		ProcessOffNetworkStrays();
+
+	if (m_CountDownToPedsAtStart != 0) {
+		// The countdown lets the world settle after boot and after a restart;
+		// its end arms the fill burst (VICE-126).
+		if (--m_CountDownToPedsAtStart == 0)
+			ArmFillBurst();
+		return;
+	}
+
+	ComputePedTotals();
+
+	// The fill waits out a cutscene (the camera there is not the game view) and
+	// a frame the frame-time watchdog skipped, and it stops at the pool: a
+	// frame whose free spaces are down to the reserve adds no pedestrian
+	// (PopulationBudget.h, PED_POOL_RESERVE). One scan a frame.
+	if (CCutsceneMgr::IsRunning() || !addPeds ||
+		CPools::GetPedPool()->GetNoOfFreeSpaces() < PED_POOL_RESERVE)
+		return;
+
+	if (FillBurstIsRunning(&ms_FillBurst)) {
+		SpendFillBurstFrame();
+	} else {
+		float pcdm = PedCreationDistMultiplier();
+		const STrafficRings rings = CurrentTrafficRings();
+		// The ring fills from the target and the lifetime, so the rate follows the ring scale.
+		for (int i = 0; i < PED_ATTEMPTS_PER_FRAME * rings.scale; i++) {
+			// The vehicle-speed multiplier widens the off-screen band's outer
+			// edge; the pull-back stays the width of the creation ring.
+			AddToPopulation(pcdm * rings.pedCreateMin,
+				pcdm * rings.pedCreateMax,
+				pcdm * rings.pedOffScreenMax - rings.pedOffScreenPullBack,
+				pcdm * rings.pedOffScreenMax);
 		}
 	}
 }
 
-void
-CPopulation::GeneratePedsAtStartOfGame()
+/* The streaming gate of the pedestrian burst (VICE-126): an attempt picks a
+ * model of the zone's pedestrian group and stops at HasModelLoaded when it is
+ * not resident (AddToPopulation), so a burst that must wait for the group is
+ * not a burst that places anything. True while at least one model of the group
+ * is resident. The zone info is the one the frame already read. */
+static bool
+PedModelsAreResident(const CZoneInfo &zoneInfo)
 {
-	// The pool check of Update, for the start-of-game burst this places in one
-	// frame (PopulationBudget.h, PED_POOL_RESERVE).
-	if (CPools::GetPedPool()->GetNoOfFreeSpaces() < PED_POOL_RESERVE)
-		return;
-	for (int i = 0; i < 100; i++) {
-		ms_nTotalCivPeds = ms_nNumCivFemale + ms_nNumCivMale;
-		ms_nTotalGangPeds = ms_nNumGang9 + ms_nNumGang8 + ms_nNumGang7
-			+ ms_nNumGang6 + ms_nNumGang5 + ms_nNumGang4
-			+ ms_nNumGang3 + ms_nNumGang2 + ms_nNumGang1;
-		ms_nTotalPeds = ms_nNumDummy + ms_nNumEmergency + ms_nNumCop
-			+ ms_nTotalGangPeds + ms_nNumCivFemale + ms_nNumCivMale;
-		ms_nTotalPeds -= ms_nTotalCarPassengerPeds;
-
-		// Off-screen min dist is 10.0f only for start of the game (naturally)
-		const STrafficRings rings = CurrentTrafficRings();
-		AddToPopulation(rings.pedCreateMin, PedCreationDistMultiplier() * rings.pedCreateMax,
-			10.0f, PedCreationDistMultiplier() * rings.pedCreateMax);
+	for (int i = 0; i < NUMMODELSPERPEDGROUP; i++) {
+		int32 model = CPopulation::ms_pPedGroups[zoneInfo.pedGroup].models[i];
+		if (model != -1 && CStreaming::HasModelLoaded(model))
+			return true;
 	}
+	return false;
+}
+
+/* One frame of the pedestrian fill burst (VICE-126). The attempts come from the
+ * burst table: the whole budget while the screen hides the fill, the small one
+ * while the player can see it. The live values the frame needs (the player
+ * centre, the zone info, the rings) are read once here and passed on to the
+ * budget and to AddToPopulation, so the per-attempt path fetches nothing twice.
+ * The totals and the stop line are re-read every attempt, as the shipped
+ * start-of-game burst recomputed the totals: the overshoot of the line is one
+ * placement (a group of 6 at the very most). The pool is re-read every
+ * FILL_BURST_POOL_CHECK_ATTEMPTS attempts, so its overshoot is one step of the
+ * loop (4 x 6 on-foot pedestrians, far inside the reserve of PED_POOL_RESERVE). */
+static void
+SpendFillBurstFrame(void)
+{
+	CVector playerCentreOfWorld = FindPlayerCentreOfWorld(CWorld::PlayerInFocus);
+	CZoneInfo zoneInfo;
+	CTheZones::GetZoneInfoForTimeOfDay(&playerCentreOfWorld, &zoneInfo);
+	const STrafficRings rings = CurrentTrafficRings();
+	float target = AreaPedCountTarget(playerCentreOfWorld, zoneInfo, rings);
+	CPopulation::ms_fFillBurstTarget = target;
+	if (FillBurstTargetReached((float)CPopulation::ms_nTotalPeds, target)) {
+		FillBurstDisarm(&CPopulation::ms_FillBurst);
+		return;
+	}
+	/* The streaming: the frame waits for the zone's models instead of spending
+	 * its attempts on models that are not in memory. The wait does not spend the
+	 * window, so a long load does not burn the burst; it counts against the
+	 * give-up bound of the helper, so it cannot wait forever either. */
+	if (!PedModelsAreResident(zoneInfo)) {
+		FillBurstSpendFrame(&CPopulation::ms_FillBurst, false, false);
+		return;
+	}
+
+	float pcdm = CPopulation::PedCreationDistMultiplier();
+	int attempts = FillBurstAttempts(&CPopulation::ms_FillBurst, FillBurstIsHidden());
+
+	/* What the frame created: the pool used count before and after. The pool is
+	 * the one place every placement of the frame shows up, the groups and the
+	 * couples included. The attempt counter follows the attempts the frame
+	 * makes, so a frame the pool or the stop line ends early counts what it
+	 * spent, not what it planned. */
+	int32 usedBefore = CPools::GetPedPool()->GetNoOfUsedSpaces();
+	for (int i = 0; i < attempts; i++) {
+		// The totals and the stop line of this attempt: both the check here and
+		// the gate of AddToPopulation read what the frame has placed so far.
+		ComputePedTotals();
+		if (FillBurstTargetReached((float)CPopulation::ms_nTotalPeds, target))
+			break;
+		if (i % FILL_BURST_POOL_CHECK_ATTEMPTS == 0 &&
+			CPools::GetPedPool()->GetNoOfFreeSpaces() < PED_POOL_RESERVE)
+			break;
+		CPopulation::ms_nFillBurstAttempts++;
+		CPopulation::AddToPopulation(pcdm * rings.pedCreateMin, pcdm * rings.pedCreateMax,
+			pcdm * rings.pedOffScreenMax - rings.pedOffScreenPullBack, pcdm * rings.pedOffScreenMax);
+	}
+	int32 placed = CPools::GetPedPool()->GetNoOfUsedSpaces() - usedBefore;
+
+	CPopulation::ms_nFillBurstPlaced += placed;
+	FillBurstSpendFrame(&CPopulation::ms_FillBurst, true, placed > 0);
 }
 
 // More speed = wider area to spawn peds
@@ -881,27 +1022,15 @@ CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScree
 			maxDist = PedCreationDistMultiplier() * rings.pedCreateMax;
 		}
 	}
-	float missionAndWeatherMult = -0.8f * Sqrt(CWeather::Rain) + 1.0f;
-
-	// Taxi side mission
-	if (CTheScripts::IsPlayerOnAMission()) {
-		CPed *player = FindPlayerPed();
-		if (player && player->InVehicle() && player->m_pMyVehicle->IsTaxi())
-			missionAndWeatherMult = 1.0f;
-	}
-	if (CDarkel::FrenzyOnGoing())
-		missionAndWeatherMult = 1.0f;
-	int selectedMaxPeds = CGame::IsInInterior() ? CPopulation::MaxNumberOfPedsInUseInterior : CPopulation::MaxNumberOfPedsInUse;
-
 	// Yeah, float
 	// The on-foot budget of the area, and the hard top of the count on foot:
 	// MaxNumberOfPedsInUse is an on-foot cap, sized by the pool arithmetic of
 	// PopulationBudget.h without the drivers, because the drivers are added on top
-	// of it below and the passengers stay out of ms_nTotalPeds entirely.
-	float maxPossiblePedsForArea = (zoneInfo.pedDensity + zoneInfo.carDensity) * playerInfo->m_fRoadDensity * PedDensityMultiplier
-		* (CDarkel::FrenzyOnGoing() ? 1.f : CIniFile::PedNumberMultiplier) * missionAndWeatherMult * PED_AREA_DENSITY_SCALE
-		* SQR(rings.scale);
-	maxPossiblePedsForArea = Min(maxPossiblePedsForArea, selectedMaxPeds);
+	// of it below and the passengers stay out of ms_nTotalPeds entirely. The
+	// expression lives in AreaPedBudget, which the fill burst reads too, so the
+	// burst stops at the line this call stops at. The live values of this call
+	// go in: neither this path nor the burst may fetch them twice.
+	float maxPossiblePedsForArea = AreaPedBudget(playerCentreOfWorld, zoneInfo, rings);
 	// Car and law-enforcer drivers count in ms_nTotalPeds: add them back so the
 	// on-foot budget does not shrink with the car count.
 	float maxPossibleTotalPeds = maxPossiblePedsForArea + CCarCtrl::NumRandomCars + CCarCtrl::NumLawEnforcerCars;
@@ -1475,8 +1604,6 @@ CPopulation::ManagePopulation(void)
 					if (TheCamera.Cams[TheCamera.ActiveCam].Mode != CCam::MODE_SNIPER
 						&& TheCamera.Cams[TheCamera.ActiveCam].Mode != CCam::MODE_SNIPER_RUNABOUT
 						&& TheCamera.Cams[TheCamera.ActiveCam].Mode != CCam::MODE_CAMERA
-						&& !TheCamera.Cams[TheCamera.ActiveCam].LookingLeft
-						&& !TheCamera.Cams[TheCamera.ActiveCam].LookingRight
 						&& !TheCamera.Cams[TheCamera.ActiveCam].LookingBehind) {
 						pedIsFarAway = true;
 					}

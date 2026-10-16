@@ -3790,9 +3790,6 @@ MIKE BLACKBURN
 [CRED358]
 TIM MCGAFF
 
-[CINCAM]
-Cámara cinemática
-
 [RC4]
 MASACRES RUMPO
 
@@ -5337,7 +5334,7 @@ distancia:
 ~g~Lleva a Mercedes y el ''love juice'' a la banda en el estudio de grabación.
 
 [HELP31]
-Para hacer una pasada, mira primero a izquierda o derecha con ~k~~VEHICLE_LOOKLEFT~ o ~k~~VEHICLE_LOOKRIGHT~.
+Para hacer una pasada, mantén pulsado ~h~~k~~PED_LOCK_TARGET~~w~ para apuntar libremente con el ratón y luego dispara.
 
 [HELP34]
 Para realizar una pasada deberás tener un subfusil.
@@ -13936,7 +13933,7 @@ Pulsa ~h~~k~~VEHICLE_LOOKLEFT~ ~w~para girar el helicóptero en sentido de las a
 ~r~¡Has destruido la furgoneta de TOPFUN que tenía las bombas y el helicóptero RC!
 
 [TEX3_32:SERG3]
-Puedes ~h~mirar atrás~w~ si ~h~pulsas simultáneamente ~k~~VEHICLE_LOOKLEFT~ y ~k~~VEHICLE_LOOKRIGHT~~w~.
+Puedes ~h~mirar atrás~w~ si pulsas ~h~~k~~VEHICLE_LOOKBEHIND~~w~.
 
 [TEX3_29:SERG3] { reVC update }
 ~g~Para soltar una bomba pulsa ~h~~k~~VEHICLE_FIREWEAPON~~g~.

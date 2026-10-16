@@ -418,7 +418,7 @@ ScreenDroplets::ProcessCameraMovement(void)
 	uint16 mode = TheCamera.Cams[TheCamera.ActiveCam].Mode;
 	bool isTopDown = mode == CCam::MODE_TOPDOWN || mode == CCam::MODE_GTACLASSIC || mode == CCam::MODE_TOP_DOWN_PED;
 	bool isLookingInDirection = FindPlayerVehicle() && mode == CCam::MODE_1STPERSON &&
-		(CPad::GetPad(0)->GetLookBehindForCar() || CPad::GetPad(0)->GetLookLeft() || CPad::GetPad(0)->GetLookRight());
+		CPad::GetPad(0)->GetLookBehindForCar();
 	ms_enabled = !isTopDown && !isLookingInDirection;
 	ms_movingEnabled = !isTopDown && !isLookingInDirection;
 

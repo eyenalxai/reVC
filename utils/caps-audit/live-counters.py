@@ -26,6 +26,13 @@ budget, ped cap 5500 before the cap change of this branch):
     cars 149..201 of the 2400 budget, peds 2251..5500 of the 5500 cap,
     parked 0..12, vehicles loaded 57..65 of 90, ped pool 5417/8192,
     vehicle pool 153/2560, dummy pool 2338/2800, visible entities 361..1233.
+
+The fill burst rows (VICE-126) are the transition timeline: the frames left of
+each window read 0 while the burst is idle, and fall from 60 while it spends
+itself after a boot, an interior exit or a cutscene end. The attempts and the
+placements of the rows above them are the burst's totals since it was armed, and
+the target is the local line it stopped at (the 90 % stop line sits on it). The
+orchestrator reads those rows live across a transition.
 """
 
 import os
@@ -57,6 +64,16 @@ SYMBOLS = [
     ("peds: ms_nNumDummy",           "_ZN11CPopulation12ms_nNumDummyE",                "I"),
     ("peds: ms_nNumCop",             "_ZN11CPopulation10ms_nNumCopE",                  "I"),
     ("peds: ms_nNumCivMale",         "_ZN11CPopulation14ms_nNumCivMaleE",              "I"),
+    # The fill burst (VICE-126): the countdown that arms the boot burst, the
+    # target the last burst frame aimed at, and what the burst has spent so far.
+    ("peds: burst countdown",        "_ZN11CPopulation24m_CountDownToPedsAtStartE",    "b"),
+    ("peds: burst target",           "_ZN11CPopulation19ms_fFillBurstTargetE",         "f"),
+    ("peds: burst attempts",         "_ZN11CPopulation21ms_nFillBurstAttemptsE",       "I"),
+    ("peds: burst placed",           "_ZN11CPopulation19ms_nFillBurstPlacedE",         "I"),
+    ("cars: burst countdown",        "_ZN8CCarCtrl22CountDownToCarsAtStartE",          "b"),
+    ("cars: burst target",           "_ZN8CCarCtrl19ms_fFillBurstTargetE",             "f"),
+    ("cars: burst attempts",         "_ZN8CCarCtrl21ms_nFillBurstAttemptsE",           "I"),
+    ("cars: burst placed",           "_ZN8CCarCtrl19ms_nFillBurstPlacedE",             "I"),
     ("stream: ms_numVehiclesLoaded", "_ZN10CStreaming20ms_numVehiclesLoadedE",        "i"),
     ("stream: ms_numPedsLoaded",     "_ZN10CStreaming16ms_numPedsLoadedE",             "i"),
     ("stream: desiredNumVehiclesLoaded", "desiredNumVehiclesLoaded",                   "i"),
@@ -80,6 +97,17 @@ POOLS = [
     ("pool: PtrNodes",        "_ZN6CPools15ms_pPtrNodePoolE",       "NUMPTRNODES"),
     ("pool: EntryInfoNodes",  "_ZN6CPools21ms_pEntryInfoNodePoolE", "NUMENTRYINFOS"),
     ("pool: Buildings",       "_ZN6CPools16ms_pBuildingPoolE",      "NUMBUILDINGS"),
+]
+
+# The fill burst (VICE-126): the state of the two work windows, SFillBurst
+# (two ints: the frames left and the stalls). Both fields read 0 while the burst
+# is idle; across an interior exit or a cutscene end they show the window
+# spending itself (the frames fall) and the counters above show what it placed.
+BURSTS = [
+    ("burst peds: frames left",  "_ZN11CPopulation12ms_FillBurstE", 0),
+    ("burst peds: stalls",       "_ZN11CPopulation12ms_FillBurstE", 4),
+    ("burst cars: frames left",  "_ZN8CCarCtrl12ms_FillBurstE",     0),
+    ("burst cars: stalls",       "_ZN8CCarCtrl12ms_FillBurstE",     4),
 ]
 
 CONFIG = "src/core/config.h"
@@ -152,6 +180,15 @@ def main():
             print(f"  {label:44s} {v:.4f}")
         else:
             print(f"  {label:44s} {v}")
+
+    print()
+    for label, mangled, offset in BURSTS:
+        off = sym.get(mangled)
+        if off is None:
+            print(f"  {label:44s} symbol missing")
+            continue
+        v = read(off + offset, "i")
+        print(f"  {label:44s} {v}")
 
     print()
     for label, mangled, enum_name in POOLS:

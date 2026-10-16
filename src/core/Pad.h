@@ -257,9 +257,7 @@ public:
 	int32 GetWeapon(void);
 	bool WeaponJustDown(void);
 	int16 GetAccelerate(void);
-	bool CycleCameraModeJustDown(void);
-	bool CycleCameraModeUpJustDown(void);
-	bool CycleCameraModeDownJustDown(void);
+	bool CameraViewToggleJustDown(void);
 	bool ChangeStationJustDown(void);
 	bool CycleWeaponLeftJustDown(void);
 	bool CycleWeaponRightJustDown(void);

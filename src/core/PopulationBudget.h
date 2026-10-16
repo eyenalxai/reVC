@@ -57,21 +57,29 @@
  * at 400. Every other pedestrian of a car is already in the lines above: the
  * police crews count as cops in ms_nTotalPeds (only the passengers of the
  * traffic are subtracted from it, CarCtrl.cpp), and a script passenger is an
- * ordinary counted pedestrian. The reserve holds the burst of one frame: the
- * placements a frame makes, about 120 on-foot pedestrians (the ped attempts at
- * the ring top times the widest group, 3 x 7.88 x 5) and about 92 car crew
- * members (a driver and up to three passengers of each of the cars the car loop
- * can create), plus room for the one-off paths.
+ * ordinary counted pedestrian. The reserve holds the frame of a fill: for the
+ * trickle, the placements of the 6 ped calls at the capped ring (3 x 2 calls,
+ * the widest one a group of 6) and the crew of the 6 car calls (a driver and up
+ * to three passengers each); for a fill burst, the widest step of its loop
+ * between two pool reads (FILL_BURST_POOL_CHECK_ATTEMPTS attempts, so at most
+ * 4 x 6 on-foot pedestrians or 4 x 4 car crew members), plus room for the
+ * one-off paths. The burst checks the pool and the stop line every step, so a
+ * burst frame of 100 attempts stops at the pool instead of emptying it. The
+ * wide groups are the mall groups of `PlaceMallPedsAsStationaryGroup`
+ * (3..6 under FIX_BUGS; a gang group is 3..5).
  *
  * The line is held by the creation paths, not by the arithmetic alone:
  *
  *	CPopulation::Update		one ped pool read a frame; the frame then
- *					adds at most the reserve's burst
- *	GeneratePedsAtStartOfGame	one read for the burst; the budget inside
- *					the loop is recomputed every call, so the
- *					burst of one call is one group (<= 5)
+ *					adds at most the reserve's frame
+ *	CPopulation::SpendFillBurstFrame	one read before its loop, then one
+ *					every FILL_BURST_POOL_CHECK_ATTEMPTS attempts
+ *					(the stop line itself is re-read every
+ *					attempt, so its overshoot is one placement)
  *	CCarCtrl::GenerateRandomCars	one read a frame, before any car
  *					(and the drivers) is created
+ *	CCarCtrl::SpendFillBurstFrame	the same step inside the car burst, or a
+ *					frame of 100 cars could take 400 crew members
  *	CreateCarFromPlacement		one read per car with passengers, and
  *					MAX_PED_PASSENGERS caps the counted ones
  *
@@ -98,8 +106,14 @@
  * -------------
  *
  * The rates are not caps: they bound the time a count takes to reach its top
- * (ADR 0013, the traffic rate follows the ring). The ring top is scale 7.88, so
- * a frame makes 3 x 7.88 = 23 car calls and 23 ped calls.
+ * (ADR 0013, the traffic rate follows the ring). The ring stops at scale 2
+ * (VICE-145), so a frame makes 3 x 2 = 6 car calls and 6 ped calls.
+ *
+ * That trickle fills a full ring in tens of seconds, which is the owner's
+ * complaint. The fill burst is the other rate: after boot, an interior exit and
+ * a cutscene end the street fills at once, in a bounded work window, and each
+ * frame of the window carries a bounded number of attempts. The rates decide
+ * how fast a count reaches its top; the caps decide where it stops.
  *
  * The streaming model budget
  * --------------------------
@@ -150,9 +164,12 @@
  * this is their true cap. The police crews and the script peds are not
  * passengers in that sense and count in the lines above. */
 #define MAX_PED_PASSENGERS 400
-/* The free ped pool slots a frame leaves to its creation paths: the burst of
- * one frame (about 120 on-foot pedestrians and 92 car crew members) plus room
- * for the one-off paths (scripts, the ropes). */
+/* The free ped pool slots a frame leaves to its creation paths: the frame of a
+ * fill plus room for the one-off paths (scripts, the ropes). The widest
+ * placement is a group of 6 (a mall group; a gang group is 5), so the trickle
+ * of the capped ring asks for 6 x 6 = 36 and the widest step of a burst loop
+ * (FILL_BURST_POOL_CHECK_ATTEMPTS attempts between two pool reads) asks for
+ * 4 x 6 = 24 on-foot pedestrians or 4 x 4 = 16 car crew members. */
 #define PED_POOL_RESERVE 332
 
 /* The models one class array holds (CCarCtrl::CarArrays): the shipped data
@@ -169,6 +186,70 @@
 #define RANDOM_CAR_ATTEMPTS_PER_FRAME 3
 /* The pedestrian calls per frame, times the ring scale. */
 #define PED_ATTEMPTS_PER_FRAME 3
+
+/* --- The fill burst (VICE-126) ------------------------------------------ */
+
+/* The burst is the fill of a transition: after boot, an interior exit and a
+ * cutscene end the counts jump to their targets instead of trickling up. It is
+ * a bounded work window, and the bound is one number for every run:
+ *
+ *	FILL_BURST_FRAMES x FILL_BURST_ATTEMPTS_PER_FRAME	the visible window
+ *	FILL_BURST_FRAMES x FILL_BURST_HIDDEN_ATTEMPTS_PER_FRAME the hidden one
+ *
+ * A frame that spends its attempts spends a window frame, placing or not. A
+ * frame that cannot spend them (the models of the zone are not resident) does
+ * not spend the window, but it counts against the give-up bound below, so the
+ * streaming wait is bounded too and no run can ask for more attempts than the
+ * hidden window above. A frame that ends without a placement is a stall, and
+ * FILL_BURST_STALL_FRAMES of them in a row give the burst up and hand the fill
+ * back to the trickle.
+ *
+ * The screen hides the fill on the frames the camera covers: the fully black
+ * frames of a transition and the dark head of a fade (the fade is drawn over
+ * the world, and FILL_BURST_HIDDEN_FADE is how much of it hides a spawn at the
+ * ring). There the burst spends the whole budget: the world behind the fade is
+ * dimmed to a quarter at most, so the work cannot be seen. On a visible frame
+ * it spends the small budget, a few times the trickle and still bounded, and it
+ * stops at FILL_BURST_TARGET_FRACTION of the local target, so a full area
+ * cannot be over-spawned by a burst that outlives the transition.
+ *
+ * The random stream: the burst draws from the one global stream, exactly like
+ * the trickle it replaces, and it does not reseed. What the shift reaches is
+ * not everything after it: the car AI reseeds the stream from its own
+ * m_nRouteSeed at every path pick (CCarCtrl::PickNextNodeRandomly and the three
+ * other sites), so a car that picks its path after a burst is not shifted. The
+ * draws that do follow the shared stream past a burst are the pedestrian models
+ * and the pedestrian AI (the wander path of PedAI.cpp), the script randomness
+ * (COMMAND_GENERATE_RANDOM_FLOAT of Script.cpp), the accident rolls and the
+ * weather. The ADR (docs/adr/0021-the-fill-burst.md) states it, and the
+ * counters count the attempts, so the shift is measurable.
+ *
+ * The burst is bounded by the window, so a wrong target cannot make it runaway:
+ * the stop line is checked first every frame and every attempt inside the frame,
+ * on the live counts (the totals of the pedestrians are recomputed every
+ * attempt, exactly as the shipped start-of-game burst recomputed them).
+ */
+#define FILL_BURST_FRAMES 60			/* the work window: 2 s at 30 fps */
+#define FILL_BURST_ATTEMPTS_PER_FRAME 25	/* a visible frame: about 4 x the trickle at the ring cap */
+#define FILL_BURST_HIDDEN_ATTEMPTS_PER_FRAME 100 /* a hidden frame: the rate the shipped start-of-game burst spent */
+#define FILL_BURST_HIDDEN_FADE 192		/* the fade that hides the fill: three quarters of the screen (CDraw::FadeValue) */
+#define FILL_BURST_TARGET_FRACTION 0.9f		/* the stop line: 90 % of the local target */
+#define FILL_BURST_STALL_FRAMES 30		/* frames in a row without a placement that give the burst up: 1 s */
+#define FILL_BURST_POOL_CHECK_ATTEMPTS 4	/* the ped pool is re-read every this many attempts inside a burst frame */
+
+static_assert(FILL_BURST_HIDDEN_ATTEMPTS_PER_FRAME >= FILL_BURST_ATTEMPTS_PER_FRAME,
+	"a hidden frame can spend at least the budget of a visible one");
+static_assert(FILL_BURST_FRAMES > FILL_BURST_STALL_FRAMES,
+	"the give-up bound must bind before the window does");
+static_assert(FILL_BURST_TARGET_FRACTION > 0.0f && FILL_BURST_TARGET_FRACTION <= 1.0f,
+	"the stop line is a fraction of the local target");
+static_assert(FILL_BURST_HIDDEN_FADE > 0 && FILL_BURST_HIDDEN_FADE <= 255,
+	"the hidden threshold is a fade value");
+static_assert(FILL_BURST_POOL_CHECK_ATTEMPTS > 0, "the pool check step must make progress");
+/* The burst of a frame has to beat the trickle it replaces at the ring cap.
+ * The ratio needs the ring table (RING_MAX_SCALE), which this table does not
+ * include, so the check lives in the evidence program (utils/burst-fill),
+ * which reads both tables. */
 
 /* The parked cars a generator set holds at this ring scale: the stock count
  * over the ring area, capped by the generator count. */

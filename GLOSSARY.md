@@ -289,6 +289,30 @@ model budget, the pool each number protects and the arithmetic that ties them
 together; the table's invariants are checked at compile time. The caps stay
 below the pools.
 
+## Fill rate
+
+The spawn attempts a frame makes for a count: 3 pedestrian calls and 3 random car
+calls per frame, times the ring scale, so the rate follows the ring like the
+target does (`PED_ATTEMPTS_PER_FRAME`, `RANDOM_CAR_ATTEMPTS_PER_FRAME` in
+`src/core/PopulationBudget.h`). The rates are not caps: they bound the time a
+count takes to reach its top, and a count that is already at its top stops the
+attempts at the first check.
+
+## Fill burst
+
+The transition fill of the population and the traffic (VICE-126). After boot, an
+interior exit and a cutscene end, the counts reach 90 % of their local targets at
+once instead of trickling up. A burst is a bounded work window: 60 frames that
+each spend 25 spawn attempts, or 100 while the fade covers the screen (the black
+frames of a transition and the dark head of a fade), so a burst asks for at most
+6000 attempts. A frame the models cannot serve waits without spending its
+window, and 30 frames in a row without a placement give the burst up. The state
+machine is `src/core/FillBurst.h`, the bounds are in `PopulationBudget.h`, and
+the triggers are the two boot countdowns, the area writer
+(`CGame::SetCurrArea`) and the end of a cutscene
+(`CCutsceneMgr::DeleteCutsceneData`); ADR 0021 holds the decisions and the
+restated acceptance.
+
 ## Pool
 
 The fixed storage for the entities and their list nodes: pedestrians, vehicles,
@@ -400,6 +424,15 @@ setting keeps the camera at the player's eyes, the mouse aims and WASD stays
 with the movement. The stock look-around view (the setting off) is a separate,
 stock path and stays as it is.
 
+## Camera toggle
+
+The `CAMERA_CHANGE_VIEW_ALL_SITUATIONS` action (Home by default) flips the
+first person view setting, on foot and in a vehicle. The choice is the state
+the Display setting and the settings file use, so it holds across entering and
+leaving a vehicle and a save remembers it (VICE-139). The view change glides
+through the camera handover. The stock ped zoom cycle the action used to run
+is gone.
+
 ## Sight view
 
 The view the shot leaves from and the weapon holds its pose at while the player
@@ -443,9 +476,10 @@ the view where the mouse put it.
 ## Car ADS
 
 Aiming from the driver's seat with the mouse aim button: the follow camera
-pulls in and the free aim fires along the camera instead of the stock sideways
-drive-by. Only the drive-by vehicles (car, bike, boat) and the drive-by weapon
-take it, and the bullets ignore the player's own car.
+pulls in and the free aim fires along the camera. Only the drive-by vehicles
+(car, bike, boat) and the drive-by weapon take it, and the bullets ignore the
+player's own car. The stock sideways drive-by of the look keys is gone
+(VICE-138); a bike keeps its stock forward drive-by on the plain fire button.
 
 ## First person sights
 

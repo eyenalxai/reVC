@@ -4,8 +4,10 @@
 #include "Boat.h"
 #include "Vehicle.h"
 /* The car budgets: RANDOM_CARS_PER_INI_UNIT, MAX_RANDOM_CARS, MAX_CARS_IN_USE,
- * the parked target and the fill rate (VICE-123). */
+ * the parked target and the fill rate (VICE-123). The fill burst of the traffic
+ * lives in FillBurst.h (VICE-126). */
 #include "PopulationBudget.h"
+#include "FillBurst.h"
 
 #define GAME_SPEED_TO_METERS_PER_SECOND 50.0f
 #define METERS_PER_SECOND_TO_GAME_SPEED (1.0f / GAME_SPEED_TO_METERS_PER_SECOND)
@@ -74,6 +76,8 @@ public:
 	static float GetRandomCarTarget(void);
 	static void GenerateRandomCars(void);
 	static void GenerateOneRandomCar(void);
+	static void ArmFillBurst(bool withParkedCars);
+	static void SpendFillBurstFrame(void);
 	static bool CreateCarFromPlacement(const CCarCreationPlacement& placement, int carClass, int carModel, const CVector& vecTargetPos, const CVector2D& vecPlayerSpeed, bool testForCollision, bool bTopDownCamera);
 	static void GenerateEmergencyServicesCar(void);
 	static int32 ChooseModel(CZoneInfo*, int*);
@@ -175,6 +179,14 @@ public:
 	static int32 NumOfLoadedCarsOfRating[TOTAL_CUSTOM_CLASSES];
 	static int32 CarFreqArrays[TOTAL_CUSTOM_CLASSES][MAX_CAR_MODELS_IN_ARRAY];
 	static int32 LoadedCarsArray[TOTAL_CUSTOM_CLASSES][MAX_CAR_MODELS_IN_ARRAY];
+
+	/* The fill burst (VICE-126): the window of the traffic fill and the
+	 * counters of the burst in flight. The counters are live for the
+	 * measurement rig (utils/caps-audit/live-counters.py). */
+	static SFillBurst ms_FillBurst;
+	static uint32 ms_nFillBurstAttempts;
+	static uint32 ms_nFillBurstPlaced;
+	static float ms_fFillBurstTarget;
 };
 
 extern CVehicle* apCarsToKeep[MAX_CARS_TO_KEEP];
