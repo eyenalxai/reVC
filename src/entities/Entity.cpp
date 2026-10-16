@@ -518,6 +518,7 @@ UpdateSectorLists(CEntity *entity, eSectorListOp op)
 	int y, ystart, ymid, yend;
 	CSector *s;
 	CPtrList *list;
+	uint8 type = entity->GetType();
 
 	CRect bounds = entity->GetBoundRect();
 	xstart = CWorld::GetSectorIndexX(bounds.left);
@@ -534,39 +535,7 @@ UpdateSectorLists(CEntity *entity, eSectorListOp op)
 	for(y = ystart; y <= yend; y++)
 		for(x = xstart; x <= xend; x++){
 			s = CWorld::GetSector(x, y);
-			if(x == xmid && y == ymid) switch(entity->GetType()){
-			case ENTITY_TYPE_BUILDING:
-				list = &s->m_lists[ENTITYLIST_BUILDINGS];
-				break;
-			case ENTITY_TYPE_VEHICLE:
-				list = &s->m_lists[ENTITYLIST_VEHICLES];
-				break;
-			case ENTITY_TYPE_PED:
-				list = &s->m_lists[ENTITYLIST_PEDS];
-				break;
-			case ENTITY_TYPE_OBJECT:
-				list = &s->m_lists[ENTITYLIST_OBJECTS];
-				break;
-			case ENTITY_TYPE_DUMMY:
-				list = &s->m_lists[ENTITYLIST_DUMMIES];
-				break;
-			}else switch(entity->GetType()){
-			case ENTITY_TYPE_BUILDING:
-				list = &s->m_lists[ENTITYLIST_BUILDINGS_OVERLAP];
-				break;
-			case ENTITY_TYPE_VEHICLE:
-				list = &s->m_lists[ENTITYLIST_VEHICLES_OVERLAP];
-				break;
-			case ENTITY_TYPE_PED:
-				list = &s->m_lists[ENTITYLIST_PEDS_OVERLAP];
-				break;
-			case ENTITY_TYPE_OBJECT:
-				list = &s->m_lists[ENTITYLIST_OBJECTS_OVERLAP];
-				break;
-			case ENTITY_TYPE_DUMMY:
-				list = &s->m_lists[ENTITYLIST_DUMMIES_OVERLAP];
-				break;
-			}
+			list = CWorld::GetSectorEntityList(s, type, x == xmid && y == ymid);
 			switch(op){
 			case SECTORLIST_INSERT:
 				list->InsertItem(entity);
