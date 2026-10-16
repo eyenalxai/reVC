@@ -520,4 +520,20 @@ index order, because the narrow phase keeps the first of equal distances.
 A per-model binary tree over contiguous, ascending runs of triangles. Each node
 bounds its run; the broad phase descends only into the nodes the query sphere
 can reach. The model builds it lazily, on its first collision.
->>>>>>> origin/refactor/collision-cost
+
+## Closest-node search
+
+`CPathFind::FindNodeClosestToCoors`: the lookup that maps a world position to
+the path node nearest to it. The distance is the sum of the axis gaps with the
+z gap weighted three times, and the search returns the node of the lowest
+distance, the lowest node index on a tie. `DoPathSearch` asks it twice per
+search (the target node and the start node) and the spawn and ped paths call it
+directly, so it is the most-called pathfinding routine. See ADR 0024.
+
+## Path node grid
+
+The uniform grid of path nodes (32 m cells) that the closest-node search walks
+instead of scanning every node of the type: rings of cells around the query
+point, stopped when no farther node can tie or beat the closest one found.
+Built once after `PreparePathData`, 53 KB inside `ThePaths`; the plain scan
+stays as the fallback for a map the grid cannot hold. See ADR 0024.
