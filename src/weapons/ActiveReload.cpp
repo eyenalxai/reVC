@@ -158,12 +158,21 @@ ActiveReload::GetBarState(void)
 	ForgetStaleReload();
 
 	ActiveReloadBar bar;
-	bar.visible = ms_bActive;
+	bar.visible = false;
 	bar.progress = 0.0f;
-	if (ms_bActive)
-		bar.progress = Min((CTimer::GetTimeInMilliseconds() - ms_nStart)/(float)ms_nDuration, 1.0f);
 	bar.windowStart = ACTIVE_RELOAD_WINDOW_START;
 	bar.windowEnd = ACTIVE_RELOAD_WINDOW_END;
+	bar.result = ACTIVE_RELOAD_NONE;
+	bar.resultAge = 0;
+
+	// The toggle is authoritative: with the feature off the HUD must report
+	// nothing, so no stale bar or stale result flash can draw.
+	if (!gActiveReloadEnabled)
+		return bar;
+
+	bar.visible = ms_bActive;
+	if (ms_bActive)
+		bar.progress = Min((CTimer::GetTimeInMilliseconds() - ms_nStart)/(float)ms_nDuration, 1.0f);
 	bar.result = ms_eResult;
 	bar.resultAge = ms_nResultTime != 0 ? CTimer::GetTimeInMilliseconds() - ms_nResultTime : 0;
 
