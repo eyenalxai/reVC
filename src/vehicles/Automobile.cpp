@@ -5755,7 +5755,7 @@ SetVehicleAtomicVisibilityCB(RwObject *object, void *data)
 {
 	uint32 flags = (uint32)(uintptr)data;
 	RpAtomic *atomic = (RpAtomic*)object;
-	if((CVisibilityPlugins::GetAtomicId(atomic) & (ATOMIC_FLAG_OK|ATOMIC_FLAG_DAM)) == flags)
+	if((CVisibilityPlugins::GetAtomicExt(atomic)->flags & (ATOMIC_FLAG_OK|ATOMIC_FLAG_DAM)) == flags)
 		RpAtomicSetFlags(atomic, rpATOMICRENDER);
 	else
 		RpAtomicSetFlags(atomic, 0);

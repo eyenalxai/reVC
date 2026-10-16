@@ -293,16 +293,16 @@ CVehicleModelInfo::HideDamagedAtomicCB(RpAtomic *atomic, void *data)
 {
 	if(strstr(GetFrameNodeName(RpAtomicGetFrame(atomic)), "_dam")){
 		RpAtomicSetFlags(atomic, 0);
-		CVisibilityPlugins::SetAtomicFlag(atomic, ATOMIC_FLAG_DAM);
+		CVisibilityPlugins::GetAtomicExt(atomic)->flags |= ATOMIC_FLAG_DAM;
 	}else if(strstr(GetFrameNodeName(RpAtomicGetFrame(atomic)), "_ok"))
-		CVisibilityPlugins::SetAtomicFlag(atomic, ATOMIC_FLAG_OK);
+		CVisibilityPlugins::GetAtomicExt(atomic)->flags |= ATOMIC_FLAG_OK;
 	return atomic;
 }
 
 RpAtomic*
 CVehicleModelInfo::HideAllComponentsAtomicCB(RpAtomic *atomic, void *data)
 {
-	if(CVisibilityPlugins::GetAtomicId(atomic) & (uintptr)data)
+	if(CVisibilityPlugins::GetAtomicExt(atomic)->flags & (uintptr)data)
 		RpAtomicSetFlags(atomic, 0);
 	else
 		RpAtomicSetFlags(atomic, rpATOMICRENDER);
@@ -503,7 +503,7 @@ CVehicleModelInfo::SetAtomicFlagCB(RwObject *object, void *data)
 {
 	RpAtomic *atomic = (RpAtomic*)object;
 	assert(RwObjectGetType(object) == rpATOMIC);
-	CVisibilityPlugins::SetAtomicFlag(atomic, (uintptr)data);
+	CVisibilityPlugins::GetAtomicExt(atomic)->flags |= (int)(uintptr)data;
 	return object;
 }
 
@@ -512,7 +512,7 @@ CVehicleModelInfo::ClearAtomicFlagCB(RwObject *object, void *data)
 {
 	RpAtomic *atomic = (RpAtomic*)object;
 	assert(RwObjectGetType(object) == rpATOMIC);
-	CVisibilityPlugins::ClearAtomicFlag(atomic, (uintptr)data);
+	CVisibilityPlugins::GetAtomicExt(atomic)->flags &= ~(int)(uintptr)data;
 	return object;
 }
 
@@ -520,9 +520,9 @@ RwObject*
 GetOkAndDamagedAtomicCB(RwObject *object, void *data)
 {
 	RpAtomic *atomic = (RpAtomic*)object;
-	if(CVisibilityPlugins::GetAtomicId(atomic) & ATOMIC_FLAG_OK)
+	if(CVisibilityPlugins::GetAtomicExt(atomic)->flags & ATOMIC_FLAG_OK)
 		((RpAtomic**)data)[0] = atomic;
-	else if(CVisibilityPlugins::GetAtomicId(atomic) & ATOMIC_FLAG_DAM)
+	else if(CVisibilityPlugins::GetAtomicExt(atomic)->flags & ATOMIC_FLAG_DAM)
 		((RpAtomic**)data)[1] = atomic;
 	return object;
 }

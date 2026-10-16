@@ -7,8 +7,6 @@ class CEntity;
 class CSimpleModelInfo;
 class CClumpModelInfo;
 
-typedef bool (*ClumpVisibilityCB)(RpClump*);
-
 class CVisibilityPlugins
 {
 public:
@@ -28,12 +26,12 @@ public:
 #ifdef NEW_RENDERER
 	static CLinkList<AlphaObjectInfo> m_alphaBuildingList;
 #endif
-	static RwCamera *ms_pCamera;
 	static RwV3d *ms_pCameraPosn;
 	static float ms_cullCompsDist;
 	static float ms_vehicleLod0Dist;
 	static float ms_vehicleLod1Dist;
 	static float ms_vehicleFadeDist;
+	static float ms_vehicleWheelLodDistFactor;
 	static float ms_bigVehicleLod0Dist;
 	static float ms_bigVehicleLod1Dist;
 	static float ms_pedLod1Dist;
@@ -51,10 +49,29 @@ public:
 	static void SetupVehicleVariables(RpClump *vehicle);
 
 	static RpAtomic *RenderWheelAtomicCB(RpAtomic *atomic);
-	static RpAtomic *RenderObjNormalAtomic(RpAtomic *atomic);
 	static RpAtomic *RenderAlphaAtomic(RpAtomic *atomic, int alpha);
 	static RpAtomic *RenderWeaponCB(RpAtomic *atomic);
 	static RpAtomic *RenderFadingAtomic(RpAtomic *atm, float dist);
+
+	// The vehicle and train detail atomics are one rule: a LOD distance bounds
+	// the atomic, an optional camera-facing cull hides it, and the alpha
+	// atomics enter a sorted list instead of drawing straight away.
+	enum eVehicleAtomicCull
+	{
+		VEHICLEATOMIC_CULL_NONE,
+		VEHICLEATOMIC_CULL_ANGLE,	// dot > 0 and the angle test
+		VEHICLEATOMIC_CULL_DOT		// dot > 0 only
+	};
+	enum eVehicleAtomicSort
+	{
+		VEHICLEATOMIC_SORT_NONE,
+		VEHICLEATOMIC_SORT_ALPHA,	// DRAWLAST sorts before the clump
+		VEHICLEATOMIC_SORT_ALPHA_BIG,	// no DRAWLAST handling
+		VEHICLEATOMIC_SORT_ALPHA_BOAT,	// the boat alpha list
+		VEHICLEATOMIC_SORT_ALPHA_TRAIN	// DRAWLAST sorts by the distance alone
+	};
+	static RpAtomic *RenderVehicleAtomicCB(RpAtomic *atomic, float maxDist,
+		eVehicleAtomicCull cull, eVehicleAtomicSort sort);
 
 	static RpAtomic *RenderVehicleHiDetailCB(RpAtomic *atomic);
 	static RpAtomic *RenderVehicleHiDetailAlphaCB(RpAtomic *atomic);
@@ -82,13 +99,6 @@ public:
 	static void RenderFadingEntities(void);
 	static void RenderFadingUnderwaterEntities(void);
 
-	// All actually unused
-	static bool DefaultVisibilityCB(RpClump *clump);
-	static bool FrustumSphereCB(RpClump *clump);
-	static bool MloVisibilityCB(RpClump *clump);
-	static bool VehicleVisibilityCB(RpClump *clump);
-	static bool VehicleVisibilityCB_BigVehicle(RpClump *clump);
-
 	static float GetDistanceSquaredFromCamera(RwV3d *pos);
 	static float GetDistanceSquaredFromCamera(RwFrame *frame);
 	static float GetDotProductWithCameraVector(RwMatrix *atomicMat, RwMatrix *clumpMat, uint32 flags);
@@ -97,17 +107,12 @@ public:
 	// RW Plugins
 	//
 
-	union AtomicExt
+	struct AtomicExt
 	{
 		CSimpleModelInfo *modelInfo;	// used by SimpleModelInfo
 		int flags;			// used by ClumpModelInfo
 	};
-	static void SetAtomicModelInfo(RpAtomic*, CSimpleModelInfo*);
-	static CSimpleModelInfo *GetAtomicModelInfo(RpAtomic *atomic);
-	static void SetAtomicFlag(RpAtomic*, int);
-	static void ClearAtomicFlag(RpAtomic*, int);
-	static void SetAtomicId(RpAtomic *atomic, int);
-	static int GetAtomicId(RpAtomic *atomic);
+	static AtomicExt *GetAtomicExt(RpAtomic *atomic);
 	static void SetAtomicRenderCallback(RpAtomic*, RpAtomicCallBackRender);
 
 	static void *AtomicConstructor(void *object, int32 offset, int32 len);
@@ -132,14 +137,11 @@ public:
 
 	struct ClumpExt
 	{
-		ClumpVisibilityCB visibilityCB;
 		int alpha;
 	};
 	static void SetClumpModelInfo(RpClump*, CClumpModelInfo*);
-	static CClumpModelInfo *GetClumpModelInfo(RpClump*);
 	static void SetClumpAlpha(RpClump*, int);
 	static int GetClumpAlpha(RpClump*);
-	static bool IsClumpVisible(RpClump*);
 
 	static void *ClumpConstructor(void *object, int32 offset, int32 len);
 	static void *ClumpDestructor(void *object, int32 offset, int32 len);
