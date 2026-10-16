@@ -503,7 +503,7 @@ CVehicleModelInfo::SetAtomicFlagCB(RwObject *object, void *data)
 {
 	RpAtomic *atomic = (RpAtomic*)object;
 	assert(RwObjectGetType(object) == rpATOMIC);
-	CVisibilityPlugins::GetAtomicExt(atomic)->flags |= (int)(uintptr)data;
+	CVisibilityPlugins::GetAtomicExt(atomic)->flags |= (uintptr)data;
 	return object;
 }
 
@@ -512,7 +512,7 @@ CVehicleModelInfo::ClearAtomicFlagCB(RwObject *object, void *data)
 {
 	RpAtomic *atomic = (RpAtomic*)object;
 	assert(RwObjectGetType(object) == rpATOMIC);
-	CVisibilityPlugins::GetAtomicExt(atomic)->flags &= ~(int)(uintptr)data;
+	CVisibilityPlugins::GetAtomicExt(atomic)->flags &= ~(uintptr)data;
 	return object;
 }
 

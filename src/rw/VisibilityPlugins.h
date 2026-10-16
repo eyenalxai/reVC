@@ -31,7 +31,6 @@ public:
 	static float ms_vehicleLod0Dist;
 	static float ms_vehicleLod1Dist;
 	static float ms_vehicleFadeDist;
-	static float ms_vehicleWheelLodDistFactor;
 	static float ms_bigVehicleLod0Dist;
 	static float ms_bigVehicleLod1Dist;
 	static float ms_pedLod1Dist;
@@ -58,20 +57,20 @@ public:
 	// atomics enter a sorted list instead of drawing straight away.
 	enum eVehicleAtomicCull
 	{
-		VEHICLEATOMIC_CULL_NONE,
-		VEHICLEATOMIC_CULL_ANGLE,	// dot > 0 and the angle test
-		VEHICLEATOMIC_CULL_DOT		// dot > 0 only
+		VEHICLEATOMIC_CULL_NONE,	// no cull test
+		VEHICLEATOMIC_CULL_ANGLE,	// cull on dot > 0 && (ANGLECULL || 0.1*distSq < dot*dot)
+		VEHICLEATOMIC_CULL_DOT		// cull on dot > 0 only
 	};
 	enum eVehicleAtomicSort
 	{
-		VEHICLEATOMIC_SORT_NONE,
-		VEHICLEATOMIC_SORT_ALPHA,	// DRAWLAST sorts before the clump
-		VEHICLEATOMIC_SORT_ALPHA_BIG,	// no DRAWLAST handling
-		VEHICLEATOMIC_SORT_ALPHA_BOAT,	// the boat alpha list
-		VEHICLEATOMIC_SORT_ALPHA_TRAIN	// DRAWLAST sorts by the distance alone
+		VEHICLEATOMIC_SORT_NONE,		// draw now
+		VEHICLEATOMIC_SORT_DRAWLAST_EPS,	// DRAWLAST key distSq - 0.0001f (before the clump); else distSq + dot
+		VEHICLEATOMIC_SORT_DOT,			// key distSq + dot
+		VEHICLEATOMIC_SORT_BOATLIST,		// DRAWLAST key distSq into the boat list; else draw
+		VEHICLEATOMIC_SORT_DRAWLAST		// DRAWLAST key distSq; else distSq + dot
 	};
-	static RpAtomic *RenderVehicleAtomicCB(RpAtomic *atomic, float maxDist,
-		eVehicleAtomicCull cull, eVehicleAtomicSort sort);
+	static RpAtomic *RenderVehicleAtomicCB(RpAtomic *atomic, float maxDistSq,
+		eVehicleAtomicCull cullTest, eVehicleAtomicSort sortRule);
 
 	static RpAtomic *RenderVehicleHiDetailCB(RpAtomic *atomic);
 	static RpAtomic *RenderVehicleHiDetailAlphaCB(RpAtomic *atomic);
@@ -109,8 +108,11 @@ public:
 
 	struct AtomicExt
 	{
-		CSimpleModelInfo *modelInfo;	// used by SimpleModelInfo
-		int flags;			// used by ClumpModelInfo
+		// The simple model the loader split the atomic into; nil for the
+		// atomics that stay in their clump.
+		CSimpleModelInfo *modelInfo;
+		// The ATOMIC_FLAG_* bits of a vehicle part; zero until one is set.
+		uint32 flags;
 	};
 	static AtomicExt *GetAtomicExt(RpAtomic *atomic);
 	static void SetAtomicRenderCallback(RpAtomic*, RpAtomicCallBackRender);
