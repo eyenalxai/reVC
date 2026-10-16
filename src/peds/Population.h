@@ -87,10 +87,10 @@ public:
 	static bool CanSolicitPlayerInCar(int32);
 	static bool CanSolicitPlayerOnFoot(int32);
 	static bool IsSecurityGuard(ePedType);
-	static void PlaceGangMembers(ePedType, int32, CVector const&);
-	static void PlaceGangMembersInFormation(ePedType, int32, CVector const&);
-	static void PlaceGangMembersInCircle(ePedType, int32, CVector const&);
-	static void PlaceCouple(ePedType, int32, ePedType, int32, CVector);
+	static void PlaceGangMembers(ePedType, int32, CVector const&, bool offNetwork);
+	static void PlaceGangMembersInFormation(ePedType, int32, CVector const&, bool offNetwork);
+	static void PlaceGangMembersInCircle(ePedType, int32, CVector const&, bool offNetwork);
+	static void PlaceCouple(ePedType, int32, ePedType, int32, CVector, bool offNetwork);
 	static void PlaceMallPedsAsStationaryGroup(CVector const&, int32);
 	static CPed* AddDeadPedInFrontOfCar(const CVector& pos, CVehicle* pCulprit);
 };

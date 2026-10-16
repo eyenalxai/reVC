@@ -296,21 +296,26 @@ an area without nodes stays empty: nothing spawns there before VICE-122.
 
 A pedestrian created off the pedestrian node network. The population picks a
 random point in the creation ring and takes it only if it is free: ground at
-the level of the ring, no roof over it, no water under it, clear of other
-pedestrians, and a ped node inside the walk bound and on the same level. The
-wander state walks the pedestrian to the closest node from there. A bounded
-fraction of the spawns takes this path (`PED_OFF_NETWORK_FRACTION`); the rest
-keeps the node path (VICE-122).
+the level of the ring, no surface more than a step above it (no roof or
+canopy), ground above the water line, a clearance sphere clear of the static
+world, clear of other pedestrians, and a ped node inside the walk bound and on
+the same level. The wander state walks the pedestrian to the closest node from
+there. A bounded fraction of the spawns takes this path
+(`PED_OFF_NETWORK_FRACTION`, a fraction of zero draws no random number); the
+rest keeps the node path (VICE-122).
 
 ## Stray (off-network pedestrian)
 
 An off-network pedestrian that has not reached the network yet. The population
-watches the strays in a bounded table and culls a stray that walks for the
-stall budget without coming closer to its node, and a stray that reaches the
-water; a cull only removes a pedestrian the camera does not see. The debug
-counters carry the off-network spawns, the stuck culls and the drowned culls
+watches the strays in a bounded table until each reaches a node. The cull
+removes a stray that walks for the stall budget without coming closer to its
+node, or one whose feet are under the water line; it only removes a pedestrian
+the camera does not see, and each counter carries one removal
 (`CPopulation::ms_nOffNetworkSpawns`, `ms_nOffNetworkStuck`,
-`ms_nOffNetworkDrowned`, VICE-122).
+`ms_nOffNetworkDrowned`). A stray with no node to head for keeps its watch for
+the no-target time and is then left alone, uncounted. The members of a gang or
+couple group are validated at their own spots and watched like any other stray;
+a pedestrian that follows another leaves the watch (VICE-122).
 
 ## Dummy object
 
