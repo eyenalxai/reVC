@@ -37,7 +37,9 @@ also spreads the tier 1 bonus over 1.25 s.
    along it. The headroom is measured on the total speed,
    `push = Min(fMaxVelocity*(1 + level) - speed, DRIFT_BOOST_PUSH*
    fMaxVelocity*dt)`, so the level still means a fraction of the top speed.
-   `DRIFT_BOOST_PUSH` is 0.35, about 1.8 g against about 4 g.
+   `DRIFT_BOOST_PUSH` is 0.35, about 1.8 g against about 4 g. (ADR 0006
+   reverts this push: it runs along the nose again at 0.5, and the headroom
+   is measured on the forward speed.)
 4. `DRIFT_BOOST_DRAIN` is 0.08: the tier 1 bonus is spent in 0.5 s and the
    tier 2 bonus in 0.875 s, against 1.25 s and 2.25 s.
 

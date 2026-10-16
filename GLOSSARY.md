@@ -65,8 +65,8 @@ light: a wild player can still spin the car.
 
 ## Drift boost
 
-The push along the direction of travel that the car gets when the player ends a
-long drift. A boost that is still running takes a new one on top, up to a cap
+The push along the nose that the car gets when the player ends a long
+drift. A boost that is still running takes a new one on top, up to a cap
 (a boost chain).
 
 ## Drift layer
