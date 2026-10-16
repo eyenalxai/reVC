@@ -205,6 +205,10 @@
  *					stay 0
  *	ms_nFarTrafficShortCurves	the pick's clamped curves (the engine's
  *					"fout" case, counted instead of printed)
+ *	ms_nFarTrafficCatchUps		the applicator's catch-ups (a pending cycle
+ *					run inline because the window between two
+ *					cycles grew the command ring; 0 in normal
+ *					play)
  *
  * The first four are the ticket's counters (the cap holds, the layer's churn);
  * the refusals split by cause so a live reading says why a road stays bare: an
@@ -216,7 +220,7 @@
  * Since VICE-133 the simulation of the stagger runs on a worker thread
  * (FarTrafficWorker.h): the frame's own work is the applicator - the gate pass,
  * the creations, the removals and the writing of the poses the worker
- * published - and the worker's rows are the three above. The layer's rules are
+ * published - and the worker's rows are the four above. The layer's rules are
  * the same on both sides of the boundary: the worker only computes.
  *
  * No engine header is included here. The evidence program in utils/far-traffic
@@ -283,13 +287,13 @@ class CVector;
  * the worker thread (FarTrafficWorker.h), 0 runs the same cycle inline on the
  * main thread - the two paths are one implementation, so this constant only
  * decides where it runs, and the evidence program measures both. The default is
- * the measurement's: the worker's handshake costs about a microsecond of the
- * main thread a frame while the simulation it takes off the frame is
- * proportional to the cap (0.4-0.6 us at the current 64, several times that at
- * the margins VICE-132 asks about), so the boundary pays for itself at the
- * bigger layers and breaks even at this one - the same outcome the ticket's
- * escape hatch describes. The switch exists so the owner can put the layer back
- * on the frame thread with one edit if a future measurement says so. */
+ * the measurement's (utils/far-traffic-worker): at the current cap the cycle
+ * costs the frame thread about 1.0 us inline and the handshake costs it about
+ * 0.8-1.0 us (the hand-over's futex wake and the join), a wash; the simulation's
+ * cost grows with the cap and the handshake's does not, so the boundary wins
+ * from about 55-64 cars up, which is where VICE-132's raised maxima would live.
+ * The switch exists so the owner can put the layer back on the frame thread
+ * with one edit if their own capture says so (the ticket's escape hatch). */
 #define FAR_TRAFFIC_WORKER		1
 
 /* The band of one frame. `known` is set once the time cycle has a far clip (a
@@ -505,12 +509,15 @@ public:
 
 	/* The worker's own rows (VICE-133): the cycles it ran (the rate is this
 	 * over the elapsed time), the boundary faults (a command or a pose the
-	 * cycle and the layer's list disagreed about: must stay 0), and the pick's
+	 * cycle and the layer's list disagreed about: must stay 0), the pick's
 	 * clamped curves (the engine's own "fout" diagnostic, counted instead of
-	 * printed on the worker thread). */
+	 * printed on the worker thread), and the applicator's catch-ups (the
+	 * window between two cycles that grew the command ring towards its water
+	 * mark: 0 in normal play). */
 	static unsigned int ms_nFarTrafficWorkerCycles;
 	static unsigned int ms_nFarTrafficWorkerLost;
 	static unsigned int ms_nFarTrafficShortCurves;
+	static unsigned int ms_nFarTrafficCatchUps;
 };
 
 #endif // __GTA_FARTRAFFIC_H__

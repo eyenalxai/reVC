@@ -269,6 +269,7 @@ static bool g_bWake;
 static bool g_bInFlight;
 static bool g_bStop;
 static bool g_bReady;		/* EndCycle ran: the input may be handed over */
+static bool g_bQueueFull;	/* a command did not fit the ring (reported) */
 static std::atomic<bool> g_bInFlightAtomic;	/* the debug audit's view */
 static std::atomic<int> g_active;	/* the published output block */
 static SFarTrafficOutput g_aOutput[2];
@@ -357,13 +358,22 @@ CFarTrafficWorker::SetWorld(const SFarTrafficWorld *pWorld)
 void
 CFarTrafficWorker::ResetCars(void)
 {
+	/* A fresh layer: no cars, no commands, no published cycle. The whole of
+	 * both output blocks goes (a block's cycle number, its poses, its short
+	 * curves and its lost count), so nothing of the world the last load
+	 * simulated can be read out of them again. The applicator's marker is
+	 * zero with them (CFarTraffic::BuildWorldSnapshot), so the zeroed block is
+	 * not applied either. */
 	g_numCars = 0;
+	g_input.cycle = 0;
+	g_input.now = 0;
+	g_input.frameCounter = 0;
 	g_input.numCommands = 0;
 	g_bReady = false;
-	g_aOutput[0].numCars = 0;
-	g_aOutput[0].numPoses = 0;
-	g_aOutput[1].numCars = 0;
-	g_aOutput[1].numPoses = 0;
+	g_bQueueFull = false;
+	memset(&g_aOutput[0], 0, sizeof(g_aOutput[0]));
+	memset(&g_aOutput[1], 0, sizeof(g_aOutput[1]));
+	g_active.store(0);
 }
 
 void
@@ -381,8 +391,15 @@ CFarTrafficWorker::BeginCycle(uint32_t now, uint32_t frameCounter)
 void
 CFarTrafficWorker::AddCar(const SFarSimCar &car)
 {
-	if (g_input.numCommands >= FAR_TRAFFIC_SIM_COMMANDS)
+	if (g_input.numCommands >= FAR_TRAFFIC_SIM_COMMANDS) {
+		/* The ring is full (the applicator's catch-up did not run, or ran too
+		 * late): the command cannot be applied, so the worker's list and the
+		 * layer's diverge here. It is reported, never silent
+		 * (CFarTrafficWorker::TakeOverflow), and the layer's lost row paints
+		 * it. */
+		g_bQueueFull = true;
 		return;
+	}
 	SFarTrafficCommand *pCommand = &g_input.commands[g_input.numCommands++];
 	memset(pCommand, 0, sizeof(*pCommand));
 	pCommand->op = FAR_SIM_OP_ADD;
@@ -392,8 +409,10 @@ CFarTrafficWorker::AddCar(const SFarSimCar &car)
 void
 CFarTrafficWorker::DropCar(uint16_t slot)
 {
-	if (g_input.numCommands >= FAR_TRAFFIC_SIM_COMMANDS)
+	if (g_input.numCommands >= FAR_TRAFFIC_SIM_COMMANDS) {
+		g_bQueueFull = true;
 		return;
+	}
 	SFarTrafficCommand *pCommand = &g_input.commands[g_input.numCommands++];
 	memset(pCommand, 0, sizeof(*pCommand));
 	pCommand->op = FAR_SIM_OP_DROP;
@@ -404,6 +423,23 @@ void
 CFarTrafficWorker::EndCycle(void)
 {
 	g_bReady = true;
+}
+
+int32_t
+CFarTrafficWorker::CommandsPending(void)
+{
+	/* The worker is idle whenever the applicator asks (it queues between the
+	 * join and the next signal), so the count is a plain read. */
+	return g_input.numCommands;
+}
+
+bool
+CFarTrafficWorker::TakeOverflow(void)
+{
+	if (!g_bQueueFull)
+		return false;
+	g_bQueueFull = false;
+	return true;
 }
 
 bool
@@ -430,8 +466,15 @@ CFarTrafficWorker::Run(void)
 		AssertIdle();
 		if (g_bInFlight)
 			return false;
-		if (gp_thread == 0)
-			gp_thread = new std::thread(FarTrafficWorkerLoop);
+		if (gp_thread == 0) {
+			/* No worker thread (a caller that never Start()ed; the game
+			 * starts it at load, CGame::Initialise). The cycle is not run and
+			 * nothing is set in flight - the commands stay queued, the
+			 * applicator's catch-up keeps asking, and its water mark reports
+			 * the state rather than hanging the next join. */
+			AssertIdle();
+			return false;
+		}
 		g_bWake = true;
 		g_bInFlight = true;
 	}
@@ -466,12 +509,6 @@ CFarTrafficWorker::SetThreaded(bool bThreaded)
 	if (!bThreaded)
 		Stop();			/* the idle thread is joined away */
 	g_bThreaded = bThreaded;
-}
-
-bool
-CFarTrafficWorker::IsThreaded(void)
-{
-	return g_bThreaded;
 }
 
 void

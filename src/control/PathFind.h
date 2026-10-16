@@ -2,7 +2,7 @@
 #define __GTA_PATHFIND_H__
 
 #include "Treadable.h"
-#include "CarOnRails.h"	/* LANE_WIDTH: the lane spacing the rails measure with */
+#include "PathLanes.h"	/* LANE_WIDTH: the lane spacing of the links below */
 
 class CVehicle;
 class CPtrList;

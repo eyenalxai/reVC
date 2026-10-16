@@ -223,8 +223,11 @@ NEAR_BUBBLE = [
 # is its cycles (the rate is the row over the elapsed wall time), the worker lost
 # row counts every time the worker's list and the layer's disagreed about a car
 # (a command it could not apply, or a pose whose slot did not match) and must
-# stay 0, and the short curves row counts the pick's clamped curves (the
-# engine's old "fout" case, which the worker counts instead of printing).
+# stay 0, the short curves row counts the pick's clamped curves (the engine's
+# old "fout" case, which the worker counts instead of printing), and the
+# catch-ups row counts the pending cycles the applicator had to run inline
+# because many frames in a row never handed their cycle over (the command ring's
+# water mark): 0 in normal play.
 FAR_TRAFFIC = [
     ("far: cars",                    "_ZN11CFarTraffic18ms_nFarTrafficCarsE",           "I"),
     ("far: cap",                     "_ZN11CFarTraffic17ms_nFarTrafficCapE",            "I"),
@@ -242,6 +245,7 @@ FAR_TRAFFIC = [
     ("far: worker cycles",           "_ZN11CFarTraffic26ms_nFarTrafficWorkerCyclesE",   "I"),
     ("far: worker lost (must be 0)", "_ZN11CFarTraffic24ms_nFarTrafficWorkerLostE",     "I"),
     ("far: short curves",            "_ZN11CFarTraffic25ms_nFarTrafficShortCurvesE",    "I"),
+    ("far: worker catch-ups",        "_ZN11CFarTraffic22ms_nFarTrafficCatchUpsE",       "I"),
 ]
 
 CONFIG = "src/core/config.h"
@@ -464,6 +468,7 @@ def main():
         print(f"  the far layer: the stagger moved {far_updates} cars so far "
               f"(about a third of the layer a frame)")
     far_cycles = values.get("far worker cycles")
+    far_catchups = values.get("far worker catch-ups")
     far_lost = values.get("far worker lost (must be 0)")
     if far_cycles is not None:
         print(f"  the far layer: the worker ran {far_cycles} cycles "
@@ -472,6 +477,9 @@ def main():
         verdict = "PASS" if far_lost == 0 else "FAIL"
         print(f"  the far layer: the worker and the layer disagreed about {far_lost} "
               f"cars -> {verdict}")
+    if far_catchups is not None:
+        print(f"  the far layer: the applicator ran {far_catchups} catch-up cycles "
+              f"(0 in normal play)")
 
 
 if __name__ == "__main__":

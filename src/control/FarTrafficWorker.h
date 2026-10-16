@@ -22,12 +22,12 @@
  *	   CarOnRails.h.
  *	2. "It must not call CGeneral/myrand, CWorld, CStreaming,
  *	   CColModel/CCollision, CPathFind, the pools, librw or GL."  The module
- *	   includes no engine header at all (this file compiles on its own, and
- *	   utils/far-traffic-worker compiles it without the game). There is
- *	   therefore no call to make: the names are not even declared. The
- *	   random draws are the car's own stream (FarTrafficSimRngNext, a
- *	   private 32 bit LCG), the path graph is the snapshot, the world is the
- *	   applicator's.
+ *	   includes no engine header beyond config.h (macros and the pool-size
+ *	   enum: no type that owns state, no function), and it declares none of
+ *	   those names, so there is no call to make. The random draws are the
+ *	   car's own stream (FarTrafficSimRngNext, a private 32 bit LCG), the
+ *	   path graph is the snapshot, the world is the applicator's.
+ *	   utils/far-traffic-worker compiles this file without the game.
  *	3. "No allocation after init."  The module's storage is static (the sim
  *	   cars, the input, the two output blocks); a cycle walks arrays and
  *	   multiplies. The thread itself and its two condition variables are
@@ -168,7 +168,6 @@ struct SFarSimCar
 {
 	uint16_t slot;		/* the vehicle pool slot: the car's identity */
 	uint8_t bUTurn;		/* the pick gave up: the applicator turns it around */
-	uint8_t pad;
 	int32_t currentRouteNode, nextRouteNode, prevRouteNode;
 	int32_t timeEnteredCurve, timeToSpendOnCurrentCurve;
 	int32_t currentPathNodeInfo, nextPathNodeInfo, previousPathNodeInfo;
@@ -177,7 +176,6 @@ struct SFarSimCar
 	int16_t routeSeed;	/* CVehicle::m_nRouteSeed (the stream's seed) */
 	uint16_t randomSeed;	/* CEntity::m_randomSeed (the pose's own offset) */
 	uint8_t bStayInCurrentLevel, bStayInFastLane;	/* AutoPilot's two flags */
-	uint8_t pad2, pad3;
 	uint32_t rng;		/* set by the cycle: the car's own stream */
 	float maxTrafficSpeed;	/* AutoPilot::m_fMaxTrafficSpeed */
 	float heightAboveRoad;	/* CVehicle::GetHeightAboveRoad */
@@ -218,16 +216,17 @@ enum {
 struct SFarTrafficCommand
 {
 	uint8_t op;
-	uint8_t pad;
-	int16_t pad2;
 	SFarSimCar car;
 };
 
-/* The command bound: every command is an add of a car the count had room for or
- * a drop of a car that was in the list, so a run of frames between two cycles
- * cannot produce more than an add and a drop per slot, and the creations of one
- * frame are FAR_TRAFFIC_CREATE_ATTEMPTS on top. */
-#define FAR_TRAFFIC_SIM_COMMANDS (2 * FAR_TRAFFIC_MAX + FAR_TRAFFIC_CREATE_ATTEMPTS)
+/* The command ring. One frame's worst case is a drop of every entry the layer
+ * holds (a cutscene's cleanup, a band that closed, a mass promotion) plus
+ * FAR_TRAFFIC_CREATE_ATTEMPTS creations; the ring is four times that, and the
+ * applicator's catch-up (CFarTraffic::Process) runs a pending cycle inline as
+ * soon as the ring is half full, so the window between two cycles cannot grow
+ * the queue past it. A mutation that still cannot fit is counted, never
+ * silently dropped (CFarTrafficWorker::TakeOverflow). */
+#define FAR_TRAFFIC_SIM_COMMANDS (4 * FAR_TRAFFIC_MAX)
 
 struct SFarTrafficInput
 {
@@ -279,7 +278,10 @@ bool FarTrafficFrameHasShare(uint32_t frameCounter, int32_t numCars);
  * frame's and the applicator's barrier; Published is read after Join.
  *
  *	Start/Stop		the thread's life (once, at load and shutdown)
- *	SetWorld/ResetCars	the snapshot and an empty layer (a load)
+ *	SetWorld/ResetCars	the snapshot, and an empty layer with an
+ *				empty command queue and both output blocks zeroed
+ *				(a load; the applicator's applied-cycle marker is
+ *				zero too, so nothing stale is ever read)
  *	BeginCycle(now, frame)	stamp this frame's cycle (the pending commands
  *				of an unhanded-over frame are kept)
  *	AddCar/DropCar		queue one command
@@ -300,6 +302,13 @@ public:
 	static void AddCar(const SFarSimCar &car);
 	static void DropCar(uint16_t slot);
 	static void EndCycle(void);
+
+	/* The applicator's catch-up water mark (VICE-133's review): how many
+	 * commands wait for the next cycle, and whether a mutation could not fit
+	 * the ring (it is then reported, and the applicator's counter must stay
+	 * 0). TakeOverflow clears the flag. */
+	static int32_t CommandsPending(void);
+	static bool TakeOverflow(void);
 	/* Returns true when the cycle ran (or was handed over), false when it
 	 * would have done nothing and was dropped. */
 	static bool Run(void);
@@ -315,11 +324,12 @@ public:
 	 * compiles the calls away. */
 	static void AssertIdle(void);
 
-	/* The mode, for the measurement (and the escape hatch of the ticket): a
-	 * threaded worker, or the same cycle run inline on the main thread. The
-	 * two paths run the same simulation; only the thread differs. */
+	/* The test seam of the measurement (and the escape hatch of the ticket):
+	 * a threaded worker, or the same cycle run inline on the main thread. The
+	 * two paths run the same simulation; only the thread differs. The game
+	 * never calls this (FAR_TRAFFIC_WORKER is its default), the evidence
+	 * program drives both modes with it. */
 	static void SetThreaded(bool bThreaded);
-	static bool IsThreaded(void);
 };
 
 #endif // __GTA_FARTRAFFICWORKER_H__

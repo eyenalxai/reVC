@@ -22,12 +22,18 @@
  *	   the height and the heading must agree bit for bit over a randomized
  *	   sweep (including the u-turn and the clamped-curve cases).
  *
- *	C. The boundary. The worker's own list is kept beside a mirror of the
- *	   applicator's list, fed the same ADD/DROP commands; every published pose
- *	   must name the car the applicator's list has at that index (the lockstep
- *	   the poses' indices rest on), the cycle's "lost" count must stay 0, the
- *	   frame's share of the stagger must be exact, and a cycle must allocate
- *	   nothing (a global operator new that counts while a cycle runs).
+ *	C. The boundary. The worker's own list is kept beside a model of the
+ *	   applicator's list (the engine's own swap-drop and its append), fed the
+ *	   same ADD/DROP commands; every published pose must name the car that
+ *	   list has at its index (the lockstep the poses' indices rest on), the
+ *	   cycle's "lost" count must stay 0, the frame's share of the stagger must
+ *	   be exact, and a cycle must allocate nothing (a global operator new that
+ *	   counts while a cycle runs). The *order* of a frame is modelled too - a
+ *	   cull hand-over's append, the apply, the prune's drop - and the model is
+ *	   run twice: once in the order the applicator keeps (the VICE-133 review
+ *	   fix) and once in the order the review found the bug in (the prune
+ *	   before the apply), which the same checks must then fail on. The command
+ *	   ring's bound and its report are exercised as well.
  *
  *	D. The measurement. The ticket asks for the split of the layer's cost: the
  *	   simulation the worker takes and the main thread's applicator plus
@@ -35,10 +41,25 @@
  *	   range of caps, in both modes (the worker thread, and the same cycle run
  *	   inline), and the crossover cap - where the simulation's saving passes
  *	   the handshake's cost - is the number the ticket's escape hatch turns on.
- *	   What this program cannot measure: the engine calls of the applicator
- *	   (the sector re-insert, the RW-frame write, the alpha ramp), because they
- *	   are the engine's and are not linked here. Those are the live rig's
- *	   business; the VICE-128 harness's mirror bounds their arithmetic.
+ *	   What this program cannot reach, stated plainly:
+ *	   - the applicator itself (FarTraffic.cpp) includes the engine and is not
+ *	     linked here, so its list and its frame order are a *model* of it, not
+ *	     the code (the model is what the review's fix is tested against; the
+ *	     applicator's own ordering is the fix's, by inspection);
+ *	   - the applicator's catch-up (the command ring's water mark) is engine
+ *	     code: the ring's bound and its report are exercised, the catch-up
+ *	     itself is not;
+ *	   - the engine calls of the applicator (the pose writes, the sector
+ *	     re-insert, the RW-frame write, the alpha ramp) are the engine's; the
+ *	     live rig and the owner's capture are their measurement, and the
+ *	     VICE-128 harness's mirror bounds their arithmetic;
+ *	   - the equivalence sweep below drives the real step and the reference
+ *	     from the same car state *and the same draws* (the worker's own LCG):
+ *	     it proves the branches and the arithmetic of the moved rules, not a
+ *	     draw sequence. The far cars' stream is per car on purpose (VICE-133);
+ *	     the near traffic's stream is untouched by inspection - the delegate
+ *	     CCarCtrl::PickNextNodeRandomly is the route-seed reseed and one call
+ *	     to the shared core.
  *
  * Build and run (from the repository root):
  *
@@ -551,6 +572,15 @@ NowUs(void)
 /* The process's own CPU time, every thread of it included: the check that the
  * simulation the worker takes off the frame thread is run somewhere, not that
  * it disappears. (The worker is a thread of the same process.) */
+/* A derived number that cannot be negative (the differences below are smaller
+ * than the baseline's own run-to-run noise when the machine is busy): reported
+ * as zero, and said so. */
+static double
+NonNeg(double x)
+{
+	return x > 0.0 ? x : 0.0;
+}
+
 static uint64
 ProcessCpuUs(void)
 {
@@ -694,41 +724,182 @@ operator delete[](void *p, size_t) noexcept
 	free(p);
 }
 
-struct SFarSimMirrorList
+static void CheckQueueBound(void);
+
+/*
+ * The applicator's list, as FarTraffic.cpp keeps it: an index-based array whose
+ * drop puts the last entry in the dropped one's place, with a "dead" mark for a
+ * car the world took (a cutscene's cleanup, the pool's valve, a delete). This is
+ * a model of the applicator, not the applicator itself (FarTraffic.cpp includes
+ * the engine and is not linked here); what it carries is the *order* of a frame,
+ * which is what the worker's published poses rest on:
+ *
+ *	the cull		a hand-over appends one entry (moves no index)
+ *	the far hook		the apply (the poses name an entry index and a slot)
+ *				then the prune (the stale entries drop, swapping)
+ *				then the gate pass and the creations
+ *	the end of the frame	the cycle is handed over
+ */
+struct SFarSimAppList
 {
 	uint16 slots[FAR_TRAFFIC_MAX];
+	bool dead[FAR_TRAFFIC_MAX];
 	int32 num;
 };
 
 static void
-MirrorAdd(SFarSimMirrorList *pList, uint16 slot)
+AppAdd(SFarSimAppList *pList, uint16 slot)
 {
-	if (pList->num < FAR_TRAFFIC_MAX)
-		pList->slots[pList->num++] = slot;
+	if (pList->num >= FAR_TRAFFIC_MAX)
+		return;
+	pList->slots[pList->num] = slot;
+	pList->dead[pList->num] = false;
+	pList->num++;
 }
 
+/* The engine's own drop (FarTrafficDropEntry): the last entry takes the place. */
 static void
-MirrorDrop(SFarSimMirrorList *pList, uint16 slot)
+AppDropAt(SFarSimAppList *pList, int32 index)
 {
-	for (int32 i = 0; i < pList->num; i++) {
-		if (pList->slots[i] == slot) {
-			pList->slots[i] = pList->slots[pList->num - 1];
-			pList->num--;
-			return;
+	pList->slots[index] = pList->slots[pList->num - 1];
+	pList->dead[index] = pList->dead[pList->num - 1];
+	pList->num--;
+}
+
+/*
+ * One run of the applicator's frame order, over real cycles of the module. The
+ * poses of the previous cycle are checked the way FarTrafficApplyPose checks
+ * them (the entry index must hold the pose's slot). `bPreFixOrder` replays the
+ * order VICE-133's review found the bug in - the stale entries dropped *before*
+ * the apply, so the drop's swap moves an entry under the poses - which the
+ * checks below must then see as mismatches: that is what makes them a test of
+ * the fix and not of the model.
+ */
+static int
+RunApplicatorOrder(bool bPreFixOrder, int frames, int *pPosesChecked)
+{
+	static SFarSimAppList app;
+	static uint32 nextSlot = 0;
+	int mismatches = 0, posesChecked = 0, lost = 0, cycles = 0;
+	uint32 now = 40000;
+	uint32 appliedCycle = 0;	/* the applicator's own marker: a block is
+					 * applied once (CFarTraffic::Process) */
+
+	app.num = 0;
+	CFarTrafficWorker::SetThreaded(false);
+	CFarTrafficWorker::SetWorld(&g_world);
+	CFarTrafficWorker::ResetCars();
+
+	/* the previous cycle's output is published before the first apply */
+	CFarTrafficWorker::BeginCycle(now, 0);
+	CFarTrafficWorker::EndCycle();
+	CFarTrafficWorker::Run();
+	CFarTrafficWorker::Join();
+	const SFarTrafficOutput *pOutput = CFarTrafficWorker::Published();
+
+	for (int frame = 0; frame < frames; frame++) {
+		uint32 r = frame * 2654435761u + 7;
+		now += 33;
+		bool preOrder = bPreFixOrder && (frame % 2 == 0);
+
+		/* the cull, before the far hook: a hand-over appends one entry (an
+		 * append moves no index, in either order) */
+		if (frame % 9 == 0 && app.num < FAR_TRAFFIC_MAX) {
+			SFarSimCar car;
+			MakeCar(&car, (uint16)nextSlot++, r, frame);
+			CFarTrafficWorker::AddCar(car);
+			AppAdd(&app, car.slot);
+		}
+
+		/* the far hook: the frame's cycle is stamped and the events queue */
+		CFarTrafficWorker::BeginCycle(now, (uint32)(frame + 1));
+
+		/* The prune and the gate pass: two entries go, the engine's own
+		 * swap-drop, one command each. The pre-fix order ran this part inside
+		 * the cull, i.e. before the apply below; the fix runs it after. */
+		if (bPreFixOrder && preOrder) {
+			if (frame % 11 == 3 && app.num > 1) {
+				int32 at = (r >> 8) % app.num;		/* the world took this car */
+				CFarTrafficWorker::DropCar(app.slots[at]);
+				AppDropAt(&app, at);
+			}
+			if (frame % 7 == 1 && app.num > 1) {
+				int32 at = (r >> 16) % app.num;		/* the gate pass, a switch or a removal */
+				CFarTrafficWorker::DropCar(app.slots[at]);
+				AppDropAt(&app, at);
+			}
+		}
+
+		/* the apply: the previous cycle's poses, against the list as it is
+		 * exactly now (the order the fix keeps has nothing moved since the
+		 * cycle). A block is applied once, by its cycle number, exactly as
+		 * FarTrafficApplyOutput does: a frame whose cycle did nothing leaves
+		 * the block in place and it is not read again. */
+		if (pOutput->cycle != appliedCycle) {
+			appliedCycle = pOutput->cycle;
+			for (int32 i = 0; i < pOutput->numPoses; i++) {
+				const SFarSimPose *pPose = &pOutput->poses[i];
+				if (pPose->index >= (uint16)app.num || app.slots[pPose->index] != pPose->slot)
+					mismatches++;
+				posesChecked++;
+			}
+		}
+		lost += pOutput->numLost;
+
+		/* the same prune and gate pass, in the fix's place (and in the
+		 * pre-fix run's odd frames, which is the half of a frame the bug hid
+		 * in) */
+		if (!bPreFixOrder || !preOrder) {
+			if (frame % 11 == 3 && app.num > 1) {
+				int32 at = (r >> 8) % app.num;
+				CFarTrafficWorker::DropCar(app.slots[at]);
+				AppDropAt(&app, at);
+			}
+			if (frame % 7 == 1 && app.num > 1) {
+				int32 at = (r >> 16) % app.num;
+				CFarTrafficWorker::DropCar(app.slots[at]);
+				AppDropAt(&app, at);
+			}
+		}
+
+		/* the creations queue their appends too */
+		if (frame % 2 == 1 && app.num < FAR_TRAFFIC_MAX) {
+			SFarSimCar car;
+			MakeCar(&car, (uint16)nextSlot++, r, frame);
+			CFarTrafficWorker::AddCar(car);
+			AppAdd(&app, car.slot);
+		}
+		CFarTrafficWorker::EndCycle();
+
+		/* the end of the frame: the cycle runs */
+		if (CFarTrafficWorker::Run())
+			cycles++;
+		CFarTrafficWorker::Join();
+		pOutput = CFarTrafficWorker::Published();
+		if (pOutput->numCars != app.num) {
+			/* the two lists disagree: that is the failure the checks below
+			 * count, and the run stops here */
+			mismatches += 1000;
+			break;
 		}
 	}
+
+	*pPosesChecked = posesChecked;
+	Check(lost == 0, "no cycle in the order test lost a command");
+	Check(cycles > 0, "the order test ran cycles");
+	return mismatches;
 }
 
 static void
 CheckCycleAndLockstep(void)
 {
-	static SFarSimMirrorList list;
 	uint32 hashBefore = HashWorld(&g_world);
 	int frames = 600;
 	int adds = 0, drops = 0, poseCount = 0, lost = 0, badShare = 0, badIndex = 0;
 	uint32 now = 10000;
+	static SFarSimAppList app;	/* the applicator's own list, in its order */
 
-	list.num = 0;
+	app.num = 0;
 	CFarTrafficWorker::SetThreaded(false);	/* the lockstep is the cycle's, not the thread's */
 	CFarTrafficWorker::SetWorld(&g_world);
 	CFarTrafficWorker::ResetCars();
@@ -743,18 +914,20 @@ CheckCycleAndLockstep(void)
 		now += 33;
 
 		CFarTrafficWorker::BeginCycle(now, (uint32)frame);
-		/* a fifth of the frames adds a car, a seventh drops one */
-		if (frame % 5 == 0 && list.num < FAR_TRAFFIC_MAX) {
+		/* a fifth of the frames adds a car (the engine's append), a seventh
+		 * drops one (the engine's swap-drop by index) */
+		if (frame % 5 == 0 && app.num < FAR_TRAFFIC_MAX) {
 			SFarSimCar car;
-			MakeCar(&car, (uint16)frame, r, frame);
+			MakeCar(&car, (uint16)(1000 + frame), r, frame);
 			CFarTrafficWorker::AddCar(car);
-			MirrorAdd(&list, car.slot);
+			AppAdd(&app, car.slot);
 			adds++;
 		}
-		if (frame % 7 == 3 && list.num > 0) {
-			uint16 slot = list.slots[(r >> 8) % list.num];
+		if (frame % 7 == 3 && app.num > 0) {
+			int32 at = (r >> 8) % app.num;
+			uint16 slot = app.slots[at];
 			CFarTrafficWorker::DropCar(slot);
-			MirrorDrop(&list, slot);
+			AppDropAt(&app, at);
 			drops++;
 		}
 		CFarTrafficWorker::EndCycle();
@@ -763,12 +936,12 @@ CheckCycleAndLockstep(void)
 		const SFarTrafficOutput *pOutput = CFarTrafficWorker::Published();
 
 		if (ran) {
-			Check(pOutput->numCars == list.num, "the cycle's count matches the applicator's");
-			if (pOutput->numCars != list.num)
+			Check(pOutput->numCars == app.num, "the cycle's count matches the applicator's");
+			if (pOutput->numCars != app.num)
 				break;
 			for (int32 i = 0; i < pOutput->numPoses; i++) {
 				const SFarSimPose *pPose = &pOutput->poses[i];
-				if (pPose->index >= (uint16)list.num || list.slots[pPose->index] != pPose->slot)
+				if (pPose->index >= (uint16)app.num || app.slots[pPose->index] != pPose->slot)
 					badIndex++;
 				if (FarTrafficUpdatesThisFrame((uint32)frame, pPose->index) == false)
 					badShare++;
@@ -790,10 +963,66 @@ CheckCycleAndLockstep(void)
 	CFarTrafficWorker::EndCycle();
 	CFarTrafficWorker::Run();
 	CFarTrafficWorker::Join();
-	Check(CFarTrafficWorker::Published()->numCars == list.num,
+	Check(CFarTrafficWorker::Published()->numCars == app.num,
 		"the worker's list still matches the applicator's at the end");
+	Check(!CFarTrafficWorker::TakeOverflow(), "the ring never overflowed in the lockstep run");
 	printf("  %d frames, %d adds, %d drops, %d poses applied in lockstep, "
 		"%d allocations in the cycles\n", frames, adds, drops, poseCount, (int)g_allocCount);
+
+	/* The frame's own order, with a cull hand-over and a dead car: the poses
+	 * must stay on their cars, and the harness must be able to see the order
+	 * the fix removes (otherwise it proves nothing). */
+	int posesChecked = 0, bugPosesChecked = 0;
+	int mismatches = RunApplicatorOrder(false, 400, &posesChecked);
+	Check(mismatches == 0, "the applicator's frame order (hand-over append, apply, prune) keeps every pose on its car");
+	int bugMismatches = RunApplicatorOrder(true, 400, &bugPosesChecked);
+	Check(bugMismatches > 0, "the harness sees the pre-fix order's mismatches (the order test can fail)");
+	printf("  the order test (a cull hand-over and a dead car every frame): %d poses checked\n",
+		posesChecked);
+	printf("  with the fix, %d of them off their car; with the pre-fix order (the prune before\n",
+		mismatches);
+	printf("  the apply), %d of them off their car: the test sees the bug it guards\n",
+		bugMismatches);
+
+	/* The ring's bound: a mutation past it is reported, never silent. */
+	CheckQueueBound();
+}
+
+/* The command ring at its bound: the module never says "dropped" by silence. */
+static void
+CheckQueueBound(void)
+{
+	int32 added = 0;
+
+	CFarTrafficWorker::SetThreaded(false);
+	CFarTrafficWorker::SetWorld(&g_world);
+	CFarTrafficWorker::ResetCars();
+	Check(CFarTrafficWorker::CommandsPending() == 0, "a reset layer holds no commands");
+	Check(!CFarTrafficWorker::TakeOverflow(), "a reset layer reports no overflow");
+
+	CFarTrafficWorker::BeginCycle(1000, 0);
+	/* fill the layer: the ring is far wider than the cars the cycle holds */
+	for (int i = 0; i < FAR_TRAFFIC_SIM_COMMANDS + 8; i++) {
+		SFarSimCar car;
+		MakeCar(&car, (uint16)i, (uint32)i, i);
+		CFarTrafficWorker::AddCar(car);
+		added++;
+	}
+	Check(CFarTrafficWorker::CommandsPending() == FAR_TRAFFIC_SIM_COMMANDS,
+		"the ring holds exactly FAR_TRAFFIC_SIM_COMMANDS commands");
+	Check(added == FAR_TRAFFIC_SIM_COMMANDS + 8, "the extra commands were offered");
+	Check(CFarTrafficWorker::TakeOverflow(),
+		"a command past the ring is reported, never silently dropped");
+	Check(!CFarTrafficWorker::TakeOverflow(), "the report is taken once");
+	/* the commands that fit are applied: the layer is its own cap, the refused
+	 * cars are the ones past it (the cycle counts them) */
+	CFarTrafficWorker::EndCycle();
+	CFarTrafficWorker::Run();
+	CFarTrafficWorker::Join();
+	Check(CFarTrafficWorker::Published()->numCars == FAR_TRAFFIC_MAX,
+		"the cars past the layer's own cap are the cycle's own refusal");
+	printf("  the ring: %d commands held, %d offered, the overflow reported once\n",
+		FAR_TRAFFIC_SIM_COMMANDS, added);
 }
 
 /* D. the measurement. */
@@ -1113,7 +1342,7 @@ Measure(void)
 		printf("           | of the worker's number: the hand-over %.2f us, the join %.2f us; the\n",
 			runUs, joinUs);
 		printf("           | process's own CPU %.2f us a frame, %.2f of it outside the frame's\n",
-			cpuUs, cpuUs - busyPerFrame);
+			cpuUs, NonNeg(cpuUs - busyPerFrame));
 		printf("           | other work: the layer's own work, on the worker thread or inline (the\n");
 		printf("           | simulation moved threads, it did not disappear)\n");
 	}
@@ -1151,8 +1380,8 @@ Measure(void)
 		printf("    the boundary does not win at the cap (%.2f us more a frame): the ticket's\n"
 			"    escape hatch applies, and the boundary is the deliverable either way; the\n"
 			"    crossover cap is about %.0f cars\n", handshake - inlineCap, crossover);
-	printf("  a frame with no layer work: the schedule's own noise floor (%.2f / %.2f us, the\n",
-		idleThreaded, idleInline);
+	printf("  a frame with no layer work: the schedule's own noise floor (within %.2f / %.2f us,\n",
+		fabs(idleThreaded), fabs(idleInline));
 	printf("  subtraction's noise): the worker is not woken when the layer would do nothing\n");
 	printf("  (the stock draw distance's case), and the cycle is not even offered to it\n");
 

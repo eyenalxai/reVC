@@ -75,14 +75,12 @@
 #include <math.h>
 #include <stdint.h>
 
-/* FIX_BUGS (the shipped arithmetic of the two conditional branches below) and
- * the pool sizes come from the game's configuration; the header is otherwise
- * engine-free. */
+/* FIX_BUGS (the shipped arithmetic of the two conditional branches below) comes
+ * from the game's configuration; the header is otherwise engine-free. */
 #include "config.h"
-
-/* The lane spacing of the path links (was PathFind.h's; the pick and the pose
- * of both the near rails and the far layer measure the lanes with it). */
-#define LANE_WIDTH 5.0f
+/* The lane spacing, shared with the path geometry without either header
+ * pulling the other (PathLanes.h). */
+#include "PathLanes.h"
 
 /* The numbers of the path pick (were CCarCtrl.cpp's file-locals, moved with
  * the pick). */

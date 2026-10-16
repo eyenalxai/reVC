@@ -443,9 +443,13 @@ bool CGame::Initialise(const char* datFile)
 	ThePaths.PreparePathData();
 	/* The far traffic layer's path snapshot (VICE-133): the worker's copy of
 	 * the graph, taken here on the main thread, right after the graph is
-	 * prepared and before the grid's first lookup (BuildNodeGrid is forced so
-	 * the placements that follow never build it inside a frame). The worker
-	 * thread itself is created here, once. */
+	 * prepared. The grid is built here too, deliberately: it used to be built
+	 * lazily by the first FindNodeClosestToCoors, i.e. by the first spawn of
+	 * the first played frame (one array allocation and the node walk), and the
+	 * ticket's contract puts the snapshot after PreparePathData and
+	 * BuildNodeGrid. Forcing it keeps the first frame free of it, under the
+	 * loading screen, and the placements read a grid that was already there.
+	 * The worker thread itself is created here, once. */
 	ThePaths.BuildNodeGrid();
 	CFarTraffic::BuildWorldSnapshot();
 	for (int i = 0; i < NUMPLAYERS; i++)

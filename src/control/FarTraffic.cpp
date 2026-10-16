@@ -107,6 +107,10 @@
  *					pose whose slot did not match): must stay 0
  *	ms_nFarTrafficShortCurves	the pick's clamped curves (the engine's own
  *					"fout" diagnostic, counted instead of printed)
+ *	ms_nFarTrafficCatchUps		the pending cycle the applicator ran inline
+ *					because the window between two cycles grew
+ *					the command ring towards its water mark (0 in
+ *					normal play)
  *
  * The frame's work, exactly:
  *
@@ -145,6 +149,7 @@ unsigned int CFarTraffic::ms_nFarTrafficUpdates;
 unsigned int CFarTraffic::ms_nFarTrafficWorkerCycles;
 unsigned int CFarTraffic::ms_nFarTrafficWorkerLost;
 unsigned int CFarTraffic::ms_nFarTrafficShortCurves;
+unsigned int CFarTraffic::ms_nFarTrafficCatchUps;
 
 /*
  * The layer. A compact list of the cars it holds, with the pool slot each one
@@ -183,8 +188,10 @@ static uint32 ms_nFarWorldFlagsVersion;
  * whose cycle did nothing (no commands, no car of the stagger's share) is
  * skipped by CFarTrafficWorker::Run and leaves the published block in place, so
  * the block is read out exactly once, by its own cycle number. (The same guard
- * makes a re-entrant Process - a resize callback's extra Idle - harmless.) */
-static uint32 ms_nLastAppliedCycle = ~0u;
+ * makes a re-entrant Process - a resize callback's extra Idle - harmless.)
+ * CFarTrafficWorker::ResetCars zeroes the blocks and this marker together, so a
+ * load never reads a stale cycle. */
+static uint32 ms_nLastAppliedCycle;
 
 static void FarTrafficRefreshWorldFlags(void);
 
@@ -207,13 +214,58 @@ FarTrafficEntryIsLive(const SFarTrafficEntry &entry)
 		pAtSlot->VehicleCreatedBy == FAR_TRAFFIC_VEHICLE;
 }
 
+/* The live count (the entries whose cars are still there): what the cap reads,
+ * without moving the list. A stale entry (a cutscene, the valve, a delete) is
+ * dropped at the applicator, where the drop's swap cannot move an entry under
+ * the poses the worker published. */
+static int32
+FarTrafficCountLive(void)
+{
+	int32 live = 0;
+	for (int32 i = 0; i < ms_nFarCars; i++)
+		if (FarTrafficEntryIsLive(ms_aFarCars[i]))
+			live++;
+	return live;
+}
+
+/* The ring's water mark: before the layer queues past this, the pending cycle
+ * runs inline here and its output is applied, so the window between two cycles
+ * (the frames whose cycle the main loop never handed over - an early return
+ * from Idle) cannot grow the command queue past the ring. Half the ring is far
+ * beyond a real frame: one frame's worst case is a drop of every entry the
+ * layer holds plus the create attempts. */
+#define FAR_TRAFFIC_QUEUE_WATER (FAR_TRAFFIC_SIM_COMMANDS / 2)
+
+static void FarTrafficApplyOutput(void);
+
+static void
+FarTrafficCatchUpIfNeeded(void)
+{
+	if (CFarTrafficWorker::CommandsPending() < FAR_TRAFFIC_QUEUE_WATER)
+		return;
+	/* The pending cycle runs now, on the main thread (or on the worker, with
+	 * this thread waiting: the catch-up is the same cycle either way), and its
+	 * output is applied here. The worker's list and the layer's stay in
+	 * lockstep and no command is ever dropped. The one price: the frame's own
+	 * cycle runs again at the end of the frame, so the stagger's share of this
+	 * one frame moves twice. */
+	CFarTraffic::ms_nFarTrafficCatchUps++;
+	CFarTrafficWorker::EndCycle();
+	if (CFarTrafficWorker::Run()) {
+		CFarTrafficWorker::Join();
+		FarTrafficApplyOutput();
+	}
+	CFarTrafficWorker::BeginCycle(CTimer::GetTimeInMilliseconds(), CTimer::GetFrameCounter());
+}
+
 /* Drop one entry: the last one takes its place, which keeps the list compact
  * and makes the stagger share a real share of the layer. The worker's own array
  * drops by the same rule (FarTrafficSimRunCycle), so its entry indices stay the
- * layer's. */
+ * layer's. The catch-up first, so the command queue cannot grow past the ring. */
 static void
 FarTrafficDropEntry(int32 index)
 {
+	FarTrafficCatchUpIfNeeded();
 	CFarTrafficWorker::DropCar(ms_aFarCars[index].slot);
 	ms_aFarCars[index] = ms_aFarCars[ms_nFarCars - 1];
 	ms_nFarCars--;
@@ -256,6 +308,7 @@ FarTrafficAddEntry(CVehicle *pVehicle)
 {
 	if (ms_nFarCars >= FAR_TRAFFIC_MAX)
 		return;
+	FarTrafficCatchUpIfNeeded();
 	SFarSimCar sim;
 
 	ms_aFarCars[ms_nFarCars].pVehicle = pVehicle;
@@ -470,7 +523,9 @@ CFarTraffic::BuildWorldSnapshot(void)
 {
 	CFarTrafficWorker::Stop();
 	ms_nFarCars = 0;
-	ms_nLastAppliedCycle = ~0u;
+	/* The blocks are zeroed by ResetCars, cycle number included: the marker
+	 * goes with them, so the fresh (empty) block is not even read out. */
+	ms_nLastAppliedCycle = 0;
 	CFarTrafficWorker::ResetCars();
 
 	ms_farWorld.numNodes = ThePaths.m_numPathNodes;
@@ -627,10 +682,12 @@ CFarTraffic::AdoptOnCull(CVehicle *pVehicle, const CVector &playerPos)
 	const SFarTrafficBand band = ComputeFarTrafficBand(rings);
 	if (!FarTrafficAdoptSiteIsInBand(band, (pVehicle->GetPosition() - playerPos).Magnitude2D()))
 		return false;
-	/* The list is pruned first: a car the layer lost (a cutscene, the valve)
-	 * leaves a stale entry, and the cap is the live count. */
-	FarTrafficPruneEntries();
-	if (ms_nFarCars >= FarTrafficCap(band))
+	/* The cap reads the live count, without pruning: a stale entry (a car the
+	 * layer lost to a cutscene or the valve) is dropped at the applicator,
+	 * where the drop cannot reorder the list under the worker's published
+	 * poses. A stale entry therefore reserves a place for at most the rest of
+	 * this frame. */
+	if (FarTrafficCountLive() >= FarTrafficCap(band))
 		return false;
 
 	/* The occupants go: the car is a viewed shell from here, and the driver
@@ -701,6 +758,30 @@ CFarTraffic::RunWorker(void)
 }
 
 /*
+ * The published cycle of the worker, applied to the cars: the stagger's share,
+ * every pose checked against its car first (the index, the slot and the live
+ * test), so a stale output can never touch a car that is not the one it
+ * describes. The block is read out once, by its cycle number. A command the
+ * cycle could not apply (the ring's bound) is reported into the lost row here
+ * too, so a divergence is never silent.
+ */
+static void
+FarTrafficApplyOutput(void)
+{
+	const SFarTrafficOutput *pOutput = CFarTrafficWorker::Published();
+
+	if (CFarTrafficWorker::TakeOverflow())
+		CFarTraffic::ms_nFarTrafficWorkerLost++;
+	if (pOutput->cycle == ms_nLastAppliedCycle)
+		return;
+	ms_nLastAppliedCycle = pOutput->cycle;
+	for (int32 i = 0; i < pOutput->numPoses; i++)
+		FarTrafficApplyPose(pOutput->poses[i]);
+	CFarTraffic::ms_nFarTrafficShortCurves += pOutput->numShortCurves;
+	CFarTraffic::ms_nFarTrafficWorkerLost += pOutput->numLost;
+}
+
+/*
  * One frame of the layer. The car block of CGame::Process calls it after the
  * near cull, so the frame's pool, bubble budget and fill are already decided.
  */
@@ -708,27 +789,25 @@ void
 CFarTraffic::Process(void)
 {
 	/* The contract's barrier: the worker is idle here (JoinWorker ran before
-	 * CWorld::Process) and stays idle until RunWorker. The read below is
-	 * therefore a plain read of a published block. */
+	 * CWorld::Process) and stays idle until RunWorker. The reads below are
+	 * therefore plain reads of a published block. */
 	CFarTrafficWorker::Join();
-	const SFarTrafficOutput *pOutput = CFarTrafficWorker::Published();
+
+	/* The previous cycle's poses, first, while the layer's list is exactly
+	 * what the worker's simulation left it as: only an append may have
+	 * happened since (a cull hand-over, which moves no entry), because the
+	 * stale entries below are pruned after this and every other drop of the
+	 * frame is later still. */
+	FarTrafficApplyOutput();
 
 	/* The graph's flags moved (a script's road toggle, a save load): copy them
 	 * into the snapshot before this frame's cycle, with the worker idle. */
 	FarTrafficRefreshWorldFlags();
 
-	/* The previous cycle's poses: the stagger's share of the layer, written
-	 * into the cars. Every pose is checked against its car first (the index,
-	 * the slot and the live test), so a stale output can never touch a car
-	 * that is not the one it describes, and the block is read out once (the
-	 * cycle number below). */
-	if (pOutput->cycle != ms_nLastAppliedCycle) {
-		ms_nLastAppliedCycle = pOutput->cycle;
-		for (int32 i = 0; i < pOutput->numPoses; i++)
-			FarTrafficApplyPose(pOutput->poses[i]);
-		ms_nFarTrafficShortCurves += pOutput->numShortCurves;
-		ms_nFarTrafficWorkerLost += pOutput->numLost;
-	}
+	/* The stale entries (a cutscene's cleanup, the valve, a delete) go now,
+	 * with the apply already behind them: the drop's swap reorders the list,
+	 * and the worker's poses are read against the order its own list has. */
+	FarTrafficPruneEntries();
 
 	/* The frame's cycle is stamped; the events below queue their commands into
 	 * it. The stamp is the game time of this frame, so the poses the worker
@@ -738,9 +817,9 @@ CFarTraffic::Process(void)
 	if (!FarTrafficIsActive()) {
 		/* Paused: a cutscene or an interior owns the world, and a cutscene's
 		 * own cleanup deletes the cars (CanBeDeleted is true for a far car).
-		 * The list is pruned so the counters stay live (the drops queue for
-		 * the worker's own list); nothing is created, moved or removed. */
-		FarTrafficPruneEntries();
+		 * The list was pruned above so the counters stay live (the drops
+		 * queued for the worker's own list); nothing is created, moved or
+		 * removed here. */
 		ms_nFarTrafficCars = ms_nFarCars;
 		ms_nFarTrafficCap = 0;
 		CFarTrafficWorker::EndCycle();
