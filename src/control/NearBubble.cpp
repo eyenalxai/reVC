@@ -74,6 +74,7 @@ NearBubbleCandidateAt(const CVector &pos, const CVector &playerCentre, float rad
 	c.inFrustum = TheCamera.IsSphereVisible(pos, radius);
 	c.occluded = COcclusion::IsPositionOccluded(pos, radius);
 	c.fadeHides = FillBurstIsHidden();
+	c.bypassView = NearBubbleViewIsBypassed();
 	return c;
 }
 
@@ -106,11 +107,6 @@ CCarCtrl::NearBubbleBeginFrame(void)
 bool
 CCarCtrl::NearBubbleAllowsCreation(const CVector &pos, const CVector &playerCentre, float radius, bool rayAllowed)
 {
-	if (NearBubbleViewIsBypassed()) {
-		ms_nNearBubbleBypassed++;
-		return true;
-	}
-
 	SNearBubbleCandidate c = NearBubbleCandidateAt(pos, playerCentre, radius);
 	ENearBubbleAnswer answer = NearBubbleAnswerFor(c);
 
@@ -143,26 +139,23 @@ CCarCtrl::NearBubbleAllowsCreation(const CVector &pos, const CVector &playerCent
 bool
 CCarCtrl::NearBubbleAllowsRemoval(CVehicle *pVehicle, const CVector &playerCentre, float ringThreshold)
 {
-	if (NearBubbleViewIsBypassed()) {
-		ms_nNearBubbleBypassed++;
-		return true;
-	}
-
-	if (CTimer::GetTimeInMilliseconds() < pVehicle->m_nRemovalProtectedUntil) {
-		ms_nNearBubbleRefused++;
-		return false;
-	}
-
-	float threshold = Max(ringThreshold, NEAR_BUBBLE_REMOVE_DISTANCE);
-	if ((pVehicle->GetPosition() - playerCentre).Magnitude2D() <= threshold) {
-		ms_nNearBubbleRefused++;
-		return false;
-	}
-
 	/* The visibility of the car itself: its bounding sphere, or the named
 	 * radius of the bubble where the car is smaller. */
 	float radius = Max(NEAR_BUBBLE_ENTITY_RADIUS, pVehicle->GetBoundRadius());
 	SNearBubbleCandidate c = NearBubbleCandidateAt(pVehicle->GetBoundCentre(), playerCentre, radius);
+
+	if (!c.bypassView) {
+		if (CTimer::GetTimeInMilliseconds() < pVehicle->m_nRemovalProtectedUntil) {
+			ms_nNearBubbleRefused++;
+			return false;
+		}
+		float threshold = Max(ringThreshold, NEAR_BUBBLE_REMOVE_DISTANCE);
+		if ((pVehicle->GetPosition() - playerCentre).Magnitude2D() <= threshold) {
+			ms_nNearBubbleRefused++;
+			return false;
+		}
+	}
+
 	ENearBubbleAnswer answer = NearBubbleAnswerFor(c);
 	/* The close blind spot is an allow for a removal: the ray is the creation
 	 * rule's budget, and a car behind the camera may leave (the game fades a
@@ -183,12 +176,10 @@ CCarCtrl::NearBubbleAllowsRemoval(CVehicle *pVehicle, const CVector &playerCentr
 void
 CCarCtrl::NearBubbleCountCreation(const CVector &pos, float radius)
 {
-	if (NearBubbleViewIsBypassed()) {
-		ms_nNearBubbleBypassed++;
-		return;
-	}
 	SNearBubbleCandidate c = NearBubbleCandidateAt(pos, FindPlayerCentreOfWorld(CWorld::PlayerInFocus), radius);
-	if (c.fadeHides)
+	if (c.bypassView)
+		ms_nNearBubbleBypassed++;
+	else if (c.fadeHides)
 		ms_nNearBubbleFadeCreations++;
 	else if (NearBubblePositionIsCatchable(c))
 		ms_nNearBubbleCreationsInFrustum++;
@@ -202,12 +193,10 @@ CCarCtrl::NearBubbleCountCreation(const CVector &pos, float radius)
 void
 CCarCtrl::NearBubbleCountRemoval(const CVector &pos, float radius, bool wasInvisible)
 {
-	if (NearBubbleViewIsBypassed()) {
-		ms_nNearBubbleBypassed++;
-		return;
-	}
 	SNearBubbleCandidate c = NearBubbleCandidateAt(pos, FindPlayerCentreOfWorld(CWorld::PlayerInFocus), radius);
-	if (c.fadeHides)
+	if (c.bypassView)
+		ms_nNearBubbleBypassed++;
+	else if (c.fadeHides)
 		ms_nNearBubbleFadeRemovals++;
 	else if (!wasInvisible && NearBubblePositionIsCatchable(c))
 		ms_nNearBubbleRemovalsInFrustum++;

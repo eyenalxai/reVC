@@ -143,9 +143,10 @@ them.
   in view, or a road block that appears ahead of the player, is a scripted or
   gameplay event, not the spawner's. The parked cars and the emergency cars are
   counted: they go through the same gate.
-- **The top-down camera** (and only it) bypasses the rule: the street level is
-  not the subject of that view and the traffic must keep flowing. The bypassed
-  events are counted as such.
+- **The top-down camera** (and only it) bypasses the visibility arms of the
+  rule: the street level is not the subject of that view and the traffic must
+  keep flowing. The bubble still holds - a car at the player's elbow is there
+  when the camera returns - and the bypassed events are counted as such.
 - **A cutscene** needs no bypass: the traffic spawns are gated during one and
   the culls read the cutscene camera (the counter reads what the player sees,
   which is the cutscene).

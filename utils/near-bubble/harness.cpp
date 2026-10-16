@@ -69,6 +69,7 @@ struct SCase
 	bool inFrustum;
 	bool occluded;
 	bool fadeHides;
+	bool bypassView;
 };
 
 static SNearBubbleCandidate
@@ -81,6 +82,7 @@ CandidateOf(const SCase &s)
 	c.inFrustum = s.inFrustum;
 	c.occluded = s.occluded;
 	c.fadeHides = s.fadeHides;
+	c.bypassView = s.bypassView;
 	return c;
 }
 
@@ -187,18 +189,20 @@ Section3Ladder(void)
 	const float outRange = 400.0f;		/* beyond the fade (the visible range is 360 at stock) */
 	const float visRange = 360.0f;
 	const SCase cases[] = {
-		/* name					player	camera	range	frustum	occl	fade	*/
-		{ "in the bubble",			 60.0f,	 60.0f,	visRange, true,		false,	false	},
-		{ "in the bubble, a fade",		 60.0f,	 60.0f,	visRange, true,		false,	true	},
-		{ "in the bubble, occluded",		 60.0f,	 60.0f,	visRange, false,	true,	false	},
-		{ "in view, close, clear",		150.0f,	150.0f,	visRange, true,		false,	false	},
-		{ "in view, close, a fade",		150.0f,	150.0f,	visRange, true,		false,	true	},
-		{ "in view, close, occluded",		150.0f,	150.0f,	visRange, true,		true,	false	},
-		{ "off the frustum, close",		150.0f,	150.0f,	visRange, false,	false,	false	},
-		{ "off the frustum, beyond the fade",	150.0f,	400.0f,	visRange, false,	false,	false	},
-		{ "in view, beyond the fade",		150.0f,	400.0f,	visRange, true,		false,	false	},
-		{ "off the frustum, beyond the ray",	150.0f,	350.0f,	1000.0f, false,	false,	false	},
-		{ "a visible range of zero (boot)",	150.0f,	150.0f,	0.0f,	false,		false,	false	},
+		/* name					player	camera	range	frustum	occl	fade	bypass	*/
+		{ "in the bubble",			 60.0f,	 60.0f,	visRange, true,		false,	false,	false	},
+		{ "in the bubble, a fade",		 60.0f,	 60.0f,	visRange, true,		false,	true,	false	},
+		{ "in the bubble, occluded",		 60.0f,	 60.0f,	visRange, false,	true,	false,	false	},
+		{ "in the bubble, top-down view",	 60.0f,	 60.0f,	visRange, true,		false,	false,	true	},
+		{ "in view, close, clear",		150.0f,	150.0f,	visRange, true,		false,	false,	false	},
+		{ "in view, close, a fade",		150.0f,	150.0f,	visRange, true,		false,	true,	false	},
+		{ "in view, close, occluded",		150.0f,	150.0f,	visRange, true,		true,	false,	false	},
+		{ "off the frustum, close",		150.0f,	150.0f,	visRange, false,	false,	false,	false	},
+		{ "off the frustum, the top-down view",	150.0f,	150.0f,	visRange, true,		false,	false,	true	},
+		{ "off the frustum, beyond the fade",	150.0f,	400.0f,	visRange, false,	false,	false,	false	},
+		{ "in view, beyond the fade",		150.0f,	400.0f,	visRange, true,		false,	false,	false	},
+		{ "off the frustum, beyond the ray",	150.0f,	350.0f,	1000.0f, false,	false,	false,	false	},
+		{ "a visible range of zero (boot)",	150.0f,	150.0f,	0.0f,	false,		false,	false,	false	},
 	};
 	const int nCases = sizeof(cases) / sizeof(cases[0]);
 	const ENearBubbleAnswer expected[] = {
@@ -206,9 +210,11 @@ Section3Ladder(void)
 		NEAR_BUBBLE_REFUSED,
 		NEAR_BUBBLE_REFUSED,
 		NEAR_BUBBLE_REFUSED,
+		NEAR_BUBBLE_REFUSED,
 		NEAR_BUBBLE_ALLOWED,
 		NEAR_BUBBLE_ALLOWED,
 		NEAR_BUBBLE_SEEK_LOS,
+		NEAR_BUBBLE_ALLOWED,
 		NEAR_BUBBLE_ALLOWED,
 		NEAR_BUBBLE_ALLOWED,
 		NEAR_BUBBLE_REFUSED,
@@ -216,36 +222,39 @@ Section3Ladder(void)
 	};
 
 	printf("== 3. the ladder, case by case\n\n");
-	printf("  %-34s %-12s %-12s %s\n", "case", "answer", "allowed?", "catchable?");
+	printf("  %-38s %-12s %-12s %s\n", "case", "answer", "allowed?", "catchable?");
 	for (int i = 0; i < nCases; i++) {
 		SNearBubbleCandidate c = CandidateOf(cases[i]);
 		ENearBubbleAnswer a = NearBubbleAnswerFor(c);
 		bool allowed = a != NEAR_BUBBLE_REFUSED;
 		bool catchable = NearBubblePositionIsCatchable(c);
-		printf("  %-34s %-12s %-12s %s\n", cases[i].name,
+		/* The two exempt arms: the fade of a transition and the top-down
+		 * camera (which the counters read apart). */
+		bool exempt = cases[i].fadeHides || cases[i].bypassView;
+		printf("  %-38s %-12s %-12s %s\n", cases[i].name,
 			a == NEAR_BUBBLE_REFUSED ? "refused" : a == NEAR_BUBBLE_ALLOWED ? "allowed" : "seek the ray",
 			allowed ? "yes" : "no", catchable ? "yes" : "no");
 		Check(a == expected[i], "the ladder answered against the case list");
 		/* The acceptance: an event the ladder allows (past the ray's own
 		 * blocked check) is never one the player could catch. */
-		if (allowed && !cases[i].fadeHides)
+		if (allowed && !exempt)
 			Check(!catchable, "the ladder allowed a catchable event");
 		/* The completeness: a catchable event is refused. */
-		if (catchable && !cases[i].fadeHides)
+		if (catchable && !exempt)
 			Check(!allowed, "the ladder did not refuse a catchable event");
 	}
 	/* The two arms of the blind spot behind the ray. */
-	SNearBubbleCandidate blocked = CandidateOf(cases[6]);
+	SNearBubbleCandidate blocked = CandidateOf(cases[7]);
 	printf("\n  the blind-spot arm after the ray:\n");
 	printf("  %-34s %-12s %-12s %s\n", "blocked ray (a building between)",
 		"allowed", "yes", NearBubblePositionIsCatchable(blocked) ? "yes" : "no");
 	Check(!NearBubblePositionIsCatchable(blocked),
 		"a blocked ray must be about a position the frustum does not hold");
 
-	printf("\n  The fade is the one exempt case: an event it covers may be catchable and is\n");
-	printf("  counted as a fade event, not as a frustum event (NearBubble.cpp counts the\n");
-	printf("  fade first). The bubble is refused even under a fade: a car placed at the\n");
-	printf("  player's elbow is there when the fade lifts.\n\n");
+	printf("\n  Two arms are exempt and counted apart: the fade of a transition (the fill\n");
+	printf("  burst) and the top-down camera, whose view is not the player's. The bubble\n");
+	printf("  is refused under both: a car placed at the player's elbow is there when the\n");
+	printf("  fade lifts or the camera returns.\n\n");
 }
 
 /* The per-frame bound of the ray work: a frame spends at most the budget, and

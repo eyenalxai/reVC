@@ -162,16 +162,22 @@ struct SNearBubbleCandidate
 	bool inFrustum;		/* TheCamera.IsSphereVisible(pos, radius) */
 	bool occluded;		/* COcclusion::IsPositionOccluded(pos, radius) */
 	bool fadeHides;		/* FillBurstIsHidden(): the fade covers the screen */
+	bool bypassView;	/* the top-down camera: the view is not the player's */
 };
 
 static inline ENearBubbleAnswer
 NearBubbleAnswerFor(const SNearBubbleCandidate &c)
 {
 	/* The bubble. Nothing appears or disappears in it, whatever the view,
-	 * the fade included: a car placed at the player's elbow is there when
-	 * the fade lifts. */
+	 * the fade or the camera mode: a car placed at the player's elbow is
+	 * there when the view that covered it is gone. */
 	if (c.distToPlayer <= NEAR_BUBBLE_RADIUS)
 		return NEAR_BUBBLE_REFUSED;
+	/* The top-down camera looks at the map from above, where the street level
+	 * is not the subject and the traffic must keep flowing: the visibility
+	 * arms below step aside, the bubble above does not. */
+	if (c.bypassView)
+		return NEAR_BUBBLE_ALLOWED;
 	/* The fade of a transition covers the world: the fill burst fills
 	 * behind it (VICE-126) and the counters mark the events exempt. */
 	if (c.fadeHides)
