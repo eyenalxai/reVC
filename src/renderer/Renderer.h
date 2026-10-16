@@ -1,12 +1,20 @@
 #ifndef __GTA_RENDERER_H__
 #define __GTA_RENDERER_H__
 
+#include "DrawDistance.h"
+
 class CEntity;
 
 #ifdef FIX_BUGS
-#define LOD_DISTANCE (300.0f*TheCamera.LODDistMultiplier)
+/* The LOD distance the renderer draws with (the LOD multiplier of the frame,
+ * Camera.cpp). The live spelling composes the same product from its parts, so a
+ * reader that runs before the camera step of the frame (the menu, the population
+ * caps) sees the draw distance the frame will use instead of the last one. */
+#define LOD_DISTANCE (LOD_DISTANCE_BASE*TheCamera.LODDistMultiplier)
+#define LOD_DISTANCE_LIVE (LOD_DISTANCE_BASE*TheCamera.GenerationDistMultiplier*CRenderer::ms_lodDistScale)
 #else
-#define LOD_DISTANCE 300.0f
+#define LOD_DISTANCE LOD_DISTANCE_BASE
+#define LOD_DISTANCE_LIVE LOD_DISTANCE_BASE
 #endif
 #define FADE_DISTANCE 20.0f
 #define STREAM_DISTANCE 30.0f

@@ -17,7 +17,6 @@ public:
 
 	static float PedNumberMultiplier;
 	static float CarNumberMultiplier;
-	static float SpawnDistanceMultiplier;
 };
 
 #endif // __GTA_INIFILE_H__

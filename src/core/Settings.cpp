@@ -4,6 +4,7 @@
 #include "common.h"
 #include "Settings.h"
 
+#include "DrawDistance.h"
 #include "Frontend.h"
 #include "Camera.h"
 #include "Pad.h"
@@ -55,7 +56,10 @@ static const tSettingsEntry aSettings[] = {
 #endif
 	{ "Audio", "DynamicAcoustics", SETTINGS_INT8, SETTINGS_NO_BOUND, sizeof(int8), &FrontEndMenuManager.m_PrefsDMA },
 	{ "Display", "Brightness", SETTINGS_INT32, SETTINGS_NO_BOUND, sizeof(int32), &FrontEndMenuManager.m_PrefsBrightness },
-	{ "Display", "DrawDistance", SETTINGS_FLOAT, SETTINGS_NO_BOUND, sizeof(float), &FrontEndMenuManager.m_PrefsLOD },
+	// The draw distance is the one range control (TrafficRings.h), so a stale
+	// file cannot put it outside the slider: the bounds are the slider's own
+	// (DrawDistance.h), and the old spawn distance key maps inside them too.
+	{ "Display", "DrawDistance", SETTINGS_FLOAT, DRAWDIST_MIN, DRAWDIST_MAX, sizeof(float), &FrontEndMenuManager.m_PrefsLOD },
 	{ "Display", "Subtitles", SETTINGS_INT8, SETTINGS_NO_BOUND, sizeof(int8), &FrontEndMenuManager.m_PrefsShowSubtitles },
 	{ "Graphics", "AspectRatio", SETTINGS_INT8, SETTINGS_NO_BOUND, sizeof(int8), &FrontEndMenuManager.m_PrefsUseWideScreen },
 #ifdef LEGACY_MENU_OPTIONS
