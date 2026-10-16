@@ -1046,15 +1046,103 @@ CPlayerPed::ProcessAirborneWeapon(CPad *padUsed)
 		return;
 
 #ifdef FIRST_PERSON
-	// The aim keeps the weapon pose at the view in the air too: the airborne
-	// player does not run the weapon control, so nothing else updates it, and
-	// the pose then stays where it was when the jump started.
+	// The aim starts in the air too: the first person view serves the weapon's
+	// sight with the player camera, so the sight needs no ground (VICE-137).
+	// The airborne player does not run the weapon control, so the start, the
+	// pose and the release of the aim all happen here.
+	if (!m_pFire)
+		StartWeaponSight(padUsed, true);
+	if (TheCamera.PlayerWeaponMode.Mode != CCam::MODE_NONE && !padUsed->GetTarget() && !m_attachedTo)
+		TheCamera.ClearPlayerWeaponMode();
+
+	// The aim keeps the weapon pose at the view: nothing else updates it in the
+	// air, so the pose would stay where it was when the jump started.
 	if (TheCamera.Using1stPersonView())
 		UpdateFirstPersonAim(padUsed);
 #endif
 
 	FireWeaponWhenHeld(padUsed);
 	weapon->Update(m_audioEntityId, this);
+}
+
+// The weapons that can aim down a sight: the stock set, and in the first person
+// view every weapon that can aim (the flamethrower aims too, although the
+// weapon data does not give it the CANAIM flag).
+static bool
+CanAimWeapon(eWeaponType weapon, CWeaponInfo *info)
+{
+	switch (weapon) {
+	case WEAPONTYPE_ROCKETLAUNCHER:
+	case WEAPONTYPE_SNIPERRIFLE:
+	case WEAPONTYPE_LASERSCOPE:
+	case WEAPONTYPE_M4:
+	case WEAPONTYPE_RUGER:
+	case WEAPONTYPE_M60:
+	case WEAPONTYPE_CAMERA:
+		return true;
+	default:
+		break;
+	}
+#ifdef FIRST_PERSON
+	if (TheCamera.FirstPersonViewEnabled() &&
+	   (info->IsFlagSet(WEAPONFLAG_CANAIM) || weapon == WEAPONTYPE_FLAMETHROWER))
+		return true;
+#endif
+	return false;
+}
+
+// The weapons that only fire from their sight: no sight, no shot
+static bool
+SightOnlyWeapon(eWeaponType weapon)
+{
+	return weapon == WEAPONTYPE_ROCKETLAUNCHER || weapon == WEAPONTYPE_SNIPERRIFLE ||
+	       weapon == WEAPONTYPE_LASERSCOPE || weapon == WEAPONTYPE_CAMERA;
+}
+
+// The start of the weapon sight: the aim button turns the weapon mode of the
+// sight on. The plain sights use the M16 camera mode (the first person view
+// serves them with the player camera), the sniper and the laser scope the
+// sniper mode, the rocket launcher the rocket mode and the photo camera its
+// own. Returns true when the ped entered the stock stationary sight state, and
+// the caller then stops the weapon control for the frame. The airborne player
+// never enters it: only the sights the first person view serves start in the
+// air, the stock stationary sights need the ground (VICE-137).
+bool
+CPlayerPed::StartWeaponSight(CPad *padUsed, bool airborne)
+{
+	eWeaponType weapon = GetWeapon()->m_eWeaponType;
+
+	if (!CanAimWeapon(weapon, GetWeapon()->GetInfo()))
+		return false;
+	if (!padUsed->TargetJustDown() && !TheCamera.m_bJustJumpedOutOf1stPersonBecauseOfTarget)
+		return false;
+
+	bool stationary = !UsingFirstPersonWeaponSight();
+	if (stationary && airborne)
+		return false;
+
+#ifdef FREE_CAM
+	if (CCamera::bFreeCam && TheCamera.Cams[0].Using3rdPersonMouseCam()) {
+		m_fRotationCur = CGeneral::LimitRadianAngle(-TheCamera.Orientation);
+		SetHeading(m_fRotationCur);
+	}
+#endif
+	if (weapon == WEAPONTYPE_ROCKETLAUNCHER)
+		TheCamera.SetNewPlayerWeaponMode(CCam::MODE_ROCKETLAUNCHER, 0, 0);
+	else if (weapon == WEAPONTYPE_SNIPERRIFLE || weapon == WEAPONTYPE_LASERSCOPE)
+		TheCamera.SetNewPlayerWeaponMode(CCam::MODE_SNIPER, 0, 0);
+	else if (weapon == WEAPONTYPE_CAMERA)
+		TheCamera.SetNewPlayerWeaponMode(CCam::MODE_CAMERA, 0, 0);
+	else
+		TheCamera.SetNewPlayerWeaponMode(CCam::MODE_M16_1STPERSON, 0, 0);
+
+	if (!stationary)
+		return false;
+
+	m_fMoveSpeed = 0.0f;
+	CAnimManager::BlendAnimation(GetClump(), ASSOCGRP_STD, ANIM_STD_IDLE, 1000.0f);
+	SetPedState(PED_SNIPER_MODE);
+	return true;
 }
 
 void
@@ -1498,59 +1586,14 @@ CPlayerPed::ProcessPlayerWeapon(CPad *padUsed)
 		m_wepAccuracy = 100;
 
 	if (!m_pFire) {
-		eWeaponType weapon = GetWeapon()->m_eWeaponType;
-		if (weapon == WEAPONTYPE_ROCKETLAUNCHER || weapon == WEAPONTYPE_SNIPERRIFLE ||
-			weapon == WEAPONTYPE_LASERSCOPE || weapon == WEAPONTYPE_M4 ||
-			weapon == WEAPONTYPE_RUGER || weapon == WEAPONTYPE_M60 ||
-			weapon == WEAPONTYPE_CAMERA
-#ifdef FIRST_PERSON
-			// First person view: every weapon that can aim enters the sight view,
-			// not only the stock weapon set. The flamethrower aims too, although
-			// the weapon data does not give it the CANAIM flag.
-			|| (TheCamera.FirstPersonViewEnabled() &&
-			    (weaponInfo->IsFlagSet(WEAPONFLAG_CANAIM) || weapon == WEAPONTYPE_FLAMETHROWER))
-#endif
-			) {
+		// The aim button starts the weapon's sight; the stock stationary sight
+		// state stops the weapon control for the frame
+		if (StartWeaponSight(padUsed, false))
+			return;
 
-			if (padUsed->TargetJustDown() || TheCamera.m_bJustJumpedOutOf1stPersonBecauseOfTarget) {
-#ifdef FREE_CAM
-				if (CCamera::bFreeCam && TheCamera.Cams[0].Using3rdPersonMouseCam()) {
-					m_fRotationCur = CGeneral::LimitRadianAngle(-TheCamera.Orientation);
-					SetHeading(m_fRotationCur);
-				}
-#endif
-				if (weapon == WEAPONTYPE_ROCKETLAUNCHER)
-					TheCamera.SetNewPlayerWeaponMode(CCam::MODE_ROCKETLAUNCHER, 0, 0);
-				else if (weapon == WEAPONTYPE_SNIPERRIFLE || weapon == WEAPONTYPE_LASERSCOPE)
-					TheCamera.SetNewPlayerWeaponMode(CCam::MODE_SNIPER, 0, 0);
-				else if (weapon == WEAPONTYPE_CAMERA)
-					TheCamera.SetNewPlayerWeaponMode(CCam::MODE_CAMERA, 0, 0);
-				else
-					TheCamera.SetNewPlayerWeaponMode(CCam::MODE_M16_1STPERSON, 0, 0);
-
-#ifdef FIRST_PERSON
-				// The first person sight keeps the player moving with every
-				// weapon: the player camera gives the zoom and the aim pose
-				// comes from UpdateFirstPersonAim, so the stationary sniper
-				// state is not needed for the sniper, the laser scope and the
-				// rocket launcher either (VICE-136, VICE-137). The photo camera
-				// keeps the stock stationary viewfinder, which its own mode and
-				// the photograph need.
-				bool mobileAds = TheCamera.FirstPersonViewEnabled() &&
-				   weapon != WEAPONTYPE_CAMERA;
-				if(!mobileAds)
-#endif
-				{
-					m_fMoveSpeed = 0.0f;
-					CAnimManager::BlendAnimation(GetClump(), ASSOCGRP_STD, ANIM_STD_IDLE, 1000.0f);
-					SetPedState(PED_SNIPER_MODE);
-					return;
-				}
-			}
-			if (!TheCamera.Using1stPersonWeaponMode())
-				if (weapon == WEAPONTYPE_ROCKETLAUNCHER || weapon == WEAPONTYPE_SNIPERRIFLE || weapon == WEAPONTYPE_LASERSCOPE || weapon == WEAPONTYPE_CAMERA)
-					return;
-		}
+		// The sight only weapons do not fire from the hip
+		if (SightOnlyWeapon(GetWeapon()->m_eWeaponType) && !TheCamera.Using1stPersonWeaponMode())
+			return;
 	}
 
 	if (padUsed->GetWeapon() && m_nMoveState != PEDMOVE_SPRINT) {
@@ -1782,30 +1825,29 @@ CPlayerPed::IsMoveControllerInCharge(void)
 	return CanStrafeOrMouseControl();
 }
 
+// The aim of the weapon runs on the first person player camera: the view holds
+// the sight, keeps the player moving and keeps the aim through every movement
+// state (VICE-137). Only the first person view serves the sight this way; the
+// photo camera never does, because the photograph reads its own camera mode.
+bool
+CPlayerPed::UsingFirstPersonWeaponSight(void)
+{
+#ifdef FIRST_PERSON
+	if (TheCamera.FirstPersonViewEnabled())
+		return GetWeapon()->m_eWeaponType != WEAPONTYPE_CAMERA;
+#endif
+	return false;
+}
+
 // Whether the aiming weapon keeps the player moving. The first person view
-// serves every aiming weapon with the player camera and the mouse, so the
-// movement controller stays in charge in every movement state and WASD never
-// turns the view (VICE-137). The stock sight cameras (the setting off) keep the
-// stationary sniper, laser scope, rocket launcher and camera of the original
-// game; the photo camera keeps its stationary viewfinder in both views, because
-// the photograph reads the camera mode.
+// serves every aiming weapon with the player camera, so all of them move
+// (VICE-137). In the stock view (the setting off) the M16 camera mode of the
+// rifle sight keeps the movement (VICE-65) and the sight only weapons are
+// stationary; the photo camera is stationary in both views.
 bool
 CPlayerPed::CanMoveInWeaponSight(void)
 {
-	if (GetWeapon()->m_eWeaponType == WEAPONTYPE_CAMERA)
-		return false;
-#ifdef FIRST_PERSON
-	if (TheCamera.FirstPersonViewEnabled())
-		return true;
-#endif
-	switch (GetWeapon()->m_eWeaponType) {
-	case WEAPONTYPE_SNIPERRIFLE:
-	case WEAPONTYPE_LASERSCOPE:
-	case WEAPONTYPE_ROCKETLAUNCHER:
-		return false;
-	default:
-		return true;
-	}
+	return UsingFirstPersonWeaponSight() || !SightOnlyWeapon(GetWeapon()->m_eWeaponType);
 }
 
 // The playback speed the game forces on a movement animation: the adrenaline
@@ -2232,9 +2274,10 @@ CPlayerPed::ProcessControl(void)
 			if (!RpAnimBlendClumpGetFirstAssociation(GetClump(), ASSOC_BLOCK) && !m_attachedTo) {
 				if (TheCamera.Using1stPersonWeaponMode()) {
 					if (padUsed) {
-						// The M16 camera sight with a normal weapon keeps the
-						// player moving; the sniper, the laser scope, the rocket
-						// launcher and the camera keep the stationary sight.
+						// The sights the first person view serves keep the
+						// player moving in every state (VICE-137); the sight
+						// only weapons of the stock view and the photo camera
+						// keep the stationary sight.
 						if (CanMoveInWeaponSight())
 							PlayerControlM16(padUsed);
 						else

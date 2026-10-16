@@ -422,6 +422,12 @@ MakeAngleLessThan180(float &Angle)
 	while(Angle < -PI) Angle += 2*PI;
 }
 
+float
+EaseOutCubic(float fraction)
+{
+	return 1.0f - (1.0f - fraction)*(1.0f - fraction)*(1.0f - fraction);
+}
+
 void
 CCam::ProcessSpecialHeightRoutines(void)
 {
@@ -2720,9 +2726,11 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 	static float DontLookThroughWorldFixer = 0.0f;
 	CVector TargetCoors;
 
+#ifdef FIRST_PERSON
 	// The FOV of the last frame: the scope starts where the view it takes over
 	// was, the way the stock sniper camera starts at the FOV it had
 	float previousFOV = FOV;
+#endif
 	FOV = DefaultFOV;
 	TargetCoors = CameraTarget;
 	if(CamTargetEntity->m_rwObject == nil)
@@ -2880,38 +2888,42 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 			// The mouse look stays an offset from the car's heading: new look
 			// input takes the offset over and cancels a return at once, and a
 			// look that rests for a moment returns to straight ahead with an
-			// ease out curve. A held aim keeps the view where the mouse put it,
-			// and the stock view (the setting off) keeps its feel.
-			if(TheCamera.FirstPersonViewEnabled() && !carAds){
+			// ease out curve. A held aim owns the look: it stops a running
+			// return, and the next return starts from where the aim left the
+			// offset. The stock view (the setting off) keeps its own feel.
+			if(TheCamera.FirstPersonViewEnabled()){
 				uint32 now = CTimer::GetTimeInMilliseconds();
-				if(LookLeftRight != 0.0f || LookUpDown != 0.0f){
-					m_uiLookInputTime = now;
-					m_bRecenteringLook = false;
-				}
 				float yawOffset = Beta - vehicleHeading;
 				while(yawOffset >= PI) yawOffset -= 2*PI;
 				while(yawOffset < -PI) yawOffset += 2*PI;
 
-				if(m_bRecenteringLook){
-					float fraction = (float)(now - m_uiRecenterStart)/CAMERA_LOOK_RECENTER_TIME;
-					if(fraction >= 1.0f){
-						m_bRecenteringLook = false;
-						yawOffset = 0.0f;
-						Alpha = 0.0f;
-					}else{
-						float amount = 1.0f - (1.0f - fraction)*(1.0f - fraction)*(1.0f - fraction);
-						yawOffset = m_fRecenterFromYaw*(1.0f - amount);
-						Alpha = m_fRecenterFromPitch*(1.0f - amount);
-					}
-				}else if(now - m_uiLookInputTime > CAMERA_LOOK_RECENTER_IDLE &&
-				          (Abs(yawOffset) > CAMERA_LOOK_RECENTER_MIN_OFFSET ||
-				           Abs(Alpha) > CAMERA_LOOK_RECENTER_MIN_OFFSET)){
-					m_bRecenteringLook = true;
-					m_uiRecenterStart = now;
-					m_fRecenterFromYaw = yawOffset;
-					m_fRecenterFromPitch = Alpha;
+				if(carAds || LookLeftRight != 0.0f || LookUpDown != 0.0f){
+					m_uiLookInputTime = now;
+					m_bRecenteringLook = false;
 				}
-				Beta = vehicleHeading + yawOffset;
+
+				if(!carAds){
+					if(m_bRecenteringLook){
+						float fraction = (float)(now - m_uiRecenterStart)/CAMERA_LOOK_RECENTER_TIME;
+						if(fraction >= 1.0f){
+							m_bRecenteringLook = false;
+							yawOffset = 0.0f;
+							Alpha = 0.0f;
+						}else{
+							float amount = EaseOutCubic(fraction);
+							yawOffset = m_fRecenterFromYaw*(1.0f - amount);
+							Alpha = m_fRecenterFromPitch*(1.0f - amount);
+						}
+					}else if(now - m_uiLookInputTime > CAMERA_LOOK_RECENTER_IDLE &&
+					          (Abs(yawOffset) > CAMERA_LOOK_RECENTER_MIN_OFFSET ||
+					           Abs(Alpha) > CAMERA_LOOK_RECENTER_MIN_OFFSET)){
+						m_bRecenteringLook = true;
+						m_uiRecenterStart = now;
+						m_fRecenterFromYaw = yawOffset;
+						m_fRecenterFromPitch = Alpha;
+					}
+					Beta = vehicleHeading + yawOffset;
+				}
 			}
 		}
 		wasFirstPersonVehicle = firstPersonCarView;

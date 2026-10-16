@@ -174,6 +174,15 @@ CCamera::Init(void)
 	m_bRestoreByJumpCut = false;
 #ifdef FIRST_PERSON
 	m_bFirstPersonViewWasOn = false;
+	m_bHandoverActive = false;
+	m_bHavePresentedPose = false;
+	m_vecPresentedSource = CVector(0.0f, 0.0f, 0.0f);
+	m_vecPresentedFront = CVector(0.0f, 0.0f, -1.0f);
+	m_fPresentedFOV = DefaultFOV;
+	m_bScopeZoomRunning = false;
+	m_fScopeFOV = DefaultFOV;
+	m_fScopeFOVTarget = DefaultFOV;
+	m_fScopeFOVSpeed = 0.0f;
 #endif
 	// The car zoom levels only serve the script and RC car cameras
 	CarZoomIndicator = CAM_ZOOM_2;
@@ -529,7 +538,28 @@ CCamera::Process(void)
 	// pose the last frame presented. It runs after the transition, so a change
 	// the stock interpolation owns keeps its own values, and outside the
 	// geometry clip, because the glide into a seat passes through the car body.
-	ApplyCameraHandover(CamSource, CamFront, CamUp, FOV);
+	// A script or a cutscene camera owns its own switch: when one takes the
+	// view, the glide stops at once and the game camera never blends a view it
+	// does not own.
+	if(m_bHandoverActive){
+		if(!m_bLookingAtPlayer)
+			m_bHandoverActive = false;
+		else{
+			ApplyCameraHandover(CamSource, CamFront, CamUp, FOV);
+			// The glided pose is what the player sees: publish it to the camera
+			// itself, so everything that reads the view this frame (the shot
+			// ray, the weapon pose, the laser dot) follows it and not the pose
+			// the glide still moves toward. The geometry correction of the
+			// frame stays out: the readers of the camera source never saw it.
+			CVector presentedSource = CamSource;
+			if(m_bMoveCamToAvoidGeom)
+				presentedSource -= m_vecClearGeometryVec;
+			Cams[ActiveCam].Source = presentedSource;
+			Cams[ActiveCam].Front = CamFront;
+			Cams[ActiveCam].Up = CamUp;
+			Cams[ActiveCam].FOV = FOV;
+		}
+	}
 #endif
 
 	if(m_uiTransitionState != 0)
@@ -1991,7 +2021,7 @@ CCamera::ApplyCameraHandover(CVector &source, CVector &front, CVector &up, float
 
 	// Ease out: the glide moves quickly at the start and settles into the new
 	// pose, so it never overshoots and never stops with a visible step.
-	float amount = 1.0f - (1.0f - fraction)*(1.0f - fraction)*(1.0f - fraction);
+	float amount = EaseOutCubic(fraction);
 
 	source = m_vecHandoverFromSource + amount*(source - m_vecHandoverFromSource);
 	fov = m_fHandoverFromFOV + amount*(fov - m_fHandoverFromFOV);
@@ -4186,13 +4216,9 @@ bool
 CCamera::UsingFirstPersonSights(void)
 {
 	// Aiming down the sights in the first person view: the player camera holds
-	// the weapon pose at the view and the shot follows it, for the plain sights
-	// (the M16 camera mode serves the assault rifles and every other aiming
-	// weapon), the sniper scope and the rocket sight alike.
-	return FirstPersonViewEnabled() &&
-		(PlayerWeaponMode.Mode == CCam::MODE_M16_1STPERSON ||
-		 PlayerWeaponMode.Mode == CCam::MODE_SNIPER ||
-		 PlayerWeaponMode.Mode == CCam::MODE_ROCKETLAUNCHER);
+	// the weapon pose at the view and the shot follows it, for every sight it
+	// serves (the plain sights, the sniper scope and the rocket sight alike)
+	return FirstPersonViewEnabled() && FirstPersonServesSightMode(PlayerWeaponMode.Mode);
 }
 
 bool
@@ -4215,10 +4241,11 @@ CCamera::UsingFirstPersonScope(void)
 
 // The scope of the sniper and the laser scope keeps the rules of the stock
 // sniper camera: the mouse wheel steps the target FOV, WellBufferMe eases the
-// value, the held zoom keys zoom smoothly, and 15 degrees to the plain view FOV
-// holds the range. The scope starts at the FOV the view came from, like the
-// stock camera starts at the FOV it had. The stock range and the sniper motion
-// blur come with it, so the scope looks like the scope it stands in for.
+// value, the held zoom keys zoom smoothly, and 15 degrees to DefaultFOV holds
+// the range, whatever the plain view FOV of the setting is. The scope starts at
+// the FOV the view came from, like the stock camera starts at the FOV it had.
+// The stock range and the sniper motion blur come with it, so the scope looks
+// like the scope it stands in for.
 float
 CCamera::UpdateFirstPersonViewFOV(float previousFOV, bool usingSights, bool usingScope)
 {
@@ -4263,9 +4290,10 @@ CCamera::UpdateFirstPersonViewFOV(float previousFOV, bool usingSights, bool usin
 	else
 		m_fScopeFOVSpeed = 0.0f;
 
-	float plainFOV = (float)FrontEndMenuManager.GetFirstPersonFOV();
-	m_fScopeFOVTarget = Clamp(m_fScopeFOVTarget, FIRST_PERSON_SCOPE_FOV_MIN, plainFOV);
-	m_fScopeFOV = Clamp(m_fScopeFOV, FIRST_PERSON_SCOPE_FOV_MIN, plainFOV);
+	// The stock scope range, whatever the plain view FOV of the setting is
+	float maxFOV = Max(DefaultFOV, FIRST_PERSON_SCOPE_FOV_MIN);
+	m_fScopeFOVTarget = Clamp(m_fScopeFOVTarget, FIRST_PERSON_SCOPE_FOV_MIN, maxFOV);
+	m_fScopeFOV = Clamp(m_fScopeFOV, FIRST_PERSON_SCOPE_FOV_MIN, maxFOV);
 	TheCamera.SetMotionBlur(180, 255, 180, 120, MOTION_BLUR_SNIPER);
 	return m_fScopeFOV;
 }

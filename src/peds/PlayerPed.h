@@ -90,7 +90,9 @@ public:
 	void UseSprintEnergy(void);
 	void UpdatePlayerMovement(CPad *padUsed);
 	bool IsMoveControllerInCharge(void);
+	bool UsingFirstPersonWeaponSight(void);
 	bool CanMoveInWeaponSight(void);
+	bool StartWeaponSight(CPad *padUsed, bool airborne);
 	float GetMoveAnimPlayback(AnimationId animId) const;
 	float GetMoveAnimReferenceSpeed(void);
 	class CPlayerInfo *GetPlayerInfoForThisPlayerPed();

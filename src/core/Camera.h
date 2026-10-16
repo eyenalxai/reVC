@@ -754,4 +754,8 @@ void CamShakeNoPos(CCamera*, float);
 void MakeAngleLessThan180(float &Angle);
 void WellBufferMe(float Target, float *CurrentValue, float *CurrentSpeed, float MaxSpeed, float Acceleration, bool IsAngle);
 
+// The ease out curve of the camera glides: quick at the start and settling into
+// the target, which it reaches exactly at fraction 1.
+float EaseOutCubic(float fraction);
+
 #endif // __GTA_CAMERA_H__
