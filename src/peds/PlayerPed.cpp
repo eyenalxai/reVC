@@ -100,10 +100,8 @@ SteerVelocityTowards(const CVector2D &velocity, const CVector2D &target, float m
 	return CVector2D(Cos(newAngle), Sin(newAngle)) * velocity.Magnitude();
 }
 
-#ifdef FIRST_PERSON
-// The first person aim pose aims at a point this far along the aim ray
-#define FIRST_PERSON_AIM_DISTANCE 30.0f
-#endif
+// The player's aim pose aims at a point this far along the aim ray
+#define PLAYER_AIM_DISTANCE 30.0f
 
 bool CPlayerPed::bDontAllowWeaponChange;
 #ifndef MASTER
@@ -179,9 +177,7 @@ CPlayerPed::CPlayerPed(void) : CPed(PEDTYPE_PLAYER1)
 #ifdef FREE_CAM
 	m_bFreeAimActive = false;
 #endif
-#ifdef FIRST_PERSON
 	m_bFirstPersonAimActive = false;
-#endif
 }
 
 void
@@ -957,7 +953,6 @@ CPlayerPed::ProcessActiveReload(CPad *padUsed)
 		TryStartReloadAnimation();
 }
 
-#ifdef FIRST_PERSON
 // Aim the aim IK at a world position. The stock CPedIK::PointGunAtPosition works
 // the same way, but this path keeps the aim flag set so that CPed::AimGun applies
 // the pose every frame and CPed::ClearAimFlag releases it.
@@ -982,7 +977,7 @@ CPlayerPed::UpdateFirstPersonAim(CPad *padUsed)
 	if (TheCamera.UsingFirstPersonSights()) {
 		// Aiming down the sights: the pose follows the camera front
 		CCam *cam = &TheCamera.Cams[TheCamera.ActiveCam];
-		AimAtPosition(cam->Source + FIRST_PERSON_AIM_DISTANCE * cam->Front);
+		AimAtPosition(cam->Source + PLAYER_AIM_DISTANCE * cam->Front);
 		return;
 	}
 
@@ -996,7 +991,7 @@ CPlayerPed::UpdateFirstPersonAim(CPad *padUsed)
 		&& CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_CANAIM)) {
 		// Third person mouse camera: Target raises the gun toward the crosshair
 		CVector source, target;
-		TheCamera.Find3rdPersonCamTargetVector(FIRST_PERSON_AIM_DISTANCE, GetPosition(), source, target);
+		TheCamera.Find3rdPersonCamTargetVector(PLAYER_AIM_DISTANCE, GetPosition(), source, target);
 		AimAtPosition(target);
 		return;
 	}
@@ -1004,7 +999,6 @@ CPlayerPed::UpdateFirstPersonAim(CPad *padUsed)
 	if (m_bFirstPersonAimActive)
 		ClearAimFlag();
 }
-#endif
 
 // The shot of the held fire button: the stationary sights and the airborne
 // player fire straight from the hand, because neither runs the attack
@@ -1077,9 +1071,7 @@ CPlayerPed::PlayerControlM16(CPad *padUsed)
 		TheCamera.ClearPlayerWeaponMode();
 	}
 
-#ifdef FIRST_PERSON
 	UpdateFirstPersonAim(padUsed);
-#endif
 
 	// The weapon fires from exactly one place per state: the mobile ADS keeps
 	// the attack state, so its attack animation fires the shot like the hip
@@ -1495,13 +1487,11 @@ CPlayerPed::ProcessPlayerWeapon(CPad *padUsed)
 			weapon == WEAPONTYPE_LASERSCOPE || weapon == WEAPONTYPE_M4 ||
 			weapon == WEAPONTYPE_RUGER || weapon == WEAPONTYPE_M60 ||
 			weapon == WEAPONTYPE_CAMERA
-#ifdef FIRST_PERSON
 			// First person view: every weapon that can aim enters the sight view,
 			// not only the stock weapon set. The flamethrower aims too, although
 			// the weapon data does not give it the CANAIM flag.
 			|| (TheCamera.FirstPersonViewEnabled() &&
 			    (weaponInfo->IsFlagSet(WEAPONFLAG_CANAIM) || weapon == WEAPONTYPE_FLAMETHROWER))
-#endif
 			) {
 
 			if (padUsed->TargetJustDown() || TheCamera.m_bJustJumpedOutOf1stPersonBecauseOfTarget) {
@@ -1520,7 +1510,6 @@ CPlayerPed::ProcessPlayerWeapon(CPad *padUsed)
 				else
 					TheCamera.SetNewPlayerWeaponMode(CCam::MODE_M16_1STPERSON, 0, 0);
 
-#ifdef FIRST_PERSON
 				// The first person ADS with a normal weapon keeps the player
 				// moving: the M16 camera mode gives the zoom and the aim pose
 				// comes from UpdateFirstPersonAim, so the stationary sniper
@@ -1530,7 +1519,6 @@ CPlayerPed::ProcessPlayerWeapon(CPad *padUsed)
 				   weapon != WEAPONTYPE_ROCKETLAUNCHER && weapon != WEAPONTYPE_SNIPERRIFLE &&
 				   weapon != WEAPONTYPE_LASERSCOPE && weapon != WEAPONTYPE_CAMERA;
 				if(!mobileAds)
-#endif
 				{
 					m_fMoveSpeed = 0.0f;
 					CAnimManager::BlendAnimation(GetClump(), ASSOCGRP_STD, ANIM_STD_IDLE, 1000.0f);
@@ -1726,9 +1714,7 @@ CPlayerPed::ProcessPlayerWeapon(CPad *padUsed)
 	}
 	m_bHasLockOnTarget = m_pPointGunAt != nil;
 
-#ifdef FIRST_PERSON
 	UpdateFirstPersonAim(padUsed);
-#endif
 }
 
 bool
@@ -1851,9 +1837,7 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 	// camera) keep the body facing the camera; the classic camera turns the body
 	// toward the movement direction.
 	bool bFacingCamera = TheCamera.Cams[0].Using3rdPersonMouseCam()
-#ifdef FIRST_PERSON
 		|| TheCamera.Using1stPersonView()
-#endif
 		;
 
 	// The classic camera holds the ped in place while a smooth spray turns it
@@ -2224,9 +2208,7 @@ CPlayerPed::ProcessControl(void)
 					}
 
 				} else if ((TheCamera.Cams[0].Using3rdPersonMouseCam()
-#ifdef FIRST_PERSON
 					|| TheCamera.Using1stPersonView()
-#endif
 					)
 #ifdef FREE_CAM
 					&& !CCamera::bFreeCam

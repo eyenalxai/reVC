@@ -67,11 +67,9 @@ public:
 	bool TakePhotograph       (CEntity *shooter);
 	bool FireM16_1stPerson    (CEntity *shooter);
 	bool FireInstantHitFromCar(CVehicle *shooter, bool left, bool right);
-#ifdef FIRST_PERSON
 	// The free aim from a car: the target comes from the camera and there is no
 	// auto aim
 	bool FireInstantHitFromCarFreeAim(CVehicle *shooter);
-#endif
 	// The shot from a car after the source and the target are known
 	bool FireFromCarAt        (CVehicle *shooter, CVector &source, CVector &target);
 	

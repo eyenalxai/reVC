@@ -172,9 +172,7 @@ CCamera::Init(void)
 	m_WideScreenOn = false;
 	m_fFOV_Wide_Screen = 0.0f;
 	m_bRestoreByJumpCut = false;
-#ifdef FIRST_PERSON
 	m_bFirstPersonViewWasOn = false;
-#endif
 	// The car zoom levels only serve the script and RC car cameras
 	CarZoomIndicator = CAM_ZOOM_2;
 	PedZoomIndicator = CAM_ZOOM_2;
@@ -937,9 +935,7 @@ CCamera::CamControl(void)
 			if(CPad::GetPad(0)->CycleCameraModeUpJustDown() && !CReplay::IsPlayingBack() &&
 			   (m_bLookingAtPlayer || WhoIsInControlOfTheCamera == CAMCONTROL_OBBE) &&
 			   !m_WideScreenOn && !m_bFailedCullZoneTestPreviously && !m_bFirstPersonBeingUsed
-#ifdef FIRST_PERSON
 			   && !FirstPersonViewEnabled()
-#endif
 			   ){
 #ifdef GTA_PC_CONTROLS
 				if(FrontEndMenuManager.m_ControlMethod == CONTROL_STANDARD){
@@ -954,9 +950,7 @@ CCamera::CamControl(void)
 			if(CPad::GetPad(0)->CycleCameraModeDownJustDown() && !CReplay::IsPlayingBack() &&
 			   (m_bLookingAtPlayer || WhoIsInControlOfTheCamera == CAMCONTROL_OBBE) &&
 			   !m_WideScreenOn && !m_bFailedCullZoneTestPreviously && !m_bFirstPersonBeingUsed
-#ifdef FIRST_PERSON
 			   && !FirstPersonViewEnabled()
-#endif
 			   ){
 #ifdef GTA_PC_CONTROLS
 				if(FrontEndMenuManager.m_ControlMethod == CONTROL_STANDARD){
@@ -1204,13 +1198,11 @@ CCamera::CamControl(void)
 						else
 							ReqMode = CCam::MODE_FOLLOWPED;
 					}
-#ifdef FIRST_PERSON
 					else if(TheCamera.FirstPersonViewEnabled() && PlayerWeaponMode.Mode == CCam::MODE_M16_1STPERSON)
 						// The mobile ADS keeps the normal first person camera; the M16
 						// camera mode is the stock stationary aim camera and it moves
 						// with the movement keys.
 						ReqMode = CCam::MODE_1STPERSON;
-#endif
 					else
 						ReqMode = PlayerWeaponMode.Mode;
 				}else if(ReqMode != CCam::MODE_TOP_DOWN_PED && PedZoomIndicator != CAM_ZOOM_3){
@@ -1298,10 +1290,7 @@ CCamera::CamControl(void)
 		stopArrestCam = true;
 		beingArrested = false;
 	}
-	bool firstPersonCarView = false;
-#ifdef FIRST_PERSON
-	firstPersonCarView = InFirstPersonCarView();
-#endif
+	bool firstPersonCarView = InFirstPersonCarView();
 	if(LastPedState != PED_ARRESTED && PLAYER->GetPedState() == PED_ARRESTED){
 		if(!firstPersonCarView)
 			startArrestCam = true;
@@ -1695,7 +1684,6 @@ CCamera::CamControl(void)
 		FindPlayerPed()->bIsVisible = false;
 	else
 		FindPlayerPed()->bIsVisible = true;
-#ifdef FIRST_PERSON
 	// The first person view shows the player's own body: legs, hands and weapon
 	if(Using1stPersonView())
 		FindPlayerPed()->bIsVisible = true;
@@ -1703,7 +1691,6 @@ CCamera::CamControl(void)
 		// The stock car first person view (a big vehicle in a tunnel) hides
 		// the body, like the stock camera did
 		FindPlayerPed()->bIsVisible = false;
-#endif
 
 	bool switchedFromObbe = false;
 	if(!canUseObbeCam && WhoIsInControlOfTheCamera == CAMCONTROL_OBBE){
@@ -1797,10 +1784,8 @@ CCamera::UpdateTargetEntity(void)
 			pTargetEntity = FindPlayerPed();
 		if(PLAYER->GetPedState() == PED_DRAG_FROM_CAR)
 			pTargetEntity = FindPlayerPed();
-#ifdef FIRST_PERSON
 		if(pTargetEntity->IsVehicle() && InFirstPersonCarView() && FindPlayerPed()->GetPedState() == PED_ARRESTED)
 			pTargetEntity = FindPlayerPed();
-#endif
 	}
 }
 
@@ -1809,10 +1794,8 @@ CCamera::UpdateTargetEntity(void)
 int16
 CCamera::GetVehicleCameraMode(void)
 {
-#ifdef FIRST_PERSON
 	if(FirstPersonViewEnabled())
 		return CCam::MODE_1STPERSON;
-#endif
 	return CCam::MODE_FOLLOWPED;
 }
 
@@ -1830,7 +1813,6 @@ CCamera::UpdateFirstPersonView(bool targetIsPed)
 	   && (!CCamera::bFreeCam || m_bEnable1rstPersonCamCntrlsScript)
 #endif
 	   ){
-#ifdef FIRST_PERSON
 		// The setting turned off: leave the first person view once
 		if(m_bFirstPersonViewWasOn && !FirstPersonViewEnabled())
 			m_bFirstPersonBeingUsed = false;
@@ -1840,7 +1822,6 @@ CCamera::UpdateFirstPersonView(bool targetIsPed)
 			m_bFirstPersonBeingUsed = true;
 			m_uiFirstPersonCamLastInputTime = CTimer::GetTimeInMilliseconds();
 		}else
-#endif
 		if(targetIsPed && !Cams[0].Using3rdPersonMouseCam()){
 			// See if we want to enter first person mode. In a vehicle the
 			// look-around keys turn the camera, as in the stock game.
@@ -1867,22 +1848,18 @@ CCamera::UpdateFirstPersonView(bool targetIsPed)
 
 	if(targetIsPed &&
 	   (!FindPlayerPed()->IsPedInControl() || FindPlayerPed()->m_fMoveSpeed > 0.0f)
-#ifdef FIRST_PERSON
 	   && !FirstPersonViewEnabled()
-#endif
 	   )
 		m_bFirstPersonBeingUsed = false;
 
 	if(!m_bFirstPersonBeingUsed)
 		return false;
 
-#ifdef FIRST_PERSON
 	// The persistent first person view must not disable the player controls.
 	// Clearing also recovers a stale flag left by the stock look-around.
 	if(FirstPersonViewEnabled())
 		CPad::GetPad(0)->DisablePlayerControls &= ~PLAYERCONTROL_CAMERA;
 	else
-#endif
 		CPad::GetPad(0)->DisablePlayerControls |= PLAYERCONTROL_CAMERA;
 	return true;
 }
@@ -4046,7 +4023,6 @@ CCamera::Using1stPersonWeaponMode(void)
 	return false;
 }
 
-#ifdef FIRST_PERSON
 bool
 CCamera::FirstPersonViewEnabled(void)
 {
@@ -4130,7 +4106,6 @@ CCamera::UsingCarAds(void)
 	return Cams[ActiveCam].Using3rdPersonMouseCam() &&
 	       Cams[ActiveCam].CamTargetEntity == (CEntity*)vehicle;
 }
-#endif
 
 
 void

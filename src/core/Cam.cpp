@@ -101,10 +101,8 @@ CCam::Init(void)
 	m_fBufferedTargetBeta = 0.0f;
 	m_fBufferedTargetOrientation = 0.0f;
 	m_fBufferedTargetOrientationSpeed = 0.0f;
-#ifdef FIRST_PERSON
 	m_fAdsAmount = 0.0f;
 	m_fAdsAmountSpeed = 0.0f;
-#endif
 	m_fDimensionOfHighestNearCar = 0.0f;
 }
 
@@ -1450,12 +1448,10 @@ int16 nFadeControlThreshhold = 45;
 float fDefaultAlphaOrient = -0.22f;
 float fMouseAvoidGeomReturnRate = 0.92f;
 
-#ifdef FIRST_PERSON
 // Third person aim down the sights: while the player aims, the camera pulls
 // in and the view zooms in a little, like a modern third person shooter
 float fAdsDistanceScale = 0.6f;
 float fAdsFOVScale = 0.8f;
-#endif
 
 #ifdef GTA_PC_CONTROLS
 void
@@ -1470,23 +1466,16 @@ CCam::Process_FollowPedWithMouse(const CVector &CameraTarget, float TargetOrient
 	float CamDist;
 	CColPoint colPoint;
 	CEntity *entity;
-#ifdef FIRST_PERSON
-	float AdsDistScale = 1.0f;
-	float AdsFOVScale = 1.0f;
-#endif
 
 	if(ResetStatics){
 		Rotating = false;
 		m_bCollisionChecksOn = true;
 		CPad::GetPad(0)->ClearMouseHistory();
-#ifdef FIRST_PERSON
 		m_fAdsAmount = 0.0f;
 		m_fAdsAmountSpeed = 0.0f;
-#endif
 		ResetStatics = false;
 	}
 
-#ifdef FIRST_PERSON
 	// Third person aim down the sights: Target pulls the camera in and zooms
 	// the view a little. The first person view and the weapon cameras have
 	// their own sights, and the stock lock-on camera modes do not change. The
@@ -1504,10 +1493,9 @@ CCam::Process_FollowPedWithMouse(const CVector &CameraTarget, float TargetOrient
 			AdsAiming = TheCamera.UsingCarAds();
 	}
 	WellBufferMe(AdsAiming ? 1.0f : 0.0f, &m_fAdsAmount, &m_fAdsAmountSpeed, 0.2f, 0.1f, false);
-	AdsDistScale = 1.0f - (1.0f - fAdsDistanceScale)*m_fAdsAmount;
-	AdsFOVScale = 1.0f - (1.0f - fAdsFOVScale)*m_fAdsAmount;
+	float AdsDistScale = 1.0f - (1.0f - fAdsDistanceScale)*m_fAdsAmount;
+	float AdsFOVScale = 1.0f - (1.0f - fAdsFOVScale)*m_fAdsAmount;
 	FOV *= AdsFOVScale;
-#endif
 
 	bool OnTrain = FindPlayerVehicle() && FindPlayerVehicle()->IsTrain();
 
@@ -1587,9 +1575,7 @@ CCam::Process_FollowPedWithMouse(const CVector &CameraTarget, float TargetOrient
 		CamDist = fBaseDist + Cos(Min(Alpha*fFalloff, HALFPI))*fAngleDist;
 	else
 		CamDist = fBaseDist + Cos(Alpha)*fAngleDist;
-#ifdef FIRST_PERSON
 	CamDist *= AdsDistScale;
-#endif
 	// The camera sits further back in a vehicle, so it clears the car body
 	CamDist += VehicleDistance;
 
@@ -2482,9 +2468,7 @@ CCam::Process_Rocket(const CVector &CameraTarget, float, float, float)
 
 float fDuckingBackOffset = 0.5f;
 float fDuckingRightOffset = 0.18f;
-#ifdef FIRST_PERSON
 float fFirstPersonEyeOffsetFwd = 0.1f;	// the first person camera sits at the eyes, just in front of the head bone
-#endif
 
 void
 CCam::Process_M16_1stPerson(const CVector &CameraTarget, float, float, float)
@@ -2499,15 +2483,11 @@ CCam::Process_M16_1stPerson(const CVector &CameraTarget, float, float, float)
 
 	bool isAttached = ((CPed*)CamTargetEntity)->IsPlayer() && ((CPed*)CamTargetEntity)->m_attachedTo;
 
-#ifdef FIRST_PERSON
 	// Aiming down the sights: the sight view zooms in a little
 	if(TheCamera.FirstPersonViewEnabled() && Mode == MODE_M16_1STPERSON)
 		FOV = TheCamera.GetFirstPersonSightsFOV();
 	else
 		FOV = DefaultFOV;
-#else
-	FOV = DefaultFOV;
-#endif
 	TargetCoors = CameraTarget;
 
 	if(ResetStatics){
@@ -2633,14 +2613,12 @@ CCam::Process_M16_1stPerson(const CVector &CameraTarget, float, float, float)
 		((CPed*)CamTargetEntity)->m_pedIK.GetComponentPosition(HeadPos, PED_HEAD);
 		Source = HeadPos;
 		Source.z += 0.1f;
-#ifdef FIRST_PERSON
 		// The first person sight view sits at the eyes: the head bone plus a
 		// small forward offset. The stock back offsets would sit inside the neck.
 		if(TheCamera.FirstPersonViewEnabled() && Mode == MODE_M16_1STPERSON){
 			Source.x += fFirstPersonEyeOffsetFwd*CamTargetEntity->GetForward().x;
 			Source.y += fFirstPersonEyeOffsetFwd*CamTargetEntity->GetForward().y;
 		}else
-#endif
 		if(((CPed*)CamTargetEntity)->bIsDucking){
 			Source.x -= fDuckingBackOffset*CamTargetEntity->GetForward().x;
 			Source.y -= fDuckingBackOffset*CamTargetEntity->GetForward().y;
@@ -2685,11 +2663,9 @@ CCam::Process_M16_1stPerson(const CVector &CameraTarget, float, float, float)
 
 		if(FailedTestTwelveFramesAgo)
 			RwCameraSetNearClipPlane(Scene.camera, 0.4f);
-#ifdef FIRST_PERSON
 		// The player's own body must not be clipped away by the near plane
 		if(TheCamera.Using1stPersonView())
 			RwCameraSetNearClipPlane(Scene.camera, FIRST_PERSON_BODY_NEAR_CLIP);
-#endif
 		Source -= Front*0.4f;
 
 		GetVectorsReadyForRW();
@@ -2712,7 +2688,6 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 	if(CamTargetEntity->m_rwObject == nil)
 		return;
 
-#ifdef FIRST_PERSON
 	// The first person view in a vehicle uses the player's own ped camera: the
 	// ped sits in the car or boat, so its head is at the driver's seat (or
 	// where it stands to drive a boat) and the same camera serves both cases.
@@ -2727,7 +2702,6 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 	bool modeReset = ResetStatics;
 	if(firstPersonCarView)
 		CamTargetEntity = pPlayer;
-#endif
 
 	if(ResetStatics){
 		Beta = TargetOrientation;
@@ -2746,7 +2720,6 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		static bool FailedTestTwelveFramesAgo = false;
 		RwV3d HeadPos;
 
-#ifdef FIRST_PERSON
 		// The first person view setting overrides the default FOV
 		if(TheCamera.FirstPersonViewEnabled())
 			FOV = FrontEndMenuManager.GetFirstPersonFOV();
@@ -2754,7 +2727,6 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		if(TheCamera.UsingFirstPersonSights() ||
 		   (firstPersonCarView && TheCamera.UsingCarAds()))
 			FOV = TheCamera.GetFirstPersonSightsFOV();
-#endif
 
 		TargetCoors = CameraTarget;
 
@@ -2766,10 +2738,8 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 			// static DPadVertical unused
 			// static DPadHorizontal unused
 			m_bCollisionChecksOn = true;
-#ifdef FIRST_PERSON
 			if(TheCamera.FirstPersonViewEnabled())
 				CPad::GetPad(0)->ClearMouseHistory();
-#endif
 			ResetStatics = false;
 		}
 
@@ -2780,14 +2750,12 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		((CPed*)CamTargetEntity)->m_pedIK.GetComponentPosition(HeadPos, PED_HEAD);
 		Source = HeadPos;
 		Source.z += 0.1f;
-#ifdef FIRST_PERSON
 		// The first person view sits at the eyes: the head bone plus a small
 		// forward offset. The stock back offsets would sit inside the neck.
 		if(TheCamera.FirstPersonViewEnabled()){
 			Source.x += fFirstPersonEyeOffsetFwd*CamTargetEntity->GetForward().x;
 			Source.y += fFirstPersonEyeOffsetFwd*CamTargetEntity->GetForward().y;
 		}else
-#endif
 		if(((CPed*)CamTargetEntity)->bIsDucking){
 			Source.x -= fDuckingBackOffset*CamTargetEntity->GetForward().x;
 			Source.y -= fDuckingBackOffset*CamTargetEntity->GetForward().y;
@@ -2800,7 +2768,6 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 
 		// Look around
 		float LookLeftRight, LookUpDown;
-#ifdef FIRST_PERSON
 		bool UseMouse = false;
 		float MouseX = CPad::GetPad(0)->GetMouseX();
 		float MouseY = CPad::GetPad(0)->GetMouseY();
@@ -2814,14 +2781,12 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 			Beta += TheCamera.m_fMouseAccelHorzntl * LookLeftRight * FOV/80.0f;
 			Alpha += TheCamera.m_fMouseAccelVertical * LookUpDown * FOV/80.0f;
 		}else{
-#endif
 			LookLeftRight = -CPad::GetPad(0)->LookAroundLeftRight();
 			LookUpDown = CPad::GetPad(0)->LookAroundUpDown();
 			float xdir = LookLeftRight < 0.0f ? -1.0f : 1.0f;
 			float ydir = LookUpDown < 0.0f ? -1.0f : 1.0f;
 			Beta += SQR(LookLeftRight/100.0f)*xdir*0.8f/14.0f * FOV/80.0f * CTimer::GetTimeStep();
 			Alpha += SQR(LookUpDown/150.0f)*ydir*1.0f/14.0f * FOV/80.0f * CTimer::GetTimeStep();
-#ifdef FIRST_PERSON
 		}
 		// In a vehicle the view also turns with it, so the mouse look stays an
 		// offset from the vehicle's heading. The stored heading belongs to the
@@ -2838,7 +2803,6 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 			prevVehicleHeading = vehicleHeading;
 		}
 		wasFirstPersonVehicle = firstPersonCarView;
-#endif
 		while(Beta >= PI) Beta -= 2*PI;
 		while(Beta < -PI) Beta += 2*PI;
 		if(Alpha > DEGTORAD(60.0f)) Alpha = DEGTORAD(60.0f);
@@ -2878,11 +2842,9 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 
 		if(FailedTestTwelveFramesAgo)
 			RwCameraSetNearClipPlane(Scene.camera, 0.4f);
-#ifdef FIRST_PERSON
 		// The player's own body must not be clipped away by the near plane
 		if(TheCamera.Using1stPersonView())
 			RwCameraSetNearClipPlane(Scene.camera, FIRST_PERSON_BODY_NEAR_CLIP);
-#endif
 		Source -= Front*0.4f;
 
 		GetVectorsReadyForRW();
@@ -2959,11 +2921,9 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		Up.Normalise();
 	}
 
-#ifdef FIRST_PERSON
 	// Put the vehicle back: the swap is only for this call.
 	if(firstPersonCarView)
 		CamTargetEntity = vehicleTarget;
-#endif
 
 	ResetStatics = false;
 }
