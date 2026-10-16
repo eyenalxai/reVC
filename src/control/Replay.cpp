@@ -301,13 +301,24 @@ void CReplay::Update(void)
 	}
 }
 
+// The replay only keeps the action around the player: an entity farther than REPLAY_RECORD_RADIUS from the camera is not recorded.
+bool CReplay::IsWithinReplayRecordRadius(const CVector& position, const CVector& camera_position)
+{
+	return (position - camera_position).MagnitudeSqr() <= sq((float)REPLAY_RECORD_RADIUS);
+}
+
 void CReplay::RecordThisFrame(void)
 {
 	uint32 memory_required = sizeof(tGeneralPacket) + sizeof(tClockPacket) + sizeof(tWeatherPacket) + sizeof(tTimerPacket) + sizeof(tMiscPacket);
+	const CVector camera_position = TheCamera.GetPosition();
+	int entities_to_record = 0;
 	CVehiclePool* vehiclesT = CPools::GetVehiclePool();
 	for (int i = 0; i < vehiclesT->GetSize(); i++) {
 		CVehicle* v = vehiclesT->GetSlot(i);
 		if (v && v->m_rwObject && v->GetModelIndex() != MI_AIRTRAIN && v->GetModelIndex() != MI_TRAIN) {
+			if (entities_to_record >= MAX_REPLAY_ENTITIES || !IsWithinReplayRecordRadius(v->GetPosition(), camera_position))
+				continue;
+			entities_to_record++;
 			if (v->IsBike())
 				memory_required += sizeof(tBikeUpdatePacket);
 			else
@@ -319,6 +330,9 @@ void CReplay::RecordThisFrame(void)
 		CPed* p = pedsT->GetSlot(i);
 		if (!p || !p->m_rwObject)
 			continue;
+		if (entities_to_record >= MAX_REPLAY_ENTITIES || !IsWithinReplayRecordRadius(p->GetPosition(), camera_position))
+			continue;
+		entities_to_record++;
 		if (!p->bHasAlreadyBeenRecorded) {
 			memory_required += sizeof(tPedHeaderPacket);
 		}
@@ -332,6 +346,9 @@ void CReplay::RecordThisFrame(void)
 	memory_required += sizeof(tEndOfFramePacket) + 1; // 1 for Record.m_pBase[Record.m_nOffset] = REPLAYPACKET_END;
 	if (Record.m_nOffset + memory_required > REPLAYBUFFERSIZE - 16)
 		GoToNextBlock();
+	// GoToNextBlock reset the offset and set the END marker. A frame that still does not fit one block is skipped.
+	if (memory_required > REPLAYBUFFERSIZE - 16)
+		return;
 	tGeneralPacket* general = (tGeneralPacket*)&Record.m_pBase[Record.m_nOffset];
 	general->type = REPLAYPACKET_GENERAL;
 	general->camera_pos.CopyOnlyMatrix(TheCamera.GetMatrix());
@@ -353,10 +370,14 @@ void CReplay::RecordThisFrame(void)
 	timer->type = REPLAYPACKET_TIMER;
 	timer->timer = CTimer::GetTimeInMilliseconds();
 	Record.m_nOffset += sizeof(*timer);
+	int recorded_entities = 0;
 	CVehiclePool* vehicles = CPools::GetVehiclePool();
 	for (int i = 0; i < vehicles->GetSize(); i++){
 		CVehicle* v = vehicles->GetSlot(i);
 		if (v && v->m_rwObject && v->GetModelIndex() != MI_AIRTRAIN && v->GetModelIndex() != MI_TRAIN) {
+			if (recorded_entities >= MAX_REPLAY_ENTITIES || !IsWithinReplayRecordRadius(v->GetPosition(), camera_position))
+				continue;
+			recorded_entities++;
 			if (v->IsBike())
 				StoreBikeUpdate(v, i);
 			else
@@ -368,6 +389,9 @@ void CReplay::RecordThisFrame(void)
 		CPed* p = peds->GetSlot(i);
 		if (!p || !p->m_rwObject)
 			continue;
+		if (recorded_entities >= MAX_REPLAY_ENTITIES || !IsWithinReplayRecordRadius(p->GetPosition(), camera_position))
+			continue;
+		recorded_entities++;
 		if (!p->bHasAlreadyBeenRecorded){
 			tPedHeaderPacket* ph = (tPedHeaderPacket*)&Record.m_pBase[Record.m_nOffset];
 			ph->type = REPLAYPACKET_PED_HEADER;

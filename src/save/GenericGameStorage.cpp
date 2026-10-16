@@ -92,11 +92,23 @@ PopulateRadioStationPositionList()
 #define ReadDataFromBufferPointer(buf, to) memcpy(&to, buf, sizeof(to)); buf += align4bytes(sizeof(to));
 #define WriteDataToBufferPointer(buf, from) memcpy(buf, &from, sizeof(from)); buf += align4bytes(sizeof(from));
 
+// A save block never holds more than sizeof(work_buff) bytes, so this cap
+// only bounds a corrupt size: a valid save is unchanged and a truncated
+// file still reads short.
+static uint32
+CapSaveBlockSize(uint32 size)
+{
+	size = align4bytes(size);
+	if (size > sizeof(work_buff))
+		size = sizeof(work_buff);
+	return size;
+}
+
 #define LoadSaveDataBlock()\
 do {\
 	if (!ReadDataFromFile(file, (uint8 *) &size, 4))\
 		return false;\
-	size = align4bytes(size);\
+	size = CapSaveBlockSize(size);\
 	if (!ReadDataFromFile(file, work_buff, size))\
 		return false;\
 	buf = work_buff;\
@@ -301,7 +313,7 @@ GenericLoad()
 	CPad::ResetCheats();
 	if (!ReadInSizeofSaveFileBuffer(file, size))
 		return false;
-	size = align4bytes(size);
+	size = CapSaveBlockSize(size);
 	ReadDataFromFile(file, work_buff, size);
 	buf = (work_buff + 0x40);
 	ReadDataFromBufferPointer(buf, saveSize);
@@ -647,7 +659,7 @@ align4bytes(int32 size)
 #define LoadSaveDataBlockNoCheck(buf, file, size) \
 do { \
 	CFileMgr::Read(file, (char *)&size, sizeof(size)); \
-	size = align4bytes(size); \
+	size = CapSaveBlockSize(size); \
 	CFileMgr::Read(file, (char *)work_buff, size); \
 	buf = work_buff; \
 } while(0)
@@ -704,6 +716,8 @@ GetSaveType(char *savename)
 
 	uint32 size;
 	CFileMgr::Read(file, (char *)&size, sizeof(size));
+	if (size > sizeof(work_buff))
+		size = sizeof(work_buff);
 
 	uint8 *buf = work_buff;
 	CFileMgr::Read(file, (char *)work_buff, size); // simple vars + scripts
