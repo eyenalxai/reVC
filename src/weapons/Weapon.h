@@ -65,9 +65,22 @@ public:
 	static void DoDriveByAutoAiming(CEntity *driver,  CVehicle *vehicle, CVector *source, CVector *target);
 	
 	void Reload(void);
+	// Starts a reload and sets the timer; the fast reload flag shortens D.
+	void StartReload(CEntity *shooter);
+	// True while the manual reload rule applies to this shooter: a magazine
+	// weapon, the player and the ActiveReload feature on. AI peds and the
+	// toggle off keep the stock automatic reload.
+	bool UsesManualReload(CEntity *shooter);
+	// True while the player's reload key can start a reload: a magazine
+	// weapon, a clip that is not full, ammo in the reserve and a state that
+	// takes a reload.
+	bool CanReload(void);
 	void Update(int32 audioEntity, CPed *pedToAdjustSound);
 	bool IsTypeMelee  (void);
 	bool IsType2Handed(void);
+	// A magazine weapon has a clip of two or more rounds and fires instant
+	// hits. The active reload applies to these weapons only.
+	bool IsMagazineWeapon(void);
 	
 	static void MakePedsJumpAtShot(CPhysical *shooter, CVector *source, CVector *target);
 	

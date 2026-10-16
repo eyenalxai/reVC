@@ -78,9 +78,11 @@
 #ifdef PED_CAR_DENSITY_SLIDERS
 	// The step is (max - min) / 16. Tops chosen so the defaults land on a step:
 	// ped (3.4 - 0.2) / 16 = 0.2, so 1.0f is reachable; car (3.4 - 0.2) / 16 = 0.2, so 2.0f is reachable.
+	// spawn distance (4.0 - 1.0) / 16 = 0.1875, so 1.0f is reachable.
 	#define DENSITY_SLIDERS \
 		MENUACTION_CFO_SLIDER, "FEM_PED", { new CCFOSlider(&CIniFile::PedNumberMultiplier, "Display", "PedDensity", 0.2f, 3.4f, PedDensityChange) }, 0, 0, MENUALIGN_LEFT, \
-		MENUACTION_CFO_SLIDER, "FEM_CAR", { new CCFOSlider(&CIniFile::CarNumberMultiplier, "Display", "CarDensity", 0.2f, 3.4f, CarDensityChange) }, 0, 0, MENUALIGN_LEFT, 
+		MENUACTION_CFO_SLIDER, "FEM_CAR", { new CCFOSlider(&CIniFile::CarNumberMultiplier, "Display", "CarDensity", 0.2f, 3.4f, CarDensityChange) }, 0, 0, MENUALIGN_LEFT, \
+		MENUACTION_CFO_SLIDER, "FEM_SPN", { new CCFOSlider(&CIniFile::SpawnDistanceMultiplier, "Display", "SpawnDistance", 1.0f, 4.0f) }, 0, 0, MENUALIGN_LEFT,
 #else
 	#define DENSITY_SLIDERS 
 #endif
@@ -109,6 +111,8 @@
 #define DRIFT_TOGGLE MENUACTION_CFO_SELECT, "FEC_DRF", { new CCFOSelect((int8*)&gDriftEnabled, "Drift", "Enabled", off_on, 2, false) }, 0, 0, MENUALIGN_CENTER,
 // Infinite sprint (see src/peds/PlayerPed.cpp)
 #define SPRINT_TOGGLE MENUACTION_CFO_SELECT, "FEC_ISP", { new CCFOSelect((int8*)&gInfiniteSprint, "Controller", "InfiniteSprint", off_on, 2, false) }, 0, 0, MENUALIGN_CENTER,
+// Active reload (see src/weapons/ActiveReload.h)
+#define ACTIVE_RELOAD_TOGGLE MENUACTION_CFO_SELECT, "FEC_ARL", { new CCFOSelect((int8*)&gActiveReloadEnabled, "Weapons", "ActiveReload", off_on, 2, false) }, 0, 0, MENUALIGN_CENTER,
 
 #ifdef GAMEPAD_MENU
 	#define SELECT_CONTROLLER_TYPE  MENUACTION_CFO_SELECT, "FEC_TYP", { new CCFOSelect((int8*)&FrontEndMenuManager.m_PrefsControllerType, "Controller", "Type", controllerTypes, ARRAY_SIZE(controllerTypes), false, ControllerTypeAfterChange) }, 0, 0, MENUALIGN_LEFT,
@@ -164,6 +168,8 @@ void RestoreDefDisplay(int8 action) {
 	#endif
 	#ifdef PED_CAR_DENSITY_SLIDERS
 		CIniFile::LoadIniFile();
+		// The spawn distance has no gta3.ini key, so reset it to the stock value here
+		CIniFile::SpawnDistanceMultiplier = 1.0f;
 	#endif
 	#ifdef GRAPHICS_MENU_OPTIONS // otherwise Frontend will handle those
 		FrontEndMenuManager.m_PrefsBrightness = 256;
@@ -680,6 +686,7 @@ CMenuScreenCustom aScreens[] = {
 		MENUACTION_CHANGEMENU,	"FEC_MOU", {nil, SAVESLOT_NONE, MENUPAGE_MOUSE_CONTROLS}, 0, 0, MENUALIGN_CENTER,
 		DRIFT_TOGGLE
 		SPRINT_TOGGLE
+		ACTIVE_RELOAD_TOGGLE
 		MENUACTION_RESTOREDEF,	"FET_DEF", {nil, SAVESLOT_NONE, MENUPAGE_CONTROLLER_PC}, 320, 0, MENUALIGN_CENTER,
 		MENUACTION_GOBACK,		"FEDS_TB", {nil, SAVESLOT_NONE, 0}, 320, 0, MENUALIGN_CENTER,
    },
