@@ -379,6 +379,11 @@ const char *iniControllerActions[] = { "PED_FIREWEAPON", "PED_CYCLE_WEAPON_RIGHT
 	"PED_CYCLE_TARGET_LEFT", "PED_CYCLE_TARGET_RIGHT", "PED_CENTER_CAMERA_BEHIND_PLAYER", "PED_LOCK_TARGET", "NETWORK_TALK", "PED_1RST_PERSON_LOOK_UP", "PED_1RST_PERSON_LOOK_DOWN",
 	"_CONTROLLERACTION_36", "TOGGLE_DPAD", "SWITCH_DEBUG_CAM_ON", "TAKE_SCREEN_SHOT", "SHOW_MOUSE_POINTER_TOGGLE", "PED_RELOAD", "UNKNOWN_ACTION" };
 
+// One ini name per action: the array is indexed by e_ControllerAction, so a
+// missing name would shift every binding after it. The list holds the
+// BIND_VEHICLE_FIREWEAPON entry when the option is on, so the count follows it.
+static_assert(ARRAY_SIZE(iniControllerActions) == MAX_CONTROLLERACTIONS, "One ini name per controller action");
+
 const char *iniControllerTypes[] = { "kbd:", "2ndKbd:", "mouse:", "joy:" };
 
 const char *iniMouseButtons[] = {"LEFT","MIDDLE","RIGHT","WHLUP","WHLDOWN","X1","X2"};

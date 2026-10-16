@@ -2042,10 +2042,7 @@ CBike::DoDriveByShootings(void)
 	// The car ADS: the aim button aims freely with the camera instead of the
 	// look keys. The free aim shot has no animation of its own, so the drive-by
 	// arm stands in.
-	bool aiming = false;
-#ifdef FIRST_PERSON
-	aiming = TheCamera.UsingCarAds();
-#endif
+	bool aiming = TheCamera.UsingCarAds();
 
 	if(lookingLeft || lookingRight || aiming || CPad::GetPad(0)->GetCarGunFired()){
 		if(aiming){

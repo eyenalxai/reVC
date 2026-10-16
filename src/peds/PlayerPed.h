@@ -63,9 +63,7 @@ public:
 	CVector m_cachedCamFront;
 	CVector m_cachedCamUp;
 #endif
-#ifdef FIRST_PERSON
 	bool m_bFirstPersonAimActive; // the first person aim pose holds the aim flag
-#endif
 
 	static bool bDontAllowWeaponChange;
 #ifndef MASTER
@@ -119,10 +117,8 @@ public:
 	bool FindWeaponLockOnTarget(void);
 	void ProcessAnimGroups(void);
 	void ProcessPlayerWeapon(CPad*);
-#ifdef FIRST_PERSON
 	void AimAtPosition(const CVector &position);
 	void UpdateFirstPersonAim(CPad *padUsed);
-#endif
 	void PlayerControlZelda(CPad*);
 	bool DoesPlayerWantNewWeapon(eWeaponType, bool);
 	void PlayIdleAnimations(CPad*);

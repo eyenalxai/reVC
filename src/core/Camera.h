@@ -29,7 +29,6 @@ enum
 
 const float DefaultFOV = 70.0f; // beta: 80.0f
 
-#ifdef FIRST_PERSON
 // The camera handover: a view change that would snap in one frame glides from
 // the pose the last frame presented to the new pose over this long, with an
 // ease out curve. The first person view switching on or off, a vehicle entry
@@ -42,7 +41,6 @@ const float DefaultFOV = 70.0f; // beta: 80.0f
 // sniper camera
 #define FIRST_PERSON_SCOPE_ZOOM_STEP	10.0f
 #define FIRST_PERSON_SCOPE_FOV_MIN	15.0f
-#endif
 
 class CCam
 {
@@ -126,7 +124,6 @@ public:
 	float	f_rollSpeed;
 	float   m_fSyphonModeTargetZOffSet;
 	float   m_fAmountFractionObscured;
-#ifdef FIRST_PERSON
 	// Third person aim down the sights: 0.0 is stock, 1.0 is fully pulled in
 	float   m_fAdsAmount;
 	float   m_fAdsAmountSpeed;
@@ -139,7 +136,6 @@ public:
 	uint32  m_uiRecenterStart;
 	float   m_fRecenterFromYaw;
 	float   m_fRecenterFromPitch;
-#endif
 	float   m_fAlphaSpeedOverOneFrame;
 	float   m_fBetaSpeedOverOneFrame;
 	float   m_fBufferedTargetBeta;
@@ -364,7 +360,6 @@ public:
 	bool m_bcutsceneFinished;
 	bool m_bCullZoneChecksOn;
 	bool m_bFirstPersonBeingUsed;
-#ifdef FIRST_PERSON
 	bool m_bFirstPersonViewWasOn;
 	// The camera handover: the glide of the view when it would snap in one
 	// frame. From is the pose the last frame presented, so the glide never
@@ -386,7 +381,6 @@ public:
 	float m_fScopeFOV;
 	float m_fScopeFOVTarget;
 	float m_fScopeFOVSpeed;
-#endif
 	bool m_bJustJumpedOutOf1stPersonBecauseOfTarget;
 	bool m_bIdleOn;
 	bool m_bInATunnelAndABigVehicle;
@@ -609,7 +603,6 @@ public:
 	// m_bFirstPersonBeingUsed, m_bFirstPersonViewWasOn, the last input time
 	// and the camera bit of the pad's DisablePlayerControls.
 	bool UpdateFirstPersonView(bool targetIsPed);
-#ifdef FIRST_PERSON
 	// The camera handover: start the glide from the pose the last frame
 	// presented. Every caller that changes the view in one frame (the first
 	// person camera entering or leaving a vehicle, the view switching on or
@@ -618,7 +611,6 @@ public:
 	// Glide the camera values from the handover start toward the pose the new
 	// view computed. One call per frame from Process.
 	void ApplyCameraHandover(CVector &source, CVector &front, CVector &up, float &fov);
-#endif
 	void UpdateSoundDistances(void);
 	void InitialiseCameraForDebugMode(void);
 	void CamShake(float strength, float x, float y, float z);
@@ -697,7 +689,6 @@ public:
 	bool Find3rdPersonCamTargetVector(float dist, CVector pos, CVector &source, CVector &target);
 	float Find3rdPersonQuickAimPitch(void);
 	bool Using1stPersonWeaponMode(void);
-#ifdef FIRST_PERSON
 	bool FirstPersonViewEnabled(void);
 	bool UsingFirstPersonSights(void);
 	float GetFirstPersonSightsFOV(void);
@@ -724,7 +715,6 @@ public:
 	// sight zoom, and the scope zoom, which keeps the stock wheel zoom and
 	// starts at the view the scope came from.
 	float UpdateFirstPersonViewFOV(float previousFOV, bool usingSights, bool usingScope);
-#endif
 	// The stock sight camera the current view stands in for. The first person
 	// player camera serves the aiming weapons, so while a weapon aims down its
 	// sights it answers with the sight camera mode of that weapon. The weapon

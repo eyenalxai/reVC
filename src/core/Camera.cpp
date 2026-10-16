@@ -172,7 +172,6 @@ CCamera::Init(void)
 	m_WideScreenOn = false;
 	m_fFOV_Wide_Screen = 0.0f;
 	m_bRestoreByJumpCut = false;
-#ifdef FIRST_PERSON
 	m_bFirstPersonViewWasOn = false;
 	m_bHandoverActive = false;
 	m_bHavePresentedPose = false;
@@ -183,7 +182,6 @@ CCamera::Init(void)
 	m_fScopeFOV = DefaultFOV;
 	m_fScopeFOVTarget = DefaultFOV;
 	m_fScopeFOVSpeed = 0.0f;
-#endif
 	// The car zoom levels only serve the script and RC car cameras
 	CarZoomIndicator = CAM_ZOOM_2;
 	PedZoomIndicator = CAM_ZOOM_2;
@@ -285,14 +283,11 @@ CCamera::Process(void)
 	if(Cams[(ActiveCam+1)%2].CamTargetEntity == nil)
 		Cams[(ActiveCam+1)%2].CamTargetEntity = pTargetEntity;
 
-#ifdef FIRST_PERSON
 	// The view of the last frame: CamControl rewrites the mode below, and the
 	// handover measures this frame's change against what the player saw
 	int16 previousViewMode = Cams[ActiveCam].Mode;
-#endif
 
 	CamControl();
-#ifdef FIRST_PERSON
 	// A view change that would snap in one frame glides instead: the first
 	// person view switching on or off, a script or a sight camera taking it
 	// over, and the handback. Only view changes with the first person camera on
@@ -302,7 +297,6 @@ CCamera::Process(void)
 	   FirstPersonViewEnabled() && m_uiTransitionState == 0 &&
 	   (Cams[ActiveCam].Mode == CCam::MODE_1STPERSON || previousViewMode == CCam::MODE_1STPERSON))
 		StartCameraHandover(CAMERA_HANDOVER_TIME);
-#endif
 	if(m_bFading)
 		ProcessFade();
 	if(m_bMusicFading)
@@ -533,7 +527,6 @@ CCamera::Process(void)
 		WasPreviouslyInterSyhonFollowPed = false;	// unused
 	}
 
-#ifdef FIRST_PERSON
 	// The camera handover glides whatever the view computed above toward the
 	// pose the last frame presented. It runs after the transition, so a change
 	// the stock interpolation owns keeps its own values, and outside the
@@ -560,7 +553,6 @@ CCamera::Process(void)
 			Cams[ActiveCam].FOV = FOV;
 		}
 	}
-#endif
 
 	if(m_uiTransitionState != 0)
 		if(!m_bLookingAtVector && m_bLookingAtPlayer && !CCullZones::CamStairsForPlayer() && !m_bPlayerIsInGarage){
@@ -603,7 +595,6 @@ CCamera::Process(void)
 		CamUp.Normalise();
 	}
 
-#ifdef FIRST_PERSON
 	// This is the pose the frame presents: a later handover starts from it, so
 	// the glide from what the player saw has no jump. The shake below is noise
 	// and stays out of it.
@@ -611,7 +602,6 @@ CCamera::Process(void)
 	m_vecPresentedFront = CamFront;
 	m_fPresentedFOV = FOV;
 	m_bHavePresentedPose = true;
-#endif
 
 	GetMatrix().GetRight() = CrossProduct(CamUp, CamFront);	// actually Left
 	GetMatrix().GetForward() = CamFront;
@@ -1002,9 +992,7 @@ CCamera::CamControl(void)
 			if(CPad::GetPad(0)->CycleCameraModeUpJustDown() && !CReplay::IsPlayingBack() &&
 			   (m_bLookingAtPlayer || WhoIsInControlOfTheCamera == CAMCONTROL_OBBE) &&
 			   !m_WideScreenOn && !m_bFailedCullZoneTestPreviously && !m_bFirstPersonBeingUsed
-#ifdef FIRST_PERSON
 			   && !FirstPersonViewEnabled()
-#endif
 			   ){
 #ifdef GTA_PC_CONTROLS
 				if(FrontEndMenuManager.m_ControlMethod == CONTROL_STANDARD){
@@ -1019,9 +1007,7 @@ CCamera::CamControl(void)
 			if(CPad::GetPad(0)->CycleCameraModeDownJustDown() && !CReplay::IsPlayingBack() &&
 			   (m_bLookingAtPlayer || WhoIsInControlOfTheCamera == CAMCONTROL_OBBE) &&
 			   !m_WideScreenOn && !m_bFailedCullZoneTestPreviously && !m_bFirstPersonBeingUsed
-#ifdef FIRST_PERSON
 			   && !FirstPersonViewEnabled()
-#endif
 			   ){
 #ifdef GTA_PC_CONTROLS
 				if(FrontEndMenuManager.m_ControlMethod == CONTROL_STANDARD){
@@ -1269,7 +1255,6 @@ CCamera::CamControl(void)
 						else
 							ReqMode = CCam::MODE_FOLLOWPED;
 					}
-#ifdef FIRST_PERSON
 					else if(TheCamera.FirstPersonViewEnabled() && CCamera::FirstPersonServesSightMode(PlayerWeaponMode.Mode))
 						// The aiming weapons run the first person player camera: the
 						// mouse aims and WASD stays with the movement in every state
@@ -1277,7 +1262,6 @@ CCamera::CamControl(void)
 						// stationary sight cameras, which drive the view from the
 						// movement keys and block the moving.
 						ReqMode = CCam::MODE_1STPERSON;
-#endif
 					else
 						ReqMode = PlayerWeaponMode.Mode;
 				}else if(ReqMode != CCam::MODE_TOP_DOWN_PED && PedZoomIndicator != CAM_ZOOM_3){
@@ -1365,10 +1349,7 @@ CCamera::CamControl(void)
 		stopArrestCam = true;
 		beingArrested = false;
 	}
-	bool firstPersonCarView = false;
-#ifdef FIRST_PERSON
-	firstPersonCarView = InFirstPersonCarView();
-#endif
+	bool firstPersonCarView = InFirstPersonCarView();
 	if(LastPedState != PED_ARRESTED && PLAYER->GetPedState() == PED_ARRESTED){
 		if(!firstPersonCarView)
 			startArrestCam = true;
@@ -1762,7 +1743,6 @@ CCamera::CamControl(void)
 		FindPlayerPed()->bIsVisible = false;
 	else
 		FindPlayerPed()->bIsVisible = true;
-#ifdef FIRST_PERSON
 	// The first person view shows the player's own body: legs, hands and weapon
 	if(Using1stPersonView())
 		FindPlayerPed()->bIsVisible = true;
@@ -1770,7 +1750,6 @@ CCamera::CamControl(void)
 		// The stock car first person view (a big vehicle in a tunnel) hides
 		// the body, like the stock camera did
 		FindPlayerPed()->bIsVisible = false;
-#endif
 
 	bool switchedFromObbe = false;
 	if(!canUseObbeCam && WhoIsInControlOfTheCamera == CAMCONTROL_OBBE){
@@ -1864,10 +1843,8 @@ CCamera::UpdateTargetEntity(void)
 			pTargetEntity = FindPlayerPed();
 		if(PLAYER->GetPedState() == PED_DRAG_FROM_CAR)
 			pTargetEntity = FindPlayerPed();
-#ifdef FIRST_PERSON
 		if(pTargetEntity->IsVehicle() && InFirstPersonCarView() && FindPlayerPed()->GetPedState() == PED_ARRESTED)
 			pTargetEntity = FindPlayerPed();
-#endif
 	}
 }
 
@@ -1876,10 +1853,8 @@ CCamera::UpdateTargetEntity(void)
 int16
 CCamera::GetVehicleCameraMode(void)
 {
-#ifdef FIRST_PERSON
 	if(FirstPersonViewEnabled())
 		return CCam::MODE_1STPERSON;
-#endif
 	return CCam::MODE_FOLLOWPED;
 }
 
@@ -1897,7 +1872,6 @@ CCamera::UpdateFirstPersonView(bool targetIsPed)
 	   && (!CCamera::bFreeCam || m_bEnable1rstPersonCamCntrlsScript)
 #endif
 	   ){
-#ifdef FIRST_PERSON
 		// The setting turned off: leave the first person view once, and glide
 		// the camera back to the view that takes over instead of cutting to it.
 		// A script or a cutscene camera owns the switch while it holds the
@@ -1913,7 +1887,6 @@ CCamera::UpdateFirstPersonView(bool targetIsPed)
 			m_bFirstPersonBeingUsed = true;
 			m_uiFirstPersonCamLastInputTime = CTimer::GetTimeInMilliseconds();
 		}else
-#endif
 		if(targetIsPed && !Cams[0].Using3rdPersonMouseCam()){
 			// See if we want to enter first person mode. In a vehicle the
 			// look-around keys turn the camera, as in the stock game.
@@ -1940,27 +1913,22 @@ CCamera::UpdateFirstPersonView(bool targetIsPed)
 
 	if(targetIsPed &&
 	   (!FindPlayerPed()->IsPedInControl() || FindPlayerPed()->m_fMoveSpeed > 0.0f)
-#ifdef FIRST_PERSON
 	   && !FirstPersonViewEnabled()
-#endif
 	   )
 		m_bFirstPersonBeingUsed = false;
 
 	if(!m_bFirstPersonBeingUsed)
 		return false;
 
-#ifdef FIRST_PERSON
 	// The persistent first person view must not disable the player controls.
 	// Clearing also recovers a stale flag left by the stock look-around.
 	if(FirstPersonViewEnabled())
 		CPad::GetPad(0)->DisablePlayerControls &= ~PLAYERCONTROL_CAMERA;
 	else
-#endif
 		CPad::GetPad(0)->DisablePlayerControls |= PLAYERCONTROL_CAMERA;
 	return true;
 }
 
-#ifdef FIRST_PERSON
 // The camera handover: the first person camera serves views that change in one
 // frame (the player sits down in a vehicle or steps out, the view setting turns
 // on or off, a sight camera or a script takes the view over and gives it back).
@@ -2043,7 +2011,6 @@ CCamera::ApplyCameraHandover(CVector &source, CVector &front, CVector &up, float
 	up = CrossProduct(right, front);
 	up.Normalise();
 }
-#endif
 
 const float SOUND_DIST = 20.0f;
 
@@ -4204,7 +4171,6 @@ CCamera::Using1stPersonWeaponMode(void)
 	return false;
 }
 
-#ifdef FIRST_PERSON
 bool
 CCamera::FirstPersonViewEnabled(void)
 {
@@ -4366,7 +4332,6 @@ CCamera::UsingCarAds(void)
 	return Cams[ActiveCam].Using3rdPersonMouseCam() &&
 	       Cams[ActiveCam].CamTargetEntity == (CEntity*)vehicle;
 }
-#endif
 
 // The overlay a stock sight camera mode draws, if the mode has one
 static int16
@@ -4394,11 +4359,9 @@ CCamera::GetSightCameraMode(void)
 	// it stands in for the sight camera of the aimed weapon, so the weapon fire
 	// paths and the weapon pose read the same mode in both views. Every other
 	// view reports its own mode.
-#ifdef FIRST_PERSON
 	if(FirstPersonViewEnabled() && Cams[ActiveCam].Mode == CCam::MODE_1STPERSON &&
 	   FirstPersonServesSightMode(PlayerWeaponMode.Mode))
 		return PlayerWeaponMode.Mode;
-#endif
 
 	return Cams[ActiveCam].Mode;
 }
@@ -4411,7 +4374,6 @@ CCamera::GetSightOverlayMode(void)
 	// The plain sights need none in that view, because the raised weapon is the
 	// sight itself, exactly as it is for the weapons the stock game gives no
 	// sight camera to.
-#ifdef FIRST_PERSON
 	if(FirstPersonViewEnabled() && Cams[ActiveCam].Mode == CCam::MODE_1STPERSON){
 		switch(PlayerWeaponMode.Mode){
 		case CCam::MODE_SNIPER:
@@ -4421,7 +4383,6 @@ CCamera::GetSightOverlayMode(void)
 			return CCam::MODE_NONE;
 		}
 	}
-#endif
 
 	// Every other view draws the overlay of its own mode, if the mode has one
 	return SightOverlayOfMode(Cams[ActiveCam].Mode);

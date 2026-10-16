@@ -1243,9 +1243,7 @@ CPed::ClearAimFlag(void)
 #ifdef FREE_CAM
 		((CPlayerPed*)this)->m_bFreeAimActive = false;
 #endif
-#ifdef FIRST_PERSON
 		((CPlayerPed*)this)->m_bFirstPersonAimActive = false;
-#endif
 	}
 }
 
@@ -1462,9 +1460,7 @@ CPed::CalculateNewVelocity(void)
 			TheCamera.Cams[TheCamera.ActiveCam].m_fPlayerVelocity = m_moved.Magnitude();
 
 			if ((TheCamera.Cams[TheCamera.ActiveCam].GetWeaponFirstPersonOn() || TheCamera.Cams[0].Using3rdPersonMouseCam()
-#ifdef FIRST_PERSON
 				|| TheCamera.Using1stPersonView()
-#endif
 				) && CanStrafeOrMouseControl())
 				OrientLegsForMovement(localWalkAngle);
 		}
@@ -1482,9 +1478,7 @@ CPed::CalculateNewVelocity(void)
 	}
 
 	if ((!TheCamera.Cams[TheCamera.ActiveCam].GetWeaponFirstPersonOn() && !TheCamera.Cams[0].Using3rdPersonMouseCam())
-#ifdef FIRST_PERSON
 		&& !TheCamera.Using1stPersonView()
-#endif
 		|| FindPlayerPed() != this || !CanStrafeOrMouseControl()) {
 
 		if (FindPlayerPed() == this)
@@ -3996,11 +3990,9 @@ CPed::CanStrafeOrMouseControl(void)
 	if (CCamera::bFreeCam)
 		return false;
 #endif
-#ifdef FIRST_PERSON
 	// First person view: the player walks in the first person weapon mode
 	if (TheCamera.Using1stPersonView() && m_nPedState == PED_SNIPER_MODE)
 		return true;
-#endif
 	return m_nPedState == PED_NONE || m_nPedState == PED_IDLE || m_nPedState == PED_FLEE_POS || m_nPedState == PED_FLEE_ENTITY ||
 		m_nPedState == PED_ATTACK || m_nPedState == PED_FIGHT || m_nPedState == PED_AIM_GUN || m_nPedState == PED_JUMP || m_nPedState == PED_ANSWER_MOBILE;
 }
@@ -4890,12 +4882,10 @@ CPed::PreRender(void)
 
 	UpdateRpHAnim();
 
-#ifdef FIRST_PERSON
 	// First person: the camera sits inside the head, so collapse the head bone.
 	// The animation hierarchy rebuilds the head when the view ends.
 	if (IsPlayer() && TheCamera.Using1stPersonView())
 		CollapseHeadBone();
-#endif
 
 	bool bIsWindModifierTurnedOn = false;
 	float fAnyDirectionShift = 1.0f;
