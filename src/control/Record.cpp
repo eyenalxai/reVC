@@ -2,14 +2,6 @@
 
 #include "Record.h"
 
-#include "FileMgr.h"
-#include "Pad.h"
-#include "Pools.h"
-#include "Streaming.h"
-#include "Timer.h"
-#include "VehicleModelInfo.h"
-#include "World.h"
-
 uint16 CRecordDataForGame::RecordingState;
 
 void CRecordDataForGame::Init(void)
