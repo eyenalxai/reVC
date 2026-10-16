@@ -86,8 +86,6 @@ public:
 	CPhysical *m_aGroundPhysical[4];	// physicals touching wheels
 	CVector m_aGroundOffset[4];		// from ground object to colpoint
 	CEntity *m_pSetOnFireEntity;
-	float m_weaponDoorTimerLeft;	// still don't know what exactly this is
-	float m_weaponDoorTimerRight;
 	float m_fCarGunLR;
 	float m_fCarGunUD;
 	float m_fHeliOrientation;

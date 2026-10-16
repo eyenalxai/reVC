@@ -1475,8 +1475,6 @@ CPopulation::ManagePopulation(void)
 					if (TheCamera.Cams[TheCamera.ActiveCam].Mode != CCam::MODE_SNIPER
 						&& TheCamera.Cams[TheCamera.ActiveCam].Mode != CCam::MODE_SNIPER_RUNABOUT
 						&& TheCamera.Cams[TheCamera.ActiveCam].Mode != CCam::MODE_CAMERA
-						&& !TheCamera.Cams[TheCamera.ActiveCam].LookingLeft
-						&& !TheCamera.Cams[TheCamera.ActiveCam].LookingRight
 						&& !TheCamera.Cams[TheCamera.ActiveCam].LookingBehind) {
 						pedIsFarAway = true;
 					}

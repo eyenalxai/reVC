@@ -1890,7 +1890,7 @@ int16 CPad::GetAccelerate(void)
 	return 0;
 }
 
-bool CPad::CycleCameraModeJustDown(void)
+bool CPad::CameraViewToggleJustDown(void)
 {
 	bool result;
 	switch (CURMODE)
@@ -1935,54 +1935,6 @@ bool CPad::CycleCameraModeJustDown(void)
 	}
 
 	return result;
-}
-
-bool CPad::CycleCameraModeUpJustDown(void)
-{
-	switch (CURMODE)
-	{
-		case 0:
-		case 2:
-		case 3:
-		{
-			return !!(NewState.Select && !OldState.Select);
-
-			break;
-		}
-
-		case 1:
-		{
-			return !!(NewState.DPadUp && !OldState.DPadUp);
-
-			break;
-		}
-	}
-
-	return false;
-}
-
-bool CPad::CycleCameraModeDownJustDown(void)
-{
-	switch (CURMODE)
-	{
-		case 0:
-		case 2:
-		case 3:
-		{
-			return false;
-
-			break;
-		}
-
-		case 1:
-		{
-			return !!(NewState.DPadDown && !OldState.DPadDown);
-
-			break;
-		}
-	}
-
-	return false;
 }
 
 bool CPad::ChangeStationJustDown(void)

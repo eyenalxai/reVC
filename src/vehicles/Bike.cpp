@@ -1714,15 +1714,9 @@ CBike::PreRender(void)
 				if(GetStatus() == STATUS_PLAYER && (CTimer::GetFrameCounter()&3) == 0 &&
 				   CWeather::Rain == 0.0f){
 					CVector camDist = GetPosition() - TheCamera.GetPosition();
-					if(DotProduct(GetForward(), camDist) > 0.0f ||
-					   TheCamera.GetLookDirection() == LOOKING_LEFT ||
-					   TheCamera.GetLookDirection() == LOOKING_RIGHT){
+					if(DotProduct(GetForward(), camDist) > 0.0f){
 						if(dblExhaust)
 							pos1 = 0.5f*pos1 + 0.5f*pos2;
-
-						if(TheCamera.GetLookDirection() == LOOKING_LEFT ||
-						   TheCamera.GetLookDirection() == LOOKING_RIGHT)
-							pos1 -= 0.2f*GetForward();
 
 						CParticle::AddParticle(PARTICLE_HEATHAZE, pos1, CVector(0.0f, 0.0f, 0.0f));
 					}
@@ -2024,53 +2018,19 @@ CBike::DoDriveByShootings(void)
 	if (pDriver->IsPlayer())
 		((CPlayerPed*)pDriver)->ProcessActiveReloadInput(CPad::GetPad(0));
 
-	bool lookingLeft = false;
-	bool lookingRight = false;
-	if(TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_TOPDOWN ||
-	   TheCamera.m_bObbeCinematicCarCamOn){
-		if(CPad::GetPad(0)->GetLookLeft())
-			lookingLeft = true;
-		if(CPad::GetPad(0)->GetLookRight())
-			lookingRight = true;
-	}else{
-		if(TheCamera.Cams[TheCamera.ActiveCam].LookingLeft)
-			lookingLeft = true;
-		if(TheCamera.Cams[TheCamera.ActiveCam].LookingRight)
-			lookingRight = true;
-	}
-
-	// The car ADS: the aim button aims freely with the camera instead of the
-	// look keys. The free aim shot has no animation of its own, so the drive-by
-	// arm stands in.
+	// The car ADS: the aim button aims freely with the camera. The free aim
+	// shot has no animation of its own, so the drive-by arm stands in. The
+	// stock side look and its drive-by are gone (VICE-138): the plain fire
+	// keeps the stock forward drive-by of a bike.
 	bool aiming = TheCamera.UsingCarAds();
 
-	if(lookingLeft || lookingRight || aiming || CPad::GetPad(0)->GetCarGunFired()){
+	if(aiming || CPad::GetPad(0)->GetCarGunFired()){
 		if(aiming){
 			// the forward arm goes when the free aim takes over
 			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_FORWARD);
 			if(anim)
 				anim->blendDelta = -1000.0f;
 			anim = UpdateDriveByAimAnim(m_bikeAnimType, ANIM_BIKE_DRIVEBY_LHS, ANIM_BIKE_DRIVEBY_RHS);
-		}else if(lookingLeft){
-			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_RHS);
-			if(anim)
-				anim->blendDelta = -1000.0f;
-			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_FORWARD);
-			if(anim)
-				anim->blendDelta = -1000.0f;
-			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_LHS);
-			if(anim == nil || anim->blendDelta < 0.0f)
-				anim = CAnimManager::AddAnimation(pDriver->GetClump(), m_bikeAnimType, ANIM_BIKE_DRIVEBY_LHS);
-		}else if(lookingRight){
-			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_LHS);
-			if(anim)
-				anim->blendDelta = -1000.0f;
-			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_FORWARD);
-			if(anim)
-				anim->blendDelta = -1000.0f;
-			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_RHS);
-			if(anim == nil || anim->blendDelta < 0.0f)
-				anim = CAnimManager::AddAnimation(pDriver->GetClump(), m_bikeAnimType, ANIM_BIKE_DRIVEBY_RHS);
 		}else{
 			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_RHS);
 			if(anim)
@@ -2087,7 +2047,7 @@ CBike::DoDriveByShootings(void)
 		// the first person car view does not show it
 		if (aiming || !anim || !anim->IsRunning()) {
 			if (CPad::GetPad(0)->GetCarGunFired() && CTimer::GetTimeInMilliseconds() > weapon->m_nTimer)
-				weapon->FireFromCarWithCadence(this, lookingLeft, lookingRight, aiming);
+				weapon->FireFromCarWithCadence(this, aiming);
 		}
 	}else{
 		// The stock code refills the clip while the player does not aim.

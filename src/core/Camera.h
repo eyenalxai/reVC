@@ -45,6 +45,9 @@ const float DefaultFOV = 70.0f; // beta: 80.0f
 class CCam
 {
 public:
+	// The mode numbers are script facing: the scripts pass them and the saves
+	// carry zoom values derived from them, so they are never renumbered. A
+	// mode whose value nothing selects stays as a hole (ADR 0022).
 	enum
 	{
 		MODE_NONE = 0,
@@ -104,8 +107,6 @@ public:
 	bool    m_bTheHeightFixerVehicleIsATrain;
 	bool    LookBehindCamWasInFront;
 	bool    LookingBehind;
-	bool    LookingLeft;
-	bool    LookingRight;
 	bool    ResetStatics; //for interpolation type stuff to work
 	bool    Rotating;
 
@@ -222,10 +223,7 @@ public:
 	bool RotCamIfInFrontCar(CVector &TargetCoors, float TargetOrientation);
 	void Cam_On_A_String_Unobscured(const CVector &TargetCoors, float BaseDist);
 	void FixCamWhenObscuredByVehicle(const CVector &TargetCoors);
-	bool GetBoatLook_L_R_HeightOffset(float &Offset);
 	void LookBehind(void);
-	void LookLeft(void);
-	void LookRight(void);
 	void LookAroundVehicle(float bearing, float frontZOffset);
 	void ClipIfPedInFrontOfPlayer(void);
 	void KeepTrackOfTheSpeed(const CVector &source, const CVector &target, const CVector &up, const float &alpha, const float &beta, const float &fov);
@@ -244,8 +242,6 @@ public:
 	void Process_FollowPedWithMouse(const CVector &CameraTarget, float TargetOrientation, float, float);
 	void Process_BehindCar(const CVector &CameraTarget, float TargetOrientation, float, float);
 	void Process_Cam_On_A_String(const CVector &CameraTarget, float TargetOrientation, float, float);
-	void Process_TopDown(const CVector &CameraTarget, float TargetOrientation, float SpeedVar, float TargetSpeedVar);
-	void Process_TopDownPed(const CVector &CameraTarget, float TargetOrientation, float, float);
 	void Process_Rocket(const CVector &CameraTarget, float, float, float);
 	void Process_M16_1stPerson(const CVector &CameraTarget, float, float, float);
 	void Process_1stPerson(const CVector &CameraTarget, float, float, float);
@@ -303,8 +299,6 @@ struct CQueuedMode
 enum
 {
 	LOOKING_BEHIND,
-	LOOKING_LEFT,
-	LOOKING_RIGHT,
 	LOOKING_FORWARD,
 };
 
@@ -345,8 +339,7 @@ enum
 enum
 {
 	CAMCONTROL_GAME,
-	CAMCONTROL_SCRIPT,
-	CAMCONTROL_OBBE
+	CAMCONTROL_SCRIPT
 };
 
 class CCamera : public CPlaceable
@@ -395,8 +388,6 @@ public:
 	bool m_bLookingAtPlayer;
 	bool m_bLookingAtVector;
 	bool m_bMoveCamToAvoidGeom;
-	bool m_bObbeCinematicPedCamOn;
-	bool m_bObbeCinematicCarCamOn;
 	bool m_bRestoreByJumpCut;
 	bool m_bUseNearClipScript;
 	bool m_bStartInterScript;
@@ -575,7 +566,6 @@ public:
 
 
 	int16   m_iFadingDirection;
-	int     m_iModeObbeCamIsInForCar;
 	int16   m_iModeToGoTo;
 	int16   m_iMusicFadingDirection;
 	int16   m_iTypeOfSwitch;
@@ -638,13 +628,6 @@ public:
 	void ProcessWideScreenOn(void);
 	void DrawBordersForWideScreen(void);
 
-	// Obbe's cam
-	bool IsItTimeForNewcam(int32 obbeMode, int32 time);
-	bool TryToStartNewCamMode(int32 obbeMode);
-	void DontProcessObbeCinemaCamera(void);
-	void ProcessObbeCinemaCameraCar(void);
-	void ProcessObbeCinemaCameraHeli(void);
-	void ProcessObbeCinemaCameraPed(void);
 
 	// Train
 	void LoadTrainCamNodes(char const *name);
@@ -690,6 +673,9 @@ public:
 	float Find3rdPersonQuickAimPitch(void);
 	bool Using1stPersonWeaponMode(void);
 	bool FirstPersonViewEnabled(void);
+	// The camera toggle: flip the persistent first person choice, the state the
+	// Display setting and the settings file use (VICE-139)
+	void ToggleFirstPersonView(void);
 	bool UsingFirstPersonSights(void);
 	float GetFirstPersonSightsFOV(void);
 	bool Using1stPersonView(void);

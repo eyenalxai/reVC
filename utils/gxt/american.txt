@@ -2413,9 +2413,6 @@ Distance: ~1~ft Height: ~1~ft Flips: ~1~ Rotation: ~1~_
 [HJSTAWF]
 Distance: ~1~ft Height: ~1~ft Flips: ~1~ Rotation: ~1~_ And what a great landing!
 
-[CINCAM]
-Cinematic Camera
-
 [RC4]
 'RUMPO RAMPAGE'
 
@@ -3950,7 +3947,7 @@ NO LONGER NEEDED
 NO LONGER NEEDED
 
 [HELP31]
-To do a drive-by, first look left or right using the ~h~~k~~VEHICLE_LOOKLEFT~~w~ or the ~h~~k~~VEHICLE_LOOKRIGHT~.
+To do a drive-by, hold the ~h~~k~~PED_LOCK_TARGET~~w~ button to aim freely with the mouse, then fire.
 
 [HELP34]
 You must have a sub machine gun to perform a drive-by.
@@ -13946,7 +13943,7 @@ Press the ~h~~k~~VEHICLE_LOOKRIGHT~ ~w~button to rotate the helicopter clockwise
 ~r~You destroyed the TOPFUN van that contained the bombs and RC helicopter!
 
 [TEX3_32:SERG3]
-You can ~h~look behind~w~ by simultaneously pressing the ~h~~k~~VEHICLE_LOOKLEFT~~w~ and the ~h~~k~~VEHICLE_LOOKRIGHT~~w~ buttons.
+You can ~h~look behind~w~ by pressing the ~h~~k~~VEHICLE_LOOKBEHIND~~w~ button.
 
 [TEX3_4:SERG3] { reVC update }
 ~g~To drop a bomb press the~h~ ~k~~VEHICLE_FIREWEAPON~ ~g~button.

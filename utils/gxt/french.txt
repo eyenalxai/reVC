@@ -4043,9 +4043,6 @@ MIKE BLACKBURN
 [CRED358]
 TIM MCGAFF
 
-[CINCAM]
-Caméra cinématique
-
 [RC4]
 'RODEO DE RUMPO'
 
@@ -5670,7 +5667,7 @@ PLUS NECESSAIRE
 PLUS NECESSAIRE
 
 [HELP31]
-Pour réaliser un arrosage latéral, regarde d'abord à droite ou à gauche en utilisant ~k~~VEHICLE_LOOKLEFT~ ou ~k~~VEHICLE_LOOKRIGHT~.
+Pour réaliser un arrosage latéral, maintiens le bouton ~h~~k~~PED_LOCK_TARGET~~w~ pour viser librement à la souris, puis tire.
 
 [HELP34]
 Tu dois être armé d'une mitraillette pour réaliser un arrosage latéral.
@@ -14235,7 +14232,7 @@ Appuie sur ~h~~k~~VEHICLE_LOOKLEFT~ ~w~pour faire pivoter l'hélico dans le sens
 ~r~Tu as détruit la camionnette qui contenait l'hélico télécommandé et les bombes!
 
 [TEX3_32:SERG3]
-Tu peux ~h~regarder derrière~w~ toi en ~h~appuyant simultanément sur ~k~~VEHICLE_LOOKLEFT~ et ~k~~VEHICLE_LOOKRIGHT~~w~.
+Tu peux ~h~regarder derrière~w~ toi en appuyant sur ~h~~k~~VEHICLE_LOOKBEHIND~~w~.
 
 [TEX3_4:SERG3] { reVC update }
 ~g~Pour larguer une bombe, appuie sur la~h~ ~k~~VEHICLE_FIREWEAPON~~w~.

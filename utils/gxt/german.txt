@@ -4064,9 +4064,6 @@ MIKE BLACKBURN
 [CRED358]
 TIM MCGAFF
 
-[CINCAM]
-Cinematic-Kamera
-
 [RC4]
 'ROCK'N ROLL MIT RUMPO'
 
@@ -5670,7 +5667,7 @@ NICHT MEHR BENÖTIGT
 NICHT MEHR BENÖTIGT
 
 [HELP31]
-Um aus dem fahrenden Fahrzeug zu schießen, sieh zuerst mit ~k~~VEHICLE_LOOKLEFT~ oder ~k~~VEHICLE_LOOKRIGHT~ nach links oder rechts.
+Um aus dem fahrenden Fahrzeug zu schießen, halte ~h~~k~~PED_LOCK_TARGET~~w~ gedrückt, um mit der Maus frei zu zielen, und feuere dann.
 
 [HELP34]
 Du brauchst eine Maschinenpistole für einen 'Drive-By'.
@@ -14235,7 +14232,7 @@ Drücke ~h~~k~~VEHICLE_LOOKLEFT~~w~, um den Helikopter im Uhrzeigersinn zu drehe
 ~r~Du hast den Wagen mit den Bomben und dem ferngesteuerten Helikopter zerstört!
 
 [TEX3_32:SERG3]
-Du kannst ~h~nach hinten sehen~w~, indem du ~h~gleichzeitig ~k~~VEHICLE_LOOKLEFT~ und ~k~~VEHICLE_LOOKRIGHT~ drückst~w~.
+Du kannst ~h~nach hinten sehen~w~, indem du ~h~~k~~VEHICLE_LOOKBEHIND~~w~ drückst.
 
 [TEX3_4:SERG3] { reVC update }
 ~g~Um eine Bombe abzuwerfen, drücke die~h~ ~k~~VEHICLE_FIREWEAPON~~w~.
