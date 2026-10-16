@@ -57,10 +57,18 @@ public:
 
 	/* The fill burst (VICE-126): the window of the pedestrian fill and the
 	 * counters of the burst in flight. The counters are live for the measurement
-	 * rig (utils/caps-audit/live-counters.py). */
+	 * rig (utils/caps-audit/live-counters.py). The "total" pair accumulates
+	 * since boot (the last Initialise), so the boot burst stays readable after
+	 * a later arming resets the window rows; the three "ended" counters count
+	 * the burst runs by the reason they ended (VICE-146). */
 	static SFillBurst ms_FillBurst;
 	static uint32 ms_nFillBurstAttempts;
 	static uint32 ms_nFillBurstPlaced;
+	static uint32 ms_nFillBurstTotalAttempts;
+	static uint32 ms_nFillBurstTotalPlaced;
+	static uint32 ms_nFillBurstEndedLine;
+	static uint32 ms_nFillBurstEndedStalls;
+	static uint32 ms_nFillBurstEndedWindow;
 	static float ms_fFillBurstTarget;
 
 	static void Initialise();

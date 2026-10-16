@@ -17,9 +17,9 @@
  * most FILL_BURST_FRAMES x FILL_BURST_HIDDEN_ATTEMPTS_PER_FRAME attempts
  * (6000). A frame that spends its attempts spends a window frame, placing or
  * not; a frame that cannot spend them (the streaming has no model of the zone
- * yet) does not spend the window, but it counts against the same give-up bound,
- * so the wait is bounded too and the wall clock cannot run away from the
- * attempts.
+ * yet, or the local target is not known yet) does not spend the window, but it
+ * counts against the same give-up bound, so the wait is bounded too and the
+ * wall clock cannot run away from the attempts.
  *
  * The state is shared by the two populations, one instance each
  * (CPopulation::ms_FillBurst and CCarCtrl::ms_FillBurst): the pedestrian burst
@@ -44,6 +44,17 @@
  *    FILL_BURST_STALL_FRAMES stalls in a row disarm the burst, so a target that
  *    cannot be reached and a streaming that never arrives cannot keep a burst
  *    alive forever, and the trickle takes the fill back.
+ *  - The boot wait: a frame whose local target is not known yet (the boot
+ *    frames before the zone and the range are live, a target of 0) waits like
+ *    a streaming frame - it does not spend the window and counts against the
+ *    same give-up bound (VICE-146). The burst is not burned on a target that
+ *    cannot be filled.
+ *
+ * The end of a run is reported: FillBurstSpendFrame returns why the frame
+ * ended the burst, when it did (the window was spent, or the give-up bound
+ * fired). The caller counts the reasons, so a live read says why a burst
+ * ended. The third reason of a run, the stop line, is the caller's own check:
+ * it disarms the burst before a frame runs.
  *
  * The random stream
  * -----------------
@@ -98,6 +109,16 @@ static inline bool FillBurstIsRunning(const SFillBurst *burst)
 static inline int FillBurstAttempts(const SFillBurst *burst, bool hidden)
 { return hidden ? FILL_BURST_HIDDEN_ATTEMPTS_PER_FRAME : FILL_BURST_ATTEMPTS_PER_FRAME; }
 
+/* Why a spent frame ended the burst, when it did (VICE-146). The stop line is
+ * the third reason and is not reported here: the caller checks it before a
+ * frame runs and disarms the burst itself. */
+enum EFillBurstEnded
+{
+	FILL_BURST_NOT_ENDED = 0,
+	FILL_BURST_ENDED_WINDOW,	/* the last window frame was spent */
+	FILL_BURST_ENDED_STALLS,	/* the give-up bound fired */
+};
+
 /*
  * One frame of the burst is over.
  *
@@ -106,27 +127,37 @@ static inline int FillBurstAttempts(const SFillBurst *burst, bool hidden)
  * whether it placed something or not. `placed` is true when it created at
  * least one entity.
  *
- * A frame that spent no attempt (the streaming has no model of the zone yet)
- * does not spend the window: the fill waits for the models instead of burning
- * its frames on attempts that would fail at the model check. It counts against
- * the give-up bound all the same, so the wait is bounded like a stall.
+ * A frame that spent no attempt (the streaming has no model of the zone yet,
+ * or the local target is not known yet) does not spend the window: the fill
+ * waits for the models or the target instead of burning its frames on
+ * attempts that would fail. It counts against the give-up bound all the same,
+ * so the wait is bounded like a stall.
  *
  * A placement resets the counter of the frames in a row without one, and
- * FILL_BURST_STALL_FRAMES of them give the burst up.
+ * FILL_BURST_STALL_FRAMES of them give the burst up. The return value says
+ * whether this frame ended the burst and why, so the caller can count the
+ * reasons.
  */
-static inline void
+static inline EFillBurstEnded
 FillBurstSpendFrame(SFillBurst *burst, bool attempts, bool placed)
 {
 	if (attempts)
 		burst->nFrames--;
 	if (attempts && placed)
 		burst->nStalls = 0;
-	else if (++burst->nStalls >= FILL_BURST_STALL_FRAMES)
+	else if (++burst->nStalls >= FILL_BURST_STALL_FRAMES) {
 		FillBurstDisarm(burst);
+		return FILL_BURST_ENDED_STALLS;
+	}
+	if (burst->nFrames <= 0)
+		return FILL_BURST_ENDED_WINDOW;
+	return FILL_BURST_NOT_ENDED;
 }
 
-/* The stop line: the local count is at 90 % of the local target. A zero
- * target stops the burst too: there is nothing to fill. */
+/* The stop line: the local count is at 90 % of the local target. The predicate
+ * reads true for a zero target (0 is at 90 % of 0), so the callers check the
+ * target before it: a target that is not known yet is a boot wait, not a stop
+ * (VICE-146, the "boot wait" rule above). */
 static inline bool
 FillBurstTargetReached(float count, float target)
 {

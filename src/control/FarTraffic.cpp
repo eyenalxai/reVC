@@ -261,12 +261,29 @@ FarTrafficPromoteCar(int32 index, bool bWithDriver)
 	FarTrafficDropEntry(index);
 }
 
-/* Give one far car up: the band closed, the cap dropped or the car is beyond
- * the fog. The near bubble's removal rule decides whether the player can see it
- * go; the layer spends at most FAR_TRAFFIC_REMOVE_ATTEMPTS gate answers a
- * frame, and it asks the gate with its ray refused (a removal of the layer's is
- * a fog or a rear-half one; an occluded hint waits a frame instead of spending
- * a two-kilometre ray). */
+/* Delete one car of the layer and its entry. The near bubble's removal counter
+ * is told the car was invisible: a deletion of the layer's happens at alpha 0
+ * or off screen (the in-view band's cars fade first, VICE-146), so it can never
+ * move the catchable-zone acceptance pair. */
+static void
+FarTrafficDeleteCar(int32 index)
+{
+	CVehicle *pVehicle = ms_aFarCars[index].pVehicle;
+
+	CCarCtrl::NearBubbleCountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, true);
+	CWorld::Remove(pVehicle);
+	delete pVehicle;
+	CFarTraffic::ms_nFarTrafficRemovals++;
+	FarTrafficDropEntry(index);
+}
+
+/* The layer's removal of one car: the near bubble's rule first (with the gate's
+ * ray refused - a removal of the layer's is a fog or a rear-half one), then the
+ * in-view band's own way out (VICE-146). A car the player can see goes the way
+ * the near traffic's despawn goes: the fade-out (bFadeOut), and the faded tail
+ * is deleted at alpha 0 by the gate pass, exactly where the near cull deletes
+ * its own. An invisible or off-screen car goes at once. Returns true when the
+ * car is gone (the entry dropped). */
 static bool
 FarTrafficRemoveCar(int32 index, const CVector &playerPos)
 {
@@ -274,11 +291,15 @@ FarTrafficRemoveCar(int32 index, const CVector &playerPos)
 
 	if (!CCarCtrl::NearBubbleAllowsRemoval(pVehicle, playerPos, 0.0f, false))
 		return false;
-	CCarCtrl::NearBubbleCountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, false);
-	CWorld::Remove(pVehicle);
-	delete pVehicle;
-	CFarTraffic::ms_nFarTrafficRemovals++;
-	FarTrafficDropEntry(index);
+	if (pVehicle->GetIsOnScreen() &&
+		CVisibilityPlugins::GetClumpAlpha(pVehicle->GetClump()) > 0) {
+		/* The band's removal is the despawn's fade-out (VICE-146): the car
+		 * leaves the way the near traffic leaves in view, never by a
+		 * deletion. */
+		pVehicle->bFadeOut = true;
+		return false;
+	}
+	FarTrafficDeleteCar(index);
 	return true;
 }
 
@@ -528,6 +549,18 @@ CFarTraffic::Process(void)
 		 * shell driving through the fog is worse than a car the fog hides. */
 		if (pVehicle->GetStatus() == STATUS_WRECKED)
 			what = FAR_TRAFFIC_REMOVE;
+		/* A car that is already fading out (the in-view band's removal,
+		 * VICE-146) is on its way and asks no gate again; the switches above
+		 * have already promoted it if the player came near. Its tail is
+		 * deleted where the near cull deletes its own: at alpha 0. */
+		if (pVehicle->bFadeOut) {
+			if (CVisibilityPlugins::GetClumpAlpha(pVehicle->GetClump()) == 0) {
+				FarTrafficDeleteCar(i);
+				continue;
+			}
+			i++;
+			continue;
+		}
 		if (what == FAR_TRAFFIC_REMOVE || ms_nFarCars > cap) {
 			/* The removals are the layer's own churn and each one asks the
 			 * near bubble's removal rule. The frame's allowance counts the

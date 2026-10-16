@@ -379,12 +379,13 @@ Section3CapUnderPressure(void)
  * the player (off the frustum by the margin, past the soft distance); the
  * harness asks the ladder with those facts. */
 static SNearBubbleCandidate
-SiteCandidate(float distToCamera, float visibleRange, bool inFrustum, bool inFrustumMargin, bool occluded)
+SiteCandidate(float distToCamera, float visibleRange, float onScreenSpawnMin, bool inFrustum, bool inFrustumMargin, bool occluded)
 {
 	SNearBubbleCandidate c;
 	c.distToPlayer = distToCamera;
 	c.distToCamera = distToCamera;
 	c.visibleRange = visibleRange;
+	c.onScreenSpawnMin = onScreenSpawnMin;
 	c.inFrustum = inFrustum;
 	c.inFrustumMargin = inFrustumMargin;
 	c.occluded = occluded;
@@ -395,9 +396,11 @@ SiteCandidate(float distToCamera, float visibleRange, bool inFrustum, bool inFru
 
 /* The arms the layer may use without a line-of-sight ray: the fade that hides
  * the world, the off-frustum margin behind the camera, a fade that covers the
- * screen, and the top-down camera's bypass. The occluded hint and the close
- * blind spot are refused outright for the layer (rayAllowed false): a ray of
- * two kilometres is not the far layer's work. */
+ * screen, the top-down camera's bypass, and - since VICE-146 restored it - the
+ * in-view band (a creation in the frustum at or beyond the band minimum, which
+ * the car's own alpha reveal covers). The occluded hint and the close blind
+ * spot are refused outright for the layer (rayAllowed false): a ray of two
+ * kilometres is not the far layer's work. */
 static bool
 FarTrafficUsesRayFreeArm(const SNearBubbleCandidate &c)
 {
@@ -406,7 +409,8 @@ FarTrafficUsesRayFreeArm(const SNearBubbleCandidate &c)
 		return false;
 	ENearBubbleArm arm = NearBubbleArmFor(c);
 	return arm == NEAR_BUBBLE_ARM_FADE_DISTANCE || arm == NEAR_BUBBLE_ARM_SOFT ||
-		arm == NEAR_BUBBLE_ARM_FADE || arm == NEAR_BUBBLE_ARM_BYPASS;
+		arm == NEAR_BUBBLE_ARM_FADE || arm == NEAR_BUBBLE_ARM_BYPASS ||
+		arm == NEAR_BUBBLE_ARM_ONSCREEN_BAND;
 }
 
 static void
@@ -419,7 +423,7 @@ Section4Events(void)
 	const float drawDistances[] = { 16.0f, 8.0f, 4.0f, 2.0f, DRAWDIST_DEFAULT };
 	const int nDd = sizeof(drawDistances) / sizeof(drawDistances[0]);
 
-	int fogSites = 0, behindSites = 0, refusedSites = 0, removalSites = 0, inBandCreations = 0;
+	int fogSites = 0, behindSites = 0, refusedSites = 0, removalSites = 0, bandSites = 0, bandRefusals = 0, inBandCreations = 0;
 	int failed = 0;
 
 	printf("== 4. the events: creations, removals and the switches\n\n");
@@ -435,7 +439,7 @@ Section4Events(void)
 		/* The fog site: the car lands past the fade (the visible range), so
 		 * the ladder's fade arm allows it with no ray and no occluder
 		 * dependence. This is the oncoming traffic of a long straight road. */
-		SNearBubbleCandidate fog = SiteCandidate(b.createOuter, r.visibleRange, true, true, false);
+		SNearBubbleCandidate fog = SiteCandidate(b.createOuter, r.visibleRange, r.carOnScreenSpawnMin, true, true, false);
 		if (NearBubbleAnswerFor(fog) == NEAR_BUBBLE_ALLOWED &&
 		    NearBubbleArmFor(fog) == NEAR_BUBBLE_ARM_FADE_DISTANCE)
 			fogSites++;
@@ -447,7 +451,7 @@ Section4Events(void)
 		 * the soft distance away. Its distance is the band's inner edge, which
 		 * the matrix section proved is outside the bubble and the soft
 		 * distance. */
-		SNearBubbleCandidate behind = SiteCandidate(b.inner, r.visibleRange, false, false, false);
+		SNearBubbleCandidate behind = SiteCandidate(b.inner, r.visibleRange, r.carOnScreenSpawnMin, false, false, false);
 		if (FarTrafficUsesRayFreeArm(behind) && NearBubbleArmFor(behind) == NEAR_BUBBLE_ARM_SOFT)
 			behindSites++;
 		else {
@@ -457,16 +461,37 @@ Section4Events(void)
 		/* The same site with the occluder hint on it: the ladder sends it to
 		 * the confirmation ray, and the layer, which pays no ray, refuses it.
 		 * The counter is the layer's honest price: an occluded site waits. */
-		SNearBubbleCandidate occluded = SiteCandidate(b.inner, r.visibleRange, false, false, true);
+		SNearBubbleCandidate occluded = SiteCandidate(b.inner, r.visibleRange, r.carOnScreenSpawnMin, false, false, true);
 		if (NearBubbleAnswerFor(occluded) == NEAR_BUBBLE_SEEK_LOS && !FarTrafficUsesRayFreeArm(occluded))
 			refusedSites++;
 		else {
 			Fail("an occluded site must be the layer's refused arm");
 			failed++;
 		}
+		/* The fog site's own bracket can land inside the fade: in the frustum
+		 * at or beyond the band minimum, where the ladder's restored in-view
+		 * band (VICE-146) allows it as the stock on-screen site, covered by
+		 * the car's own reveal and free of any ray. Below the minimum it is
+		 * the catchable zone and refused - the acceptance must stay the
+		 * traffic's own. */
+		SNearBubbleCandidate bandSite = SiteCandidate(b.inner + 1.0f, r.visibleRange, r.carOnScreenSpawnMin, true, true, false);
+		if (FarTrafficUsesRayFreeArm(bandSite) && NearBubbleArmFor(bandSite) == NEAR_BUBBLE_ARM_ONSCREEN_BAND)
+			bandSites++;
+		else {
+			Fail("a site inside the in-view band is not allowed by the band arm");
+			failed++;
+		}
+		SNearBubbleCandidate belowBand = SiteCandidate(r.carOnScreenSpawnMin - 1.0f, r.visibleRange, r.carOnScreenSpawnMin, true, true, false);
+		if (NearBubbleAnswerFor(belowBand) == NEAR_BUBBLE_REFUSED &&
+		    NearBubbleArmFor(belowBand) == NEAR_BUBBLE_ARM_NONE)
+			bandRefusals++;
+		else {
+			Fail("a site under the band minimum in the frustum must be refused");
+			failed++;
+		}
 		/* The layer's own removals: beyond the fog (the outer edge plus the
 		 * hysteresis), so the ladder hides them with the fade. */
-		SNearBubbleCandidate far = SiteCandidate(b.removeOuter + 1.0f, r.visibleRange, true, true, false);
+		SNearBubbleCandidate far = SiteCandidate(b.removeOuter + 1.0f, r.visibleRange, r.carOnScreenSpawnMin, true, true, false);
 		if (NearBubbleAnswerFor(far) == NEAR_BUBBLE_ALLOWED &&
 		    NearBubbleArmFor(far) == NEAR_BUBBLE_ARM_FADE_DISTANCE)
 			removalSites++;
@@ -502,6 +527,8 @@ Section4Events(void)
 	printf("  the fog sites the fade allows:      %d\n", fogSites);
 	printf("  the behind sites the soft arm allows: %d\n", behindSites);
 	printf("  the occluded sites the layer refuses (it pays no ray): %d\n", refusedSites);
+	printf("  the sites inside the in-view band the band arm allows (VICE-146): %d\n", bandSites);
+	printf("  the sites under the band minimum in the frustum it refuses: %d\n", bandRefusals);
 	printf("  the beyond-the-fog removals the fade allows: %d\n", removalSites);
 	printf("  the creation and hand-over bands that hold their edges: %d\n\n", inBandCreations);
 

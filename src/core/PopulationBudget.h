@@ -197,10 +197,11 @@
  *	FILL_BURST_FRAMES x FILL_BURST_HIDDEN_ATTEMPTS_PER_FRAME the hidden one
  *
  * A frame that spends its attempts spends a window frame, placing or not. A
- * frame that cannot spend them (the models of the zone are not resident) does
- * not spend the window, but it counts against the give-up bound below, so the
- * streaming wait is bounded too and no run can ask for more attempts than the
- * hidden window above. A frame that ends without a placement is a stall, and
+ * frame that cannot spend them (the models of the zone are not resident, or
+ * the local target is not known yet at boot) does not spend the window, but it
+ * counts against the give-up bound below, so the streaming and boot waits are
+ * bounded too and no run can ask for more attempts than the hidden window
+ * above. A frame that ends without a placement is a stall, and
  * FILL_BURST_STALL_FRAMES of them in a row give the burst up and hand the fill
  * back to the trickle.
  *
@@ -225,9 +226,12 @@
  * counters count the attempts, so the shift is measurable.
  *
  * The burst is bounded by the window, so a wrong target cannot make it runaway:
- * the stop line is checked first every frame and every attempt inside the frame,
+ * the target is checked first every frame and every attempt inside the frame,
  * on the live counts (the totals of the pedestrians are recomputed every
- * attempt, exactly as the shipped start-of-game burst recomputed them).
+ * attempt, exactly as the shipped start-of-game burst recomputed them). A
+ * target that is not known yet (0, the boot frames) waits instead of ending
+ * the run, inside the same give-up bound (VICE-146): the burst is not burned
+ * on a target that cannot be filled.
  */
 #define FILL_BURST_FRAMES 60			/* the work window: 2 s at 30 fps */
 #define FILL_BURST_ATTEMPTS_PER_FRAME 25	/* a visible frame: about 4 x the trickle at the ring cap */

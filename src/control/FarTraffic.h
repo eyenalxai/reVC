@@ -85,8 +85,7 @@
  * A creation and a removal are the events the player can catch, so they go
  * through the near bubble's rule and through nothing else
  * (CCarCtrl::NearBubbleAllowsCreation / NearBubbleAllowsRemoval): a far car is
- * created where the player cannot see it appear (beyond the fade, behind the
- * camera by the margin, occluded, under a fade) and removed where the player
+ * created where the player cannot see it appear and removed where the player
  * cannot see it go. The layer's own sites are the two the bubble leaves on an
  * open road, and it asks no line-of-sight ray for them:
  *
@@ -101,6 +100,22 @@
  *			traffic that keeps flowing after the player stops. The
  *			rear half is off the frustum by the bubble's margin for
  *			every FOV the game has, so the soft arm is the site's own.
+ *
+ * Two arms of the ladder are the layer's on purpose and both are ray-free: the
+ * fade and the soft arm above, and - since VICE-146 restored it - the in-view
+ * band. A far creation whose placement brackets slightly inside the fade (the
+ * fog site's own segment length) lands in the frustum at or beyond
+ * rings.carOnScreenSpawnMin, where the band arm allows it as the stock on-screen
+ * site: the car's own alpha reveal covers it, exactly as it covers a near
+ * spawn, and it is counted in the band rows, never the acceptance pair.
+ *
+ * The removals use the band's own cover: a car the player can see that the rule
+ * lets out at or beyond the band minimum goes by the despawn's fade-out
+ * (`bFadeOut`, the way the near traffic leaves in view, VICE-146), and the
+ * faded tail is deleted at alpha 0, where the near cull deletes its own. A car
+ * that is invisible or off screen, and every car beyond the fog or of a closed
+ * band, is deleted at once. The layer's deletion is counted with the near
+ * bubble's hidden removals, never the catchable zone.
  *
  * The ray is refused (rayAllowed false) for the far layer, on both gates: a
  * site two kilometres out spends a line-of-sight ray of that length, and the

@@ -123,21 +123,38 @@ Three facts bound any change here:
      band keeps 0.707). The bubble's soft arm - off the frustum by the margin,
      at or beyond the soft distance (102.5 m) - allows it with no ray.
 
-   The layer passes `rayAllowed = false`: a far site is two kilometres out, and
-   a line-of-sight ray of that length is the wrong work for a position the fog
-   or the camera's back already hides. The price is exact and conservative: an
-   occluded far site is refused, and the counts that bypass the gate cannot
-   pass unnoticed because the counters are the bubble's own.
+   Two arms of the ladder are the layer's on purpose and both are ray-free: the
+   fade and the soft arm above, and - since VICE-146 restored it - the **in-view
+   band**. A far creation whose placement brackets slightly inside the fade (the
+   fog site's own segment length) lands in the frustum at or beyond
+   `rings.carOnScreenSpawnMin`, where the band arm allows it as the stock
+   on-screen site: the car's own alpha reveal covers it, exactly as it covers a
+   near spawn (at the layer's stagger the reveal takes 1.6 s, which at the
+   fog's distance is a form in the haze, not a pop), and the event is counted in
+   the band rows, never the acceptance pair. A far site under the band minimum
+   stays in the catchable zone and is refused. The harness checks all three
+   ray-free arms (fade, soft, band) and the refusal under the minimum.
 5. **Removals ask the bubble's removal rule, and the layer pays no ray for
    them either.** `FarTrafficRemoveCar` calls
    `CCarCtrl::NearBubbleAllowsRemoval` - the same gate the near cull uses (the
-   distance beyond the bubble and its reserve, the fresh-spawn grace, and a
-   hidden arm: off the frustum by the margin, beyond the fade, under a fade) -
-   with the gate's ray option false (the gate grew the option for the layer,
-   `NearBubbleAllowsRemoval(..., bool rayAllowed = true)`; the near paths are
-   unchanged and keep their ray). The removal arms of the layer are therefore
-   the fog's and the camera's back; an occluded hint is refused, not confirmed,
-   which costs a frame of waiting and never a two-kilometre ray.
+   distance beyond the bubble and its reserve, the fresh-spawn grace, and an
+   allowed arm: off the frustum by the margin, beyond the fade, under a fade, or
+   in the in-view band) - with the gate's ray option false (the gate grew the
+   option for the layer, `NearBubbleAllowsRemoval(..., bool rayAllowed = true)`;
+   the near paths are unchanged and keep their ray). The removal arms of the
+   layer are therefore the fog's, the camera's back, and the band; an occluded
+   hint is refused, not confirmed, which costs a frame of waiting and never a
+   two-kilometre ray.
+   **The band's removal is a fade, not a deletion** (VICE-146's own cover, and
+   the way the near despawn leaves in view): a car the player can see that the
+   rule lets out sets `bFadeOut`, and its faded tail is deleted at alpha 0 by the
+   gate pass - exactly where the near cull deletes its own - counted with the
+   near bubble's hidden removals, so a far car never blinks out in view and the
+   catchable-zone acceptance pair never moves for the layer. A car that is
+   invisible or off screen, and every car beyond the fog or of a closed band, is
+   deleted at once. The fade loses the layer nothing: a fading car is still a
+   far car (no collision, no control) until its tail, and it is promoted like
+   any other if the player comes near it.
    The frame's bound counts the *gates the layer asks*, not the cars it
    removes: `removalGates` is spent by every answer, a refusal included, so one
    frame cannot ask more than `FAR_TRAFFIC_REMOVE_ATTEMPTS` (2) answers and
@@ -242,12 +259,19 @@ Three facts bound any change here:
 11. **The counters** (live in `utils/caps-audit/live-counters.py`):
     `ms_nFarTrafficCars` and `ms_nFarTrafficCap` (the live pair: a cap of zero
     is a closed band, not a fault), `ms_nFarTrafficCreations`,
-    `ms_nFarTrafficRemovals`, `ms_nFarTrafficPromotions`,
+    `ms_nFarTrafficRemovals` (a removal is counted when the car is gone: the
+    faded tail of an in-view removal counts here, never at the moment the fade
+    starts), `ms_nFarTrafficPromotions`,
     `ms_nFarTrafficSafetyPromotions` (the driverless reach seals),
     `ms_nFarTrafficDemotions` (the hand-overs), `ms_nFarTrafficInReach` (the
     acceptance gauge, must stay 0), the refusals by cause (`Refused`,
     `RefusedModel`, `RefusedPool`), `ms_nFarTrafficAttempts` and
-    `ms_nFarTrafficUpdates` (the stagger's work).
+    `ms_nFarTrafficUpdates` (the stagger's work). The near bubble's own rows are
+    VICE-146's: the acceptance pair is the catchable-zone counters
+    (`ms_nNearBubbleCatchableCreations` / `-Removals`), the in-view band has its
+    own pair (`ms_nNearBubbleBandCreations` / `-Removals`) and the layer's
+    events can move the band pair (a far creation the band allowed, an in-view
+    removal's fade-out) but never the acceptance pair.
 
 ## The reading of "hidden" for a switch
 
@@ -268,6 +292,30 @@ below-floor stress cell - outside the bubble and its reserve either way), and
 the hand-over happens only where the near cull's own blind-spot rule already
 allowed a removal. The evidence program carries both: the sites through the
 bubble's ladder, and the switch's fact list (7 written of 13, 1 drawn and held).
+
+## The reading of "hidden" after VICE-146
+
+The near bubble's in-view band (ADR 0025's amendment) makes the events of a
+position in the frustum at or beyond `rings.carOnScreenSpawnMin` allowed: a
+creation is covered by the car's own reveal, a removal by the despawn's
+fade-out. The far layer follows that rule instead of sitting beside it:
+
+- **a far creation whose placement lands in the band is a band site** (the fog
+  site's own segment can bracket inside the fade: in the frustum, at or beyond
+  the minimum, covered by the reveal the layer runs on its stagger - 1.6 s, a
+  form in the haze at that distance). It is counted in 146's band rows; a site
+  under the band minimum stays in the catchable zone and is refused.
+- **a far removal the player can see is a fade-out** (`bFadeOut`, the same
+  cover the near despawn uses), and its tail is deleted at alpha 0, counted with
+  the near bubble's hidden removals. A far car never blinks out in view, and the
+  catchable-zone acceptance pair cannot move for the layer.
+
+So the layer needs no arm forbidden and no exception: the ladder's allowed arms
+are the layer's sites (the fade, the soft arm, the band), the ray-requiring arms
+are refused because the layer pays no ray, and the band's own cover - the reveal
+and the fade-out - is what the layer uses. The harness checks the three ray-free
+arms and the refusal under the minimum; `utils/near-bubble` owns the ladder's own
+proof.
 
 ## What bounds the work
 
@@ -394,6 +442,11 @@ all; the live frame read and the owner's play-test are their measurement.
   pool cannot give a driver is made real without one inside the player's reach
   (the reach's seal, `FAR_TRAFFIC_SAFETY_PROMOTE`). The gauge
   `ms_nFarTrafficInReach` reads the end state of every frame and must stay 0.
+- **The in-view band (VICE-146) has one meaning, not two**: a far creation the
+  band allows is a band creation (the reveal covers it) and a far car the player
+  can see goes by the fade-out, exactly as the near traffic's on-screen events
+  do. The layer's removals never blink out in view, and the catchable-zone
+  acceptance pair stays the near bubble's own.
 - **The switches cannot be seen, with one fact held back**: the car's own facts
   are untouched by every switch, and the one drawn fact a promotion writes - the
   driver - is held to the car's own reveal and drawn by the engine only inside

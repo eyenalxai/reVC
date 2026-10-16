@@ -18,7 +18,11 @@
  *      the burst promises: a productive frame spends the window, a frame the
  *      gates stop does not, a stall is an empty frame that ran, enough stalls in
  *      a row give the burst up, and the stop line ends the burst at the
- *      fraction of the local target.
+ *      fraction of the local target. It also checks the boot wait (VICE-146): a
+ *      frame whose local target is not known yet (0) does not spend the window
+ *      and does not end the burst before the existing give-up bound, so the
+ *      boot burst runs the moment the area is live; and the reason a run ended
+ *      is reported (the window spent or the give-up bound).
  *
  *   C. The triggers. It prints the transitions that arm a burst and the file
  *      that owns each trigger, so the design of the ticket is in one place next
@@ -91,13 +95,16 @@ static void PrintBounds(void)
 /* ------------------------------------------------------- B. the state machine */
 
 /* What one burst run cost: the frames that ran, the frames that placed
- * something and the attempts the caller would have spent. */
+ * something, the attempts the caller would have spent, and the reason the run
+ * ended (the stop line, the window, or the give-up bound - VICE-146). */
 struct SBurstRun
 {
 	int framesSpent;
 	int framesPlaced;
 	int attempts;
 	bool endedByStopLine;
+	bool endedByWindow;
+	bool endedByStalls;
 };
 
 /*
@@ -111,7 +118,7 @@ struct SBurstRun
 static SBurstRun
 RunBurst(float count, float target, int places, bool hidden)
 {
-	SBurstRun run = { 0, 0, 0, false };
+	SBurstRun run = { 0, 0, 0, false, false, false };
 	SFillBurst burst;
 	int placedLeft = places;
 
@@ -130,7 +137,11 @@ RunBurst(float count, float target, int places, bool hidden)
 		bool placed = placedLeft > 0;
 		if (placed)
 			placedLeft--;
-		FillBurstSpendFrame(&burst, true, placed);
+		EFillBurstEnded ended = FillBurstSpendFrame(&burst, true, placed);
+		if (ended == FILL_BURST_ENDED_WINDOW)
+			run.endedByWindow = true;
+		else if (ended == FILL_BURST_ENDED_STALLS)
+			run.endedByStalls = true;
 		run.framesSpent++;
 		if (placed)
 			run.framesPlaced++;
@@ -159,6 +170,7 @@ static void CheckStateMachine(void)
 	Check(full.attempts == FILL_BURST_FRAMES * FILL_BURST_HIDDEN_ATTEMPTS_PER_FRAME,
 		"the window of hidden frames spends the hidden budget of every frame");
 	Check(!full.endedByStopLine, "the window can end without the stop line");
+	Check(full.endedByWindow && !full.endedByStalls, "a spent window reports the window as the end reason");
 
 	SBurstRun visible = RunBurst(0.0f, 1000.0f, FILL_BURST_FRAMES, false);
 	Check(visible.attempts == FILL_BURST_FRAMES * FILL_BURST_ATTEMPTS_PER_FRAME,
@@ -190,16 +202,41 @@ static void CheckStateMachine(void)
 
 	/* A frame that cannot spend its attempts (the streaming wait) does not
 	 * spend the window, but it counts against the same bound: the wait is
-	 * bounded, and the window is still there when the models arrive. */
+	 * bounded, and the window is still there when the models arrive. It
+	 * reports the give-up reason when the bound fires. */
 	SFillBurst waiting;
 	FillBurstArm(&waiting);
 	for (int i = 0; i < FILL_BURST_STALL_FRAMES - 1; i++)
-		FillBurstSpendFrame(&waiting, false, false);
+		Check(FillBurstSpendFrame(&waiting, false, false) == FILL_BURST_NOT_ENDED,
+			"a wait below the bound does not end the burst");
 	Check(FillBurstIsRunning(&waiting), "a burst survives a wait below the bound");
 	Check(waiting.nFrames == FILL_BURST_FRAMES, "a frame that spends no attempt leaves the window whole");
 	Check(waiting.nStalls == FILL_BURST_STALL_FRAMES - 1, "the waiting frames are counted");
-	FillBurstSpendFrame(&waiting, false, false);
+	Check(FillBurstSpendFrame(&waiting, false, false) == FILL_BURST_ENDED_STALLS,
+		"the give-up bound reports the stalls as the end reason");
 	Check(!FillBurstIsRunning(&waiting), "the wait bound ends the burst");
+
+	/* The boot wait (VICE-146): a frame whose local target is not known yet
+	 * (0) rides the same mechanism - it spends no attempt, so the window
+	 * stays whole - and the burst runs the moment the target is live. */
+	SFillBurst boot;
+	FillBurstArm(&boot);
+	for (int i = 0; i < 5; i++)
+		Check(FillBurstSpendFrame(&boot, false, false) == FILL_BURST_NOT_ENDED,
+			"a boot frame without a target does not end the burst");
+	Check(FillBurstIsRunning(&boot), "the burst survives the boot wait");
+	Check(boot.nFrames == FILL_BURST_FRAMES, "the boot wait leaves the window whole");
+	Check(boot.nStalls == 5, "the boot frames count against the give-up bound");
+	Check(FillBurstSpendFrame(&boot, true, true) == FILL_BURST_NOT_ENDED,
+		"the first frame with a target runs");
+	Check(boot.nFrames == FILL_BURST_FRAMES - 1, "the target's frame spends a window frame");
+	Check(boot.nStalls == 0, "a placement clears the boot wait's stalls");
+	/* A boot wait that never ends gives the burst up at the same bound. */
+	SFillBurst bootLost;
+	FillBurstArm(&bootLost);
+	for (int i = 0; i < FILL_BURST_STALL_FRAMES; i++)
+		FillBurstSpendFrame(&bootLost, false, false);
+	Check(!FillBurstIsRunning(&bootLost), "a target that never arrives ends the burst at the bound");
 
 	/* A placement resets the counter: the bound is a run of frames without one. */
 	SFillBurst recovering;
@@ -218,12 +255,44 @@ static void CheckStateMachine(void)
 	Check(refused.attempts == FILL_BURST_STALL_FRAMES * FILL_BURST_HIDDEN_ATTEMPTS_PER_FRAME,
 		"the failing run spends the attempts of its frames");
 	Check(!refused.endedByStopLine, "the failing run is not the stop line");
+	Check(refused.endedByStalls && !refused.endedByWindow, "a failing run reports the give-up bound");
 
-	/* The stop line: 90 % of the local target, and a zero target stops too. */
+	/* The stop line: 90 % of the local target. The predicate reads true at a
+	 * zero target (0 is at 90 % of 0): that is exactly why the callers check
+	 * the target first and wait (VICE-146), and the caller-guard case below
+	 * holds the wait. */
 	Check(!FillBurstTargetReached(89.9f, 100.0f), "89.9 % of the target does not stop the burst");
 	Check(FillBurstTargetReached(90.0f, 100.0f), "90 % of the target stops the burst");
-	Check(FillBurstTargetReached(0.0f, 0.0f), "a zero target stops the burst");
-	Check(FillBurstTargetReached(5.0f, 0.0f), "a run that lost its target stops the burst");
+	Check(FillBurstTargetReached(0.0f, 0.0f), "the stop-line predicate reads true at a zero target");
+	Check(FillBurstTargetReached(5.0f, 0.0f), "the stop-line predicate reads true when the target is lost");
+
+	/* The caller's guard (VICE-146), as far as an offline program can reach:
+	 * this is one frame of the callers' own decision, in their order - the
+	 * target first, the stop line of a live target second, the frame last
+	 * (Population.cpp, CarCtrl.cpp) - so the burst is armed through the
+	 * zero-target frames of a boot and runs the moment the area is known. A
+	 * caller edit that moved the stop line before the target check, or
+	 * dropped the wait, would disarm the burst on a 0 target on its first
+	 * frame; this sequence catches that. */
+	SFillBurst guarded;
+	int bootFrames = 0;
+	FillBurstArm(&guarded);
+	for (int i = 0; i < 12; i++) {
+		float target = i < 10 ? 0.0f : 500.0f;	/* the zone is live on frame 10 */
+		if (target <= 0.0f) {
+			/* The boot wait: the stop line is never reached with a 0 target. */
+			FillBurstSpendFrame(&guarded, false, false);
+			bootFrames++;
+			continue;
+		}
+		if (FillBurstTargetReached(0.0f, target))
+			break;	/* the stop line of a live target (not reached here) */
+		FillBurstSpendFrame(&guarded, true, true);
+	}
+	Check(bootFrames == 10, "the boot frames wait for the target");
+	Check(FillBurstIsRunning(&guarded), "the guarded burst survives the zero-target boot");
+	Check(guarded.nFrames == FILL_BURST_FRAMES - 2, "only the live-target frames spend the window");
+	Check(guarded.nStalls == 0, "a placement clears the boot wait's stalls");
 
 	SBurstRun stopped = RunBurst(900.0f, 1000.0f, FILL_BURST_FRAMES, true);
 	Check(stopped.endedByStopLine, "the stop line ends the burst");
@@ -234,7 +303,10 @@ static void CheckStateMachine(void)
 		FILL_BURST_FRAMES * FILL_BURST_HIDDEN_ATTEMPTS_PER_FRAME, FILL_BURST_FRAMES / 30.0f);
 	printf("  whatever the gates do; the wall clock of a run is the frames it spends plus its waits\n");
 	printf("  counters for the live rig: CPopulation::ms_FillBurst, ms_nFillBurstAttempts, ms_nFillBurstPlaced,\n");
-	printf("  ms_fFillBurstTarget; the same four on CCarCtrl\n\n");
+	printf("  ms_fFillBurstTarget, and the since-boot pair ms_nFillBurstTotalAttempts / ms_nFillBurstTotalPlaced\n");
+	printf("  with the end reasons ms_nFillBurstEndedLine / Stalls / Window (VICE-146); the same eight on\n");
+	printf("  CCarCtrl. A boot burst that waits for its target is not burned on it, so the totals show\n");
+	printf("  the run once the area is live.\n\n");
 }
 
 /* ------------------------------------------------------------ C. the triggers */
