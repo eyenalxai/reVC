@@ -2162,6 +2162,7 @@ CMenuManager::DrawControllerSetupScreen()
 		actionTexts[25] = TheText.Get("FEC_LOL");
 		actionTexts[26] = TheText.Get("FEC_LOR");
 		actionTexts[27] = TheText.Get("FEC_RLD");
+		actionTexts[28] = nil;
 	}
 
 	// Blue panel background

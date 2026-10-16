@@ -292,7 +292,7 @@ void CControllerConfigManager::InitDefaultControlConfiguration()
 
 	SetControllerKeyAssociatedWithAction    (PED_DUCK,                            'C',        KEYBOARD);
 	SetControllerKeyAssociatedWithAction    (PED_RELOAD,                          'R',        KEYBOARD);
-																	          
+
 	SetControllerKeyAssociatedWithAction    (PED_FIREWEAPON,                      rsPADINS,   KEYBOARD);
 	SetControllerKeyAssociatedWithAction    (PED_FIREWEAPON,                      rsLCTRL,    OPTIONAL_EXTRA);
 #ifdef BIND_VEHICLE_FIREWEAPON
