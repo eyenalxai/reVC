@@ -44,17 +44,22 @@
  *    FILL_BURST_STALL_FRAMES stalls in a row disarm the burst, so a target that
  *    cannot be reached and a streaming that never arrives cannot keep a burst
  *    alive forever, and the trickle takes the fill back.
- *  - The boot wait: a frame whose local target is not known yet (the boot
- *    frames before the zone and the range are live, a target of 0) waits like
- *    a streaming frame - it does not spend the window and counts against the
- *    same give-up bound (VICE-146). The burst is not burned on a target that
- *    cannot be filled.
+ *  - The target wait: a frame whose local target is not known yet (the boot
+ *    frames before the zone and the range are live, a target of 0) rides
+ *    FillBurstSpendTargetWait: it does not spend the window and it does not
+ *    burn the give-up bound - an invalid target is not a placement stall - and
+ *    its own bound (FILL_BURST_TARGET_WAIT_FRAMES) gives the wait up when the
+ *    world never becomes live. The first cut of VICE-146 routed this wait
+ *    through the stall helper, and the pedestrian boot burst died silently at
+ *    boot; the fix round split it out.
  *
- * The end of a run is reported: FillBurstSpendFrame returns why the frame
- * ended the burst, when it did (the window was spent, or the give-up bound
+ * The end of a run is reported: FillBurstSpendFrame and
+ * FillBurstSpendTargetWait return why the frame ended the burst, when it did
+ * (the window was spent, the give-up bound fired, or the target wait bound
  * fired). The caller counts the reasons, so a live read says why a burst
- * ended. The third reason of a run, the stop line, is the caller's own check:
- * it disarms the burst before a frame runs.
+ * ended. The other two reasons of a run, the stop line and the car budget, are
+ * the callers' own checks: they disarm the burst before a frame runs and count
+ * it themselves.
  *
  * The random stream
  * -----------------
@@ -81,6 +86,7 @@ struct SFillBurst
 {
 	int nFrames;	/* the window frames that still carry attempts; 0 = idle */
 	int nStalls;	/* the frames in a row without a placement */
+	int nTargetWaits;	/* the frames the burst has waited for a target (VICE-146 fix) */
 };
 
 /* Arm the window: a transition has happened and the fill may spend it. */
@@ -89,6 +95,7 @@ FillBurstArm(SFillBurst *burst)
 {
 	burst->nFrames = FILL_BURST_FRAMES;
 	burst->nStalls = 0;
+	burst->nTargetWaits = 0;
 }
 
 static inline void
@@ -96,6 +103,7 @@ FillBurstDisarm(SFillBurst *burst)
 {
 	burst->nFrames = 0;
 	burst->nStalls = 0;
+	burst->nTargetWaits = 0;
 }
 
 static inline bool FillBurstIsRunning(const SFillBurst *burst)
@@ -109,14 +117,16 @@ static inline bool FillBurstIsRunning(const SFillBurst *burst)
 static inline int FillBurstAttempts(const SFillBurst *burst, bool hidden)
 { return hidden ? FILL_BURST_HIDDEN_ATTEMPTS_PER_FRAME : FILL_BURST_ATTEMPTS_PER_FRAME; }
 
-/* Why a spent frame ended the burst, when it did (VICE-146). The stop line is
- * the third reason and is not reported here: the caller checks it before a
- * frame runs and disarms the burst itself. */
+/* Why a spent frame ended the burst, when it did (VICE-146): every helper path
+ * that disarms reports the reason here, so no run ends silently. The stop line
+ * and the car budget are the callers' own disarms: the caller checks them
+ * before a frame runs and counts them itself. */
 enum EFillBurstEnded
 {
 	FILL_BURST_NOT_ENDED = 0,
 	FILL_BURST_ENDED_WINDOW,	/* the last window frame was spent */
 	FILL_BURST_ENDED_STALLS,	/* the give-up bound fired */
+	FILL_BURST_ENDED_TARGET_WAIT,	/* the target never became valid (VICE-146 fix) */
 };
 
 /*
@@ -127,20 +137,23 @@ enum EFillBurstEnded
  * whether it placed something or not. `placed` is true when it created at
  * least one entity.
  *
- * A frame that spent no attempt (the streaming has no model of the zone yet,
- * or the local target is not known yet) does not spend the window: the fill
- * waits for the models or the target instead of burning its frames on
- * attempts that would fail. It counts against the give-up bound all the same,
- * so the wait is bounded like a stall.
+ * A frame with no attempts (the streaming has no model of the zone yet) does
+ * not spend the window: the fill waits for the models instead of burning its
+ * frames on attempts that would fail. It counts against the give-up bound all
+ * the same, so the streaming wait is bounded like a stall. A frame whose
+ * target is not known yet does not come here: it rides
+ * FillBurstSpendTargetWait, whose bound is its own.
  *
  * A placement resets the counter of the frames in a row without one, and
  * FILL_BURST_STALL_FRAMES of them give the burst up. The return value says
  * whether this frame ended the burst and why, so the caller can count the
- * reasons.
+ * reasons. A frame here has passed the caller's target check, so it clears
+ * the target wait.
  */
 static inline EFillBurstEnded
 FillBurstSpendFrame(SFillBurst *burst, bool attempts, bool placed)
 {
+	burst->nTargetWaits = 0;	/* the caller's target was valid for this frame */
 	if (attempts)
 		burst->nFrames--;
 	if (attempts && placed)
@@ -151,6 +164,25 @@ FillBurstSpendFrame(SFillBurst *burst, bool attempts, bool placed)
 	}
 	if (burst->nFrames <= 0)
 		return FILL_BURST_ENDED_WINDOW;
+	return FILL_BURST_NOT_ENDED;
+}
+
+/*
+ * One frame waiting for a valid local target (VICE-146 fix): the boot frames
+ * before the zone and the range are live, where the target is 0. The frame is
+ * neither an attempt nor a placement stall: the window and the give-up bound
+ * are untouched, and the wait has its own bound
+ * (FILL_BURST_TARGET_WAIT_FRAMES), so a world that never becomes live gives
+ * the burst up - with the reason reported - instead of keeping it armed (and
+ * the trickle out) forever. The caller counts the reason like every other.
+ */
+static inline EFillBurstEnded
+FillBurstSpendTargetWait(SFillBurst *burst)
+{
+	if (++burst->nTargetWaits >= FILL_BURST_TARGET_WAIT_FRAMES) {
+		FillBurstDisarm(burst);
+		return FILL_BURST_ENDED_TARGET_WAIT;
+	}
 	return FILL_BURST_NOT_ENDED;
 }
 

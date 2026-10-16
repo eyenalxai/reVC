@@ -197,11 +197,19 @@
  *	FILL_BURST_FRAMES x FILL_BURST_HIDDEN_ATTEMPTS_PER_FRAME the hidden one
  *
  * A frame that spends its attempts spends a window frame, placing or not. A
- * frame that cannot spend them (the models of the zone are not resident, or
- * the local target is not known yet at boot) does not spend the window, but it
- * counts against the give-up bound below, so the streaming and boot waits are
- * bounded too and no run can ask for more attempts than the hidden window
- * above. A frame that ends without a placement is a stall, and
+ * frame whose zone models are not resident does not spend the window, but it
+ * counts against the give-up bound below, so the streaming wait is bounded too
+ * and no run can ask for more attempts than the hidden window above. A frame
+ * whose local target is not known yet (the boot frames before the zone and
+ * the range are live, a target of 0) waits on its own bound
+ * (FILL_BURST_TARGET_WAIT_FRAMES): it does not spend the window and does not
+ * burn the give-up bound, because an invalid target is not a placement stall -
+ * the first fix routed the wait through the stall helper and the pedestrian
+ * burst died silently at boot (the VICE-146 fix round). The car target and
+ * the car budget have positive floors (the ring table's scale floor is the
+ * FOV factor, at least 1.0, and the ini multipliers clamp at 0.2), so the
+ * target wait is the pedestrian burst's in practice; the shared helper serves
+ * both. A frame that ends without a placement is a stall, and
  * FILL_BURST_STALL_FRAMES of them in a row give the burst up and hand the fill
  * back to the trickle.
  *
@@ -239,6 +247,7 @@
 #define FILL_BURST_HIDDEN_FADE 192		/* the fade that hides the fill: three quarters of the screen (CDraw::FadeValue) */
 #define FILL_BURST_TARGET_FRACTION 0.9f		/* the stop line: 90 % of the local target */
 #define FILL_BURST_STALL_FRAMES 30		/* frames in a row without a placement that give the burst up: 1 s */
+#define FILL_BURST_TARGET_WAIT_FRAMES 600	/* the target wait: a dedicated bound, about 20 s at 30 fps (VICE-146 fix) */
 #define FILL_BURST_POOL_CHECK_ATTEMPTS 4	/* the ped pool is re-read every this many attempts inside a burst frame */
 
 static_assert(FILL_BURST_HIDDEN_ATTEMPTS_PER_FRAME >= FILL_BURST_ATTEMPTS_PER_FRAME,
@@ -250,6 +259,8 @@ static_assert(FILL_BURST_TARGET_FRACTION > 0.0f && FILL_BURST_TARGET_FRACTION <=
 static_assert(FILL_BURST_HIDDEN_FADE > 0 && FILL_BURST_HIDDEN_FADE <= 255,
 	"the hidden threshold is a fade value");
 static_assert(FILL_BURST_POOL_CHECK_ATTEMPTS > 0, "the pool check step must make progress");
+static_assert(FILL_BURST_TARGET_WAIT_FRAMES > FILL_BURST_STALL_FRAMES,
+	"the target wait must outlast the stall bound it must not burn");
 /* The burst of a frame has to beat the trickle it replaces at the ring cap.
  * The ratio needs the ring table (RING_MAX_SCALE), which this table does not
  * include, so the check lives in the evidence program (utils/burst-fill),

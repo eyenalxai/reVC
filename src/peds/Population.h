@@ -69,6 +69,7 @@ public:
 	static uint32 ms_nFillBurstEndedLine;
 	static uint32 ms_nFillBurstEndedStalls;
 	static uint32 ms_nFillBurstEndedWindow;
+	static uint32 ms_nFillBurstEndedTargetWait;
 	static float ms_fFillBurstTarget;
 
 	static void Initialise();
