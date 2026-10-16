@@ -39,7 +39,12 @@ enum Config {
 	NUMOBJECTS = 460,
 	NUMDUMMIES = 2340,
 	NUMAUDIOSCRIPTOBJECTS = 192,
-	NUMCOLMODELS = 4400,
+	// First person is always on. The parallel feature line still guards its
+	// code with this define (HUD reticle, car ADS, camera work), so it must
+	// stay defined for that code to compile.
+	FIRST_PERSON,
+
+	// Sfx and music
 	NUMCUTSCENEOBJECTS = 50,	// not a pool in VC
 
 	NUMANIMBLOCKS = 35,
