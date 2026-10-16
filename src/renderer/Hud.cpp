@@ -245,19 +245,18 @@ DrawActiveReloadBar(void)
 	const float bottom = top + height;
 
 	if (bar.visible) {
-		// track
-		CRGBA track = NOTWANTED_COLOR;
-		track.a = 255;
+		// The wanted level drawing stores its fade alpha into the palette
+		// colors, so take their RGB with a fresh opaque alpha.
+		CRGBA track(NOTWANTED_COLOR.r, NOTWANTED_COLOR.g, NOTWANTED_COLOR.b, 255);
 		CSprite2d::DrawRect(CRect(left, top, right, bottom), track);
 
 		// window zone
-		CRGBA zone = WANTED_COLOR;
-		zone.a = 255;
+		CRGBA zone(WANTED_COLOR.r, WANTED_COLOR.g, WANTED_COLOR.b, 255);
 		CSprite2d::DrawRect(CRect(left + width*bar.windowStart, top, left + width*bar.windowEnd, bottom), zone);
 
 		// needle
 		const float needle = left + width*bar.progress;
-		CSprite2d::DrawRect(CRect(needle - SCREEN_SCALE_X(1.0f), top, needle + SCREEN_SCALE_X(1.0f), bottom), CRGBA(255, 255, 255, 255));
+		CSprite2d::DrawRect(CRect(needle - SCREEN_SCALE_X(1.0f), top, needle + SCREEN_SCALE_X(1.0f), bottom), ACTIVERELOAD_PERFECT_COLOR);
 	}
 
 	if (flash) {
