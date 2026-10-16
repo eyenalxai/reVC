@@ -313,7 +313,7 @@ GenericLoad()
 	CPad::ResetCheats();
 	if (!ReadInSizeofSaveFileBuffer(file, size))
 		return false;
-	size = align4bytes(size);
+	size = CapSaveBlockSize(size);
 	ReadDataFromFile(file, work_buff, size);
 	buf = (work_buff + 0x40);
 	ReadDataFromBufferPointer(buf, saveSize);
