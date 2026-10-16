@@ -191,7 +191,7 @@ CCam::Process(void)
 	switch(Mode){
 	case MODE_TOPDOWN:
 	case MODE_GTACLASSIC:
-	//	Process_TopDown(CameraTarget, TargetOrientation, SpeedVar, TargetSpeedVar);
+		// no camera of its own: the values stay script reachable (ADR 0022)
 		break;
 	case MODE_BEHINDCAR:
 		Process_BehindCar(CameraTarget, TargetOrientation, SpeedVar, TargetSpeedVar);
@@ -569,19 +569,6 @@ CCam::GetVectorsReadyForRW(void)
 	Up = CrossProduct(right, Front);
 }
 
-bool
-CCam::GetBoatLook_L_R_HeightOffset(float &Offset)
-{
-	if(CamTargetEntity == nil)
-		return false;
-	CVehicleModelInfo *mi = (CVehicleModelInfo*)CModelInfo::GetModelInfo(CamTargetEntity->GetModelIndex());
-	tBoatHandlingData *handling = mod_HandlingManager.GetBoatPointer(mi->m_handlingId);
-	if(handling){
-		Offset = handling->fLook_L_R_BehindCamHeight;
-		return true;
-	}
-	return false;	// can't happen, we always get a boat pointer back
-}
 
 // Tuning values of the follow camera in a vehicle (see Process_FollowPed and
 // the look keys)
@@ -1979,142 +1966,6 @@ CCam::AvoidWallsTopDownPed(const CVector &TargetCoors, const CVector &Offset, fl
 	WellBufferMe(Target, Adjuster, AdjusterSpeed, MaxSpeed, Acceleration, false);
 }
 
-void
-CCam::Process_TopDownPed(const CVector &CameraTarget, float TargetOrientation, float, float)
-{
-	if(!CamTargetEntity->IsPed())
-		return;
-
-	float Dist;
-	float HeightTarget;
-	static int NumPedPosCountsSoFar = 0;
-	static float PedAverageSpeed = 0.0f;
-	static float AdjustHeightTargetMoveBuffer = 0.0f;
-	static float AdjustHeightTargetMoveSpeed = 0.0f;
-	static float PedSpeedSoFar = 0.0f;
-	static float FarClipDistance = 200.0f;
-	static float NearClipDistance = 1.5f;
-	static float TargetAdjusterForSouth = 0.0f;
-	static float TargetAdjusterSpeedForSouth = 0.0f;
-	static float TargetAdjusterForNorth = 0.0f;
-	static float TargetAdjusterSpeedForNorth = 0.0f;
-	static float TargetAdjusterForEast = 0.0f;
-	static float TargetAdjusterSpeedForEast = 0.0f;
-	static float TargetAdjusterForWest = 0.0f;
-	static float TargetAdjusterSpeedForWest = 0.0f;
-	static CVector PreviousPlayerMoveSpeedVec;
-	CVector TargetCoors, PlayerMoveSpeed;
-	CVector TestSource, TestTarget;
-	CColPoint colPoint;
-	CEntity *entity;
-
-	FOV = DefaultFOV;
-	TargetCoors = CameraTarget;
-	PlayerMoveSpeed = ((CPed*)CamTargetEntity)->GetMoveSpeed();
-
-	if(ResetStatics){
-		PreviousPlayerMoveSpeedVec = PlayerMoveSpeed;
-		AdjustHeightTargetMoveBuffer = 0.0f;
-		AdjustHeightTargetMoveSpeed = 0.0f;
-		NumPedPosCountsSoFar = 0;
-		PedSpeedSoFar = 0.0f;
-		PedAverageSpeed = 0.0f;
-		TargetAdjusterForWest = 0.0f;
-		TargetAdjusterSpeedForWest = 0.0f;
-		TargetAdjusterForEast = 0.0f;
-		TargetAdjusterSpeedForEast = 0.0f;
-		TargetAdjusterForNorth = 0.0f;
-		TargetAdjusterSpeedForNorth = 0.0f;
-		TargetAdjusterForSouth = 0.0f;
-		TargetAdjusterSpeedForSouth = 0.0f;
-	}
-
-	if(RwCameraGetFarClipPlane(Scene.camera) > FarClipDistance)
-		RwCameraSetFarClipPlane(Scene.camera, FarClipDistance);
-	RwCameraSetNearClipPlane(Scene.camera, NearClipDistance);
-
-	// Average ped speed
-	NumPedPosCountsSoFar++;
-	PedSpeedSoFar += PlayerMoveSpeed.Magnitude();
-	if(NumPedPosCountsSoFar == 5){
-		PedAverageSpeed = 0.4f*PedAverageSpeed + 0.6*(PedSpeedSoFar/5.0f);
-		NumPedPosCountsSoFar = 0;
-		PedSpeedSoFar = 0.0f;
-	}
-	PreviousPlayerMoveSpeedVec = PlayerMoveSpeed;
-
-	// Zoom out depending on speed
-	if(PedAverageSpeed > 0.01f && PedAverageSpeed <= 0.04f)
-		HeightTarget = 2.5f;
-	else if(PedAverageSpeed > 0.04f && PedAverageSpeed <= 0.145f)
-		HeightTarget = 4.5f;
-	else if(PedAverageSpeed > 0.145f)
-		HeightTarget = 7.0f;
-	else
-		HeightTarget = 0.0f;
-
-	// Zoom out if locked on target is far away
-	if(FindPlayerPed()->m_pPointGunAt){
-		Dist = (FindPlayerPed()->m_pPointGunAt->GetPosition() - CameraTarget).Magnitude2D();
-		if(Dist > 6.0f)
-			HeightTarget = Max(HeightTarget, Dist/22.0f*37.0f);
-	}
-
-	Source = TargetCoors + CVector(0.0f, -1.0f, 9.0f);
-
-	// Collision checks
-	entity = nil;
-	TestSource = TargetCoors + CVector(0.0f, -1.0f, 9.0f);
-	TestTarget = TestSource;
-	TestTarget.z = TargetCoors.z;
-	if(CWorld::ProcessLineOfSight(TestTarget, TestSource, colPoint, entity, true, false, false, false, false, false, false)){
-		if(TargetCoors.z+9.0f+HeightTarget < colPoint.point.z+3.0f)
-			HeightTarget = colPoint.point.z+3.0f - (TargetCoors.z+9.0f);
-	}else{
-		TestSource = TargetCoors + CVector(0.0f, -1.0f, 9.0f);
-		TestTarget = TestSource;
-		TestSource.z += HeightTarget;
-		TestTarget.z = TestSource.z + 10.0f;
-		if(CWorld::ProcessLineOfSight(TestTarget, TestSource, colPoint, entity, true, false, false, false, false, false, false)){
-			if(TargetCoors.z+9.0f+HeightTarget < colPoint.point.z+3.0f)
-				HeightTarget = colPoint.point.z+3.0f - (TargetCoors.z+9.0f);
-		}
-	}
-
-	WellBufferMe(HeightTarget, &AdjustHeightTargetMoveBuffer, &AdjustHeightTargetMoveSpeed, 0.3f, 0.03f, false);
-	Source.z += AdjustHeightTargetMoveBuffer;
-
-	// Wall checks
-	AvoidWallsTopDownPed(TargetCoors, CVector(0.0f, -3.0f, 3.0f), &TargetAdjusterForSouth, &TargetAdjusterSpeedForSouth, 1.0f);
-	Source.y += TargetAdjusterForSouth;
-	AvoidWallsTopDownPed(TargetCoors, CVector(0.0f, 3.0f, 3.0f), &TargetAdjusterForNorth, &TargetAdjusterSpeedForNorth, 1.0f);
-	Source.y -= TargetAdjusterForNorth;
-	// BUG: east and west flipped
-	AvoidWallsTopDownPed(TargetCoors, CVector(3.0f, 0.0f, 3.0f), &TargetAdjusterForWest, &TargetAdjusterSpeedForWest, 1.0f);
-	Source.x -= TargetAdjusterForWest;
-	AvoidWallsTopDownPed(TargetCoors, CVector(-3.0f, 0.0f, 3.0f), &TargetAdjusterForEast, &TargetAdjusterSpeedForEast, 1.0f);
-	Source.x += TargetAdjusterForEast;
-
-	TargetCoors.y = Source.y + 1.0f;
-	TargetCoors.y += TargetAdjusterForSouth;
-	TargetCoors.x += TargetAdjusterForEast;
-	TargetCoors.x -= TargetAdjusterForWest;
-
-	Front = TargetCoors - Source;
-	Front.Normalise();
-#ifdef FIX_BUGS
-	if(Front.x == 0.0f && Front.y == 0.0f)
-		Front.y = 0.0001f;
-#else
-	// someone used = instead of == in the above check by accident
-	Front.x = 0.0f;
-#endif
-	m_cvecTargetCoorsForFudgeInter = TargetCoors;
-	Up = CrossProduct(Front, CVector(-1.0f, 0.0f, 0.0f));
-	Up.Normalise();
-
-	ResetStatics = false;
-}
 
 void
 CCam::Process_Rocket(const CVector &CameraTarget, float, float, float)

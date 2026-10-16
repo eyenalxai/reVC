@@ -701,7 +701,6 @@ CCamera::CamControl(void)
 	bool switchByJumpCut = false;
 	bool stairs = false;
 	bool boatTarget = false;
-	int PrevMode = Cams[ActiveCam].Mode;
 	CVector targetPos;
 	CVector garageCenter, garageDoorPos1, garageDoorPos2;
 	CVector garageCenterToDoor, garageCamPos;
@@ -962,6 +961,15 @@ CCamera::CamControl(void)
 			// the action now and switches the view, the zoom levels stay at
 			// the stock default (VICE-139)
 			ReqMode = CCam::MODE_FOLLOWPED;
+
+			// The stock clamp kept the ped zoom inside the three levels. The
+			// two values whose cameras are gone normalise the way it did, so a
+			// save that holds them behaves as before. CAM_ZOOM_TOPDOWN stays:
+			// it selects the top down camera on foot by design (ADR 0022).
+			if(PedZoomIndicator == CAM_ZOOM_1STPRS)
+				PedZoomIndicator = CAM_ZOOM_3;
+			else if(PedZoomIndicator == CAM_ZOOM_CINEMATIC)
+				PedZoomIndicator = CAM_ZOOM_1;
 
 			// Check 1st person mode
 			if(UpdateFirstPersonView(true))
@@ -2122,42 +2130,38 @@ CCamera::GetScreenRect(CRect &rect)
 void
 CCamera::TakeControl(CEntity *target, int16 mode, int16 typeOfSwitch, int32 controller)
 {
-	{
-		WhoIsInControlOfTheCamera = controller;
-		if(target){
-			if(mode == CCam::MODE_NONE){
-				// Why are we checking the old entity?
-				if(pTargetEntity->IsPed())
-					mode = CCam::MODE_FOLLOWPED;
-				else if(pTargetEntity->IsVehicle())
-					mode = CCam::MODE_CAM_ON_A_STRING;
-			}
-		}else if(FindPlayerVehicle())
-			target = FindPlayerVehicle();
-		else
-			target = PLAYER;
+	WhoIsInControlOfTheCamera = controller;
+	if(target){
+		if(mode == CCam::MODE_NONE){
+			// Why are we checking the old entity?
+			if(pTargetEntity->IsPed())
+				mode = CCam::MODE_FOLLOWPED;
+			else if(pTargetEntity->IsVehicle())
+				mode = CCam::MODE_CAM_ON_A_STRING;
+		}
+	}else if(FindPlayerVehicle())
+		target = FindPlayerVehicle();
+	else
+		target = PLAYER;
 
-		m_bLookingAtVector = false;
-		pTargetEntity = target;
-		m_iModeToGoTo = mode;
-		m_iTypeOfSwitch = typeOfSwitch;
-		m_bLookingAtPlayer = false;
-		m_bStartInterScript = true;
-	}
+	m_bLookingAtVector = false;
+	pTargetEntity = target;
+	m_iModeToGoTo = mode;
+	m_iTypeOfSwitch = typeOfSwitch;
+	m_bLookingAtPlayer = false;
+	m_bStartInterScript = true;
 }
 
 void
 CCamera::TakeControlNoEntity(const CVector &position, int16 typeOfSwitch, int32 controller)
 {
-	{
-		WhoIsInControlOfTheCamera = controller;
-		m_bLookingAtVector = true;
-		m_bLookingAtPlayer = false;
-		m_iModeToGoTo = CCam::MODE_FIXED;
-		m_vecFixedModeVector = position;
-		m_iTypeOfSwitch = typeOfSwitch;
-		m_bStartInterScript = true;
-	}
+	WhoIsInControlOfTheCamera = controller;
+	m_bLookingAtVector = true;
+	m_bLookingAtPlayer = false;
+	m_iModeToGoTo = CCam::MODE_FIXED;
+	m_vecFixedModeVector = position;
+	m_iTypeOfSwitch = typeOfSwitch;
+	m_bStartInterScript = true;
 }
 
 void

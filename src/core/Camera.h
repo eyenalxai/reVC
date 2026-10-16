@@ -45,6 +45,9 @@ const float DefaultFOV = 70.0f; // beta: 80.0f
 class CCam
 {
 public:
+	// The mode numbers are script facing: the scripts pass them and the saves
+	// carry zoom values derived from them, so they are never renumbered. A
+	// mode whose value nothing selects stays as a hole (ADR 0022).
 	enum
 	{
 		MODE_NONE = 0,
@@ -220,7 +223,6 @@ public:
 	bool RotCamIfInFrontCar(CVector &TargetCoors, float TargetOrientation);
 	void Cam_On_A_String_Unobscured(const CVector &TargetCoors, float BaseDist);
 	void FixCamWhenObscuredByVehicle(const CVector &TargetCoors);
-	bool GetBoatLook_L_R_HeightOffset(float &Offset);
 	void LookBehind(void);
 	void LookAroundVehicle(float bearing, float frontZOffset);
 	void ClipIfPedInFrontOfPlayer(void);
@@ -240,7 +242,6 @@ public:
 	void Process_FollowPedWithMouse(const CVector &CameraTarget, float TargetOrientation, float, float);
 	void Process_BehindCar(const CVector &CameraTarget, float TargetOrientation, float, float);
 	void Process_Cam_On_A_String(const CVector &CameraTarget, float TargetOrientation, float, float);
-	void Process_TopDownPed(const CVector &CameraTarget, float TargetOrientation, float, float);
 	void Process_Rocket(const CVector &CameraTarget, float, float, float);
 	void Process_M16_1stPerson(const CVector &CameraTarget, float, float, float);
 	void Process_1stPerson(const CVector &CameraTarget, float, float, float);
