@@ -68,6 +68,9 @@ float gDriftStrength = 1.0f;
 float gDriftAssist = 1.0f;
 bool gDriftDebug = false;
 
+// Active reload (see src/weapons/ActiveReload.h)
+bool gActiveReloadEnabled = true;
+
 // Infinite sprint (see src/peds/PlayerPed.cpp)
 bool gInfiniteSprint = false;
 
@@ -372,7 +375,7 @@ const char *iniControllerActions[] = { "PED_FIREWEAPON", "PED_CYCLE_WEAPON_RIGHT
 	"VEHICLE_ACCELERATE", "VEHICLE_BRAKE", "VEHICLE_CHANGE_RADIO_STATION", "VEHICLE_HORN", "TOGGLE_SUBMISSIONS", "VEHICLE_HANDBRAKE", "PED_1RST_PERSON_LOOK_LEFT",
 	"PED_1RST_PERSON_LOOK_RIGHT", "VEHICLE_LOOKLEFT", "VEHICLE_LOOKRIGHT", "VEHICLE_LOOKBEHIND", "VEHICLE_TURRETLEFT", "VEHICLE_TURRETRIGHT", "VEHICLE_TURRETUP", "VEHICLE_TURRETDOWN",
 	"PED_CYCLE_TARGET_LEFT", "PED_CYCLE_TARGET_RIGHT", "PED_CENTER_CAMERA_BEHIND_PLAYER", "PED_LOCK_TARGET", "NETWORK_TALK", "PED_1RST_PERSON_LOOK_UP", "PED_1RST_PERSON_LOOK_DOWN",
-	"_CONTROLLERACTION_36", "TOGGLE_DPAD", "SWITCH_DEBUG_CAM_ON", "TAKE_SCREEN_SHOT", "SHOW_MOUSE_POINTER_TOGGLE", "UNKNOWN_ACTION" };
+	"_CONTROLLERACTION_36", "TOGGLE_DPAD", "SWITCH_DEBUG_CAM_ON", "TAKE_SCREEN_SHOT", "SHOW_MOUSE_POINTER_TOGGLE", "PED_RELOAD", "UNKNOWN_ACTION" };
 
 const char *iniControllerTypes[] = { "kbd:", "2ndKbd:", "mouse:", "joy:" };
 
@@ -595,6 +598,7 @@ bool LoadINISettings()
 	ReadIniIfExists("Drift", "Strength", &gDriftStrength);
 	ReadIniIfExists("Drift", "Assist", &gDriftAssist);
 	ReadIniIfExists("Drift", "Debug", &gDriftDebug);
+	ReadIniIfExists("Weapons", "ActiveReload", &gActiveReloadEnabled);
 
 #ifdef PROPER_SCALING
 	ReadIniIfExists("Draw", "ProperScaling", &CDraw::ms_bProperScaling);	
@@ -714,6 +718,7 @@ void SaveINISettings()
 	StoreIni("Drift", "Strength", gDriftStrength);
 	StoreIni("Drift", "Assist", gDriftAssist);
 	StoreIni("Drift", "Debug", gDriftDebug);
+	StoreIni("Weapons", "ActiveReload", gActiveReloadEnabled);
 
 #ifdef PROPER_SCALING	
 	StoreIni("Draw", "ProperScaling", CDraw::ms_bProperScaling);	

@@ -776,6 +776,7 @@ ProcessSlowMode(void)
 	int16 L3 = CPad::GetPad(0)->NewState.LeftShock;
 	int16 R3 = CPad::GetPad(0)->NewState.RightShock;
 	int16 networktalk = CPad::GetPad(0)->NewState.NetworkTalk;
+	int16 reload = CPad::GetPad(0)->NewState.Reload;
 	int16 stop = true;
 	
 	do
@@ -818,6 +819,7 @@ ProcessSlowMode(void)
 	CPad::GetPad(0)->OldState.LeftShock = L3;
 	CPad::GetPad(0)->OldState.RightShock = R3;
 	CPad::GetPad(0)->OldState.NetworkTalk = networktalk;
+	CPad::GetPad(0)->OldState.Reload = reload;
 	CPad::GetPad(0)->NewState.LeftStickX = lX;
 	CPad::GetPad(0)->NewState.LeftStickY = lY;
 	CPad::GetPad(0)->NewState.RightStickX = rX;
@@ -839,6 +841,7 @@ ProcessSlowMode(void)
 	CPad::GetPad(0)->NewState.LeftShock = L3;
 	CPad::GetPad(0)->NewState.RightShock = R3;
 	CPad::GetPad(0)->NewState.NetworkTalk = networktalk;
+	CPad::GetPad(0)->NewState.Reload = reload;
 }
 
 
