@@ -353,9 +353,6 @@ public:
 	bool m_bJustCameOutOfGarage;
 	bool m_bJustInitalised;
 	bool m_bJust_Switched;
-#ifdef FIRST_PERSON
-	bool m_bLastTargetWasVehicle;
-#endif
 	bool m_bLookingAtPlayer;
 	bool m_bLookingAtVector;
 	bool m_bMoveCamToAvoidGeom;
@@ -558,6 +555,13 @@ public:
 	void Process(void);
 	void CamControl(void);
 	void UpdateTargetEntity(void);
+	// The mode the game camera uses in a vehicle: the follow camera, or the
+	// first person view when the setting is on. The same pair serves on foot.
+	int16 GetVehicleCameraMode(void);
+	// Chooses between the follow camera and the first person view for this
+	// frame. The setting applies on foot and in a vehicle; the stock
+	// look-around toggle only applies on foot.
+	bool ChooseFirstPersonView(bool targetIsPed);
 	void UpdateSoundDistances(void);
 	void InitialiseCameraForDebugMode(void);
 	void CamShake(float strength, float x, float y, float z);
@@ -642,6 +646,8 @@ public:
 	float GetFirstPersonSightsFOV(void);
 	bool Using1stPersonView(void);
 	bool UsingThirdPersonAds(void);
+	// The first person mode with the player's own vehicle as the target
+	bool InFirstPersonCarView(void);
 #endif
 
 	// Physical camera

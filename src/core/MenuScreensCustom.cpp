@@ -63,11 +63,15 @@
 
 #ifdef FIRST_PERSON
 	#define FIRST_PERSON_TOGGLES \
-		MENUACTION_CFO_SELECT, "FEC_FPC", { new CCFOSelect((int8*)&FrontEndMenuManager.m_bFirstPersonView, "Display", "FirstPersonView", off_on, 2, false, FirstPersonViewAfterChange) }, 0, 0, MENUALIGN_LEFT, \
+		MENUACTION_CFO_SELECT, "FEC_FPC", { new CCFOSelect((int8*)&FrontEndMenuManager.m_bFirstPersonView, "Display", "FirstPersonView", off_on, 2, false) }, 0, 0, MENUALIGN_LEFT, \
 		MENUACTION_CFO_DYNAMIC, "FEC_FOV", { new CCFODynamic((int8*)&FrontEndMenuManager.m_nFirstPersonFOV, "Display", "FirstPersonFOV", FirstPersonFOVDraw, FirstPersonFOVPress) }, 0, 0, MENUALIGN_LEFT,
 #else
 	#define FIRST_PERSON_TOGGLES
 #endif
+
+// The follow camera distance in a vehicle (see CCam::Process_FollowPed)
+#define CAR_CAMERA_DISTANCE_OPTION \
+	MENUACTION_CFO_DYNAMIC, "FEC_CCD", { new CCFODynamic((int8*)&FrontEndMenuManager.m_nCarCameraDistance, "Display", "CarCameraDistance", CarCameraDistanceDraw, CarCameraDistancePress) }, 0, 0, MENUALIGN_LEFT,
 
 #ifdef PS2_ALPHA_TEST
 	#define DUALPASS_SELECTOR MENUACTION_CFO_SELECT, "FEM_2PR", { new CCFOSelect((int8*)&gPS2alphaTest, "Graphics", "PS2AlphaTest", off_on, 2, false) }, 0, 0, MENUALIGN_LEFT,
@@ -294,13 +298,6 @@ wchar* MultiSamplingDraw(bool *disabled, bool userHovering) {
 #endif
 
 #ifdef FIRST_PERSON
-void FirstPersonViewAfterChange(int8 before, int8 after) {
-	if (after)
-		TheCamera.CarZoomIndicator = CAM_ZOOM_1STPRS;
-	else if (TheCamera.CarZoomIndicator == CAM_ZOOM_1STPRS)
-		TheCamera.CarZoomIndicator = CAM_ZOOM_2;
-}
-
 wchar* FirstPersonFOVDraw(bool *disabled, bool userHovering) {
 	static wchar unicodeTemp[16];
 	sprintf(gString, "%i", FrontEndMenuManager.m_nFirstPersonFOV);
@@ -322,6 +319,27 @@ void FirstPersonFOVPress(int8 action) {
 	FrontEndMenuManager.SaveSettings();
 }
 #endif
+
+wchar* CarCameraDistanceDraw(bool *disabled, bool userHovering) {
+	static wchar unicodeTemp[16];
+	sprintf(gString, "%i", FrontEndMenuManager.GetCarCameraDistance());
+	AsciiToUnicode(gString, unicodeTemp);
+	return unicodeTemp;
+}
+
+void CarCameraDistancePress(int8 action) {
+	// The stored value is unsigned, so step from the clamped value: a step
+	// below the minimum would wrap around to a large number.
+	int32 distance = FrontEndMenuManager.GetCarCameraDistance();
+	if (action == FEOPTION_ACTION_LEFT)
+		distance--;
+	else if (action == FEOPTION_ACTION_RIGHT)
+		distance++;
+	else
+		return;
+	FrontEndMenuManager.m_nCarCameraDistance = Clamp(distance, CAR_CAMERA_DISTANCE_MIN, CAR_CAMERA_DISTANCE_MAX);
+	FrontEndMenuManager.SaveSettings();
+}
 
 #ifdef IMPROVED_VIDEOMODE
 const char* screenModes[] = { "FED_FLS", "FED_WND" };
@@ -497,6 +515,7 @@ CMenuScreenCustom aScreens[] = {
 		POSTFX_SELECTORS
 		// re3.cpp inserts here pipeline selectors if neo/neo.txd exists and EXTENDED_PIPELINES defined
 		FIRST_PERSON_TOGGLES
+		CAR_CAMERA_DISTANCE_OPTION
 		MENUACTION_RESTOREDEF,	"FET_DEF", {nil, SAVESLOT_NONE, MENUPAGE_DISPLAY_SETTINGS}, 320, 0, MENUALIGN_CENTER,
 		MENUACTION_GOBACK,		"FEDS_TB", {nil, SAVESLOT_NONE, MENUPAGE_NONE}, 320, 0, MENUALIGN_CENTER,
 	},
@@ -512,6 +531,7 @@ CMenuScreenCustom aScreens[] = {
 		MENUACTION_HUD,			"FED_HUD", { nil, SAVESLOT_NONE, MENUPAGE_DISPLAY_SETTINGS }, 0, 0, MENUALIGN_LEFT,
 		MENUACTION_SUBTITLES,	"FED_SUB", { nil, SAVESLOT_NONE, MENUPAGE_DISPLAY_SETTINGS }, 0, 0, MENUALIGN_LEFT,
 		FIRST_PERSON_TOGGLES
+		CAR_CAMERA_DISTANCE_OPTION
 		MENUACTION_CFO_DYNAMIC,	"FET_DEF", { new CCFODynamic(nil, nil, nil, nil, RestoreDefDisplay) }, 320, 0, MENUALIGN_CENTER,
 		MENUACTION_GOBACK,		"FEDS_TB", { nil, SAVESLOT_NONE, MENUPAGE_NONE}, 320, 0, MENUALIGN_CENTER,
 	},

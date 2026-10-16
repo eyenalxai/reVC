@@ -1450,6 +1450,9 @@ First person camera
 [FEC_FOV]
 First Person FOV
 
+[FEC_CCD]
+Car camera distance
+
 [FEC_LL]
 Look left
 

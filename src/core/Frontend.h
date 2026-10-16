@@ -601,6 +601,10 @@ struct MenuTrapezoid
 #define FIRST_PERSON_BODY_NEAR_CLIP 0.05f	// the player's own body parts sit close to the camera
 #endif
 
+// The follow camera sits this much further back in a vehicle, in metres
+#define CAR_CAMERA_DISTANCE_MIN 0
+#define CAR_CAMERA_DISTANCE_MAX 10
+
 class CMenuManager
 {
 public:
@@ -654,6 +658,8 @@ public:
 	bool m_bFirstPersonView;
 	uint8 m_nFirstPersonFOV;	// unsigned: the setting reaches 180
 #endif
+	// Extra follow camera distance in a vehicle, in metres
+	uint8 m_nCarCameraDistance;
 	int32 m_nPrefsVideoMode;
 	int32 m_nDisplayVideoMode;
 	int32 m_nMouseTempPosX;
@@ -773,6 +779,7 @@ public:
 #ifdef FIRST_PERSON
 	int32 GetFirstPersonFOV(void);
 #endif
+	int32 GetCarCameraDistance(void);
 
 #ifdef CUTSCENE_BORDERS_SWITCH
 	static bool m_PrefsCutsceneBorders;
