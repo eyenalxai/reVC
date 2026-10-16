@@ -3532,9 +3532,6 @@ CMenuManager::Process(void)
 		UserInput();
 		ProcessFileActions();
 		DMAudio.Service();
-#ifdef USE_TEXTURE_POOL
-		// TODO
-#endif
 	}
 
 	SwitchMenuOnAndOff();

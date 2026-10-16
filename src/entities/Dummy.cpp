@@ -30,10 +30,7 @@ CDummy::Add(void)
 	for(y = ystart; y <= yend; y++)
 		for(x = xstart; x <= xend; x++){
 			s = CWorld::GetSector(x, y);
-			if(x == xmid && y == ymid)
-				list = &s->m_lists[ENTITYLIST_DUMMIES];
-			else
-				list = &s->m_lists[ENTITYLIST_DUMMIES_OVERLAP];
+			list = CWorld::GetSectorEntityList(s, m_type, x == xmid && y == ymid);
 			CPtrNode *node = list->InsertItem(this);
 			assert(node);
 			m_entryInfoList.InsertItem(list, node, s);

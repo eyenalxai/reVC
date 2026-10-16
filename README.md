@@ -160,7 +160,7 @@ We accept only these kinds of PRs;
 
 We have a [Coding Style](https://github.com/mrxenginner/reVC/blob/miami/CODING_STYLE.md) document that isn't followed or enforced very well.
 
-Do not use features from C++11 or later.
+Do not use features from C++17 or later.
 
 
 ## History
