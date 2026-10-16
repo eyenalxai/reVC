@@ -108,7 +108,14 @@ class CReplay
 
 	enum {
 		NUM_REPLAYBUFFERS = 8,
-		REPLAYBUFFERSIZE = 100000
+		REPLAYBUFFERSIZE = 100000,
+		// Only entities near the camera are recorded, so the frame size does not grow with the whole world.
+		REPLAY_RECORD_RADIUS = 120, // metres
+		// Worst case is sizeof(tVehicleUpdatePacket) = 56 bytes per entity
+		// (a ped with header costs sizeof(tPedHeaderPacket) + sizeof(tPedUpdatePacket) = 8 + 48 = 56 too).
+		// 500 * 56 = 28000 bytes, plus the fixed part (~600 bytes with all bullet traces)
+		// still fits REPLAYBUFFERSIZE - 16.
+		MAX_REPLAY_ENTITIES = 500
 	};
 
 
@@ -414,6 +421,7 @@ private:
 	static void ProcessLookAroundCam(void);
 	static size_t FindSizeOfPacket(uint8);
 	static void GoToNextBlock(void);
+	static bool IsWithinReplayRecordRadius(const CVector& position, const CVector& camera_position);
 #endif
 };
 
