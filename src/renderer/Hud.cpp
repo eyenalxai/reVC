@@ -443,6 +443,13 @@ DrawCrosshairAndSights(CPlayerPed *playerPed, eWeaponType WeaponType, int32 Mode
 	// third person view draws it at the camera crosshair position above
 	if (TheCamera.UsingCarAds() && Mode == CCam::MODE_1STPERSON)
 		DrawCrossHairPC = 1;
+
+	// The on-foot sights keep the plain first person camera, so the camera
+	// mode cannot tell the sights are up (the M16 camera mode is the stock
+	// stationary aim). Ask the sight predicate the shot ray and the ADS FOV
+	// use; the first person car view keeps its own rule above.
+	if (TheCamera.UsingFirstPersonSights() && !TheCamera.InFirstPersonCarView())
+		DrawCrossHairPC = 1;
 #endif
 
 	if (DrawCrossHair || DrawCrossHairPC) {

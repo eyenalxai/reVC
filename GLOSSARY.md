@@ -274,6 +274,13 @@ pulls in and the free aim fires along the camera instead of the stock sideways
 drive-by. Only the drive-by vehicles (car, bike, boat) and the drive-by weapon
 take it, and the bullets ignore the player's own car.
 
+## First person sights
+
+Aiming down the sights on foot in the first person view. The plain first person
+camera keeps the player moving (the M16 camera mode is the stock stationary
+aim). The sight predicate, `CCamera::UsingFirstPersonSights`, raises the sight
+zoom, the shot ray and the reticle together.
+
 ## Replay block
 
 One of the eight fixed buffers of `REPLAYBUFFERSIZE` (100000) bytes that hold
