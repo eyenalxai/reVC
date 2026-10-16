@@ -41,8 +41,7 @@ enum Config {
 	// (NUMOBJECTS) + 4 spare (VICE-134).
 	NUMDUMMIES = 2800,
 	NUMAUDIOSCRIPTOBJECTS = 192,
-
-	// Sfx and music
+	NUMCOLMODELS = 4400,
 	NUMCUTSCENEOBJECTS = 50,	// not a pool in VC
 
 	NUMANIMBLOCKS = 35,
