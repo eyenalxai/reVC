@@ -615,6 +615,23 @@ CPed::FinishedReloadCB(CAnimBlendAssociation *reloadAssoc, void *arg)
 	}
 }
 
+// The reload association that runs on this ped: the reload slot first, then
+// the crouch variant, the same order the reload animation is picked in
+// (VICE-88). nil when none runs. Shared by TryStartReloadAnimation and
+// AbortReloadAnimation.
+CAnimBlendAssociation*
+CPed::GetRunningReloadAnimation(CWeaponInfo *weapon)
+{
+	if (GetReloadAnim(weapon) == (AnimationId)0)
+		return nil;
+
+	CAnimBlendAssociation *reloadAssoc = RpAnimBlendClumpGetAssociation(GetClump(), GetReloadAnim(weapon));
+	if (reloadAssoc == nil && GetCrouchReloadAnim(weapon) != (AnimationId)0)
+		reloadAssoc = RpAnimBlendClumpGetAssociation(GetClump(), GetCrouchReloadAnim(weapon));
+
+	return reloadAssoc;
+}
+
 // Plays the reload animation of a ped whose weapon is reloading. The attack
 // handler breaks out of the attack for it, and the player's per-frame path
 // calls it so an idle player plays the animation too. reloadAnimAssoc is the
@@ -632,11 +649,8 @@ CPed::TryStartReloadAnimation(CAnimBlendAssociation *reloadAnimAssoc)
 		return false;
 
 	// An association that already runs must not be started twice.
-	if (reloadAnimAssoc == nil) {
-		reloadAnimAssoc = RpAnimBlendClumpGetAssociation(GetClump(), GetReloadAnim(ourWeapon));
-		if (reloadAnimAssoc == nil && GetCrouchReloadAnim(ourWeapon))
-			reloadAnimAssoc = RpAnimBlendClumpGetAssociation(GetClump(), GetCrouchReloadAnim(ourWeapon));
-	}
+	if (reloadAnimAssoc == nil)
+		reloadAnimAssoc = GetRunningReloadAnimation(ourWeapon);
 
 	if (reloadAnimAssoc)
 		return false;
@@ -656,6 +670,25 @@ CPed::TryStartReloadAnimation(CAnimBlendAssociation *reloadAnimAssoc)
 	m_shootTimer = CTimer::GetTimeInMilliseconds();
 	DMAudio.PlayOneShot(m_audioEntityId, SOUND_WEAPON_AK47_BULLET_ECHO, GetWeapon()->m_eWeaponType);
 	return true;
+}
+
+// Fades out the reload animation of a ped whose perfect reload ended the timer
+// early. The fade runs the existing finish callback once (it restores the
+// crouch pose) and then deletes the association, so a later reload can blend
+// a fresh animation instead of the attack path refusing on the old one
+// (VICE-88). Never delete the association here: the delete flag and the fade
+// are what let the callback run.
+void
+CPed::AbortReloadAnimation(void)
+{
+	CWeaponInfo *ourWeapon = CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType);
+	CAnimBlendAssociation *reloadAssoc = GetRunningReloadAnimation(ourWeapon);
+
+	if (reloadAssoc == nil)
+		return;
+
+	reloadAssoc->blendDelta = -1000.0f;
+	reloadAssoc->flags |= ASSOC_DELETEFADEDOUT;
 }
 
 uint8

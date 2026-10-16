@@ -132,7 +132,8 @@ CCarCtrl::GenerateRandomCars()
 	}
 	if (NumRandomCars < MAX_RANDOM_CARS){
 		if (CountDownToCarsAtStart == 0) {
-			for (int i = 0; i < RANDOM_CAR_ATTEMPTS_PER_FRAME; i++)
+			// The ring fills from the target and the lifetime, so the rate follows the spawn distance.
+			for (int i = 0; i < RANDOM_CAR_ATTEMPTS_PER_FRAME * CIniFile::SpawnDistanceMultiplier; i++)
 				GenerateOneRandomCar();
 		} else if (--CountDownToCarsAtStart == 0) {
 			for (int i = 0; i < 100; i++)

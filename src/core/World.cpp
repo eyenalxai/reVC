@@ -62,6 +62,25 @@ CWorld::Initialise()
 	bIncludeBikers = false;
 }
 
+// Each entity type has a pair of lists in a sector, the main list first, the
+// overlap list next. The overlap list holds the entity in the sectors its
+// bounding rect only partly covers.
+static const int aEntityListForType[ENTITY_TYPE_DUMMY + 1] = {
+	ENTITYLIST_BUILDINGS,	// ENTITY_TYPE_NOTHING, never in a sector
+	ENTITYLIST_BUILDINGS,	// ENTITY_TYPE_BUILDING
+	ENTITYLIST_VEHICLES,	// ENTITY_TYPE_VEHICLE
+	ENTITYLIST_PEDS,	// ENTITY_TYPE_PED
+	ENTITYLIST_OBJECTS,	// ENTITY_TYPE_OBJECT
+	ENTITYLIST_DUMMIES,	// ENTITY_TYPE_DUMMY
+};
+
+CPtrList *
+CWorld::GetSectorEntityList(CSector *sector, uint8 type, bool inMiddleSector)
+{
+	assert(type > ENTITY_TYPE_NOTHING && type <= ENTITY_TYPE_DUMMY);
+	return &sector->m_lists[aEntityListForType[type] + (inMiddleSector ? 0 : 1)];
+}
+
 void
 CWorld::Add(CEntity *ent)
 {

@@ -822,7 +822,19 @@ void CControllerConfigManager::AffectControllerStateOn_ButtonDown_Driving(int32 
 		state.RightShoulder1 = 255;
 	if (button == GetControllerKeyAssociatedWithAction(VEHICLE_ACCELERATE, type))
 		state.Cross = 255;
-	if (button == GetControllerKeyAssociatedWithAction(VEHICLE_CHANGE_RADIO_STATION, type))
+	// The reload key must win when one physical key serves both the reload
+	// and the radio: R is the reload key on the keyboard and the radio key
+	// on the optional-extra type, so pressing R in a car would both reload
+	// and change the station (VICE-90). Unbound keys (m_Key 0 on the mouse
+	// and the joystick) never match a pressed key.
+	bool isReloadKey = false;
+	for (int32 i = 0; i < MAX_CONTROLLERTYPES; i++)
+	{
+		int32 reloadKey = GetControllerKeyAssociatedWithAction(PED_RELOAD, (eControllerType)i);
+		if (reloadKey != 0 && button == reloadKey)
+			isReloadKey = true;
+	}
+	if (!isReloadKey && button == GetControllerKeyAssociatedWithAction(VEHICLE_CHANGE_RADIO_STATION, type))
 		state.LeftShoulder1 = 255;
 	if (button == GetControllerKeyAssociatedWithAction(VEHICLE_BRAKE, type))
 		state.Square = 255;
@@ -920,8 +932,6 @@ void CControllerConfigManager::AffectControllerStateOn_ButtonDown_FirstPersonOnl
 		state.Cross = 255;
 	if (button == GetControllerKeyAssociatedWithAction(PED_DUCK, type))
 		state.LeftShock = 255;
-	if (button == GetControllerKeyAssociatedWithAction(PED_RELOAD, type))
-		state.Reload = 255;
 }
 
 void CControllerConfigManager::AffectControllerStateOn_ButtonDown_ThirdPersonOnly(int32 button, eControllerType type, CControllerState &state)
@@ -940,8 +950,6 @@ void CControllerConfigManager::AffectControllerStateOn_ButtonDown_ThirdPersonOnl
 		state.Cross = 255;
 	if (button == GetControllerKeyAssociatedWithAction(PED_DUCK, type))
 		state.LeftShock = 255;
-	if (button == GetControllerKeyAssociatedWithAction(PED_RELOAD, type))
-		state.Reload = 255;
 	
 	if (FrontEndMenuManager.m_ControlMethod == CONTROL_CLASSIC)
 	{
@@ -1075,6 +1083,12 @@ void CControllerConfigManager::AffectControllerStateOn_ButtonDown_AllStates(int3
 
 	if (button == GetControllerKeyAssociatedWithAction(NETWORK_TALK, type))
 		state.NetworkTalk = 255;
+
+	// The reload key works in every state, driving included: nothing else
+	// sets the pad field, and the active reload reads it through
+	// CPad::ReloadJustDown (VICE-90).
+	if (button == GetControllerKeyAssociatedWithAction(PED_RELOAD, type))
+		state.Reload = 255;
 }
 
 void CControllerConfigManager::AffectControllerStateOn_ButtonDown_VehicleAndThirdPersonOnly(int32 button, eControllerType type, CControllerState &state)
