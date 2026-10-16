@@ -360,12 +360,17 @@ the screen fade:
   in the in-view band may be despawned as the stock game did, with the fade-out
   the removal path already had; under the band minimum the removal rule is
   unchanged.
-- **The counters read the zones apart.** `ms_nNearBubbleCreationsInFrustum` /
-  `ms_nNearBubbleRemovalsInFrustum` now mean the catchable zone - in the
-  frustum nearer than the band minimum - and must stay 0;
-  `ms_nNearBubbleBandCreations` / `ms_nNearBubbleBandRemovals` count the
-  in-view band's events (allowed, covered by the car's own reveal) and rise as
-  the traffic fills. The rig prints both and the PASS line reads both.
+- **The counters read the zones apart, with names that carry the meaning.**
+  The acceptance pair was renamed from the frustum counters to
+  `ms_nNearBubbleCatchableCreations` / `ms_nNearBubbleCatchableRemovals`: they
+  now mean the catchable zone - in the frustum nearer than the band minimum -
+  and must stay 0. `ms_nNearBubbleBandCreations` / `ms_nNearBubbleBandRemovals`
+  count the in-view band's events and rise as the traffic fills (a creation is
+  covered by the car's own reveal, a removal by the fade-out of the despawn).
+  The scripted cars' in-view row was renamed with them
+  (`ms_nNearBubbleOtherCreationsInView`; it keeps the wider catchable set, the
+  band included, and informs without failing). The rig prints the zones and the
+  PASS line reads the catchable pair.
 - **The boot burst waits for its target.** The pedestrian and the car burst no
   longer burn their window on a zero target at boot (the zone, the ring and
   the budget line are not live yet): a frame with `target <= 0` waits in the
@@ -374,7 +379,9 @@ the screen fade:
   known. The burst counters gain the since-boot totals
   (`ms_nFillBurstTotalAttempts` / `ms_nFillBurstTotalPlaced`, the boot burst
   readable after a later arming reset the window rows) and the end reasons
-  (`ms_nFillBurstEndedLine` / `EndedStalls` / `EndedWindow`).
+  (`ms_nFillBurstEndedLine`, `ms_nFillBurstEndedBudget` - the car burst's full
+  budget line, apart from the target's, the pedestrian frame having no budget
+  line of its own - `EndedStalls` and `EndedWindow`).
 
 The harness (`utils/near-bubble`) gained the band in its case table (in the
 frustum at `bandMin - 1` refused, at `bandMin` allowed, the fade still first),

@@ -430,7 +430,7 @@ Section3bExhaustive(void)
 	};
 	const float ranges[] = { 0.0f, 200.0f, 360.0f };
 	int combinations = 0, allowedOutside = 0, refusedCatchable = 0, violations = 0;
-	int armMismatch = 0, softInsideMargin = 0;
+	int armMismatch = 0, softInsideMargin = 0, bandMissed = 0;
 
 	for (int dp = 0; dp < 2; dp++)
 	for (int dc = 0; dc < 5; dc++)
@@ -481,6 +481,21 @@ Section3bExhaustive(void)
 		if (arm == NEAR_BUBBLE_ARM_ONSCREEN_BAND &&
 			(!catchable || c.distToCamera < c.onScreenSpawnMin))
 			armMismatch++;
+		/* The band's completeness: a catchable position beyond the bubble
+		 * and at or beyond the minimum that the fade and the bypass do not
+		 * take first must be allowed by the band itself. An edit that
+		 * *narrows* the band (a raised minimum, an extra margin, a strict
+		 * comparison) refuses such a position and shows up here, not only
+		 * in the case table (the catchable refusals below are
+		 * informational). The bubble is checked before the band, so its
+		 * disc is excluded: inside it nothing is allowed, band or not. */
+		if (c.distToPlayer > NEAR_BUBBLE_RADIUS &&
+			catchable && !c.fadeHides && !c.bypassView &&
+			c.distToCamera >= c.onScreenSpawnMin &&
+			arm != NEAR_BUBBLE_ARM_ONSCREEN_BAND) {
+			bandMissed++;
+			Fail("the sweep found a catchable in-band position the band did not take");
+		}
 	}
 	printf("== 3b. the structural binding: every combination of the fields\n\n");
 	printf("  combinations: %d (the camera distances straddle the soft distance and the\n", combinations);
@@ -492,10 +507,12 @@ Section3bExhaustive(void)
 	printf("  allowed and catchable outside the fade, the bypass and the band: %d (must be 0)\n", violations);
 	printf("  answers that disagree with the arm: %d (must be 0)\n", armMismatch);
 	printf("  soft-arm answers inside the margin: %d (must be 0)\n", softInsideMargin);
+	printf("  catchable in-band positions the band did not take: %d (must be 0)\n", bandMissed);
 	printf("\n  The ladder and the counters share the predicate NearBubblePositionIsCatchable\n");
 	printf("  and the arm function, so no combination of the view can let a catchable event\n");
 	printf("  through unwatched, every catchable one under the band minimum is refused, the\n");
-	printf("  band takes exactly the positions at or beyond the minimum, and every hint goes\n");
+	printf("  band takes every catchable position at or beyond the minimum (a band narrowed by\n");
+	printf("  an extra condition fails here, not only in the case table), and every hint goes\n");
 	printf("  to the confirmation ray. A future edit that drops an arm or moves a condition\n");
 	printf("  fails this sweep.\n\n");
 }
@@ -761,10 +778,12 @@ main(void)
 	if (g_failures == 0) {
 		printf("  every check passes. The bubble sits the reserve inside every traffic band and\n");
 		printf("  the soft distance covers the side band's placement slack at every cell of the\n");
-		printf("  control, the ladder allows no catchable event and sends every hint to the\n");
-		printf("  confirmation ray (the sweep holds it), the frame's work is bounded by one\n");
-		printf("  number, the reveal is a fade, and the soft arm keeps an open street above what\n");
-		printf("  its traffic needs with the real mix of the spawner's branches.\n");
+		printf("  control, the ladder allows no catchable event under the in-view band minimum,\n");
+		printf("  sends every hint to the confirmation ray and takes every catchable position at\n");
+		printf("  or beyond the band (the sweep holds both), the frame's work is bounded by one\n");
+		printf("  number, the reveal is a fade, and the soft arm and the in-view band keep an\n");
+		printf("  open street above what its traffic needs with the real mix of the spawner's\n");
+		printf("  branches.\n");
 		return 0;
 	}
 	printf("  %d check(s) failed.\n", g_failures);

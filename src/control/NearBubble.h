@@ -104,9 +104,9 @@
  *
  * Anything left - in the frustum or within the margin of it, not occluded,
  * inside the fade and under the band minimum - is refused: that is the
- * catchable zone, and the two frustum counters of the acceptance read it. The
- * refused creation costs nothing: the placement loop of the caller moves to
- * its next candidate and the frame keeps its budget.
+ * catchable zone, and the two catchable-zone counters of the acceptance read
+ * it. The refused creation costs nothing: the placement loop of the caller
+ * moves to its next candidate and the frame keeps its budget.
  *
  * The removal rule
  * ----------------
@@ -134,7 +134,8 @@
  * game draws over the world covers at least FILL_BURST_HIDDEN_FADE of it. A
  * creation in that state may sit in the frustum - the player cannot see it -
  * and the counters record it as fade exempt, so the acceptance of the ticket
- * (the frustum counters stay zero) reads cleanly. The bubble still applies:
+ * (the catchable-zone counters stay zero) reads cleanly. The bubble still
+ * applies:
  * even a hidden frame does not create a car at the player's elbow. The fill's
  * mass is opaque when the screen returns: the ramp of a car's alpha runs at
  * the hidden step while the fade covers the screen (CVehicle::
@@ -144,17 +145,19 @@
  * The counters (the acceptance)
  * -----------------------------
  *
- *	creations in the frustum	the acceptance counter (VICE-146): a car
- *					placed in the frustum nearer than the band
- *					minimum - the catchable zone, where the
- *					player could catch it. Must stay 0.
- *	removals in the frustum		the same for a car deleted (not faded)
- *					where the player could catch it.
+ *	catchable creations / removals	the acceptance counters (VICE-146): a
+ *					car placed or deleted in the frustum
+ *					nearer than the band minimum - the
+ *					catchable zone, where the player
+ *					could catch it. Must stay 0.
  *	band creations / removals	the in-view band: a car placed or
  *					deleted in the frustum at or beyond the
- *					band minimum. Allowed, covered by the
- *					car's own reveal; the counters rise with
- *					the traffic the band restores.
+ *					band minimum. Allowed: a creation is
+ *					covered by the car's own reveal (its
+ *					alpha ramp from the first render), a
+ *					removal by the fade-out of the despawn.
+ *					The counters rise with the traffic the
+ *					band restores.
  *	fade creations / removals	the catchable events a fade covered:
  *					exempt. The hidden events of a faded frame are
  *					counted with the hidden ones, so the fade

@@ -35,22 +35,25 @@ the target is the local line it stopped at (the 90 % stop line sits on it). The
 orchestrator reads those rows live across a transition. The "since boot" totals
 accumulate over every run of the session (they are reset by the boot of the
 game only), so the boot burst stays readable after a later arming reset the
-window rows, and the three "ended" rows count the runs by the reason they ended
-(VICE-146). A burst waits, without spending its window, for a target that is not
-known yet at boot, so a boot run is not burned on a zero target.
+window rows, and the "ended" rows count the runs by the reason they ended
+(VICE-146): the target's stop line, the full car budget (cars only), the
+give-up bound, or the window spent. A burst waits, without spending its window,
+for a target that is not known yet at boot, so a boot run is not burned on a
+zero target.
 
 The near bubble rows (VICE-127) are the acceptance of the pop-in ticket: the two
-frustum counters count a car created or removed where the player could catch it
-and must stay 0. Since VICE-146 they read the catchable zone only - in the
-frustum nearer than the in-view band minimum - because the band at or beyond the
-minimum is allowed (it is the stock game's on-screen spawn band, covered by the
-car's own alpha ramp), and the band's own creations and removals have their two
-rows. The fade rows are the fill burst's work, exempt by the screen; the fill
-and the target are the traffic inside the player's 90 m disc and the share of
-the car target that area asks for (the other fill is the rest of the target: the
-cars outside the traffic spawner, whose creations the "other" rows carry apart).
-The counters are cumulative, so the orchestrator notes them before a drive or a
-camera turn and reads them after.
+catchable-zone counters (renamed from the frustum pair at VICE-146) count a car
+created or removed where the player could catch it and must stay 0. Since
+VICE-146 they read the catchable zone only - in the frustum nearer than the
+in-view band minimum - because the band at or beyond the minimum is allowed (it
+is the stock game's on-screen spawn band: a creation is covered by the car's own
+alpha ramp, a removal by the fade-out of the despawn), and the band's own
+creations and removals have their two rows. The fade rows are the fill burst's
+work, exempt by the screen; the fill and the target are the traffic inside the
+player's 90 m disc and the share of the car target that area asks for (the other
+fill is the rest of the target: the cars outside the traffic spawner, whose
+creations the "other" rows carry apart). The counters are cumulative, so the
+orchestrator notes them before a drive or a camera turn and reads them after.
 """
 
 import os
@@ -84,9 +87,10 @@ SYMBOLS = [
     ("peds: ms_nNumCivMale",         "_ZN11CPopulation14ms_nNumCivMaleE",              "I"),
     # The fill burst (VICE-126): the countdown that arms the boot burst, the
     # target the last burst frame aimed at, and what the burst has spent so far.
-    # The "since boot" pair accumulates over every run of the session; the three
-    # "ended" rows count the runs by the reason they ended (VICE-146): the stop
-    # line of the frame, the give-up bound (a run of frames without a
+    # The "since boot" pair accumulates over every run of the session; the
+    # "ended" rows count the runs by the reason they ended (VICE-146): the
+    # target's stop line, the full car budget (cars only: the pedestrian frame
+    # has no budget line), the give-up bound (a run of frames without a
     # placement), or the window spent.
     ("peds: burst countdown",        "_ZN11CPopulation24m_CountDownToPedsAtStartE",    "b"),
     ("peds: burst target",           "_ZN11CPopulation19ms_fFillBurstTargetE",         "f"),
@@ -104,6 +108,7 @@ SYMBOLS = [
     ("cars: burst attempts since boot", "_ZN8CCarCtrl26ms_nFillBurstTotalAttemptsE",   "I"),
     ("cars: burst placed since boot", "_ZN8CCarCtrl24ms_nFillBurstTotalPlacedE",       "I"),
     ("cars: burst ended by line",    "_ZN8CCarCtrl22ms_nFillBurstEndedLineE",          "I"),
+    ("cars: burst ended by budget",  "_ZN8CCarCtrl24ms_nFillBurstEndedBudgetE",        "I"),
     ("cars: burst ended by stalls",  "_ZN8CCarCtrl24ms_nFillBurstEndedStallsE",        "I"),
     ("cars: burst ended by window",  "_ZN8CCarCtrl24ms_nFillBurstEndedWindowE",        "I"),
     ("stream: ms_numVehiclesLoaded", "_ZN10CStreaming20ms_numVehiclesLoadedE",        "i"),
@@ -142,27 +147,30 @@ BURSTS = [
     ("burst cars: stalls",       "_ZN8CCarCtrl12ms_FillBurstE",     4),
 ]
 
-# The near bubble (VICE-127). The two frustum counters are the acceptance of the
-# pop-in ticket and must stay 0. Since VICE-146 they mean the catchable zone -
-# in the frustum nearer than the in-view band minimum - because the band at or
-# beyond the minimum is allowed (the stock game's on-screen spawn band, covered
-# by the car's own alpha ramp); the band rows are its creations and removals,
-# expected to rise with the traffic. The fade rows are the catchable events a
-# fade covered (the fill burst's work, exempt by the screen); the hidden and
-# refused rows show the rule working, and the hidden ones subdivide by the arm
-# (the occluded hint and the close blind spot, both confirmed by the
-# line-of-sight ray: the "ray creations" row is the close blind spot's, the
-# occluder rows are the hint's); the rays row is the frame's budget (4) and the
-# total follows it; the fill is the traffic inside the player's disc, the other
-# fill is the rest of the car target (the cars outside the traffic spawner), and
-# the target is the share of the car budget the disc asks for. The other
-# creations (and the catchable ones of them) are the scripted, set-piece, road
-# block, car park, garage and cheat cars: the ticket's counters carry them apart
-# so a scripted car that appears in view is visible here and never inside the
-# traffic's rows. The valve row is the pool's own last line.
+# The near bubble (VICE-127). The two catchable-zone counters are the acceptance
+# of the pop-in ticket and must stay 0. They were renamed from the frustum pair
+# at VICE-146, when they took the narrower meaning: the catchable zone - in the
+# frustum nearer than the in-view band minimum - because the band at or beyond
+# the minimum is allowed (the stock game's on-screen spawn band; a creation is
+# covered by the car's own alpha ramp, a removal by the fade-out of the
+# despawn); the band rows are its creations and removals, expected to rise with
+# the traffic. The fade rows are the catchable events a fade covered (the fill
+# burst's work, exempt by the screen); the hidden and refused rows show the rule
+# working, and the hidden ones subdivide by the arm (the occluded hint and the
+# close blind spot, both confirmed by the line-of-sight ray: the "ray creations"
+# row is the close blind spot's, the occluder rows are the hint's); the rays row
+# is the frame's budget (4) and the total follows it; the fill is the traffic
+# inside the player's disc, the other fill is the rest of the car target (the
+# cars outside the traffic spawner), and the target is the share of the car
+# budget the disc asks for. The other creations (and the in-view ones of them)
+# are the scripted, set-piece, road block, car park, garage and cheat cars: the
+# ticket's counters carry them apart so a scripted car that appears in view is
+# visible here and never inside the traffic's rows; its in-view row is the wider
+# catchable set (the band included), informational by design. The valve row is
+# the pool's own last line.
 NEAR_BUBBLE = [
-    ("bubble: creations in frustum (catchable zone)", "_ZN8CCarCtrl32ms_nNearBubbleCreationsInFrustumE", "I"),
-    ("bubble: removals in frustum (catchable zone)",  "_ZN8CCarCtrl31ms_nNearBubbleRemovalsInFrustumE",  "I"),
+    ("bubble: catchable-zone creations", "_ZN8CCarCtrl32ms_nNearBubbleCatchableCreationsE", "I"),
+    ("bubble: catchable-zone removals",  "_ZN8CCarCtrl31ms_nNearBubbleCatchableRemovalsE",  "I"),
     ("bubble: band creations",       "_ZN8CCarCtrl27ms_nNearBubbleBandCreationsE",      "I"),
     ("bubble: band removals",        "_ZN8CCarCtrl26ms_nNearBubbleBandRemovalsE",       "I"),
     ("bubble: fade creations",       "_ZN8CCarCtrl27ms_nNearBubbleFadeCreationsE",      "I"),
@@ -181,7 +189,7 @@ NEAR_BUBBLE = [
     ("bubble: other fill (rest)",    "_ZN8CCarCtrl23ms_nNearBubbleOtherFillE",          "I"),
     ("bubble: fill target",          "_ZN8CCarCtrl20ms_fNearBubbleTargetE",             "f"),
     ("bubble: other creations",      "_ZN8CCarCtrl28ms_nNearBubbleOtherCreationsE",     "I"),
-    ("bubble: other creations in frustum", "_ZN8CCarCtrl37ms_nNearBubbleOtherCreationsInFrustumE", "I"),
+    ("bubble: other creations in view", "_ZN8CCarCtrl34ms_nNearBubbleOtherCreationsInViewE", "I"),
     ("bubble: valve removals",       "_ZN8CCarCtrl27ms_nNearBubbleValveRemovalsE",      "I"),
 ]
 
@@ -311,14 +319,14 @@ def main():
     else:
         print("  the ring scale: not derivable (a symbol is missing)")
 
-    # The acceptance of the near bubble (VICE-127), as one line. The two frustum
-    # counters read the catchable zone (VICE-146): in the frustum nearer than
-    # the in-view band minimum, where the player could catch the event. The
-    # band counters are reported next to them: they are allowed and expected to
-    # rise as the traffic fills; they do not fail the verdict.
+    # The acceptance of the near bubble (VICE-127), as one line. The two
+    # catchable-zone counters read the zone of VICE-146: in the frustum nearer
+    # than the in-view band minimum, where the player could catch the event.
+    # The band counters are reported next to them: they are allowed and expected
+    # to rise as the traffic fills; they do not fail the verdict.
     print()
-    creations = values.get("creations in frustum (catchable zone)")
-    removals = values.get("removals in frustum (catchable zone)")
+    creations = values.get("catchable-zone creations")
+    removals = values.get("catchable-zone removals")
     valve = values.get("valve removals")
     band_creations = values.get("band creations")
     band_removals = values.get("band removals")
@@ -333,8 +341,8 @@ def main():
         band = ""
         if band_creations is not None and band_removals is not None:
             band = f", band creations {band_creations}, band removals {band_removals}"
-        print(f"  the near bubble: creations in the frustum {creations}, "
-              f"removals in the frustum {removals}, valve removals {valve}{band} -> {verdict}")
+        print(f"  the near bubble: catchable-zone creations {creations}, "
+              f"catchable-zone removals {removals}, valve removals {valve}{band} -> {verdict}")
     other = values.get("other fill (rest)")
     if fill is not None and target is not None:
         if other is None:
@@ -347,12 +355,12 @@ def main():
         print(f"  the near bubble: the hidden creations by arm: occluded hint {occluder}, "
               f"close blind spot {ray}")
     other_creations = values.get("other creations")
-    other_in_frustum = values.get("other creations in frustum")
-    if other_creations is not None and other_in_frustum is not None:
+    other_in_view = values.get("other creations in view")
+    if other_creations is not None and other_in_view is not None:
         # The scripted cars are their own category: a road block or a cheat car
         # in view is expected, so this row informs and does not fail the verdict.
         print(f"  the near bubble: the cars outside the spawner {other_creations}, "
-              f"of them catchable {other_in_frustum} (their own row, not the traffic's)")
+              f"of them in view {other_in_view} (their own row, not the traffic's)")
 
 
 if __name__ == "__main__":

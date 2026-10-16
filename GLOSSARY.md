@@ -320,15 +320,18 @@ removes an entity inside (VICE-127). The radius is the car side band (120 m)
 less the placement reserve of the ring table (30 m), so no spawn band places
 inside it; the population inside the bubble is the traffic that drove in from
 outside. A creation outside the bubble is allowed only while the player cannot
-see the position: beyond the visible range (the fade and the fog), behind the
+see the position - beyond the visible range (the fade and the fog), behind the
 soft distance (the traffic behind the camera, off the view cone by the margin),
-or behind the confirmation ray (the occluded hint and the close blind spot are
-never allowed on their own: a blocked line of sight decides, bounded per frame).
-A removal needs the fresh-spawn grace, the removal distance (the bubble plus its
-reserve, at least the ring's despawn) and the same hidden condition. A car
-created off the view cone holds its alpha 0 until it is first on screen, so the
-reveal itself is the fade. The rules live in `src/control/NearBubble.h`, the
-engine arms and the counters in `NearBubble.cpp`; ADR 0025 holds the decisions.
+behind the confirmation ray (the occluded hint and the close blind spot are
+never allowed on their own: a blocked line of sight decides, bounded per frame)
+- or in the in-view band (VICE-146: the on-screen spawn band at or beyond
+`rings.carOnScreenSpawnMin`, covered by the car's own reveal). A removal needs
+the fresh-spawn grace, the removal distance (the bubble plus its reserve, at
+least the ring's despawn) and the same conditions: hidden, or in the in-view
+band (covered by the fade-out of the despawn). A car created off the view cone
+holds its alpha 0 until it is first on screen, so the reveal itself is the fade.
+The rules live in `src/control/NearBubble.h`, the engine arms and the counters
+in `NearBubble.cpp`; ADR 0025 holds the decisions (and the VICE-146 amendment).
 
 ## Soft distance
 
@@ -337,8 +340,10 @@ side band less the widest lane offset of the shipped paths (17.5 m), so every
 placement of the band sits at or beyond it. A car off the view cone by the
 margin and at or beyond it may be created - the traffic behind the camera - and
 inside it only the confirmation ray decides. It is the arm that keeps a street
-with no occluders alive, because the ring's bands sit inside the visible range
-by the ring table's design (`NEAR_BUBBLE_SOFT_DISTANCE`).
+with no occluders alive for the traffic behind the camera, because the ring's
+bands sit inside the visible range by the ring table's design
+(`NEAR_BUBBLE_SOFT_DISTANCE`); the front calls of the spawner are the in-view
+band's since VICE-146.
 
 ## Confirmation ray
 
@@ -350,18 +355,51 @@ only selects the position; the close blind spot (off the view cone by the
 margin, inside the soft distance) uses the same ray. A frame spends at most four
 of them (`NEAR_BUBBLE_LOS_RAYS_PER_FRAME`).
 
-## Frustum counter
+## Catchable zone
 
-One of the two acceptance counters of the near bubble (VICE-127), read live by
-`utils/caps-audit/live-counters.py`: `ms_nNearBubbleCreationsInFrustum` and
-`ms_nNearBubbleRemovalsInFrustum`. An event at a position the player could catch
-- in the frustum, inside the fade, not occluded - moves them; the rule never
-allows one, so a path that bypasses the rule shows up there. Both must stay 0 in
-a play session; the catchable events a fade covers are counted apart (fade
-creations and fade removals), and the cars created outside the traffic spawner
-have their own rows (`ms_nNearBubbleOtherCreations` and its in-frustum
-subdivision), so neither a transition nor a scripted car reads as a traffic
-violation.
+The positions of the near bubble's acceptance (VICE-146): in the frustum and
+nearer than the in-view band minimum. A creation or removal there is one the
+player could catch, so the acceptance counters of the zone must stay 0 unless a
+fade covered the event; the occluded and beyond-the-fade positions of the
+frustum sit outside the acceptance (a confirmed ray or the fog hides them, and
+the rule counts them as hidden). The zone is named by the two counters, the
+catchable-zone counters.
+
+## Catchable-zone counter
+
+The acceptance pair of the near bubble (VICE-127; the frustum counters renamed
+at VICE-146): `ms_nNearBubbleCatchableCreations` and
+`ms_nNearBubbleCatchableRemovals`, read live by
+`utils/caps-audit/live-counters.py`. An event the player could catch - in the
+catchable zone - moves them unless a fade covered it; the rule never allows one,
+so a path that bypasses the rule shows up there. Both must stay 0 in a play
+session; the catchable events a fade covers are counted apart (fade creations
+and fade removals), the in-view band's events have their own pair (the band
+counters), and the cars created outside the traffic spawner have their own rows
+(`ms_nNearBubbleOtherCreations` and its in-view subdivision), so neither a
+transition nor a scripted car reads as a traffic violation.
+
+## In-view band
+
+The stock game's on-screen spawn band, restored as the last allowed arm of the
+near bubble (VICE-146): a position in the frustum at or beyond
+`CurrentTrafficRings().carOnScreenSpawnMin` (220 m at the stock ring, 440 m at
+the owner's settings) may be created or removed even though the player can see
+it. The spawner's on-screen branch aims at `carOnScreenSpawnMax` and the birth
+cull holds a fresh on-screen car at or beyond the minimum, so the band is the
+band the stock game always had; the near bubble had refused it and starved the
+traffic. A creation there is covered by the car's own reveal (its alpha starts
+at 0 and ramps up from the first render), a removal by the fade-out of the
+despawn (`CVehicle::bFadeOut`); the strict bubble keeps refusing everything
+nearer than the band (`NEAR_BUBBLE_ARM_ONSCREEN_BAND`).
+
+## Band counter
+
+One of the two counters of the in-view band, read live by
+`utils/caps-audit/live-counters.py`: `ms_nNearBubbleBandCreations` and
+`ms_nNearBubbleBandRemovals`. They count the events the band arm allowed (in
+the frustum, at or beyond the band minimum, no fade); they rise as the traffic
+fills and are not violations.
 
 ## Fresh-spawn grace
 

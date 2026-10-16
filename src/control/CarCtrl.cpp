@@ -108,14 +108,16 @@ uint32 aCarsToKeepTime[MAX_CARS_TO_KEEP];
 /* The fill burst (VICE-126): the state of the window and the counters the live
  * rig reads (utils/caps-audit/live-counters.py). The "total" pair accumulates
  * since boot (the last Init or ReInit), so the boot burst stays readable after
- * a later arming resets the window rows; the three "ended" counters count the
- * burst runs by the reason they ended (VICE-146). */
+ * a later arming resets the window rows; the four "ended" counters count the
+ * burst runs by the reason they ended (VICE-146): the target's stop line, the
+ * full car budget, the give-up bound and the spent window. */
 SFillBurst CCarCtrl::ms_FillBurst;
 uint32 CCarCtrl::ms_nFillBurstAttempts;
 uint32 CCarCtrl::ms_nFillBurstPlaced;
 uint32 CCarCtrl::ms_nFillBurstTotalAttempts;
 uint32 CCarCtrl::ms_nFillBurstTotalPlaced;
 uint32 CCarCtrl::ms_nFillBurstEndedLine;
+uint32 CCarCtrl::ms_nFillBurstEndedBudget;
 uint32 CCarCtrl::ms_nFillBurstEndedStalls;
 uint32 CCarCtrl::ms_nFillBurstEndedWindow;
 float CCarCtrl::ms_fFillBurstTarget;
@@ -223,9 +225,9 @@ CarModelsAreResident(void)
 void
 CCarCtrl::SpendFillBurstFrame(void)
 {
-	/* The stop line: the random car target of the ring, the line
+	/* The stop lines: the random car target of the ring, the line
 	 * GenerateOneRandomCar stops at, and the car budget behind it. A burst never
-	 * runs past its target. */
+	 * runs past either, and the end counter says which one bound. */
 	ms_fFillBurstTarget = GetRandomCarTarget();
 	/* The boot hazard (VICE-146): before the camera and the ring are live the
 	 * target and the car budget line are 0, and the stop line would burn the
@@ -235,9 +237,16 @@ CCarCtrl::SpendFillBurstFrame(void)
 		FillBurstSpendFrame(&ms_FillBurst, false, false);
 		return;
 	}
-	if (FillBurstTargetReached((float)NumRandomCars, ms_fFillBurstTarget) ||
-		NumCarsInUse() >= MaxNumberOfCarsInUse) {
+	/* The two stop lines are counted apart: the target's line says the area is
+	 * full, the budget's says the car budget is (the two mean different
+	 * things to the orchestrator, so the reason rows do not conflate them). */
+	if (FillBurstTargetReached((float)NumRandomCars, ms_fFillBurstTarget)) {
 		ms_nFillBurstEndedLine++;
+		FillBurstDisarm(&ms_FillBurst);
+		return;
+	}
+	if (NumCarsInUse() >= MaxNumberOfCarsInUse) {
+		ms_nFillBurstEndedBudget++;
 		FillBurstDisarm(&ms_FillBurst);
 		return;
 	}
@@ -2491,6 +2500,7 @@ void CCarCtrl::Init(void)
 	ms_nFillBurstTotalAttempts = 0;
 	ms_nFillBurstTotalPlaced = 0;
 	ms_nFillBurstEndedLine = 0;
+	ms_nFillBurstEndedBudget = 0;
 	ms_nFillBurstEndedStalls = 0;
 	ms_nFillBurstEndedWindow = 0;
 	for (int i = 0; i < MAX_CARS_TO_KEEP; i++)
@@ -2526,6 +2536,7 @@ void CCarCtrl::ReInit(void)
 	ms_nFillBurstTotalAttempts = 0;
 	ms_nFillBurstTotalPlaced = 0;
 	ms_nFillBurstEndedLine = 0;
+	ms_nFillBurstEndedBudget = 0;
 	ms_nFillBurstEndedStalls = 0;
 	ms_nFillBurstEndedWindow = 0;
 	for (int i = 0; i < MAX_CARS_TO_KEEP; i++)

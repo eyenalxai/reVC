@@ -154,8 +154,10 @@ FillBurstSpendFrame(SFillBurst *burst, bool attempts, bool placed)
 	return FILL_BURST_NOT_ENDED;
 }
 
-/* The stop line: the local count is at 90 % of the local target. A zero
- * target stops the burst too: there is nothing to fill. */
+/* The stop line: the local count is at 90 % of the local target. The predicate
+ * reads true for a zero target (0 is at 90 % of 0), so the callers check the
+ * target before it: a target that is not known yet is a boot wait, not a stop
+ * (VICE-146, the "boot wait" rule above). */
 static inline bool
 FillBurstTargetReached(float count, float target)
 {

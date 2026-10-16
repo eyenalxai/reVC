@@ -257,11 +257,42 @@ static void CheckStateMachine(void)
 	Check(!refused.endedByStopLine, "the failing run is not the stop line");
 	Check(refused.endedByStalls && !refused.endedByWindow, "a failing run reports the give-up bound");
 
-	/* The stop line: 90 % of the local target, and a zero target stops too. */
+	/* The stop line: 90 % of the local target. The predicate reads true at a
+	 * zero target (0 is at 90 % of 0): that is exactly why the callers check
+	 * the target first and wait (VICE-146), and the caller-guard case below
+	 * holds the wait. */
 	Check(!FillBurstTargetReached(89.9f, 100.0f), "89.9 % of the target does not stop the burst");
 	Check(FillBurstTargetReached(90.0f, 100.0f), "90 % of the target stops the burst");
-	Check(FillBurstTargetReached(0.0f, 0.0f), "a zero target stops the burst");
-	Check(FillBurstTargetReached(5.0f, 0.0f), "a run that lost its target stops the burst");
+	Check(FillBurstTargetReached(0.0f, 0.0f), "the stop-line predicate reads true at a zero target");
+	Check(FillBurstTargetReached(5.0f, 0.0f), "the stop-line predicate reads true when the target is lost");
+
+	/* The caller's guard (VICE-146), as far as an offline program can reach:
+	 * this is one frame of the callers' own decision, in their order - the
+	 * target first, the stop line of a live target second, the frame last
+	 * (Population.cpp, CarCtrl.cpp) - so the burst is armed through the
+	 * zero-target frames of a boot and runs the moment the area is known. A
+	 * caller edit that moved the stop line before the target check, or
+	 * dropped the wait, would disarm the burst on a 0 target on its first
+	 * frame; this sequence catches that. */
+	SFillBurst guarded;
+	int bootFrames = 0;
+	FillBurstArm(&guarded);
+	for (int i = 0; i < 12; i++) {
+		float target = i < 10 ? 0.0f : 500.0f;	/* the zone is live on frame 10 */
+		if (target <= 0.0f) {
+			/* The boot wait: the stop line is never reached with a 0 target. */
+			FillBurstSpendFrame(&guarded, false, false);
+			bootFrames++;
+			continue;
+		}
+		if (FillBurstTargetReached(0.0f, target))
+			break;	/* the stop line of a live target (not reached here) */
+		FillBurstSpendFrame(&guarded, true, true);
+	}
+	Check(bootFrames == 10, "the boot frames wait for the target");
+	Check(FillBurstIsRunning(&guarded), "the guarded burst survives the zero-target boot");
+	Check(guarded.nFrames == FILL_BURST_FRAMES - 2, "only the live-target frames spend the window");
+	Check(guarded.nStalls == 0, "a placement clears the boot wait's stalls");
 
 	SBurstRun stopped = RunBurst(900.0f, 1000.0f, FILL_BURST_FRAMES, true);
 	Check(stopped.endedByStopLine, "the stop line ends the burst");
