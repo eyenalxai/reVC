@@ -11,6 +11,9 @@ class CEntity;
 #define FADE_DISTANCE 20.0f
 #define STREAM_DISTANCE 30.0f
 
+// Test knob: multiplies every LOD distance. 1.0f gives the normal values.
+#define LOD_DISTANCE_TEST_MULT 4.0f
+
 extern bool gbShowPedRoadGroups;
 extern bool gbShowCarRoadGroups;
 extern bool gbShowCollisionPolys;

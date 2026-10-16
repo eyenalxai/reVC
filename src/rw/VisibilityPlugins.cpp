@@ -153,11 +153,11 @@ CVisibilityPlugins::SetRenderWareCamera(RwCamera *camera)
 		ms_cullCompsDist = sq(TheCamera.LODDistMultiplier * 20.0f);
 
 	// How far the vehicle detail parts (_hi/extra, _vlo and low detail) draw.
-	ms_vehicleLod0Dist = sq(250.0f * VEHICLE_LODDIST_MULTIPLIER);
-	ms_vehicleLod1Dist = sq(320.0f * VEHICLE_LODDIST_MULTIPLIER);
-	ms_vehicleFadeDist = sq(320.0f * VEHICLE_LODDIST_MULTIPLIER);
-	ms_bigVehicleLod0Dist = sq(200.0f * VEHICLE_LODDIST_MULTIPLIER);
-	ms_bigVehicleLod1Dist = sq(350.0f * VEHICLE_LODDIST_MULTIPLIER);
+	ms_vehicleLod0Dist = sq(250.0f * VEHICLE_LODDIST_MULTIPLIER * LOD_DISTANCE_TEST_MULT);
+	ms_vehicleLod1Dist = sq(320.0f * VEHICLE_LODDIST_MULTIPLIER * LOD_DISTANCE_TEST_MULT);
+	ms_vehicleFadeDist = sq(320.0f * VEHICLE_LODDIST_MULTIPLIER * LOD_DISTANCE_TEST_MULT);
+	ms_bigVehicleLod0Dist = sq(200.0f * VEHICLE_LODDIST_MULTIPLIER * LOD_DISTANCE_TEST_MULT);
+	ms_bigVehicleLod1Dist = sq(350.0f * VEHICLE_LODDIST_MULTIPLIER * LOD_DISTANCE_TEST_MULT);
 	ms_pedLod1Dist = sq(60.0f * TheCamera.LODDistMultiplier);
 	ms_pedFadeDist = sq(70.0f * TheCamera.LODDistMultiplier);
 }
