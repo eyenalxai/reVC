@@ -28,7 +28,7 @@ carry 17-48 degrees when the boost runs out.
    DotProduct(car->m_vecMoveSpeed, car->GetForward())`, `push =
    Min(fMaxVelocity*(1 + level) - fwdSpeed, DRIFT_BOOST_PUSH*
    fMaxVelocity*dt)`. The drain shape and the level rules are unchanged.
-2. `DRIFT_BOOST_PUSH` is 0.5, about 2.6 g with the straightening pull. v4 was
+2. `DRIFT_BOOST_PUSH` is 0.5, about 2.5 g with the straightening pull. v4 was
    0.8 and felt too fast; v5 was 0.35 along the travel and felt like ice.
 3. Every v5 tuning that the owner did not complain about stays:
    `DRIFT_TIER1_TIME` 0.35, `DRIFT_TIER2_TIME` 0.8, `DRIFT_BOOST_TIER1` 0.04,

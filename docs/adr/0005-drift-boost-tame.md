@@ -55,6 +55,9 @@ also spreads the tier 1 bonus over 1.25 s.
 - The charge needs 0.35 s (tier 1) or 0.8 s (tier 2) of real slide, so a
   corner drift pays without a long hold. The charge rules, the entry gate,
   the curve rate, the alignment and the recovery are unchanged.
+- ADR 0006 reverts the push direction and the cap metric of the first two
+  bullets: the nose push and the forward-speed headroom are back, because the
+  travel push made the car read as sliding on ice.
 - The drift never costs speed: the push only adds, the rotation helper is
   untouched, and the invariants of ADRs 0001-0004 still hold: player only,
   off by default, inert when off, surfaces and temperature unchanged, and
