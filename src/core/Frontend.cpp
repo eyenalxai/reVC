@@ -60,6 +60,12 @@ const CRGBA SCROLLBAR_COLOR = LABEL_COLOR;
 #define SCROLLBAR_MAX_HEIGHT 263.0f // not in end result
 #define SCROLLABLE_PAGES
 
+// Draw distance slider. The maximum is four times the old maximum (4.0). The
+// value 4.0 keeps the old distances; 16.0 gives four times the old distances.
+#define DRAWDIST_MIN 0.925f
+#define DRAWDIST_MAX 16.0f
+#define DRAWDIST_RANGE (DRAWDIST_MAX - DRAWDIST_MIN)
+
 #define hasNativeList(screen) (screen == MENUPAGE_SKIN_SELECT || screen == MENUPAGE_KEYBOARD_CONTROLS)
 
 #ifdef SCROLLABLE_PAGES
@@ -731,10 +737,10 @@ CMenuManager::CheckSliderMovement(int value)
 		break;
 	case MENUACTION_DRAWDIST:
 		if(value > 0)
-			m_PrefsLOD += ((4.0f - 0.925f) / MENUSLIDER_LOGICAL_BARS);
+			m_PrefsLOD += DRAWDIST_RANGE / MENUSLIDER_LOGICAL_BARS;
 		else
-			m_PrefsLOD -= ((4.0f - 0.925f) / MENUSLIDER_LOGICAL_BARS);
-		m_PrefsLOD = Clamp(m_PrefsLOD, 0.925f, 4.0f);
+			m_PrefsLOD -= DRAWDIST_RANGE / MENUSLIDER_LOGICAL_BARS;
+		m_PrefsLOD = Clamp(m_PrefsLOD, DRAWDIST_MIN, DRAWDIST_MAX);
 		CRenderer::ms_lodDistScale = m_PrefsLOD;
 		break;
 
@@ -1564,7 +1570,7 @@ CMenuManager::DrawStandardMenus(bool activeScreen)
 							ProcessSlider(m_PrefsBrightness / 384.0f, SLIDER_Y(70.0f), HOVEROPTION_INCREASE_BRIGHTNESS, HOVEROPTION_DECREASE_BRIGHTNESS, SCREEN_WIDTH, true);
 							break;
 						case MENUACTION_DRAWDIST:
-							ProcessSlider((m_PrefsLOD - 0.925f) / 3.075f, SLIDER_Y(99.0f), HOVEROPTION_INCREASE_DRAWDIST, HOVEROPTION_DECREASE_DRAWDIST, SCREEN_WIDTH, true);
+							ProcessSlider((m_PrefsLOD - DRAWDIST_MIN) / DRAWDIST_RANGE, SLIDER_Y(99.0f), HOVEROPTION_INCREASE_DRAWDIST, HOVEROPTION_DECREASE_DRAWDIST, SCREEN_WIDTH, true);
 							break;
 						case MENUACTION_MUSICVOLUME:
 							if(m_nPrefsAudio3DProviderIndex != NO_AUDIO_PROVIDER)
@@ -3190,7 +3196,7 @@ CMenuManager::LoadSettings()
 #ifdef LEGACY_MENU_OPTIONS
 	m_PrefsVsync = m_PrefsVsyncDisp;
 #endif
-	m_PrefsLOD = Clamp(m_PrefsLOD, 0.925f, 4.0f);
+	m_PrefsLOD = Clamp(m_PrefsLOD, DRAWDIST_MIN, DRAWDIST_MAX);
 	CRenderer::ms_lodDistScale = m_PrefsLOD;
 
 	if (m_nPrefsAudio3DProviderIndex == NO_AUDIO_PROVIDER)
