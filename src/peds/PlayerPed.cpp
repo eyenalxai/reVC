@@ -320,7 +320,7 @@ CPlayerPed::MakeChangesForNewWeapon(eWeaponType weapon)
 
 	// The stock weapon switch fills the clip. With the active reload on the
 	// player reloads by hand, so the clip keeps its rounds (VICE-74).
-	if (!gActiveReloadEnabled)
+	if (GetWeapon()->RefillsClipAutomatically(this))
 		GetWeapon()->m_nAmmoInClip = Min(GetWeapon()->m_nAmmoTotal, CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->m_nAmountofAmmunition);
 
 	if (CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_CANAIM))

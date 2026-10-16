@@ -83,6 +83,59 @@ GetFirstPersonSightsRay(float range, CVector &source, CVector &target)
 	target = cam->Front*range + source;
 }
 
+// The ray of a shot that leaves along the camera: the first person view
+// shoots along the active cam, the mouse-look third person view along the
+// camera's aim solver, and the free camera along the vectors cached for it.
+// firstPerson repeats the view the caller has already picked, so the free
+// camera never drives the first person shot. left, when not nil, receives
+// the camera's left vector.
+static void
+GetCameraShotRay(CEntity *shooter, float range, CVector *fireSource, CVector &source, CVector &target, CVector *left, bool firstPerson)
+{
+	CCam *cam = &TheCamera.Cams[TheCamera.ActiveCam];
+
+#ifdef FREE_CAM
+	if (CCamera::bFreeCam && !firstPerson) {
+		CPlayerPed *shooterPed = (CPlayerPed*)shooter;
+		Find3rdPersonCamTargetVectorFromCachedVectors(range, *fireSource, source, target,
+			shooterPed->m_cachedCamSource, shooterPed->m_cachedCamFront, shooterPed->m_cachedCamUp);
+		if (left)
+			*left = CrossProduct(shooterPed->m_cachedCamFront, shooterPed->m_cachedCamUp);
+		return;
+	}
+#endif
+
+	if (firstPerson)
+		GetFirstPersonSightsRay(range, source, target);
+	else
+		TheCamera.Find3rdPersonCamTargetVector(range, *fireSource, source, target);
+
+	if (left)
+		*left = CrossProduct(cam->Front, cam->Up);
+}
+
+// One particle of a gunflash chain: the step from the flash before it and
+// the size at the new place. The step of the first row is zero, the flash
+// sits on the muzzle.
+struct GunflashParticle
+{
+	float step;
+	float size;
+};
+
+// One chain of gunflash particles: one flash per row, each a step further
+// along dir than the one before it. The rows are the order and the look of
+// the flash.
+static void
+AddGunflashChain(tParticleType type, CVector pos, CVector const &dir, const GunflashParticle *chain, int32 count)
+{
+	for (int32 i = 0; i < count; i++) {
+		if (chain[i].step != 0.0f)
+			pos += chain[i].step * dir;
+		CParticle::AddParticle(type, pos, CVector(0.0f, 0.0f, 0.0f), nil, chain[i].size);
+	}
+}
+
 CWeaponInfo *
 CWeapon::GetInfo()
 {
@@ -1024,7 +1077,7 @@ CWeapon::FireInstantHit(CEntity *shooter, CVector *fireSource)
 	else if ( shooter == FindPlayerPed() && TheCamera.Using1stPersonView() && !TheCamera.UsingFirstPersonSights() )
 	{
 		// Hip fire: the shot leaves along the camera axis with the stock player spread
-		GetFirstPersonSightsRay(info->m_fRange, source, target);
+		GetCameraShotRay(shooter, info->m_fRange, fireSource, source, target, nil, true);
 
 		int32 inaccuracy = 100 - ((CPed *)shooter)->m_wepAccuracy;
 		if (inaccuracy != 0)
@@ -1067,10 +1120,10 @@ CWeapon::FireInstantHit(CEntity *shooter, CVector *fireSource)
 #endif
 	else if ( shooter == FindPlayerPed() && TheCamera.Cams[0].Using3rdPersonMouseCam()  )
 	{
+		GetCameraShotRay(shooter, info->m_fRange, fireSource, source, target, nil, false);
 #ifdef FREE_CAM
 		if (CCamera::bFreeCam) {
 			CPlayerPed* shooterPed = (CPlayerPed*)shooter;
-			Find3rdPersonCamTargetVectorFromCachedVectors(info->m_fRange, *fireSource, source, target, shooterPed->m_cachedCamSource, shooterPed->m_cachedCamFront, shooterPed->m_cachedCamUp);
 
 			if ((shooterPed->m_pedIK.m_flags & CPedIK::GUN_POINTED_SUCCESSFULLY) == 0) {
 				target.x = info->m_fRange;
@@ -1079,11 +1132,8 @@ CWeapon::FireInstantHit(CEntity *shooter, CVector *fireSource)
 
 				shooterPed->TransformToNode(target, PED_HANDR);
 			}
-		} else
-#endif
-		{
-			TheCamera.Find3rdPersonCamTargetVector(info->m_fRange, *fireSource, source, target);
 		}
+#endif
 
 #ifdef FIX_BUGS
 		// fix muzzleflash rotation
@@ -1253,19 +1303,16 @@ CWeapon::FireInstantHit(CEntity *shooter, CVector *fireSource)
 			if ( shooterMoving )
 				gunflashPos += CVector(1.5f*vel.x, 1.5f*vel.y, 0.0f);
 
-			CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.07f);
-			gunflashPos += CVector(0.06f*ahead.x, 0.06f*ahead.y, 0.0f);
-			CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.05f);
-			gunflashPos += CVector(0.04f*ahead.x, 0.04f*ahead.y, 0.0f);
-			CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.04f);
-			gunflashPos += CVector(0.04f*ahead.x, 0.04f*ahead.y, 0.0f);
-			CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.03f);
-			gunflashPos += CVector(0.03f*ahead.x, 0.03f*ahead.y, 0.0f);
-			CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.03f);
-			gunflashPos += CVector(0.03f*ahead.x, 0.03f*ahead.y, 0.0f);
-			CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.02f);
-			gunflashPos += CVector(0.02f*ahead.x, 0.02f*ahead.y, 0.0f);
-			CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.01f);
+			static const GunflashParticle gunflashSmg[] = {
+				{ 0.00f, 0.07f },
+				{ 0.06f, 0.05f },
+				{ 0.04f, 0.04f },
+				{ 0.04f, 0.03f },
+				{ 0.03f, 0.03f },
+				{ 0.03f, 0.02f },
+				{ 0.02f, 0.01f },
+			};
+			AddGunflashChain(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(ahead.x, ahead.y, 0.0f), gunflashSmg, ARRAY_SIZE(gunflashSmg));
 
 			CVector gunsmokePos = *fireSource;
 			float rnd = CGeneral::GetRandomNumberInRange(0.05f, 0.25f);
@@ -1294,11 +1341,12 @@ CWeapon::FireInstantHit(CEntity *shooter, CVector *fireSource)
 			if ( shooterMoving )
 				gunflashPos += CVector(1.5f*vel.x, 1.5f*vel.y, 0.0f);
 
-			CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.06f);
-			gunflashPos += CVector(0.06f*ahead.x, 0.06f*ahead.y, 0.0f);
-			CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.04f);
-			gunflashPos += CVector(0.04f*ahead.x, 0.04f*ahead.y, 0.0f);
-			CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.02f);
+			static const GunflashParticle gunflashPistol[] = {
+				{ 0.00f, 0.06f },
+				{ 0.06f, 0.04f },
+				{ 0.04f, 0.02f },
+			};
+			AddGunflashChain(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(ahead.x, ahead.y, 0.0f), gunflashPistol, ARRAY_SIZE(gunflashPistol));
 
 			CVector gunsmokePos = *fireSource;
 			CParticle::AddParticle(PARTICLE_GUNSMOKE2, gunsmokePos, CVector(ahead.x*0.10f, ahead.y*0.10f, 0.0f), nil, 0.005f);
@@ -1336,29 +1384,34 @@ CWeapon::AddGunFlashBigGuns(CVector start, CVector end)
 	CVector2D ahead = shootVec;
 	ahead.Normalise();
 
-	CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.08f);
-	gunflashPos += CVector(0.06f * ahead.x, 0.06f * ahead.y, 0.0f);
-	CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.06f);
-	gunflashPos += CVector(0.06f * ahead.x, 0.06f * ahead.y, 0.0f);
-	CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.06f);
+	// The flash of the big guns: the muzzle burst and four short spokes
+	static const GunflashParticle gunflashMuzzle[] = {
+		{ 0.00f, 0.08f },
+		{ 0.06f, 0.06f },
+		{ 0.06f, 0.06f },
+	};
+	static const GunflashParticle gunflashSpokeZ[] = {
+		{ 0.00f, 0.04f },
+		{ 0.04f, 0.02f },
+		{ 0.03f, 0.02f },
+	};
+	static const GunflashParticle gunflashSpoke[] = {
+		{ 0.00f, 0.04f },
+		{ 0.04f, 0.03f },
+		{ 0.03f, 0.02f },
+	};
+
+	AddGunflashChain(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(ahead.x, ahead.y, 0.0f), gunflashMuzzle, ARRAY_SIZE(gunflashMuzzle));
 
 	gunflashPos = start;
 	gunflashPos += CVector(-0.1f * ahead.x, -0.1f * ahead.y, 0.0f);
 	gunflashPos.z += 0.04f;
-	CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.04f);
-	gunflashPos.z += 0.04f;
-	CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.02f);
-	gunflashPos.z += 0.03f;
-	CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.02f);
+	AddGunflashChain(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 1.0f), gunflashSpokeZ, ARRAY_SIZE(gunflashSpokeZ));
 
 	gunflashPos = start;
 	gunflashPos += CVector(-0.1f * ahead.x, -0.1f * ahead.y, 0.0f);
 	gunflashPos.z -= 0.04f;
-	CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.04f);
-	gunflashPos.z -= 0.04f;
-	CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.02f);
-	gunflashPos.z -= 0.03f;
-	CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.02f);
+	AddGunflashChain(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, -1.0f), gunflashSpokeZ, ARRAY_SIZE(gunflashSpokeZ));
 
 	CVector offset = CrossProduct(CVector(ahead.x, ahead.y, 0.0f), CVector(0.0f, 0.0f, 5.0f));
 	offset.Normalise2D();
@@ -1366,20 +1419,12 @@ CWeapon::AddGunFlashBigGuns(CVector start, CVector end)
 	gunflashPos = start;
 	gunflashPos += CVector(-0.1f * ahead.x, -0.1f * ahead.y, 0.0f);
 	gunflashPos += CVector(0.06f * offset.x, 0.06f * offset.y, 0.0f);
-	CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.04f);
-	gunflashPos += CVector(0.04f * offset.x, 0.04f * offset.y, 0.0f);
-	CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.03f);
-	gunflashPos += CVector(0.03f * offset.x, 0.03f * offset.y, 0.0f);
-	CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.02f);
+	AddGunflashChain(PARTICLE_GUNFLASH_NOANIM, gunflashPos, offset, gunflashSpoke, ARRAY_SIZE(gunflashSpoke));
 
 	gunflashPos = start;
 	gunflashPos += CVector(-0.1f * ahead.x, -0.1f * ahead.y, 0.0f);
 	gunflashPos -= CVector(0.06f * offset.x, 0.06f * offset.y, 0.0f);
-	CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.04f);
-	gunflashPos -= CVector(0.04f * offset.x, 0.04f * offset.y, 0.0f);
-	CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.03f);
-	gunflashPos -= CVector(0.03f * offset.x, 0.03f * offset.y, 0.0f);
-	CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.02f);
+	AddGunflashChain(PARTICLE_GUNFLASH_NOANIM, gunflashPos, CVector(-offset.x, -offset.y, 0.0f), gunflashSpoke, ARRAY_SIZE(gunflashSpoke));
 
 	CVector gunsmokePos = start;
 	float rnd = CGeneral::GetRandomNumberInRange(0.05f, 0.25f);
@@ -1767,13 +1812,14 @@ CWeapon::FireShotgun(CEntity *shooter, CVector *fireSource)
 	CVector2D rotOffset(-Sin(angle), Cos(angle));
 	rotOffset.Normalise();
 
+	static const GunflashParticle gunflashShotgun[] = {
+		{ 0.00f, 0.00f },
+		{ 0.10f, 0.15f },
+		{ 0.10f, 0.20f },
+	};
 	CVector gunflashPos = *fireSource;
 	gunflashPos += CVector(rotOffset.x*0.1f, rotOffset.y*0.1f, 0.0f);
-	CParticle::AddParticle(PARTICLE_GUNFLASH, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.0f);
-	gunflashPos += CVector(rotOffset.x*0.1f, rotOffset.y*0.1f, 0.0f);
-	CParticle::AddParticle(PARTICLE_GUNFLASH, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.15f);
-	gunflashPos += CVector(rotOffset.x*0.1f, rotOffset.y*0.1f, 0.0f);
-	CParticle::AddParticle(PARTICLE_GUNFLASH, gunflashPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.2f);
+	AddGunflashChain(PARTICLE_GUNFLASH, gunflashPos, CVector(rotOffset.x, rotOffset.y, 0.0f), gunflashShotgun, ARRAY_SIZE(gunflashShotgun));
 	CParticle::AddParticle(PARTICLE_GUNFLASH, *fireSource, CVector(0.0f, 0.0f, 0.0f), nil, 0.0f);
 
 	CVector gunsmokePos = *fireSource;
@@ -1839,42 +1885,19 @@ CWeapon::FireShotgun(CEntity *shooter, CVector *fireSource)
 		CColPoint point;
 		CEntity *victim;
 
-#ifdef FIRST_PERSON
 		// The first person view: the sight view and hip fire shoot along the camera axis
-		bool usingFirstPerson = shooter == FindPlayerPed() &&
+		bool usingFirstPerson = false;
+#ifdef FIRST_PERSON
+		usingFirstPerson = shooter == FindPlayerPed() &&
 			(TheCamera.UsingFirstPersonSights() || TheCamera.Using1stPersonView());
 #endif
 
 		if ( shooter == FindPlayerPed() && TheCamera.Cams[0].Using3rdPersonMouseCam()
-#ifdef FIRST_PERSON
 			|| usingFirstPerson
-#endif
 			)
 		{
 			CVector Left;
-#ifdef FREE_CAM
-			if (CCamera::bFreeCam
-#ifdef FIRST_PERSON
-				&& !usingFirstPerson
-#endif
-				) {
-				CPlayerPed* shooterPed = (CPlayerPed*)shooter;
-				Find3rdPersonCamTargetVectorFromCachedVectors(1.0f, *fireSource, source, target, shooterPed->m_cachedCamSource, shooterPed->m_cachedCamFront, shooterPed->m_cachedCamUp);
-				Left = CrossProduct(shooterPed->m_cachedCamFront, shooterPed->m_cachedCamUp);
-			}
-			else
-#endif
-#ifdef FIRST_PERSON
-			if (usingFirstPerson) {
-				CCam *cam = &TheCamera.Cams[TheCamera.ActiveCam];
-				GetFirstPersonSightsRay(1.0f, source, target);
-				Left = CrossProduct(cam->Front, cam->Up);
-			} else
-#endif
-			{
-				TheCamera.Find3rdPersonCamTargetVector(1.0f, *fireSource, source, target);
-				Left = CrossProduct(TheCamera.Cams[TheCamera.ActiveCam].Front, TheCamera.Cams[TheCamera.ActiveCam].Up);
-			}
+			GetCameraShotRay(shooter, 1.0f, fireSource, source, target, &Left, usingFirstPerson);
 
 			float f = (i - (shootsAtOnce / 2)) * angleBetweenTwoShot;
 			target  = f * Left + target - source;
@@ -2314,37 +2337,18 @@ CWeapon::FireAreaEffect(CEntity *shooter, CVector *fireSource)
 	CVector target;
 	CVector dir;
 
-#ifdef FIRST_PERSON
 	// The first person view: the sight view and hip fire shoot along the camera axis
-	bool usingFirstPerson = shooter == FindPlayerPed() &&
+	bool usingFirstPerson = false;
+#ifdef FIRST_PERSON
+	usingFirstPerson = shooter == FindPlayerPed() &&
 		(TheCamera.UsingFirstPersonSights() || TheCamera.Using1stPersonView());
 #endif
 
 	if ( shooter == FindPlayerPed() && TheCamera.Cams[0].Using3rdPersonMouseCam()
-#ifdef FIRST_PERSON
 		|| usingFirstPerson
-#endif
 		)
 	{
-#ifdef FREE_CAM
-		if (CCamera::bFreeCam
-#ifdef FIRST_PERSON
-			&& !usingFirstPerson
-#endif
-			) {
-			CPlayerPed* shooterPed = (CPlayerPed*)shooter;
-			Find3rdPersonCamTargetVectorFromCachedVectors(info->m_fRange, *fireSource, source, target, shooterPed->m_cachedCamSource, shooterPed->m_cachedCamFront, shooterPed->m_cachedCamUp);
-		}
-		else
-#endif
-#ifdef FIRST_PERSON
-		if (usingFirstPerson) {
-			GetFirstPersonSightsRay(info->m_fRange, source, target);
-		} else
-#endif
-		{
-			TheCamera.Find3rdPersonCamTargetVector(info->m_fRange, *fireSource, source, target);
-		}
+		GetCameraShotRay(shooter, info->m_fRange, fireSource, source, target, nil, usingFirstPerson);
 		float norm = (1.0f / info->m_fRange);
 		dir = (target - source) * norm;
 	}
@@ -3075,6 +3079,12 @@ bool
 CWeapon::UsesManualReload(CEntity *shooter)
 {
 	return gActiveReloadEnabled && IsMagazineWeapon() && shooter == FindPlayerPed();
+}
+
+bool
+CWeapon::RefillsClipAutomatically(CPed *ped)
+{
+	return !gActiveReloadEnabled || !ped->IsPlayer();
 }
 
 bool
