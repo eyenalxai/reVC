@@ -21,6 +21,7 @@
 #include "DMAudio.h"
 #include "Darkel.h"
 #include "Debug.h"
+#include "DriftControl.h"
 #include "DriftFeedback.h"
 #include "EventList.h"
 #include "FileLoader.h"
@@ -900,10 +901,11 @@ void CGame::Process(void)
 
 		// The drift feedback is stepped once a frame here: after the physics
 		// step wrote the drift state, and before the camera below reads the
-		// strength (see DriftFeedback.h). Player-only, like the drift itself.
+		// strength (see DriftFeedback.h and ADR 0012). IsDriftCar keeps the
+		// step on the player's car; the enable flag is not tested here, so
+		// the module's own check still runs every frame.
 		CVehicle *playerVeh = FindPlayerVehicle();
-		if(gDriftEnabled && playerVeh != nil && playerVeh->IsCar() &&
-		   playerVeh->GetStatus() == STATUS_PLAYER)
+		if(IsDriftCar(playerVeh))
 			CDriftFeedback::Update((CAutomobile*)playerVeh, CTimer::GetTimeStepInSeconds());
 
 		if (CReplay::ShouldStandardCameraBeProcessed())

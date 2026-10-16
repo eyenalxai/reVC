@@ -97,11 +97,11 @@ thread owns the file. It changes nothing in the physics.
 
 ## Drift snapshot
 
-One read of the drift layer's live state — the phase, the slip angle, the
-target, the yaw rate, the charge, the boost and the flags — taken at the point
-of the read, so every reader sees the values the on-screen readout shows. The
-feedback and telemetry layers read the snapshot; the drift layer's state stays
-private.
+One read of the drift layer's live state — the phase, the active and
+handbrake-turn flags, the slip angle, the target, the yaw rate, the grip cut,
+the grip scale, the charge, the boost and the entry speed — taken at the point
+of the read, so the feedback, the telemetry and the on-screen readout all see
+the same values. The drift layer's state stays private.
 
 ## Boost chain
 

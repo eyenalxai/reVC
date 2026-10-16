@@ -154,21 +154,19 @@ DriftTelemetryFormat(const char *format, ...)
 	DriftTelemetryAppend(line);
 }
 
-// Writes one row of the current state, with the event token when there is one.
-// The values come from the model's snapshot, the same ones the on-screen
-// readout uses (see DriftControl.cpp).
+// Writes one row of the passed state, with the event token when there is one.
+// The values are the model's snapshot, the same ones the on-screen readout
+// uses (see DriftControl.cpp).
 static void
-DriftTelemetryRow(CAutomobile *car, CDriftControl *ctrl, const char *event)
+DriftTelemetryRow(CAutomobile *car, const CDriftControl::tSnapshot &snap, const char *event)
 {
 	tDriftTelemetry *state = ms_pTelemetry;
-	CDriftControl::tSnapshot snap;
 	float fMaxVelocity;
 	float fSpeed;
 
 	if(state == nil)
 		return;
 
-	snap = ctrl->GetSnapshot(car);
 	fMaxVelocity = car->pHandling->Transmission.fMaxVelocity;
 	fSpeed = car->m_vecMoveSpeed.Magnitude();
 
@@ -320,22 +318,22 @@ CDriftTelemetry::Tick(CAutomobile *car, CDriftControl *ctrl)
 			    snap.ePhase == CDriftControl::DRIFT_PHASE_ENGAGE) ||
 			   (state->ePrevPhase == CDriftControl::DRIFT_PHASE_RECOVER &&
 			    snap.ePhase == CDriftControl::DRIFT_PHASE_DRIFT))
-				DriftTelemetryRow(car, ctrl, snap.bHandbrakeTurn ? "TURN" : "ENTER");
+				DriftTelemetryRow(car, snap, snap.bHandbrakeTurn ? "TURN" : "ENTER");
 			else if(state->ePrevPhase == CDriftControl::DRIFT_PHASE_ENGAGE &&
 			        snap.ePhase == CDriftControl::DRIFT_PHASE_DRIFT)
-				DriftTelemetryRow(car, ctrl, "RUN");
+				DriftTelemetryRow(car, snap, "RUN");
 			else if(state->ePrevPhase == CDriftControl::DRIFT_PHASE_RECOVER &&
 			        snap.ePhase == CDriftControl::DRIFT_PHASE_INACTIVE)
-				DriftTelemetryRow(car, ctrl, "END");
+				DriftTelemetryRow(car, snap, "END");
 		}
 		// The drift pauses in the air; the pause and the resume are edges
 		// while a drift is on.
 		if(air != state->bPrevAir && snap.ePhase != CDriftControl::DRIFT_PHASE_INACTIVE)
-			DriftTelemetryRow(car, ctrl, air ? "AIR" : "LAND");
+			DriftTelemetryRow(car, snap, air ? "AIR" : "LAND");
 		if(snap.fBoost > state->fPrevBoost){
 			char event[32];
 			sprintf(event, "BOOST %.2f->%.2f", state->fPrevBoost, snap.fBoost);
-			DriftTelemetryRow(car, ctrl, event);
+			DriftTelemetryRow(car, snap, event);
 		}
 		// A handbrake edge that was denied an entry names the first gate that
 		// failed. The drift itself starts later in the same frame, so a gate
@@ -344,11 +342,11 @@ CDriftTelemetry::Tick(CAutomobile *car, CDriftControl *ctrl)
 		   snap.ePhase == CDriftControl::DRIFT_PHASE_INACTIVE){
 			float fwdSpeed = DotProduct(car->m_vecMoveSpeed, car->GetForward());
 			if(air)
-				DriftTelemetryRow(car, ctrl, "DENY:air");
+				DriftTelemetryRow(car, snap, "DENY:air");
 			else if(fwdSpeed <= 0.0f)
-				DriftTelemetryRow(car, ctrl, "DENY:rev");
+				DriftTelemetryRow(car, snap, "DENY:rev");
 			else if(Abs(car->m_fSteerInput) <= DRIFT_ENTRY_STEER)
-				DriftTelemetryRow(car, ctrl, "DENY:steer");
+				DriftTelemetryRow(car, snap, "DENY:steer");
 		}
 	}
 	state->bFirstCall = false;
@@ -359,7 +357,7 @@ CDriftTelemetry::Tick(CAutomobile *car, CDriftControl *ctrl)
 	// of the same state.
 	if((snap.ePhase != CDriftControl::DRIFT_PHASE_INACTIVE || handbrake) &&
 	   CTimer::GetTimeInMilliseconds() >= state->nNextRowMs)
-		DriftTelemetryRow(car, ctrl, "");
+		DriftTelemetryRow(car, snap, "");
 
 	state->ePrevPhase = snap.ePhase;
 	state->bPrevAir = air;
@@ -371,6 +369,7 @@ void
 CDriftTelemetry::Event(CAutomobile *car, CDriftControl *ctrl, const char *event)
 {
 	tDriftTelemetry *state;
+	CDriftControl::tSnapshot snap;
 
 	if(!gDriftDebug || car == nil || ctrl == nil)
 		return;
@@ -381,5 +380,6 @@ CDriftTelemetry::Event(CAutomobile *car, CDriftControl *ctrl, const char *event)
 	if(state == nil)
 		return;
 
-	DriftTelemetryRow(car, ctrl, event != nil ? event : "");
+	snap = ctrl->GetSnapshot(car);
+	DriftTelemetryRow(car, snap, event != nil ? event : "");
 }

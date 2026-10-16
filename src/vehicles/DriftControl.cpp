@@ -57,6 +57,14 @@ float gDriftDebugCharge;	// seconds of slide that charge the boost
 float gDriftDebugBoost;	// stacked boost, fraction of top speed
 float gDriftDebugSpeed;	// speed change since entry, fraction of top speed
 
+// The car the drift layer works on: the player's car, and only it (see ADR
+// 0001). AI cars, traffic and every non-car vehicle keep the original path.
+bool
+IsDriftCar(CVehicle *car)
+{
+	return car != nil && car->IsCar() && car->GetStatus() == STATUS_PLAYER;
+}
+
 CDriftControl::CDriftControl(void)
 {
 	Reset();
@@ -78,7 +86,7 @@ CDriftControl::Reset(void)
 }
 
 float
-CDriftControl::GetMinGrip(void)
+CDriftControl::GetMinGrip(void) const
 {
 	// Strength scales how far the rear grip is cut.
 	return Clamp(1.0f - (1.0f - DRIFT_GRIP_CUTOFF)*gDriftStrength, 0.05f, 1.0f);
@@ -99,7 +107,7 @@ CDriftControl::GetForwardSpeed(CAutomobile *car)
 }
 
 float
-CDriftControl::GetRearGripScale(void)
+CDriftControl::GetRearGripScale(void) const
 {
 	if(m_Phase == DRIFT_PHASE_INACTIVE)
 		return 1.0f;
@@ -135,11 +143,11 @@ CDriftControl::GetSteerAngleMult(void)
 	return 1.0f + (DRIFT_STEERLOCK_MULT - 1.0f)*m_fGripCut;
 }
 
-// One read of the live state, at the point of the read: the feedback and the
-// telemetry need the same values the on-screen readout shows (see
-// PrintDebugState), so one struct carries them all.
+// One read of the live state, at the point of the read: the feedback, the
+// telemetry and the on-screen readout (see PrintDebugState) all build from
+// this one struct, so the values cannot drift apart.
 CDriftControl::tSnapshot
-CDriftControl::GetSnapshot(CAutomobile *car)
+CDriftControl::GetSnapshot(CAutomobile *car) const
 {
 	tSnapshot snap;
 
@@ -153,6 +161,7 @@ CDriftControl::GetSnapshot(CAutomobile *car)
 	snap.fGripScale = GetRearGripScale();
 	snap.fCharge = m_fDriftTime;
 	snap.fBoost = m_fBoostLevel;
+	snap.fEntrySpeed = m_fEntrySpeed;
 	return snap;
 }
 
@@ -370,48 +379,32 @@ CDriftControl::GetPhaseName(eDriftPhase phase)
 	return names[phase];
 }
 
-float
-CDriftControl::GetSlipAngleDeg(void)
-{
-	return RADTODEG(m_fSlipAngle);
-}
-
-float
-CDriftControl::GetTargetSlipDeg(void)
-{
-	return RADTODEG(m_fTargetSlip);
-}
-
-float
-CDriftControl::GetYawRateDeg(CAutomobile *car)
-{
-	return RADTODEG(DotProduct(car->m_vecTurnSpeed, car->GetUp()) * DRIFT_TICK_RATE);
-}
-
 void
 CDriftControl::PrintDebugState(CAutomobile *car)
 {
 	char buf[128];
+	tSnapshot snap = GetSnapshot(car);
 
 	float fMaxVelocity = GetMaxSpeed(car);
 
-	gDriftDebugSlip = GetSlipAngleDeg();
-	gDriftDebugTarget = GetTargetSlipDeg();
-	gDriftDebugYaw = GetYawRateDeg(car);
-	gDriftDebugCharge = m_fDriftTime;
-	gDriftDebugBoost = m_fBoostLevel;
-	gDriftDebugSpeed = (car->m_vecMoveSpeed.Magnitude() - m_fEntrySpeed)/fMaxVelocity;
+	gDriftDebugSlip = RADTODEG(snap.fSlip);
+	gDriftDebugTarget = RADTODEG(snap.fTargetSlip);
+	gDriftDebugYaw = RADTODEG(snap.fYawRate);
+	gDriftDebugCharge = snap.fCharge;
+	gDriftDebugBoost = snap.fBoost;
+	gDriftDebugSpeed = (car->m_vecMoveSpeed.Magnitude() - snap.fEntrySpeed)/fMaxVelocity;
 
 	sprintf(buf, "Drift %-8s%s slip %.1f/%.1f yaw %.0f charge %.2f boost %.2f speed %+.2f",
-		GetPhaseName(m_Phase), m_bHandbrakeTurn ? " turn" : "",
+		GetPhaseName(snap.ePhase), snap.bHandbrakeTurn ? " turn" : "",
 
 		gDriftDebugSlip, gDriftDebugTarget, gDriftDebugYaw, gDriftDebugCharge, gDriftDebugBoost, gDriftDebugSpeed);
 	CDebug::PrintAt(buf, 2, 5);
 }
 
 // The entry gate that INACTIVE and RECOVER share: handbrake + steering, on
-// the ground and moving forward. Update asks it too, so an inactive frame
-// only skips the entry work when the entry would fail anyway.
+// the ground and moving forward. Update asks it too: an inactive frame that
+// fails the gate is skipped early, and a frame that passes it computes the
+// slip angle and runs the entry (see Update).
 bool
 CDriftControl::CanStartDrift(CAutomobile *car, float fwdSpeed, bool onGround, bool handbrake)
 {

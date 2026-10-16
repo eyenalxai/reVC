@@ -18,12 +18,12 @@ static RwFrame *ms_pLeanedFrame;
 static float
 DriftFeedbackTarget(CAutomobile *car)
 {
-	if(!gDriftEnabled || car == nil)
+	if(!gDriftEnabled)
 		return 0.0f;
-	// AI cars and traffic never feed the feedback.
-	if(car->GetStatus() != STATUS_PLAYER)
+	// AI cars, traffic and every non-car vehicle never feed the feedback.
+	if(!IsDriftCar(car))
 		return 0.0f;
-	// The drift controller only keeps the slip angle fresh while it runs.
+	// Only a running drift feeds it; otherwise the strength eases out.
 	CDriftControl::tSnapshot snap = car->m_DriftControl.GetSnapshot(car);
 	if(!snap.bActive)
 		return 0.0f;
