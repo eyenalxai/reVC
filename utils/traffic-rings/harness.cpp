@@ -31,6 +31,17 @@
 #include <stdio.h>
 #include <string.h>
 
+/* The budget of the ring: the numbers the game uses (CarCtrl.h
+ * RANDOM_CARS_PER_INI_UNIT and MAX_RANDOM_CARS; IniFile.h
+ * DEFAULT_MAX_NUMBER_OF_CARS and MAX_CARS_IN_USE). The harness keeps the ring
+ * only, so they are mirrored here to print the target at a setting. */
+#define RING_CARS_PER_UNIT 30.0f
+#define RING_MAX_RANDOM_CARS 1700
+#define RING_CAR_CAP_BASE 45.0f
+#define RING_CAR_CAP_TOP 2400
+
+static float Sq(float x) { return x * x; }
+
 /* The draw distance the player starts with (DrawDistance.h DRAWDIST_DEFAULT,
  * Renderer.cpp ms_lodDistScale). The slider's reachable values are
  * DRAWDIST_MIN + k x DRAWDIST_RANGE / SLIDER_STEPS; SLIDER_STEPS mirrors
@@ -205,6 +216,48 @@ static void CheckStockAgainstTheGame(void)
 	printf("  there (the pop-in distance the stock ring carries).\n\n");
 }
 
+/*
+ * The owner's exact settings (VICE-145): the maximum draw distance, the first
+ * person FOV of 110 (the FOV factor 70/110) and sunny weather, at the slider
+ * top densities. The ring must stay local and the target of the density sliders
+ * must still fill it.
+ */
+static void CheckOwnerSettings(void)
+{
+	const float drawDistance = 16.0f;
+	const float fovFactor = 70.0f / 110.0f;
+	const float carDensity = 3.4f;
+	const float farClip = 2000.0f;
+	STrafficRings r = RingsAt(drawDistance, fovFactor, farClip);
+	float target = RING_CARS_PER_UNIT * carDensity * r.scale * r.scale;
+	if (target > RING_MAX_RANDOM_CARS)
+		target = RING_MAX_RANDOM_CARS;
+	float carCap = RING_CAR_CAP_BASE * carDensity * r.scale * r.scale;
+	if (carCap > RING_CAR_CAP_TOP)
+		carCap = RING_CAR_CAP_TOP;
+	/* the same settings without the local cap of VICE-145, for the report */
+	float oldRequest = drawDistance * fovFactor / DRAWDIST_DEFAULT;
+	float oldCap = (TrafficRingsMin(LOD_DISTANCE_BASE * fovFactor * drawDistance, farClip) - RING_CAR_DESPAWN_RESERVE) / RING_CAR_ONSCREEN_SPAWN_MAX;
+	float oldScale = TrafficRingsMin(oldRequest, TrafficRingsMax(oldCap, fovFactor));
+	float oldFront = RING_CAR_ONSCREEN_SPAWN_MAX * oldScale;
+	float oldDespawn = TrafficRingsMax(RING_CAR_DESPAWN * oldScale, oldFront + RING_CAR_DESPAWN_RESERVE);
+
+	printf("== 1b. the owner's settings (VICE-145): draw distance %.0f, first person FOV 110 (factor %.3f),\n", (double)drawDistance, (double)fovFactor);
+	printf("     sunny (far clip %.0f), the density sliders at %.1f\n\n", (double)farClip, (double)carDensity);
+	PrintRings("the table:", r);
+	printf("\n  car target (%.0f x density x scale^2, capped at %d): %.0f   cars-in-use cap: %.0f\n",
+		(double)RING_CARS_PER_UNIT, RING_MAX_RANDOM_CARS, (double)target, (double)carCap);
+	printf("  ring area (up to the despawn %.0f m): %.2f km^2, so %.0f cars per km^2\n",
+		(double)r.carDespawn, (double)(3.14159265f * Sq(r.carDespawn) / 1e6f), (double)(target / (3.14159265f * Sq(r.carDespawn) / 1e6f)));
+	printf("  the whole ring sits %.0f m inside the far clip, so the fog and the fade of\n", (double)(farClip - r.carDespawn));
+	printf("  the world around the car hide a spawn; the far clip never does here.\n");
+	printf("  The draw distance drives the ring up to the cap (the scale reaches %.1f at a draw\n", (double)RING_MAX_SCALE);
+	printf("  distance of %.2f at FOV 70); past that the world grows and the ring does not.\n\n", (double)(RING_MAX_SCALE * DRAWDIST_DEFAULT));
+	printf("  before the cap (VICE-145): the scale reached %.2f, the front ring %.0f m and the\n", (double)oldScale, (double)oldFront);
+	printf("  despawn %.0f m, so the same %d cars spread over %.1f km^2 of city.\n\n",
+		(double)oldDespawn, RING_MAX_RANDOM_CARS, (double)(3.14159265f * Sq(oldDespawn) / 1e6f));
+}
+
 static void CheckMaxSettings(void)
 {
 	printf("== 2. the control at its ends, FOV factor 1.0, sunny (far clip 2000 m)\n\n");
@@ -275,7 +328,9 @@ static float CapWithFloor(float drawDistance, float fovFactor, float farClip)
 {
 	float lod = LOD_DISTANCE_BASE * fovFactor * drawDistance;
 	float visibleRange = (farClip > 0.0f) ? TrafficRingsMin(lod, farClip) : lod;
-	return TrafficRingsMax(visibleRange - RING_CAR_DESPAWN_RESERVE, RING_CAR_ONSCREEN_SPAWN_MAX * fovFactor);
+	return TrafficRingsMin(
+		TrafficRingsMax(visibleRange - RING_CAR_DESPAWN_RESERVE, RING_CAR_ONSCREEN_SPAWN_MAX * fovFactor),
+		RING_CAR_ONSCREEN_SPAWN_MAX * RING_MAX_SCALE);
 }
 
 static void CheckLegacyMapping(void)
@@ -365,6 +420,7 @@ int main(void)
 
 	CheckPlacementReserve();
 	CheckStockAgainstTheGame();
+	CheckOwnerSettings();
 	CheckMaxSettings();
 	CheckLegacyMapping();
 

@@ -251,9 +251,12 @@ FOGGY 150 m).
 ## Ring scale
 
 The one number that scales the traffic ring table: the LOD distance over its
-stock value, capped so the on-screen car ring stays inside the visible range.
-1.0 at the stock settings (the default draw distance 1.2, FOV 70), where the
-stock LOD distance is 360 m (300 x 1.2).
+stock value, capped so the on-screen car ring stays inside the visible range and
+inside the local cap (`RING_MAX_SCALE` 2, so the front band is at most 500 m:
+the budgets are fixed, so a ring that follows a 2 km draw distance would spread
+the same cars thin and empty the near streets). 1.0 at the stock settings (the
+default draw distance 1.2, FOV 70), where the stock LOD distance is 360 m (300 x
+1.2); the draw distance drives the ring up to the cap.
 
 ## Despawn reserve
 
