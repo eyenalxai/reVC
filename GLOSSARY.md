@@ -337,6 +337,53 @@ A vehicle collision with an object, a pedestrian, or a vegetation building. The
 vehicle's speed loss and collision damage from a soft hit are one tenth of the
 original values.
 
+## First person view
+
+The fork's persistent first person camera, on foot and in a vehicle: the view
+setting keeps the camera at the player's eyes, the mouse aims and WASD stays
+with the movement. The stock look-around view (the setting off) is a separate,
+stock path and stays as it is.
+
+## Sight view
+
+The view the shot leaves from and the weapon holds its pose at while the player
+aims down the sights. `CCamera::GetSightCameraMode` names it: the stock sight
+camera mode, or the first person player camera standing in for it. The first
+person view serves every aiming weapon with the player camera, so the player
+keeps moving and WASD stays with the movement in every movement state
+(VICE-137). The photo camera keeps its stock stationary viewfinder, because the
+photograph reads its mode. `CCamera::GetSightOverlayMode` names the overlay the
+HUD draws: the sniper scope and the rocket sight draw theirs over the player
+camera, and the plain first person view draws the on-foot reticle of the aim
+(VICE-143), the same sprite the stock sight camera draws.
+
+## Scope zoom
+
+The zoom of the sniper and the laser scope in the sight view. The first person
+view keeps the wheel zoom and the range of the stock sniper camera and starts
+at the FOV of the view the scope takes over, so the scope looks and zooms like
+the scope it stands in for.
+
+## Camera handover
+
+One glide of the game camera with an ease out curve. A view change that would
+snap in one frame takes it: entering or leaving a vehicle in the first person
+view, the view switching on or off, a sight camera or a script taking the view
+over, and the handback. The from pose is the pose the last frame presented and
+the target is the live pose of the new view, so input during the glide works on
+the live pose and the glide ends exactly on the new pose. The view changes take
+`CAMERA_HANDOVER_TIME` (650 ms) and the sight zoom takes
+`CAMERA_SIGHTS_HANDOVER_TIME` (250 ms).
+
+## Look recenter
+
+The return of the first person vehicle look to straight ahead of the car. The
+mouse look is an offset from the car's heading; when the look rests for
+`CAMERA_LOOK_RECENTER_IDLE` (400 ms) the offset returns to zero over
+`CAMERA_LOOK_RECENTER_TIME` (800 ms) with an ease out curve. New look input
+cancels the return at once and takes the live offset over, and a held aim keeps
+the view where the mouse put it.
+
 ## Car ADS
 
 Aiming from the driver's seat with the mouse aim button: the follow camera
