@@ -110,30 +110,55 @@ Three facts bound any change here:
    creation is a creation: it is built by the near spawner's function, which
    asks `CCarCtrl::NearBubbleAllowsCreation` with the final position and, when
    it is allowed, moves the acceptance counters
-   (`NearBubbleCountCreation`). The layer's own sites are the two the bubble
+   (`NearBubbleCountCreation`). The layer's sites are the ones the bubble
    leaves on an open road:
-   - **the fog site**: `CPathFind::CollectCarCreationCoors` at
+   - **the fog site** (tried first): `CPathFind::CollectCarCreationCoors` at
      `outer + FAR_TRAFFIC_FADE_MARGIN` (50 m), so the placement's own segment
      brackets behind the fade (the bubble's `NEAR_BUBBLE_ARM_FADE_DISTANCE` is
      `distToCamera >= visibleRange`; the margin also covers the segment length
      and the camera's offset from the player centre). This is the oncoming
-     traffic of a long straight road: a car forms out of the haze.
-   - **the behind site**: the same placement call at `inner`, keeping the rear
-     half of the camera (a direction cosine of 0, where the near spawner's side
-     band keeps 0.707). The bubble's soft arm - off the frustum by the margin,
-     at or beyond the soft distance (102.5 m) - allows it with no ray.
+     traffic of a long straight road: a car forms out of the haze. The path
+     network does not reach the fog everywhere (see the margin below), so this
+     site often answers nothing.
+   - **the near site**, ahead and behind: the same placement call at
+     `inner + FAR_TRAFFIC_SITE_MARGIN`, once within 45 degrees of the camera's
+     forward (ahead) and once in the rear half (behind). The rear half is off
+     the frustum by the bubble's margin for every FOV the game has, so the soft
+     arm is its own; a front placement is at or beyond `carOnScreenSpawnMin` by
+     the ring table's own numbers, so the in-view band (VICE-146, the car's own
+     reveal) covers it. Both are ray-free arms.
 
-   Two arms of the ladder are the layer's on purpose and both are ray-free: the
-   fade and the soft arm above, and - since VICE-146 restored it - the **in-view
-   band**. A far creation whose placement brackets slightly inside the fade (the
-   fog site's own segment length) lands in the frustum at or beyond
-   `rings.carOnScreenSpawnMin`, where the band arm allows it as the stock
-   on-screen site: the car's own alpha reveal covers it, exactly as it covers a
-   near spawn (at the layer's stagger the reveal takes 1.6 s, which at the
-   fog's distance is a form in the haze, not a pop), and the event is counted in
-   the band rows, never the acceptance pair. A far site under the band minimum
-   stays in the catchable zone and is refused. The harness checks all three
-   ray-free arms (fade, soft, band) and the refusal under the minimum.
+   **The site margin, and the live defect it fixes.** The collector's placement
+   lands at or *inside* its target distance, never outside it: the distance
+   from the player along a node segment is a convex function of the segment's
+   parameter, so its value at the collector's interpolated parameter is at most
+   the interpolated distance, which is exactly the target (the shortfall is the
+   segment's own sagitta; over a sweep of the crossing's place, the circle's
+   point and the segment's direction, with the shipped spacings and the band's
+   radii, it stays under 2.2 m, and the placement never lands outside). A site
+   aimed exactly at the band's inner edge therefore lands *inside the near
+   band*, and the layer's own band check refuses every placement: the layer's
+   first live session counted **25024 attempts and 0 creations**, with no model
+   and no pool refusal to blame - the whole attempt died at the site. Every site
+   is aimed `FAR_TRAFFIC_SITE_MARGIN` (50 m) past the edge it wants: the near
+   site is `inner + 50` (which is also the clearance the layer wants from the
+   near traffic's own despawn) and the margin covers the measured shortfall
+   twenty-two times over. The harness proves both halves (the site inside its
+   band at every matrix cell, and the shortfall sweep under the margin).
+   **The attempt has three sites, farthest first**: the fog
+   (`FarTrafficFogSiteDistance`), the near site ahead (the front cone, within 45
+   degrees of the camera's forward) and the near site behind (the rear half).
+   The first is the haze of a long sight line; the path network does not reach
+   it everywhere (the city is 3.6 km across and the visible range reaches 2 km,
+   so no node pair straddles the fog over most of the map and the collector
+   answers nothing), and the two near sites are the fallback the network always
+   reaches - the near traffic's own band is placed at these distances by the
+   stock spawner.
+   The attempt's refusals are counted by the stage they died at:
+   `RefusedNoSite` (no site of the attempt found a node pair),
+   `RefusedBand` (every placement fell outside the band) or `RefusedGate` (the
+   in-band placements were refused by the near bubble's gate or the car build,
+   a lane already taken being the normal case).
 5. **Removals ask the bubble's removal rule, and the layer pays no ray for
    them either.** `FarTrafficRemoveCar` calls
    `CCarCtrl::NearBubbleAllowsRemoval` - the same gate the near cull uses (the
@@ -264,7 +289,8 @@ Three facts bound any change here:
     starts), `ms_nFarTrafficPromotions`,
     `ms_nFarTrafficSafetyPromotions` (the driverless reach seals),
     `ms_nFarTrafficDemotions` (the hand-overs), `ms_nFarTrafficInReach` (the
-    acceptance gauge, must stay 0), the refusals by cause (`Refused`,
+    acceptance gauge, must stay 0), the refusals by cause (`Refused` the total,
+    `RefusedNoSite` / `RefusedBand` / `RefusedGate` the stage of the attempt,
     `RefusedModel`, `RefusedPool`), `ms_nFarTrafficAttempts` and
     `ms_nFarTrafficUpdates` (the stagger's work). The near bubble's own rows are
     VICE-146's: the acceptance pair is the catchable-zone counters
@@ -339,13 +365,13 @@ all; the live frame read and the owner's play-test are their measurement.
   `CollectCarCreationCoors` at the far radii (a walk of the ~3,351 car nodes -
   ADR 0024's count - with the per-link bracket test) and a car build. The
   harness mirrors that scan over a synthetic graph of the shipped counts: about
-  12 us for the fog site's whole-graph radius and 7 us for the behind site's, so
-  both sites of an attempt and both attempts of a filling frame are about
-  39 us. The mirror is not the engine call (the water-path branch, the accepted
-  pairs' interpolation, the reservoir shuffle and the car build's object
-  queries are not in it); it says the right order of magnitude, and the layer
-  makes no attempt at all while it is full. The live frame read decides the
-  rest.
+  12 us for the fog site's whole-graph radius and 7 us for the near site's, so
+  the attempt's three sites (the fog, the near site ahead, the near site
+  behind) and the two attempts of a filling frame are about 50 us, and the
+  layer makes no attempt at all while it is full. The mirror is not the engine
+  call (the water-path branch, the accepted pairs' interpolation, the reservoir
+  shuffle and the car build's object queries are not in it); it says the right
+  order of magnitude, and the live frame read decides the rest.
 - The streams (`RemoveDistantCars`, the pool valve) skip a far car on one
   compare; the layer's list is at most 64 entries, validated against the pool
   slot before use.
@@ -429,8 +455,23 @@ all; the live frame read and the owner's play-test are their measurement.
 - **A long straight road shows traffic to the fog**: oncoming cars form out of
   the haze at the visible range and drive in, and the cars the player passes
   recede into it behind at the near band's edge (the hand-over) instead of
-  blinking out. At the stock draw distance the band is closed and nothing
-  changes.
+  blinking out. Where the path network does not reach the fog (most of the map
+  at a two kilometre visible range) the near site carries the layer from the
+  band's inner edge instead; the only loss is how far out the cars form.
+  At the stock draw distance the band is closed and nothing changes.
+- **The site side is where the layer died live, and the margin fixes it** (the
+  first session: 25024 attempts, 0 creations, no model and no pool refusal).
+  The fix is one constant and one fallback: the sites aim
+  `FAR_TRAFFIC_SITE_MARGIN` past the edge the collector's own interpolation
+  would land inside, and the near site is tried when the fog is beyond the
+  network. The live expectation after the fix (max sliders, a band open): the
+  first counter to move is `ms_nFarTrafficCreations`, whose rise is what the
+  attempts buy (two a frame while the layer is under its cap), so
+  `ms_nFarTrafficCars` climbs to the cap within a couple of seconds and
+  `ms_nFarTrafficUpdates` follows it; the promotions rise while driving, and the
+  refusals stay low - `RefusedNoSite` only over water or at the map's edge,
+  `RefusedGate` for lanes already taken (the normal case), `RefusedBand` near
+  zero. The `in reach` gauge stays 0.
 - **The pool cannot overflow**: the budget, the far cap and the reserve are an
   arithmetic of constants with two compile-time asserts, and every refusal is
   counted. A full far layer costs the near traffic nothing of its target, and

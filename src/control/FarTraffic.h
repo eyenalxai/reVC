@@ -98,12 +98,23 @@
  *			already hides. This is the oncoming traffic of a long
  *			straight road. The layer places it at the fade plus
  *			FAR_TRAFFIC_FADE_MARGIN so the placement's own length
- *			lands inside the fog rather than at its edge.
- *	the behind site	behind the camera (the rear half): the traffic the
- *			player has already passed. This is the same-direction
- *			traffic that keeps flowing after the player stops. The
- *			rear half is off the frustum by the bubble's margin for
- *			every FOV the game has, so the soft arm is the site's own.
+ *			lands inside the fog rather than at its edge. The path
+ *			network does not reach the fog everywhere (the city is
+ *			3.6 km across, the visible range reaches 2 km), so this
+ *			site returns nothing over most of the map and the layer
+ *			falls back:
+ *	the near site	the band's inner edge plus FAR_TRAFFIC_SITE_MARGIN, in
+ *			both cones: ahead (the oncoming and receding traffic of the
+ *			road the player is on) and behind (the rear half, the
+ *			traffic the player has already passed). The margin is what
+ *			makes the site placeable at all: the collector's placement
+ *			lands at or INSIDE its target distance (the convexity of the
+ *			distance along a node segment), so a site aimed at the
+ *			band's edge itself lands in the near band and every
+ *			placement is refused - the zero-creation defect of the
+ *			layer's first live session. The near site is where the near
+ *			traffic's own band is placed, so the network always reaches
+ *			it where the roads are.
  *
  * Two arms of the ladder are the layer's on purpose and both are ray-free: the
  * fade and the soft arm above, and - since VICE-146 restored it - the in-view
@@ -194,9 +205,14 @@
  *					player's reach that the gate pass had
  *					to decide on; must stay 0
  *	ms_nFarTrafficRefused		the creation attempts the rule stopped
- *	ms_nFarTrafficRefusedModel	a refusal of a model that is not streamed
- *	ms_nFarTrafficRefusedPool	a refusal of a pool reserve (a creation, or
- *					the driver of a promotion)
+ *	ms_nFarTrafficRefusedNoSite	those the network could not place at all
+ *					(no site of the attempt found a node pair)
+ *	ms_nFarTrafficRefusedBand	those whose placements all fell outside the
+ *					band (too near the near traffic, or past the fog)
+ *	ms_nFarTrafficRefusedGate	those whose in-band placements the near
+ *					bubble's gate or the car build refused
+ *	ms_nFarTrafficRefusedModel	those stopped by the streaming
+ *	ms_nFarTrafficRefusedPool	those stopped by a pool reserve (or a driver)
  *	ms_nFarTrafficAttempts		the creation attempts
  *	ms_nFarTrafficUpdates		the car updates of the stagger (the cost)
  *	ms_nFarTrafficWorkerCycles	the worker's cycles (VICE-133)
@@ -250,11 +266,28 @@ class CVector;
 #define FAR_TRAFFIC_REF_AREA		4000000.0f	/* 2 km x 2 km */
 #define FAR_TRAFFIC_MIN_CARS		8
 
-/* The creation sites. A site is placed this far beyond the fade (the bubble's
- * fade arm needs the camera distance at or past the visible range; the margin
- * also covers the length of the path segment the placement brackets) and the
- * outer hysteresis keeps a car created just past the fog from being removed on
- * its way out of the band. */
+/* The site distance margin. `CPathFind::CollectCarCreationCoors` places a
+ * candidate where the segment between its two path nodes is interpolated to the
+ * target distance, and that interpolation always lands AT or INSIDE the target
+ * (the distance from the player along a segment is convex, so its value at the
+ * interpolated parameter is at most the interpolated distance - exactly the
+ * target; the shortfall is the segment's own sagitta, L x L / 8R, which for the
+ * shipped node spacing and the band's radii is a few metres at most). A site
+ * aimed exactly at the band's inner edge therefore lands inside the near band
+ * and every placement is refused by the layer's own band check - the live
+ * zero-creation defect of VICE-128's first session. Every site is aimed this
+ * margin PAST its edge instead, and the margin is also the clearance the layer
+ * wants from the near traffic's own despawn (a car the layer creates is 50 m
+ * beyond where the near traffic ends). It must stay smaller than the band. */
+#define FAR_TRAFFIC_SITE_MARGIN		50.0f
+
+/* The creation sites. The fog site is placed this far beyond the fade (the
+ * bubble's fade arm needs the camera distance at or past the visible range; the
+ * margin also covers the length of the path segment the placement brackets) and
+ * the outer hysteresis keeps a car created just past the fog from being removed
+ * on its way out of the band. The path network does not reach the fog
+ * everywhere (the city is 3.6 km across and the visible range reaches 2 km), so
+ * the layer also has the near site below, which the network always reaches. */
 #define FAR_TRAFFIC_FADE_MARGIN		50.0f
 #define FAR_TRAFFIC_OUTER_HYSTERESIS	100.0f
 
@@ -324,6 +357,28 @@ ComputeFarTrafficBand(const STrafficRings &rings)
 	band.known = band.outer > 0.0f;
 	band.active = band.known && band.outer >= band.inner + FAR_TRAFFIC_MIN_BAND;
 	return band;
+}
+
+/* The near site of the layer: the band's inner edge plus the margin, asked in
+ * both cones (ahead and behind). This is the site the network always reaches -
+ * the near traffic's own band is placed at these distances by the stock
+ * spawner everywhere the roads are - so the layer can always place while the
+ * player is on land. The fog site is tried first and the near site is the
+ * fallback: the fog gives the oncoming traffic of a long sight line when the
+ * map reaches it, and the near site keeps the layer alive when it does not. */
+static inline float
+FarTrafficNearSiteDistance(const SFarTrafficBand &band)
+{
+	return band.inner + FAR_TRAFFIC_SITE_MARGIN;
+}
+
+/* The fog site of the layer: past the fade, where a creation forms out of the
+ * haze (the near bubble's fade arm covers it). It returns nothing when the
+ * network does not reach that far. */
+static inline float
+FarTrafficFogSiteDistance(const SFarTrafficBand &band)
+{
+	return band.createOuter;
 }
 
 /* The cap of the band: the area share of the reference band, floored for an
@@ -436,6 +491,11 @@ static_assert(FAR_TRAFFIC_REMOVE_ATTEMPTS > 0, "a frame must be able to empty th
 static_assert(FAR_TRAFFIC_OUTER_HYSTERESIS > 0.0f, "a removal must keep off a fresh creation");
 static_assert(FAR_TRAFFIC_ADOPT_HYSTERESIS > 0.0f, "a hand-over needs its hysteresis");
 static_assert(FAR_TRAFFIC_POOL_RESERVE > 0, "the layer must leave the pool room to breathe");
+/* The site margin must fit inside the narrowest open band, so the near site
+ * (the inner edge plus the margin) is a site of every band that opens. */
+static_assert(FAR_TRAFFIC_SITE_MARGIN > 0.0f, "a site must clear the band's edge it aims past");
+static_assert(FAR_TRAFFIC_MIN_BAND > FAR_TRAFFIC_SITE_MARGIN,
+	"the near site must sit inside the narrowest open band");
 
 /* The layer's own rules, the frame entry and the near cull's hand-over. The
  * engine side is FarTraffic.cpp; the counters are read live by
@@ -502,6 +562,9 @@ public:
 	static unsigned int ms_nFarTrafficDemotions;
 	static unsigned int ms_nFarTrafficInReach;
 	static unsigned int ms_nFarTrafficRefused;
+	static unsigned int ms_nFarTrafficRefusedNoSite;
+	static unsigned int ms_nFarTrafficRefusedBand;
+	static unsigned int ms_nFarTrafficRefusedGate;
 	static unsigned int ms_nFarTrafficRefusedModel;
 	static unsigned int ms_nFarTrafficRefusedPool;
 	static unsigned int ms_nFarTrafficAttempts;

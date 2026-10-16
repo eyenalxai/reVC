@@ -295,6 +295,15 @@ The spike's evidence bounds the decision:
 - **The worker thread exists from `CGame::Initialise`** (started with the
   snapshot) and is joined in `CGame::ShutDown`; it sleeps between cycles, and a
   frame that has no work never wakes it.
+- **The creation sites are the applicator's, and the boundary does not see
+  them.** The layer's sites (the fog and the near site, ahead and behind - the
+  three-site creation fix, merged from `miami` as `f20074f7`, with
+  `FAR_TRAFFIC_SITE_MARGIN` and the refusal-by-cause counters) live in
+  `FarTrafficTrySite`/`FarTrafficTryCreate`, i.e. in the applicator's creation
+  path, on the main thread, on this side of the boundary. A creation queues its
+  ADD (with the car's sim seed) for the worker like any other; a change to the
+  sites therefore needs no change to the worker, the ring or the published
+  blocks - which is what the boundary was for.
 - **What this does not do**: no change to the collision solver, the scene sync
   walk or path searching's shared tables (the spike's deferred candidates, each
   with its own conditions in its section 3); no change to the layer's rules,

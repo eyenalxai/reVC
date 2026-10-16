@@ -305,13 +305,18 @@ interior exit and a cutscene end, the counts reach 90 % of their local targets a
 once instead of trickling up. A burst is a bounded work window: 60 frames that
 each spend 25 spawn attempts, or 100 while the fade covers the screen (the black
 frames of a transition and the dark head of a fade), so a burst asks for at most
-6000 attempts. A frame the models cannot serve waits without spending its
-window, and 30 frames in a row without a placement give the burst up. The state
-machine is `src/core/FillBurst.h`, the bounds are in `PopulationBudget.h`, and
-the triggers are the two boot countdowns, the area writer
-(`CGame::SetCurrArea`) and the end of a cutscene
-(`CCutsceneMgr::DeleteCutsceneData`); ADR 0021 holds the decisions and the
-restated acceptance.
+6000 attempts. A frame the models cannot serve after the run has
+started waits without spending its window and counts against the give-up bound;
+30 frames in a row without a placement give the burst up. Before the run's
+first attempt the world is still loading (the local target is not known yet, or
+the zone's models are not resident yet): those frames ride their own boot wait
+(`FILL_BURST_BOOT_WAIT_FRAMES`, 600), spending neither the window nor the
+give-up bound, and a world that never becomes ready gives the burst up with a
+counted reason (`ms_nFillBurstEndedBootWait`). The state machine is
+`src/core/FillBurst.h`, the bounds are in `PopulationBudget.h`, and the triggers
+are the two boot countdowns, the area writer (`CGame::SetCurrArea`) and the end
+of a cutscene (`CCutsceneMgr::DeleteCutsceneData`); ADR 0021 holds the
+decisions and the restated acceptance.
 
 ## Near bubble
 
@@ -453,9 +458,13 @@ through `CarOnRails.h` and checked bit for bit by `utils/far-traffic-worker`;
 the worker's list of cars is kept in lockstep with the applicator's by the
 ADD/DROP command list, keyed by the pool slot, and the published poses are
 checked against both before they are applied. Its counters are
-`ms_nFarTrafficWorkerCycles`, `ms_nFarTrafficWorkerLost` (must stay 0) and
-`ms_nFarTrafficShortCurves`; `FAR_TRAFFIC_WORKER` (`FarTraffic.h`) selects the
-worker or the same cycle run inline.
+`ms_nFarTrafficWorkerCycles` (the cycles), `ms_nFarTrafficWorkerLost` (a
+command or a pose the cycle and the layer disagreed about: must stay 0),
+`ms_nFarTrafficShortCurves` (the pick's clamped curves) and
+`ms_nFarTrafficCatchUps` (the pending cycle the applicator ran inline when the
+window between two cycles grew the command ring: 0 in normal play);
+`FAR_TRAFFIC_WORKER` (`FarTraffic.h`) selects the worker or the same cycle run
+inline.
 
 ## Far band
 
@@ -465,11 +474,15 @@ the visible range (`rings.visibleRange`, min(LOD distance, weather far clip)).
 The band is open only while it has width (`FAR_TRAFFIC_MIN_BAND`, 160 m); its
 count cap follows the band's area up to `FAR_TRAFFIC_MAX` (64), and the cars
 outside the car budget keep the rest of the vehicle pool's margin. The creation
-sites are the fog (a car forming out of the haze ahead) and the rear half of the
-camera (the traffic the player passed); a placement of the fog site's own
-segment that lands inside the fade is allowed by the in-view band (VICE-146,
-the car's own reveal covers it), and a car the player can see goes by the same
-band's fade-out.
+sites are tried farthest first: the fog (a car forming out of the haze ahead)
+and the near site - the band's inner edge plus `FAR_TRAFFIC_SITE_MARGIN` (50 m,
+the collector's placement lands at or inside its target, so a site aimed at the
+edge itself lands in the near band and is refused) - in both cones, ahead (the
+oncoming traffic) and behind (the traffic the player passed); a placement of the
+fog site's own segment that lands inside the fade is allowed by the in-view band
+(VICE-146, the car's own reveal covers it), and a car the player can see goes by
+the same band's fade-out. A refused attempt is counted by the stage it reached
+(`ms_nFarTrafficRefusedNoSite` / `...RefusedBand` / `...RefusedGate`).
 
 ## Promotion
 

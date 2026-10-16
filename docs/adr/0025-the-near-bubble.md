@@ -371,17 +371,35 @@ the screen fade:
   (`ms_nNearBubbleOtherCreationsInView`; it keeps the wider catchable set, the
   band included, and informs without failing). The rig prints the zones and the
   PASS line reads the catchable pair.
-- **The boot burst waits for its target.** The pedestrian and the car burst no
-  longer burn their window on a zero target at boot (the zone, the ring and
-  the budget line are not live yet): a frame with `target <= 0` waits in the
-  same bounded way the streaming wait uses - it does not spend the window and
-  counts against the give-up bound - and the burst runs the moment the area is
-  known. The burst counters gain the since-boot totals
+- **The boot burst waits for its world - on its own bound.** The pedestrian
+  burst no longer burns its window while the world is still loading (the
+  zone, the ring and the budget line are not live yet, so the target is 0; or
+  the zone's models are not resident yet, the slow load of the first
+  seconds). Before the run's first attempt those frames ride a dedicated boot
+  wait (`FillBurstSpendBootWait`, `FILL_BURST_BOOT_WAIT_FRAMES` = 600 frames,
+  about 20 s at 30 fps). It does not spend the window and it does not burn the
+  stall bound - a loading world is not a placement stall - and the wait has
+  its own end reason, so a world that never becomes ready is given up with a
+  counted `FILL_BURST_ENDED_BOOT_WAIT` instead of a silent disarm. **The live
+  defect that forced the split:** the first cut routed both while-loading
+  frames through `FillBurstSpendFrame(false, false)`, whose shared give-up
+  bound (30 stalls) disarmed the pedestrian burst before its first attempt;
+  the live read showed `peds: burst attempts since boot 0`, `placed 0`, every
+  ended row 0 and `burst peds: frames left 0` - and `peds: burst target
+  1377`, the full pedestrian cap plus the random cars, so the last run died
+  on the models, not on a zero target, with the world already live. The car
+  target and the car budget have positive floors (the ring table's scale floor
+  is the FOV factor, at least 1.0; the ini multipliers clamp at 0.2), so the
+  boot wait is the pedestrian burst's in practice and the car burst's guard
+  cannot fire. The burst counters gain the since-boot totals
   (`ms_nFillBurstTotalAttempts` / `ms_nFillBurstTotalPlaced`, the boot burst
   readable after a later arming reset the window rows) and the end reasons
   (`ms_nFillBurstEndedLine`, `ms_nFillBurstEndedBudget` - the car burst's full
   budget line, apart from the target's, the pedestrian frame having no budget
-  line of its own - `EndedStalls` and `EndedWindow`).
+  line of its own - `EndedStalls`, `EndedWindow` and the pedestrian
+  `EndedBootWait`). Every helper path that ends a run reports its reason
+  through the return value, and the callers count it; the boot wait frames
+  are visible live as the `boot waits` row of the pedestrian burst.
 
 The harness (`utils/near-bubble`) gained the band in its case table (in the
 frustum at `bandMin - 1` refused, at `bandMin` allowed, the fade still first),
