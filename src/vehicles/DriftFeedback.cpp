@@ -10,7 +10,6 @@
 
 // One set of state is enough: only the player's car can drift.
 static float ms_fStrength;	// signed drift strength, -1..1
-static uint32 ms_nLastFrame = (uint32)-1;
 static RwMatrix ms_savedRootMatrix;
 static RwFrame *ms_pLeanedFrame;
 
@@ -45,11 +44,6 @@ CDriftFeedback::Update(CAutomobile *car, float timeStep)
 		ms_fStrength = 0.0f;
 		return;
 	}
-
-	// One step a frame, even when the car is pre-rendered twice.
-	if(ms_nLastFrame == CTimer::GetFrameCounter())
-		return;
-	ms_nLastFrame = CTimer::GetFrameCounter();
 
 	float target = DriftFeedbackTarget(car);
 	float dt = Min(timeStep, DRIFT_FEEDBACK_MAX_STEP);

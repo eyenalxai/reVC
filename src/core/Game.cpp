@@ -21,6 +21,7 @@
 #include "DMAudio.h"
 #include "Darkel.h"
 #include "Debug.h"
+#include "DriftFeedback.h"
 #include "EventList.h"
 #include "FileLoader.h"
 #include "FileMgr.h"
@@ -49,6 +50,7 @@
 #include "Phones.h"
 #include "Pickups.h"
 #include "Plane.h"
+#include "PlayerInfo.h"
 #include "PlayerSkin.h"
 #include "Population.h"
 #include "Radar.h"
@@ -895,6 +897,15 @@ void CGame::Process(void)
 		CSpecialFX::Update();
 		CRopes::Update();
 		CTimeCycle::Update();
+
+		// The drift feedback is stepped once a frame here: after the physics
+		// step wrote the drift state, and before the camera below reads the
+		// strength (see DriftFeedback.h). Player-only, like the drift itself.
+		CVehicle *playerVeh = FindPlayerVehicle();
+		if(gDriftEnabled && playerVeh != nil && playerVeh->IsCar() &&
+		   playerVeh->GetStatus() == STATUS_PLAYER)
+			CDriftFeedback::Update((CAutomobile*)playerVeh, CTimer::GetTimeStepInSeconds());
+
 		if (CReplay::ShouldStandardCameraBeProcessed())
 			TheCamera.Process();
 		CCullZones::Update();

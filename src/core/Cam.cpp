@@ -5217,9 +5217,8 @@ CCam::Process_FollowCar_SA(const CVector& CameraTarget, float TargetOrientation,
 	// VICE-32: a drift stretches the chase view. The term of the last frame
 	// comes back out first, so the speed FOV below keeps the value it would
 	// have without the drift. Only the active camera carries the term. The
-	// strength is stepped once a frame in the car's PreRender, which runs
-	// after this camera pass, so this frame adds the term of the previous
-	// step (see DriftFeedback.h).
+	// strength is stepped once a frame just before this camera pass (see
+	// DriftFeedback.h).
 	bool bDriftCam = isCar && car->GetStatus() == STATUS_PLAYER &&
 		this == &TheCamera.Cams[TheCamera.ActiveCam];
 	if (bDriftCam) {
