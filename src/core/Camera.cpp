@@ -276,7 +276,24 @@ CCamera::Process(void)
 	if(Cams[(ActiveCam+1)%2].CamTargetEntity == nil)
 		Cams[(ActiveCam+1)%2].CamTargetEntity = pTargetEntity;
 
+#ifdef FIRST_PERSON
+	// The view of the last frame: CamControl rewrites the mode below, and the
+	// handover measures this frame's change against what the player saw
+	int16 previousViewMode = Cams[ActiveCam].Mode;
+#endif
+
 	CamControl();
+#ifdef FIRST_PERSON
+	// A view change that would snap in one frame glides instead: the first
+	// person view switching on or off, a script or a sight camera taking it
+	// over, and the handback. Only view changes with the first person camera on
+	// either side take it, so third person to third person changes keep their
+	// own switches. The stock transition already glides its own changes.
+	if(Cams[ActiveCam].Mode != previousViewMode && m_bLookingAtPlayer &&
+	   FirstPersonViewEnabled() && m_uiTransitionState == 0 &&
+	   (Cams[ActiveCam].Mode == CCam::MODE_1STPERSON || previousViewMode == CCam::MODE_1STPERSON))
+		StartCameraHandover(CAMERA_HANDOVER_TIME);
+#endif
 	if(m_bFading)
 		ProcessFade();
 	if(m_bMusicFading)
@@ -507,6 +524,14 @@ CCamera::Process(void)
 		WasPreviouslyInterSyhonFollowPed = false;	// unused
 	}
 
+#ifdef FIRST_PERSON
+	// The camera handover glides whatever the view computed above toward the
+	// pose the last frame presented. It runs after the transition, so a change
+	// the stock interpolation owns keeps its own values, and outside the
+	// geometry clip, because the glide into a seat passes through the car body.
+	ApplyCameraHandover(CamSource, CamFront, CamUp, FOV);
+#endif
+
 	if(m_uiTransitionState != 0)
 		if(!m_bLookingAtVector && m_bLookingAtPlayer && !CCullZones::CamStairsForPlayer() && !m_bPlayerIsInGarage){
 			CEntity *entity = nil;
@@ -547,6 +572,16 @@ CCamera::Process(void)
 		CamUp = CrossProduct(CamRight, CamFront);
 		CamUp.Normalise();
 	}
+
+#ifdef FIRST_PERSON
+	// This is the pose the frame presents: a later handover starts from it, so
+	// the glide from what the player saw has no jump. The shake below is noise
+	// and stays out of it.
+	m_vecPresentedSource = CamSource;
+	m_vecPresentedFront = CamFront;
+	m_fPresentedFOV = FOV;
+	m_bHavePresentedPose = true;
+#endif
 
 	GetMatrix().GetRight() = CrossProduct(CamUp, CamFront);	// actually Left
 	GetMatrix().GetForward() = CamFront;
@@ -1831,9 +1866,15 @@ CCamera::UpdateFirstPersonView(bool targetIsPed)
 #endif
 	   ){
 #ifdef FIRST_PERSON
-		// The setting turned off: leave the first person view once
-		if(m_bFirstPersonViewWasOn && !FirstPersonViewEnabled())
+		// The setting turned off: leave the first person view once, and glide
+		// the camera back to the view that takes over instead of cutting to it.
+		// A script or a cutscene camera owns the switch while it holds the
+		// view, so the handover waits for the player camera.
+		if(m_bFirstPersonViewWasOn && !FirstPersonViewEnabled()){
 			m_bFirstPersonBeingUsed = false;
+			if(Cams[ActiveCam].Mode == CCam::MODE_1STPERSON)
+				StartCameraHandover(CAMERA_HANDOVER_TIME);
+		}
 		m_bFirstPersonViewWasOn = FirstPersonViewEnabled();
 		if(FirstPersonViewEnabled()){
 			// The setting keeps the camera in first person
@@ -1886,6 +1927,91 @@ CCamera::UpdateFirstPersonView(bool targetIsPed)
 		CPad::GetPad(0)->DisablePlayerControls |= PLAYERCONTROL_CAMERA;
 	return true;
 }
+
+#ifdef FIRST_PERSON
+// The camera handover: the first person camera serves views that change in one
+// frame (the player sits down in a vehicle or steps out, the view setting turns
+// on or off, a sight camera or a script takes the view over and gives it back).
+// The handover glides the pose the last frame presented into the pose the new
+// view computes, so no view change is an instant cut. The from pose is fixed
+// and the target is the live pose of the new view, so player input keeps
+// working on the live pose during the glide and takes over cleanly when the
+// glide ends: the ease out curve reaches the live pose exactly.
+void
+CCamera::StartCameraHandover(uint32 duration)
+{
+	if(!m_bHavePresentedPose)
+		return;
+
+	m_vecHandoverFromSource = m_vecPresentedSource;
+	m_vecHandoverFromFront = m_vecPresentedFront;
+	m_fHandoverFromFOV = m_fPresentedFOV;
+	m_uiHandoverStart = CTimer::GetTimeInMilliseconds();
+	m_uiHandoverDuration = duration;
+	m_bHandoverActive = true;
+}
+
+// The yaw and the pitch of a view direction, in the convention the camera modes
+// build their front from: x = cos(pitch)cos(yaw), y = cos(pitch)sin(yaw),
+// z = sin(pitch). GetATanOfXY(x, y) answers atan2(y, x), so the first call is
+// the yaw of the direction and the second its pitch.
+static void
+DirectionToYawPitch(const CVector &direction, float &yaw, float &pitch)
+{
+	yaw = CGeneral::GetATanOfXY(direction.x, direction.y);
+	pitch = CGeneral::GetATanOfXY(direction.Magnitude2D(), direction.z);
+	// GetATanOfXY answers in [0, 2*PI), and the camera modes build their front
+	// from a pitch in (-PI, PI]: looking down is a negative pitch, so the turn
+	// between two views never swings over the top.
+	if(pitch > PI)
+		pitch -= 2*PI;
+}
+
+static CVector
+YawPitchToDirection(float yaw, float pitch)
+{
+	return CVector(Cos(pitch)*Cos(yaw), Cos(pitch)*Sin(yaw), Sin(pitch));
+}
+
+void
+CCamera::ApplyCameraHandover(CVector &source, CVector &front, CVector &up, float &fov)
+{
+	if(!m_bHandoverActive)
+		return;
+
+	uint32 elapsed = CTimer::GetTimeInMilliseconds() - m_uiHandoverStart;
+	float fraction = m_uiHandoverDuration == 0 ? 1.0f : (float)elapsed/(float)m_uiHandoverDuration;
+	if(fraction >= 1.0f){
+		// The new view owns the camera again
+		m_bHandoverActive = false;
+		return;
+	}
+
+	// Ease out: the glide moves quickly at the start and settles into the new
+	// pose, so it never overshoots and never stops with a visible step.
+	float amount = 1.0f - (1.0f - fraction)*(1.0f - fraction)*(1.0f - fraction);
+
+	source = m_vecHandoverFromSource + amount*(source - m_vecHandoverFromSource);
+	fov = m_fHandoverFromFOV + amount*(fov - m_fHandoverFromFOV);
+
+	// The direction turns the short way: a handover into a view that looks the
+	// other way must not spin the long way round.
+	float fromYaw, fromPitch, toYaw, toPitch;
+	DirectionToYawPitch(m_vecHandoverFromFront, fromYaw, fromPitch);
+	DirectionToYawPitch(front, toYaw, toPitch);
+	float yawDelta = toYaw - fromYaw;
+	while(yawDelta >= PI) yawDelta -= 2*PI;
+	while(yawDelta < -PI) yawDelta += 2*PI;
+
+	front = YawPitchToDirection(fromYaw + amount*yawDelta, fromPitch + amount*(toPitch - fromPitch));
+
+	// Keep the basis orthonormal, the way the transition does
+	CVector right = CrossProduct(front, up);
+	right.Normalise();
+	up = CrossProduct(right, front);
+	up.Normalise();
+}
+#endif
 
 const float SOUND_DIST = 20.0f;
 

@@ -29,6 +29,17 @@ enum
 
 const float DefaultFOV = 70.0f; // beta: 80.0f
 
+#ifdef FIRST_PERSON
+// The camera handover: a view change that would snap in one frame glides from
+// the pose the last frame presented to the new pose over this long, with an
+// ease out curve. The first person view switching on or off, a vehicle entry
+// and exit and a camera handback all take it.
+#define CAMERA_HANDOVER_TIME		650	// milliseconds
+// The sight zoom of the first person view: entering or leaving the sights is
+// the same glide, only short.
+#define CAMERA_SIGHTS_HANDOVER_TIME	250	// milliseconds
+#endif
+
 class CCam
 {
 public:
@@ -342,6 +353,20 @@ public:
 	bool m_bFirstPersonBeingUsed;
 #ifdef FIRST_PERSON
 	bool m_bFirstPersonViewWasOn;
+	// The camera handover: the glide of the view when it would snap in one
+	// frame. From is the pose the last frame presented, so the glide never
+	// jumps and player input keeps working on the live pose underneath.
+	bool m_bHandoverActive;
+	bool m_bHavePresentedPose;
+	uint32 m_uiHandoverStart;
+	uint32 m_uiHandoverDuration;
+	CVector m_vecHandoverFromSource;
+	CVector m_vecHandoverFromFront;
+	float m_fHandoverFromFOV;
+	// The pose the last frame presented to the player
+	CVector m_vecPresentedSource;
+	CVector m_vecPresentedFront;
+	float m_fPresentedFOV;
 #endif
 	bool m_bJustJumpedOutOf1stPersonBecauseOfTarget;
 	bool m_bIdleOn;
@@ -565,6 +590,16 @@ public:
 	// m_bFirstPersonBeingUsed, m_bFirstPersonViewWasOn, the last input time
 	// and the camera bit of the pad's DisablePlayerControls.
 	bool UpdateFirstPersonView(bool targetIsPed);
+#ifdef FIRST_PERSON
+	// The camera handover: start the glide from the pose the last frame
+	// presented. Every caller that changes the view in one frame (the first
+	// person camera entering or leaving a vehicle, the view switching on or
+	// off, a sight camera taking the view and giving it back) calls this.
+	void StartCameraHandover(uint32 duration);
+	// Glide the camera values from the handover start toward the pose the new
+	// view computed. One call per frame from Process.
+	void ApplyCameraHandover(CVector &source, CVector &front, CVector &up, float &fov);
+#endif
 	void UpdateSoundDistances(void);
 	void InitialiseCameraForDebugMode(void);
 	void CamShake(float strength, float x, float y, float z);

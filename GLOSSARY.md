@@ -267,6 +267,24 @@ A vehicle collision with an object, a pedestrian, or a vegetation building. The
 vehicle's speed loss and collision damage from a soft hit are one tenth of the
 original values.
 
+## First person view
+
+The fork's persistent first person camera, on foot and in a vehicle: the view
+setting keeps the camera at the player's eyes, the mouse aims and WASD stays
+with the movement. The stock look-around view (the setting off) is a separate,
+stock path and stays as it is.
+
+## Camera handover
+
+One glide of the game camera with an ease out curve. A view change that would
+snap in one frame takes it: entering or leaving a vehicle in the first person
+view, the view switching on or off, a sight camera or a script taking the view
+over, and the handback. The from pose is the pose the last frame presented and
+the target is the live pose of the new view, so input during the glide works on
+the live pose and the glide ends exactly on the new pose. The view changes take
+`CAMERA_HANDOVER_TIME` (650 ms) and the sight zoom takes
+`CAMERA_SIGHTS_HANDOVER_TIME` (250 ms).
+
 ## Car ADS
 
 Aiming from the driver's seat with the mouse aim button: the follow camera

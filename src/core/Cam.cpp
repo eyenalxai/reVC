@@ -2725,6 +2725,17 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 	   pPlayer && pPlayer->InVehicle() &&
 	   vehicleTarget == (CEntity*)pPlayer->m_pMyVehicle && ((CVehicle*)vehicleTarget)->pDriver;
 	bool modeReset = ResetStatics;
+	// The view anchor: the camera serves the walking player or a vehicle the
+	// player rides in (for the driver the camera serves the seated ped below).
+	// The anchor changes in one frame when the player sits down or steps out,
+	// so the camera handover glides from the pose the last frame presented, for
+	// the driver and the passenger alike. The stock view (the setting off)
+	// keeps its own switch and its own feel.
+	static bool wasVehicleAnchor = false;
+	bool vehicleAnchor = !vehicleTarget->IsPed();
+	if(TheCamera.FirstPersonViewEnabled() && (modeReset || vehicleAnchor != wasVehicleAnchor))
+		TheCamera.StartCameraHandover(CAMERA_HANDOVER_TIME);
+	wasVehicleAnchor = vehicleAnchor;
 	if(firstPersonCarView)
 		CamTargetEntity = pPlayer;
 #endif
@@ -2750,9 +2761,15 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		// The first person view setting overrides the default FOV
 		if(TheCamera.FirstPersonViewEnabled())
 			FOV = FrontEndMenuManager.GetFirstPersonFOV();
-		// Aiming down the sights zooms in; the car ADS zooms the car view too
-		if(TheCamera.UsingFirstPersonSights() ||
-		   (firstPersonCarView && TheCamera.UsingCarAds()))
+		// Aiming down the sights zooms in; the car ADS zooms the car view too.
+		// The zoom is a view change in one frame, so it glides like the others.
+		static bool wasUsingSights = false;
+		bool usingSights = TheCamera.UsingFirstPersonSights() ||
+		                   (firstPersonCarView && TheCamera.UsingCarAds());
+		if(TheCamera.FirstPersonViewEnabled() && usingSights != wasUsingSights)
+			TheCamera.StartCameraHandover(CAMERA_SIGHTS_HANDOVER_TIME);
+		wasUsingSights = usingSights;
+		if(usingSights)
 			FOV = TheCamera.GetFirstPersonSightsFOV();
 #endif
 
