@@ -10,6 +10,7 @@
 #include "Gangs.h"
 #include "ModelIndices.h"
 #include "Zones.h"
+#include "PathFind.h"
 #include "CivilianPed.h"
 #include "EmergencyPed.h"
 #include "Replay.h"
@@ -34,6 +35,33 @@
 // ring, the off-screen band and the removal distances scale with it.
 #define PED_AREA_DENSITY_SCALE	3.0f // scale the zone density budget for dense on-foot crowds
 #define PED_ATTEMPTS_PER_FRAME	3 // spawn attempts per frame
+
+// The off-network spawns (VICE-122). A bounded fraction of the pedestrian
+// spawns skips the node path and takes a free position in the creation ring,
+// and the existing wander state walks the pedestrian to the closest ped node
+// from there. A node is ground a pedestrian can stand on; a free position needs
+// the checks below, and the walk to the network needs a bound and a backstop.
+// The constants are the one place the fraction and the checks are tuned.
+//
+// The fraction of zero is special: no random number is drawn, so the node path
+// stays bit-exact with the behaviour before this change.
+#define PED_OFF_NETWORK_FRACTION	0.15f	// the fraction of the spawns that tries a free position
+#define PED_OFF_NETWORK_ATTEMPTS	5	// free positions tried for one spawn
+#define PED_OFF_NETWORK_LEVEL_MARGIN	3.0f	// the ground-to-position tolerance the node path itself allows
+#define PED_OFF_NETWORK_ROOF_CAST	50.0f	// the surface cast starts this far above the position
+#define PED_OFF_NETWORK_STEP		0.5f	// the surface may stand this far above the ground: a step, not a roof
+#define PED_OFF_NETWORK_PROBE_HEIGHT	0.9f	// the clearance probe sits this far above the ground
+#define PED_OFF_NETWORK_PROBE_RADIUS	0.5f	// and is this wide: static geometry inside it rejects the spot
+#define PED_OFF_NETWORK_WATER_MARGIN	0.1f	// the ground must stand this far above the water line
+#define PED_OFF_NETWORK_NODE_RANGE	150.0f	// the closest ped node may not be farther: the walk bound
+#define PED_OFF_NETWORK_NODE_LEVEL	5.0f	// and it may not sit on another level: the ground is a roof
+#define PED_OFF_NETWORK_JOIN_DISTANCE	8.0f	// a stray this near a node has reached the network
+#define PED_OFF_NETWORK_PROGRESS	0.25f	// metres of approach that count for the stray
+#define PED_OFF_NETWORK_STALL_TIME	20000	// ms of walking without progress before the stray cull
+#define PED_OFF_NETWORK_NO_TARGET_TIME	60000	// ms without a node to head for before the watch is given up
+#define PED_OFF_NETWORK_CULL_RADIUS	3.0f	// sphere the camera must not see before a stray is removed
+#define PED_OFF_NETWORK_SLOTS		32	// the bounded stray table
+#define PED_OFF_NETWORK_CHECKS_PER_FRAME 2	// stray entries checked per frame
 
 PedGroup CPopulation::ms_pPedGroups[NUMPEDGROUPS];
 bool CPopulation::ms_bGivePedsWeapons;
@@ -69,6 +97,203 @@ uint32 gLastSelectedCivilianIndex;
 CEntity *gSunbatheObstacles[2];
 CEntity *gCoupleObstacles[3];
 
+uint32 CPopulation::ms_nOffNetworkSpawns;
+uint32 CPopulation::ms_nOffNetworkStuck;
+uint32 CPopulation::ms_nOffNetworkDrowned;
+
+/* The strays: the off-network pedestrians that have not reached the network yet
+ * (VICE-122). The table is bounded and the frame checks a fixed number of
+ * entries, so the cost of the cull does not follow the crowd. The references
+ * keep the entries valid when a pedestrian dies. */
+struct COffNetworkStray
+{
+	CPed *ped;		// nil when the slot is free or the pedestrian is gone
+	CPathNode *node;	// the node the last check measured against
+	float fNodeDist;	// the distance to that node at the last check
+	uint32 nSpawnTime;	// the spawn, so the oldest watch can be given up
+	uint32 nStallTime;	// ms the pedestrian walked without coming closer
+	uint32 nNoTargetTime;	// ms the pedestrian had no node to head for
+	uint32 nLastCheckTime;	// the time of the last check, for the clocks
+};
+
+static COffNetworkStray aOffNetworkStrays[PED_OFF_NETWORK_SLOTS];
+static int32 nOffNetworkStrayCursor;
+
+/* The water line of the position's block, without the waves: the placement and
+ * the cull both read this line, so neither answer moves with the wave phase. */
+static bool
+GetWaterLine(const CVector &pos, float *pLevel)
+{
+	return CWaterLevel::GetWaterLevelNoWaves(pos.x, pos.y, pos.z, pLevel);
+}
+
+/* The ground at (x, y) stands above the water line: a free position and the
+ * member of a group both need this, or the pedestrian ends up in the water. */
+static bool
+GroundIsClearOfWater(float x, float y, float groundZ)
+{
+	float waterLevel;
+	if (!GetWaterLine(CVector(x, y, groundZ), &waterLevel))
+		return true;
+	return groundZ > waterLevel + PED_OFF_NETWORK_WATER_MARGIN;
+}
+
+// The pedestrian stands under the water line: the stray reached the water.
+static bool
+PositionIsInWater(const CVector &pos)
+{
+	float waterLevel;
+	if (!GetWaterLine(pos, &waterLevel))
+		return false;
+	return pos.z < waterLevel - PED_OFF_NETWORK_WATER_MARGIN;
+}
+
+// Stop watching a stray: free the entry and its reference.
+static void
+UntrackOffNetworkStray(COffNetworkStray *stray)
+{
+	if (stray->ped)
+		stray->ped->CleanUpOldReference((CEntity**)&stray->ped);
+	stray->ped = nil;
+	stray->node = nil;
+}
+
+// Watch a pedestrian that spawned off the network until it reaches a node.
+// Bounded: when the table is full the oldest watch is given up.
+static void
+TrackOffNetworkPed(CPed *ped)
+{
+	if (ped == nil)
+		return;
+
+	COffNetworkStray *stray = &aOffNetworkStrays[0];
+	for (int32 i = 0; i < PED_OFF_NETWORK_SLOTS; i++) {
+		if (aOffNetworkStrays[i].ped == nil) {
+			stray = &aOffNetworkStrays[i];
+			break;
+		}
+		if (aOffNetworkStrays[i].nSpawnTime < stray->nSpawnTime)
+			stray = &aOffNetworkStrays[i];
+	}
+	if (stray->ped)
+		stray->ped->CleanUpOldReference((CEntity**)&stray->ped);
+
+	uint32 now = CTimer::GetTimeInMilliseconds();
+	stray->ped = ped;
+	stray->node = nil;
+	stray->fNodeDist = 0.0f;
+	stray->nSpawnTime = now;
+	stray->nStallTime = 0;
+	stray->nNoTargetTime = 0;
+	stray->nLastCheckTime = now;
+	ped->RegisterReference((CEntity**)&stray->ped);
+}
+
+// A pedestrian the placement created on a free position: count it and watch it
+// until it reaches the network (VICE-122).
+static void
+AddOffNetworkPed(CPed *ped, bool offNetwork)
+{
+	if (!offNetwork || ped == nil)
+		return;
+	CPopulation::ms_nOffNetworkSpawns++;
+	TrackOffNetworkPed(ped);
+}
+
+// Remove a stray out of sight. A pedestrian in view stays: the cull never takes
+// one away in front of the player. True when the pedestrian is gone.
+static bool
+CullOffNetworkStray(COffNetworkStray *stray)
+{
+	if (TheCamera.IsSphereVisible(stray->ped->GetPosition(), PED_OFF_NETWORK_CULL_RADIUS))
+		return false;
+	CPed *ped = stray->ped;
+	UntrackOffNetworkStray(stray);
+	CPopulation::RemovePed(ped);
+	return true;
+}
+
+// The stray cull (VICE-122). A stray that waits on purpose (a traffic light, a
+// chat, a hit wall) is not stuck; only a pedestrian that walks towards the
+// network and never comes closer is. A stray in the water is a bad placement.
+// The counters follow the cull: a removed stray is counted, and a stray the
+// camera can see is counted on the frame the cull can take it.
+static void
+ProcessOffNetworkStrays(void)
+{
+	uint32 now = CTimer::GetTimeInMilliseconds();
+
+	for (int32 check = 0; check < PED_OFF_NETWORK_CHECKS_PER_FRAME; check++) {
+		nOffNetworkStrayCursor = (nOffNetworkStrayCursor + 1) % PED_OFF_NETWORK_SLOTS;
+		COffNetworkStray *stray = &aOffNetworkStrays[nOffNetworkStrayCursor];
+		CPed *ped = stray->ped;
+		if (ped == nil)
+			continue;
+
+		// A pedestrian a script claimed, a driver, a dead one, or one that
+		// follows another is not the stray this cull is for.
+		if (!ped->CanBeDeleted() || ped->bInVehicle || ped->DyingOrDead() ||
+			ped->m_objective == OBJECTIVE_FOLLOW_CHAR_IN_FORMATION) {
+			UntrackOffNetworkStray(stray);
+			continue;
+		}
+
+		CVector pos = ped->GetPosition();
+
+		// The wander state walked the pedestrian to its first node: a normal
+		// pedestrian from here on.
+		if (ped->m_pLastPathNode && Distance2D(ped->m_pLastPathNode->GetPosition(), pos) <= PED_OFF_NETWORK_JOIN_DISTANCE) {
+			UntrackOffNetworkStray(stray);
+			continue;
+		}
+
+		// The pedestrian reached the water: a bad placement. The count follows
+		// the removal, so a stray the camera keeps in view stays watched and is
+		// counted on the frame the cull can take it.
+		if (PositionIsInWater(pos)) {
+			if (CullOffNetworkStray(stray))
+				CPopulation::ms_nOffNetworkDrowned++;
+			continue;
+		}
+
+		// The stall clock runs while the stray walks towards the network; it
+		// stands while the pedestrian waits (a traffic light, a chat, a hit
+		// wall) or stands still, which is what a pedestrian does between two
+		// walks. A stray with no node to head for is not a stray the walk clock
+		// can measure: it keeps its watch for the no-target time and the watch
+		// is then given up, so the slot comes back (a following or fleeing
+		// pedestrian is not the stray this cull is for).
+		CPathNode *node = ped->m_pNextPathNode ? ped->m_pNextPathNode : ped->m_pLastPathNode;
+		if (node == nil) {
+			stray->nNoTargetTime += now - stray->nLastCheckTime;
+			stray->nLastCheckTime = now;
+			if (stray->nNoTargetTime > PED_OFF_NETWORK_NO_TARGET_TIME)
+				UntrackOffNetworkStray(stray);
+			continue;
+		}
+		stray->nNoTargetTime = 0;
+
+		bool moving = ped->m_nMoveState == PEDMOVE_WALK || ped->m_nMoveState == PEDMOVE_JOG
+			|| ped->m_nMoveState == PEDMOVE_RUN || ped->m_nMoveState == PEDMOVE_SPRINT;
+		if (!moving || ped->m_nWaitState != WAITSTATE_FALSE) {
+			stray->nLastCheckTime = now;
+			continue;
+		}
+
+		float dist = Distance2D(node->GetPosition(), pos);
+		if (node != stray->node || dist < stray->fNodeDist - PED_OFF_NETWORK_PROGRESS) {
+			stray->node = node;
+			stray->fNodeDist = dist;
+			stray->nStallTime = 0;
+		}
+
+		stray->nStallTime += now - stray->nLastCheckTime;
+		stray->nLastCheckTime = now;
+		if (stray->nStallTime > PED_OFF_NETWORK_STALL_TIME && CullOffNetworkStray(stray))
+			CPopulation::ms_nOffNetworkStuck++;
+	}
+}
+
 void
 CPopulation::Initialise()
 {
@@ -96,6 +321,14 @@ CPopulation::Initialise()
 	ms_nTotalMissionPeds = 0;
 	m_CountDownToPedsAtStart = 2;
 	bZoneChangeHasHappened = false; // III leftover
+
+	// The strays and their counters start empty (VICE-122). The pointers are
+	// only dropped here: the strays belong to the game that ends with this call.
+	memset(aOffNetworkStrays, 0, sizeof(aOffNetworkStrays));
+	nOffNetworkStrayCursor = 0;
+	ms_nOffNetworkSpawns = 0;
+	ms_nOffNetworkStuck = 0;
+	ms_nOffNetworkDrowned = 0;
 
 	m_AllRandomPedsThisType = -1;
 	PedDensityMultiplier = 1.0f;
@@ -364,6 +597,9 @@ CPopulation::Update(bool addPeds)
 		ManagePopulation();
 		RemovePedsIfThePoolGetsFull();
 		MoveCarsAndPedsOutOfAbandonedZones();
+		// The strays wait out a cutscene: the camera there is not the game view.
+		if (!CCutsceneMgr::IsRunning())
+			ProcessOffNetworkStrays();
 		if (m_CountDownToPedsAtStart != 0) {
 			if (--m_CountDownToPedsAtStart == 0)
 				GeneratePedsAtStartOfGame();
@@ -524,6 +760,82 @@ CPopulation::AddPed(ePedType pedType, uint32 miOrCopType, CVector const &coors, 
 	}
 }
 
+/* A free position for a pedestrian spawn (VICE-122): a random point in the
+ * creation ring, then the checks the node path does not need, because a node is
+ * ground a pedestrian can stand on. The wander state walks the pedestrian to
+ * the closest node from here, so the position must sit on the pedestrian level,
+ * on land and clear of other pedestrians, and the network must be within the
+ * walk bound and on the same level: a node far below the position means the
+ * position is a roof.
+ *
+ * What the checks cannot tell: a surface the casts find is a surface, so a low
+ * platform whose top is within the level margin of the ring and within the node
+ * level of a node (a roof garden, a hillside ledge) still passes. The stray
+ * cull takes the pedestrian that cannot leave such a spot, and the group's own
+ * level checks keep its members within a step of the seed. */
+static bool
+FindFreePedCreationCoors(const CVector &centre, float minDist, float maxDist, float minDistOffScreen, float maxDistOffScreen, CVector *pPosition)
+{
+	bool found;
+	for (int attempt = 0; attempt < PED_OFF_NETWORK_ATTEMPTS; attempt++) {
+		// The bands of GeneratePedCreationCoors: a position in view takes the
+		// creation ring, one out of view takes the off-screen band.
+		float angle = CGeneral::GetRandomNumberInRange(0.0f, TWOPI);
+		float dist = CGeneral::GetRandomNumberInRange(minDistOffScreen, maxDist);
+		CVector pos(centre.x + dist * Sin(angle), centre.y + dist * Cos(angle), centre.z);
+		bool visible = TheCamera.IsSphereVisible(pos, 2.0f);
+		if (visible && !(minDist < dist && dist < maxDist))
+			continue;
+		if (!visible && !(minDistOffScreen < dist && dist < maxDistOffScreen))
+			continue;
+
+		// The ground. The cast starts on the level itself, so anything above
+		// the level is missed and the position lands at or below it.
+		float groundZ = CWorld::FindGroundZFor3DCoord(pos.x, pos.y, pos.z, &found);
+		if (!found)
+			continue;
+		if (Abs(groundZ - pos.z) > PED_OFF_NETWORK_LEVEL_MARGIN)
+			continue;
+		pos.z = groundZ;
+
+		// The surface: the top surface over the position may stand no more than
+		// a step above the ground. A roof, a canopy or a bridge deck stands
+		// higher, and a pedestrian there cannot leave it.
+		float surfaceZ = CWorld::FindGroundZFor3DCoord(pos.x, pos.y, pos.z + PED_OFF_NETWORK_ROOF_CAST, &found);
+		if (!found || surfaceZ > pos.z + PED_OFF_NETWORK_STEP)
+			continue;
+
+		// The water: the ground must stand above the water line. The line is the
+		// level without the waves, so the shoreline does not move with the wave
+		// phase.
+		if (!GroundIsClearOfWater(pos.x, pos.y, pos.z))
+			continue;
+
+		// The clearance over the feet: a sphere against the static world. The
+		// pedestrian position check below reads vehicles and pedestrians only,
+		// so this is what catches a spot inside a wall, a fence or a low roof.
+		if (CWorld::TestSphereAgainstWorld(pos + CVector(0.0f, 0.0f, PED_OFF_NETWORK_PROBE_HEIGHT), PED_OFF_NETWORK_PROBE_RADIUS,
+			nil, true, false, false, false, false, false))
+			continue;
+
+		// The spot must be free for a pedestrian.
+		if (!CPedPlacement::IsPositionClearForPed(pos))
+			continue;
+
+		// The network: the walk to it is bounded, and it must be on the level of
+		// the ground, or the ground is a roof above the network.
+		int32 node = ThePaths.FindNodeClosestToCoors(pos, PATH_PED, PED_OFF_NETWORK_NODE_RANGE);
+		if (node < 0)
+			continue;
+		if (Abs(ThePaths.m_pathNodes[node].GetPosition().z - pos.z) > PED_OFF_NETWORK_NODE_LEVEL)
+			continue;
+
+		*pPosition = pos;
+		return true;
+	}
+	return false;
+}
+
 void
 CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScreen, float maxDistOffScreen)
 {
@@ -634,20 +946,32 @@ CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScree
 			pedAmount = 1;
 
 		CVector generatedCoors;
-		int node1, node2;
-		float randomPos;
-		bool foundCoors = !!ThePaths.GeneratePedCreationCoors(playerCentreOfWorld.x, playerCentreOfWorld.y, minDist, maxDist, minDistOffScreen, maxDistOffScreen,
-			&generatedCoors, &node1, &node2, &randomPos, nil);
+		/* Off the network (VICE-122): a bounded fraction of the spawns takes a
+		 * free position in the creation ring instead of a node pair. On-network
+		 * spawning is untouched: the fraction is small, a free position that
+		 * fails a check falls back to the node path below, and a fraction of
+		 * zero draws no random number at all, so the node path is bit-exact. */
+		bool offNetwork = false;
+		if (!CGame::IsInInterior() && PED_OFF_NETWORK_FRACTION > 0.0f &&
+			CGeneral::GetRandomNumberInRange(0.0f, 1.0f) < PED_OFF_NETWORK_FRACTION)
+			offNetwork = FindFreePedCreationCoors(playerCentreOfWorld, minDist, maxDist, minDistOffScreen, maxDistOffScreen, &generatedCoors);
 
-		if (!foundCoors)
-			return;
+		if (!offNetwork) {
+			int node1, node2;
+			float randomPos;
+			bool foundCoors = !!ThePaths.GeneratePedCreationCoors(playerCentreOfWorld.x, playerCentreOfWorld.y, minDist, maxDist, minDistOffScreen, maxDistOffScreen,
+				&generatedCoors, &node1, &node2, &randomPos, nil);
 
-		uint8 nodeSpawnRate = Min(ThePaths.m_pathNodes[node1].spawnRate, ThePaths.m_pathNodes[node2].spawnRate);
-		int randomRate = CGeneral::GetRandomNumber() & 0xF;
-		if (randomRate > nodeSpawnRate)
-			return;
+			if (!foundCoors)
+				return;
 
-		CPathFind::TakeWidthIntoAccountForCoors(&ThePaths.m_pathNodes[node1], &ThePaths.m_pathNodes[node2], CGeneral::GetRandomNumber(), &generatedCoors.x, &generatedCoors.y);
+			uint8 nodeSpawnRate = Min(ThePaths.m_pathNodes[node1].spawnRate, ThePaths.m_pathNodes[node2].spawnRate);
+			int randomRate = CGeneral::GetRandomNumber() & 0xF;
+			if (randomRate > nodeSpawnRate)
+				return;
+
+			CPathFind::TakeWidthIntoAccountForCoors(&ThePaths.m_pathNodes[node1], &ThePaths.m_pathNodes[node2], CGeneral::GetRandomNumber(), &generatedCoors.x, &generatedCoors.y);
+		}
 		if (CGame::currArea == AREA_MALL && (pedTypeToAdd == PEDTYPE_CIVMALE || pedTypeToAdd == PEDTYPE_CIVFEMALE || pedTypeToAdd == PEDTYPE_CRIMINAL) &&
 			CGeneral::GetRandomNumberInRange(0.f, 1.f) > 0.5f) {
 
@@ -656,12 +980,12 @@ CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScree
 		}
 
 		if (pedTypeToAdd >= PEDTYPE_GANG1 && pedTypeToAdd <= PEDTYPE_GANG9 && !isSecurityGuard) {
-			PlaceGangMembers((ePedType)pedTypeToAdd, pedAmount, generatedCoors);
+			PlaceGangMembers((ePedType)pedTypeToAdd, pedAmount, generatedCoors, offNetwork);
 			return;
 		}
 
 		if (man > -1 && woman > -1) {
-			PlaceCouple(PEDTYPE_CIVMALE, man, PEDTYPE_CIVFEMALE, woman, generatedCoors);
+			PlaceCouple(PEDTYPE_CIVMALE, man, PEDTYPE_CIVFEMALE, woman, generatedCoors, offNetwork);
 			return;
 		}
 
@@ -746,6 +1070,7 @@ CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScree
 			if (!distIsOk || !surfaceIsOk)
 				break;
 			CPed *newPed = AddPed((ePedType)pedTypeToAdd, modelToAdd, generatedCoors);
+			AddOffNetworkPed(newPed, offNetwork);
 			if (forceAddingCop && newPed->m_nPedType == PEDTYPE_COP)
 				((CCopPed*)newPed)->m_bThrowsSpikeTrap = true;
 
@@ -1451,17 +1776,17 @@ CPopulation::ChooseCivilianCoupleOccupations(int32 group, int32& man, int32& wom
 }
 
 void
-CPopulation::PlaceGangMembers(ePedType pedType, int pedAmount, CVector const& coors)
+CPopulation::PlaceGangMembers(ePedType pedType, int pedAmount, CVector const& coors, bool offNetwork)
 {
 	if (CGeneral::GetRandomNumberInRange(0.f, 1.f) < 0.333f) {
-		PlaceGangMembersInFormation(pedType, pedAmount, coors);
+		PlaceGangMembersInFormation(pedType, pedAmount, coors, offNetwork);
 	} else {
-		PlaceGangMembersInCircle(pedType, pedAmount, coors);
+		PlaceGangMembersInCircle(pedType, pedAmount, coors, offNetwork);
 	}
 }
 
 void
-CPopulation::PlaceGangMembersInFormation(ePedType pedType, int pedAmount, CVector const& coors)
+CPopulation::PlaceGangMembersInFormation(ePedType pedType, int pedAmount, CVector const& coors, bool offNetwork)
 {
 	CPed *createdPeds[5];
 
@@ -1475,6 +1800,7 @@ CPopulation::PlaceGangMembersInFormation(ePedType pedType, int pedAmount, CVecto
 				if (((CPedModelInfo*)CModelInfo::GetModelInfo(leaderModel))->GetRwObject()) {
 					CPed *leader = AddPed(pedType, leaderModel, CVector(coors.x, coors.y, finalZ));
 					if (leader) {
+						AddOffNetworkPed(leader, offNetwork);
 						leader->SetObjective(OBJECTIVE_NONE);
 						leader->SetWanderPath(CGeneral::GetRandomNumberInRange(0, 8));
 						leader->bIsLeader = true;
@@ -1492,15 +1818,17 @@ CPopulation::PlaceGangMembersInFormation(ePedType pedType, int pedAmount, CVecto
 							if (!memberPed)
 								continue;
 
+							AddOffNetworkPed(memberPed, offNetwork);
 							memberPed->SetObjective(OBJECTIVE_FOLLOW_CHAR_IN_FORMATION, leader);
 							memberPed->SetFormation((eFormation)i);
 							CVector formationPos = memberPed->GetFormationPosition();
 							CVector finalFormationPos = formationPos;
 							bool formationFoundGround;
-							float formationGroundZ = CWorld::FindGroundZFor3DCoord(formationPos.x, formationPos.y, 1.0f + formationPos.z, &formationFoundGround) + 1.0f;
+							float memberGroundZ = CWorld::FindGroundZFor3DCoord(formationPos.x, formationPos.y, 1.0f + formationPos.z, &formationFoundGround);
+							float formationGroundZ = memberGroundZ + 1.0f;
 
 							finalFormationPos.z = Max(finalFormationPos.z, formationGroundZ);
-							if (formationFoundGround) {
+							if (formationFoundGround && (!offNetwork || GroundIsClearOfWater(formationPos.x, formationPos.y, memberGroundZ))) {
 								if (Abs(finalFormationPos.z - leader->GetPosition().z) <= 1.0f) {
 									if (CWorld::GetIsLineOfSightClear(finalFormationPos, leader->GetPosition(), true, false, false, false, false, false, false)) {
 										memberPed->SetPosition(finalFormationPos);
@@ -1532,7 +1860,7 @@ CPopulation::PlaceGangMembersInFormation(ePedType pedType, int pedAmount, CVecto
 }
 
 void
-CPopulation::PlaceGangMembersInCircle(ePedType pedType, int pedAmount, CVector const& coors)
+CPopulation::PlaceGangMembersInCircle(ePedType pedType, int pedAmount, CVector const& coors, bool offNetwork)
 {
 	CPed *createdPeds[5];
 
@@ -1559,9 +1887,12 @@ CPopulation::PlaceGangMembersInCircle(ePedType pedType, int pedAmount, CVector c
 				float xOffset = randomR * Cos(angleMult * circleSector);
 				float yOffset = randomR * Sin(angleMult * circleSector);
 				bool foundGround;
-				float groundZ = CWorld::FindGroundZFor3DCoord(xOffset + coors.x, yOffset + coors.y, coors.z + 1.0, &foundGround) + 1.0f;
+				float memberGroundZ = CWorld::FindGroundZFor3DCoord(xOffset + coors.x, yOffset + coors.y, coors.z + 1.0, &foundGround);
+				float groundZ = memberGroundZ + 1.0f;
 				if (foundGround) {
 					CVector finalPos(coors.x + xOffset, coors.y + yOffset, coors.z > groundZ ? coors.z : groundZ);
+					if (offNetwork && !GroundIsClearOfWater(xOffset + coors.x, yOffset + coors.y, memberGroundZ))
+						continue;
 #ifndef FIX_BUGS
 					const bool createLeader = i == 0;
 #endif
@@ -1595,6 +1926,7 @@ CPopulation::PlaceGangMembersInCircle(ePedType pedType, int pedAmount, CVector c
 						if (!foundObstacle && memberCanSeeLeader && notTooHighFromLeader) {
 							CPed* newPed = AddPed(pedType, gangModel, finalPos);
 							if (newPed) {
+								AddOffNetworkPed(newPed, offNetwork);
 								createdPeds[pedIdx++] = newPed;
 								float angle = CGeneral::GetRadianAngleBetweenPoints(
 									coors.x, coors.y,
@@ -1648,7 +1980,7 @@ CPopulation::PlaceGangMembersInCircle(ePedType pedType, int pedAmount, CVector c
 }
 
 void
-CPopulation::PlaceCouple(ePedType manType, int32 manModel, ePedType womanType, int32 womanModel, CVector coors)
+CPopulation::PlaceCouple(ePedType manType, int32 manModel, ePedType womanType, int32 womanModel, CVector coors, bool offNetwork)
 {
 	// Homosexuality filter!!!! Homophobic R* >>>:(
 	if (manType != PEDTYPE_CIVMALE || womanType != PEDTYPE_CIVFEMALE)
@@ -1664,6 +1996,7 @@ CPopulation::PlaceCouple(ePedType manType, int32 manModel, ePedType womanType, i
 				if (((CPedModelInfo*)CModelInfo::GetModelInfo(manModel))->GetRwObject()) {
 					CPed *man = AddPed(PEDTYPE_CIVMALE, manModel, correctedManPos);
 					if (man) {
+						AddOffNetworkPed(man, offNetwork);
 						man->SetObjective(OBJECTIVE_NONE);
 						man->SetWanderPath(CGeneral::GetRandomNumberInRange(0, 8));
 						man->bIsLeader = true;
@@ -1672,15 +2005,17 @@ CPopulation::PlaceCouple(ePedType manType, int32 manModel, ePedType womanType, i
 						if (((CPedModelInfo*)CModelInfo::GetModelInfo(womanModel))->GetRwObject()) {
 							CPed* woman = AddPed(PEDTYPE_CIVFEMALE, womanModel, correctedManPos); // will set the correct position later
 							if (woman) {
+								AddOffNetworkPed(woman, offNetwork);
 								woman->SetObjective(OBJECTIVE_FOLLOW_CHAR_IN_FORMATION, man);
 								woman->SetFormation(FORMATION_RIGHT);
 
 								CVector formationPos = woman->GetFormationPosition();
 								CVector womanPos = formationPos;
 								bool womanFoundGround;
-								float formationGroundZ = CWorld::FindGroundZFor3DCoord(formationPos.x, formationPos.y, 1.0f + formationPos.z, &womanFoundGround) + 1.0f;
+								float memberGroundZ = CWorld::FindGroundZFor3DCoord(formationPos.x, formationPos.y, 1.0f + formationPos.z, &womanFoundGround);
+								float formationGroundZ = memberGroundZ + 1.0f;
 
-								if (womanFoundGround) {
+								if (womanFoundGround && (!offNetwork || GroundIsClearOfWater(formationPos.x, formationPos.y, memberGroundZ))) {
 									CVector correctedWomanPos = womanPos;
 									correctedWomanPos.z = Max(womanPos.z, formationGroundZ);
 									woman->SetPosition(correctedWomanPos);

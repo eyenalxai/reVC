@@ -288,6 +288,38 @@ The caps stay below the pools.
 The fixed storage for the entities and their list nodes: pedestrians, vehicles,
 audio entities. A pool never grows; the caps keep the counts below it.
 
+## Pedestrian node network
+
+The ped path nodes (`PATH_PED`): the walkable network of the map. The game
+creates pedestrians on it (`GeneratePedCreationCoors`) and walks them along it
+(`FindNextNodeWandering`). The closest-node search has no radius of its own, so
+an area without nodes stays empty: nothing spawns there before VICE-122.
+
+## Off-network spawn
+
+A pedestrian created off the pedestrian node network. The population picks a
+random point in the creation ring and takes it only if it is free: ground at
+the level of the ring, no surface more than a step above it (no roof or
+canopy), ground above the water line, a clearance sphere clear of the static
+world, clear of other pedestrians, and a ped node inside the walk bound and on
+the same level. The wander state walks the pedestrian to the closest node from
+there. A bounded fraction of the spawns takes this path
+(`PED_OFF_NETWORK_FRACTION`, a fraction of zero draws no random number); the
+rest keeps the node path (VICE-122).
+
+## Stray (off-network pedestrian)
+
+An off-network pedestrian that has not reached the network yet. The population
+watches the strays in a bounded table until each reaches a node. The cull
+removes a stray that walks for the stall budget without coming closer to its
+node, or one whose feet are under the water line; it only removes a pedestrian
+the camera does not see, and each counter carries one removal
+(`CPopulation::ms_nOffNetworkSpawns`, `ms_nOffNetworkStuck`,
+`ms_nOffNetworkDrowned`). A stray with no node to head for keeps its watch for
+the no-target time and is then left alone, uncounted. The members of a gang or
+couple group are validated at their own spots and watched like any other stray;
+a pedestrian that follows another leaves the watch (VICE-122).
+
 ## Dummy object
 
 A `CDummyObject`: the stand-in for a map object that is far from the player, or
