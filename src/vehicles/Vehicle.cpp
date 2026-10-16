@@ -1693,6 +1693,10 @@ CVehicle::CanBeDeleted(void)
 	case MISSION_VEHICLE: return false;
 	case PARKED_VEHICLE: return true;
 	case PERMANENT_VEHICLE: return false;
+	/* A far car is removable: it is the car the layer itself gives up (the
+	 * band closed, the cap dropped) and, in the pool's last resort, the cull
+	 * may take it like any other car outside the bubble (VICE-128). */
+	case FAR_TRAFFIC_VEHICLE: return true;
 	}
 	return true;
 }

@@ -42,6 +42,15 @@ share of the car target that area asks for (the other fill is the rest of the
 target: the cars outside the traffic spawner, whose creations the "other"
 rows carry apart). The counters are cumulative, so the orchestrator notes them
 before a drive or a camera turn and reads them after.
+
+The far layer rows (VICE-128) are the band between the near traffic's despawn
+and the fog: the count against the cap of the frame (the cap is the band's, so
+it moves with the draw distance and the weather; zero is a closed band, not a
+fault), the layer's churn (creations and removals), the two switches
+(promotions and hand-overs) and the refusals by cause (an absent model is the
+streaming; a pool reserve is the layer's own promise to the rest of the game).
+The updates row is the stagger's work: about a third of the layer a frame, so
+it grows by the cap each three frames.
 """
 
 import os
@@ -156,7 +165,34 @@ NEAR_BUBBLE = [
     ("bubble: valve removals",       "_ZN8CCarCtrl27ms_nNearBubbleValveRemovalsE",      "I"),
 ]
 
+# The far traffic layer (VICE-128). The layer holds the cars of the band between
+# the near traffic's despawn and the fog; the count and the cap are the live
+# pair to read (the cap is the band's, so it moves with the draw distance and
+# the weather), the creations/removals are its churn, the promotions and the
+# hand-overs are the two switches (a far car that the player came near becomes
+# traffic, a traffic car the cull would delete keeps driving as a far one), and
+# the refusals split by cause: a refused model is the streaming (the layer
+# builds a car only with a model the streamer holds), a refused pool is a
+# reserve (the layer leaves the pool room for the rest of the game). The
+# updates are the cars the stagger moved (about a third of the layer a frame);
+# the attempts are the placements the frame tried.
+FAR_TRAFFIC = [
+    ("far: cars",                    "_ZN11CFarTraffic18ms_nFarTrafficCarsE",           "I"),
+    ("far: cap",                     "_ZN11CFarTraffic17ms_nFarTrafficCapE",            "I"),
+    ("far: creations",               "_ZN11CFarTraffic23ms_nFarTrafficCreationsE",      "I"),
+    ("far: removals",                "_ZN11CFarTraffic22ms_nFarTrafficRemovalsE",       "I"),
+    ("far: promotions",              "_ZN11CFarTraffic24ms_nFarTrafficPromotionsE",     "I"),
+    ("far: demotions (hand-overs)",  "_ZN11CFarTraffic23ms_nFarTrafficDemotionsE",      "I"),
+    ("far: refused",                 "_ZN11CFarTraffic21ms_nFarTrafficRefusedE",        "I"),
+    ("far: refused model",           "_ZN11CFarTraffic26ms_nFarTrafficRefusedModelE",   "I"),
+    ("far: refused pool",            "_ZN11CFarTraffic25ms_nFarTrafficRefusedPoolE",    "I"),
+    ("far: attempts",                "_ZN11CFarTraffic22ms_nFarTrafficAttemptsE",       "I"),
+    ("far: updates (stagger)",       "_ZN11CFarTraffic21ms_nFarTrafficUpdatesE",        "I"),
+]
+
 CONFIG = "src/core/config.h"
+
+
 
 
 def find_pid():
@@ -250,6 +286,19 @@ def main():
             print(f"  {label:44s} {v}")
 
     print()
+    for label, mangled, fmt in FAR_TRAFFIC:
+        off = sym.get(mangled)
+        if off is None:
+            print(f"  {label:44s} symbol missing")
+            continue
+        v = read(off, fmt)
+        values[label.split(': ')[1]] = v
+        if fmt == "f":
+            print(f"  {label:44s} {v:.4f}")
+        else:
+            print(f"  {label:44s} {v}")
+
+    print()
     for label, mangled, enum_name in POOLS:
         off = sym.get(mangled)
         if off is None:
@@ -315,6 +364,32 @@ def main():
         # in view is expected, so this row informs and does not fail the verdict.
         print(f"  the near bubble: the cars outside the spawner {other_creations}, "
               f"of them catchable {other_in_frustum} (their own row, not the traffic's)")
+
+    # The far traffic layer (VICE-128), as one line. The layer fills the band
+    # between the near traffic and the fog; a cap of zero is a closed band (the
+    # stock draw distance or a storm), not a fault.
+    print()
+    far_cars = values.get("cars")
+    far_cap = values.get("cap")
+    far_creations = values.get("creations")
+    far_removals = values.get("removals")
+    far_promotions = values.get("promotions")
+    far_demotions = values.get("demotions (hand-overs)")
+    far_refused = values.get("refused")
+    far_updates = values.get("updates (stagger)")
+    if far_cars is None or far_cap is None:
+        print("  the far layer: a symbol is missing (the layer cannot be read)")
+    else:
+        note = "closed band" if far_cap == 0 else "open band"
+        if far_cap and far_cars > far_cap:
+            note = "OVER THE CAP"
+        print(f"  the far layer: {far_cars} cars against the cap {far_cap} ({note})")
+    if far_creations is not None:
+        print(f"  the far layer: creations {far_creations}, removals {far_removals}, "
+              f"promotions {far_promotions}, hand-overs {far_demotions}, refused {far_refused}")
+    if far_updates is not None:
+        print(f"  the far layer: the stagger moved {far_updates} cars so far "
+              f"(about a third of the layer a frame)")
 
 
 if __name__ == "__main__":

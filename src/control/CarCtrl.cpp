@@ -459,8 +459,13 @@ CCarCtrl::GenerateOneRandomCar()
 	}
 }
 
+/* A car of the traffic spawner, or - with `bFarTraffic` - a car of the far
+ * traffic layer (VICE-128): the same placement, the same model choice and the
+ * same path setup, but no driver, no birth cull of the near ring, no accident
+ * roll, and the car leaves in the far state (static, no collision, no audio)
+ * for the layer to move. `ppCreated` (optional) receives the car. */
 bool
-CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int carClass, int carModel, const CVector& vecTargetPos, const CVector2D& vecPlayerSpeed, bool testForCollision, bool bTopDownCamera)
+CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int carClass, int carModel, const CVector& vecTargetPos, const CVector2D& vecPlayerSpeed, bool testForCollision, bool bTopDownCamera, bool bFarTraffic, CVehicle **ppCreated)
 {
 	CPathNode* pCurNode = &ThePaths.m_pathNodes[placement.node1];
 	CPathNode* pNextNode = &ThePaths.m_pathNodes[placement.node2];
@@ -504,16 +509,19 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 	if (colliding)
 		/* If something is already present in spawn position, try the next placement. */
 		return false;
-	if (!bBoatGenerated && !ThePaths.TestCoorsCloseness(vecTargetPos, false, placement.position))
-		/* Testing if spawn position can reach target position via valid path. */
+	if (!bBoatGenerated && !bFarTraffic && !ThePaths.TestCoorsCloseness(vecTargetPos, false, placement.position))
+		/* Testing if spawn position can reach target position via valid path.
+		 * The far layer's cars are placed out to the fog, where the route to
+		 * the player is long by design (VICE-128); the test is the near
+		 * ring's own reach, so it is asked for the near cars only. */
 		return false;
 	CVehicle* pVehicle;
 	if (CModelInfo::IsBoatModel(carModel))
-		pVehicle = new CBoat(carModel, RANDOM_VEHICLE);
+		pVehicle = new CBoat(carModel, bFarTraffic ? FAR_TRAFFIC_VEHICLE : RANDOM_VEHICLE);
 	else if (CModelInfo::IsBikeModel(carModel))
-		pVehicle = new CBike(carModel, RANDOM_VEHICLE);
+		pVehicle = new CBike(carModel, bFarTraffic ? FAR_TRAFFIC_VEHICLE : RANDOM_VEHICLE);
 	else
-		pVehicle = new CAutomobile(carModel, RANDOM_VEHICLE);
+		pVehicle = new CAutomobile(carModel, bFarTraffic ? FAR_TRAFFIC_VEHICLE : RANDOM_VEHICLE);
 	pVehicle->AutoPilot.m_nPrevRouteNode = 0;
 	pVehicle->AutoPilot.m_nCurrentRouteNode = placement.node1;
 	pVehicle->AutoPilot.m_nNextRouteNode = placement.node2;
@@ -755,26 +763,30 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 	 * off-screen branch uses the same threshold as the on-screen one, because
 	 * the lifetime cull (PossiblyRemoveVehicle) does: a car that is off screen
 	 * now can come into view a frame later, and one ring serves both requests.
-	 * The on-screen band keeps its own lower edge and the camera rule. */
-	if (!pVehicle->GetIsOnScreen()){
-		if ((vecTargetPos - pVehicle->GetPosition()).Magnitude2D() > rings.carDespawn * (pVehicle->bExtendedRange ? rings.extendedRangeFactor : 1.0f)) {
-			/* Too far away cars that are not visible aren't needed. */
-			delete pVehicle;
-			return false;
-		}
-	}else{
-		if ((vecTargetPos - pVehicle->GetPosition()).Magnitude2D() > rings.carDespawn * (pVehicle->bExtendedRange ? rings.extendedRangeFactor : 1.0f) ||
-			(vecTargetPos - pVehicle->GetPosition()).Magnitude2D() < rings.carOnScreenSpawnMin) {
-			delete pVehicle;
-			return false;
-		}
-		if ((TheCamera.GetPosition() - pVehicle->GetPosition()).Magnitude2D() < rings.carCameraMin || bTopDownCamera) {
-			delete pVehicle;
-			return false;
-		}
-		if (pVehicle->GetModelIndex() == MI_MARQUIS) { // so marquis can only spawn if player doesn't see it?
-			delete pVehicle;
-			return false;
+	 * The on-screen band keeps its own lower edge and the camera rule. The far
+	 * layer's cars are placed past the despawn by design (VICE-128), so the
+	 * near ring's birth cull is the near cars' own. */
+	if (!bFarTraffic) {
+		if (!pVehicle->GetIsOnScreen()){
+			if ((vecTargetPos - pVehicle->GetPosition()).Magnitude2D() > rings.carDespawn * (pVehicle->bExtendedRange ? rings.extendedRangeFactor : 1.0f)) {
+				/* Too far away cars that are not visible aren't needed. */
+				delete pVehicle;
+				return false;
+			}
+		}else{
+			if ((vecTargetPos - pVehicle->GetPosition()).Magnitude2D() > rings.carDespawn * (pVehicle->bExtendedRange ? rings.extendedRangeFactor : 1.0f) ||
+				(vecTargetPos - pVehicle->GetPosition()).Magnitude2D() < rings.carOnScreenSpawnMin) {
+				delete pVehicle;
+				return false;
+			}
+			if ((TheCamera.GetPosition() - pVehicle->GetPosition()).Magnitude2D() < rings.carCameraMin || bTopDownCamera) {
+				delete pVehicle;
+				return false;
+			}
+			if (pVehicle->GetModelIndex() == MI_MARQUIS) { // so marquis can only spawn if player doesn't see it?
+				delete pVehicle;
+				return false;
+			}
 		}
 	}
 	/* The near bubble (VICE-127): a car may only appear where the player
@@ -783,17 +795,22 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 	 * the car really takes: outside the bubble, and hidden now (occluded,
 	 * beyond the fade, or behind a blocked line of sight), or a frame the
 	 * fade covers (the fill burst). A refusal is not an error: the placement
-	 * loop of GenerateOneRandomCar tries its next candidate. */
-	if (!NearBubbleAllowsCreation(pVehicle->GetPosition(), vecTargetPos, NEAR_BUBBLE_ENTITY_RADIUS, true)) {
+	 * loop of GenerateOneRandomCar tries its next candidate.
+	 * The far layer (VICE-128) asks the same gate with `rayAllowed` false:
+	 * its sites are behind the camera by the margin or beyond the fade, and a
+	 * line-of-sight ray of two kilometres is not the far layer's work. */
+	if (!NearBubbleAllowsCreation(pVehicle->GetPosition(), vecTargetPos, NEAR_BUBBLE_ENTITY_RADIUS, !bFarTraffic)) {
 		delete pVehicle;
 		return false;
 	}
 	/* The fresh-spawn grace: the culls of the frame may not take this car
 	 * before it has lived NEAR_BUBBLE_GRACE_MS. */
 	pVehicle->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + NEAR_BUBBLE_GRACE_MS;
-	/* The car is the traffic spawner's own: the bubble's fill counts it, and
-	 * the cars the scripts and the set pieces create (RANDOM_VEHICLE too, so
-	 * part of the car target) are the fill's other half (VICE-127). */
+	/* The car is the traffic's own: the bubble's fill counts it, and the cars
+	 * the scripts and the set pieces create (RANDOM_VEHICLE too, so part of
+	 * the car target) are the fill's other half (VICE-127). A far car is the
+	 * traffic of its band (VICE-128) and becomes a RANDOM_VEHICLE when it is
+	 * promoted, so the flag is right for both. */
 	pVehicle->bIsTrafficCar = true;
 	CVehicleModelInfo* pVehicleModel = pVehicle->GetModelInfo();
 	float radiusToTest = pVehicleModel->GetColModel()->boundingSphere.radius;
@@ -809,17 +826,44 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 		delete pVehicle;
 		return false;
 	}
-	if (speedDifferenceWithTarget.x * distanceToTarget.x +
+	/* The speed test refuses a spawn that drives away from the player: a near
+	 * car would leave the ring without ever being seen. The far layer's cars
+	 * drive away from the player by design (they are the traffic that
+	 * recedes), so the test is the near cars' own (VICE-128). */
+	if (!bFarTraffic &&
+		speedDifferenceWithTarget.x * distanceToTarget.x +
 		speedDifferenceWithTarget.y * distanceToTarget.y >= 0.0f){
 		delete pVehicle;
 		return false;
 	}
 	pVehicleModel->AvoidSameVehicleColour(&pVehicle->m_currentColour1, &pVehicle->m_currentColour2);
 	CWorld::Add(pVehicle);
+	if (bFarTraffic) {
+		/* The far state (VICE-128), after the add: the car is rendered and
+		 * moved by the far layer and by nothing else. The static flag goes on
+		 * here, so the car leaves the moving entity list CWorld::Add put it on
+		 * (CWorld::Process runs no control on it: no AI, no physics, no
+		 * wheels); collision is off both ways (ProcessCollisionSectorList
+		 * tests the flag, so the player cannot touch it and the near traffic
+		 * cannot even brake for it); the audio entity of a car kilometres away
+		 * is switched off after the add (CWorld::Add wakes it), so
+		 * ProcessEntity skips it. The flags live in the layer
+		 * (CFarTraffic::ApplyFarState), so a far spawn and a hand-over apply
+		 * exactly the same state. */
+		CFarTraffic::ApplyFarState(pVehicle);
+	}
 	/* The acceptance reads this: the car exists now, and the counter says
 	 * where. The gate above already refused every catchable spot, so this is
 	 * the guard of the paths that bypass it (VICE-127). */
 	NearBubbleCountCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
+	if (ppCreated)
+		*ppCreated = pVehicle;
+	/* The far car is done here: no occupants, no mad-driver roll, no accident
+	 * at the spawn point (a ped would be created kilometres away), and no
+	 * police bookkeeping. The layer takes it from here, and the promotion
+	 * (CFarTraffic) gives it its driver when the player is near. */
+	if (bFarTraffic)
+		return true;
 	if (carClass == COPS || carClass == COPS_BOAT)
 		CCarAI::AddPoliceCarOccupants(pVehicle);
 	else {
@@ -1165,6 +1209,13 @@ CCarCtrl::RemoveCarsIfThePoolGetsFull(void)
 		CVehicle* pVehicle = CPools::GetVehiclePool()->GetSlot(i);
 		if (!pVehicle)
 			continue;
+		/* A far car is never the valve's victim (VICE-128): the layer's
+		 * creation gate keeps FAR_TRAFFIC_POOL_RESERVE free slots and the
+		 * cap keeps the car budget 96 slots clear of the pool, so the valve
+		 * cannot be reached by the layer; taking a rendered car in the fog
+		 * would be a deletion with no rule behind it. */
+		if (pVehicle->VehicleCreatedBy == FAR_TRAFFIC_VEHICLE)
+			continue;
 		if (IsThisVehicleInteresting(pVehicle) || pVehicle->bIsLocked)
 			continue;
 		if (!pVehicle->CanBeDeleted() || CCranes::IsThisCarBeingTargettedByAnyCrane(pVehicle))
@@ -1200,6 +1251,12 @@ CCarCtrl::RemoveCarsIfThePoolGetsFull(void)
 void
 CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 {
+	/* The far layer owns its own cars (VICE-128): a far car is outside every
+	 * near threshold and rule, its removal is the band's own decision, and
+	 * the near cull must not touch it. The guard is first, so a far car costs
+	 * one compare in the frame's scan. */
+	if (pVehicle->VehicleCreatedBy == FAR_TRAFFIC_VEHICLE)
+		return;
 #ifdef FIX_BUGS
 	if (pVehicle->bIsLocked)
 		return;
@@ -1244,6 +1301,16 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 			if (bOnScreenAtEntry){
 				pVehicle->bFadeOut = true;
 			}else{
+				/* The far layer's hand-over (VICE-128): a car of the traffic
+				 * spawner that the cull is about to delete here may keep
+				 * driving as a far car instead, farther than the near band's
+				 * edge by the layer's own hysteresis. The car is hidden (the
+				 * gate above said so) and the switch changes nothing the
+				 * renderer draws, so the player sees a car drive away, not a
+				 * car blink out. The layer refuses when it is off or full;
+				 * the cull then deletes as it always did. */
+				if (CFarTraffic::AdoptOnCull(pVehicle, vecPlayerPos))
+					return;
 				NearBubbleCountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, false);
 				CWorld::Remove(pVehicle);
 				delete pVehicle;
@@ -1316,23 +1383,8 @@ static CVector GetRandomOffsetForVehicle(CVehicle* pVehicle, bool bNext)
 }
 
 void
-CCarCtrl::UpdateCarOnRails(CVehicle* pVehicle)
+CCarCtrl::ComputeCarOnRailPose(CVehicle* pVehicle, CVector *pPosition, CVector *pDirection)
 {
-	if (pVehicle->AutoPilot.m_nTempAction == TEMPACT_WAIT){
-		pVehicle->SetMoveSpeed(0.0f, 0.0f, 0.0f);
-		pVehicle->AutoPilot.ModifySpeed(0.0f);
-		if (CTimer::GetTimeInMilliseconds() > pVehicle->AutoPilot.m_nTempAction){
-			pVehicle->AutoPilot.m_nTempAction = TEMPACT_NONE;
-			pVehicle->AutoPilot.m_nAntiReverseTimer = CTimer::GetTimeInMilliseconds();
-			pVehicle->AutoPilot.m_nTimeToStartMission = CTimer::GetTimeInMilliseconds();
-		}
-		return;
-	}
-	SlowCarOnRailsDownForTrafficAndLights(pVehicle);
-	if (pVehicle->AutoPilot.m_nTimeEnteredCurve + pVehicle->AutoPilot.m_nTimeToSpendOnCurrentCurve <= CTimer::GetTimeInMilliseconds())
-		PickNextNodeAccordingStrategy(pVehicle);
-	if (pVehicle->GetStatus() == STATUS_PHYSICS)
-		return;
 	CCarPathLink* pCurrentLink = &ThePaths.m_carPathLinks[pVehicle->AutoPilot.m_nCurrentPathNodeInfo];
 	CCarPathLink* pNextLink = &ThePaths.m_carPathLinks[pVehicle->AutoPilot.m_nNextPathNodeInfo];
 	float currentPathLinkForwardX = pCurrentLink->GetDirX() * pVehicle->AutoPilot.m_nCurrentDirection;
@@ -1353,8 +1405,6 @@ CCarCtrl::UpdateCarOnRails(CVehicle* pVehicle)
 	CVector directionNextLink = GetRandomOffsetForVehicle(pVehicle, true);
 	directionNextLink += CVector(nextPathLinkForwardX, nextPathLinkForwardY, 0.0f);
 	directionNextLink.Normalise();
-	CVector positionIncludingCurve;
-	CVector directionIncludingCurve;
 	CCurves::CalcCurvePoint(
 		&positionOnCurrentLinkIncludingLane,
 		&positionOnNextLinkIncludingLane,
@@ -1362,9 +1412,32 @@ CCarCtrl::UpdateCarOnRails(CVehicle* pVehicle)
 		&directionNextLink,
 		GetPositionAlongCurrentCurve(pVehicle),
 		pVehicle->AutoPilot.m_nTimeToSpendOnCurrentCurve,
-		&positionIncludingCurve,
-		&directionIncludingCurve
+		pPosition,
+		pDirection
 	);
+}
+
+void
+CCarCtrl::UpdateCarOnRails(CVehicle* pVehicle)
+{
+	if (pVehicle->AutoPilot.m_nTempAction == TEMPACT_WAIT){
+		pVehicle->SetMoveSpeed(0.0f, 0.0f, 0.0f);
+		pVehicle->AutoPilot.ModifySpeed(0.0f);
+		if (CTimer::GetTimeInMilliseconds() > pVehicle->AutoPilot.m_nTempAction){
+			pVehicle->AutoPilot.m_nTempAction = TEMPACT_NONE;
+			pVehicle->AutoPilot.m_nAntiReverseTimer = CTimer::GetTimeInMilliseconds();
+			pVehicle->AutoPilot.m_nTimeToStartMission = CTimer::GetTimeInMilliseconds();
+		}
+		return;
+	}
+	SlowCarOnRailsDownForTrafficAndLights(pVehicle);
+	if (pVehicle->AutoPilot.m_nTimeEnteredCurve + pVehicle->AutoPilot.m_nTimeToSpendOnCurrentCurve <= CTimer::GetTimeInMilliseconds())
+		PickNextNodeAccordingStrategy(pVehicle);
+	if (pVehicle->GetStatus() == STATUS_PHYSICS)
+		return;
+	CVector positionIncludingCurve;
+	CVector directionIncludingCurve;
+	ComputeCarOnRailPose(pVehicle, &positionIncludingCurve, &directionIncludingCurve);
 	positionIncludingCurve.z = 15.0f;
 	DragCarToPoint(pVehicle, &positionIncludingCurve);
 	pVehicle->SetMoveSpeed(directionIncludingCurve / GAME_SPEED_TO_CARAI_SPEED);
@@ -3603,6 +3676,10 @@ void CCarCtrl::UpdateCarCount(CVehicle* pVehicle, bool remove)
 			if (--NumPermanentCars < 0)
 				NumPermanentCars = 0;
 			return;
+		case FAR_TRAFFIC_VEHICLE:
+			/* The far layer's cars are outside every budget (VICE-128):
+			 * they hold pool slots, not car-target slots. */
+			return;
 		}
 	}
 	else{
@@ -3620,6 +3697,8 @@ void CCarCtrl::UpdateCarCount(CVehicle* pVehicle, bool remove)
 			return;
 		case PERMANENT_VEHICLE:
 			++NumPermanentCars;
+			return;
+		case FAR_TRAFFIC_VEHICLE:
 			return;
 		}
 	}
