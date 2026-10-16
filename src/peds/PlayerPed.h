@@ -115,6 +115,11 @@ public:
 	bool FindWeaponLockOnTarget(void);
 	void ProcessAnimGroups(void);
 	void ProcessPlayerWeapon(CPad*);
+	// The player's held upper body aim pose (VICE-141): the weapon aim pose
+	// rides on the upper body only while the legs keep the movement animation.
+	void HoldUpperBodyAimPose(void);
+	void ReleaseHeldAimPose(void);
+#ifdef FIRST_PERSON
 	void AimAtPosition(const CVector &position);
 	void UpdateFirstPersonAim(CPad *padUsed);
 	void PlayerControlZelda(CPad*);

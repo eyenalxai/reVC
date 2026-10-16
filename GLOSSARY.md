@@ -326,6 +326,19 @@ Aiming down the sights on foot in the first person view. The plain first person
 camera keeps the player moving (the M16 camera mode is the stock stationary
 aim). The sight predicate, `CCamera::UsingFirstPersonSights`, drives the sight
 zoom, the shot ray and the reticle together.
+## Aim pose
+
+The pose of the player's upper body while the sights are up: the weapon's fire
+animation held at its loop start, the way the stock third person aim holds it.
+On the player it drives only the upper body, so the arms and the torso hold the
+aim while the legs keep the movement animation, the sprint cycle included.
+
+## Partial association
+
+An animation association that layers over the movement animation instead of
+replacing it (`ASSOC_PARTIAL`). It drives the bones its keyframes cover; the
+bones it has no keys for keep the animation below it. The weapon fire, reload
+and fight animations are partials.
 
 ## Replay block
 
