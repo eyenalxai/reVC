@@ -109,7 +109,7 @@ uint32 CPopulation::ms_nOffNetworkDrowned;
  * boot burst stays readable after a later arming resets the window rows; the
  * "ended" counters count the burst runs by the reason they ended (VICE-146):
  * the target's stop line, the give-up bound, the window spent, and - the fix
- * round - the target wait bound (the boot burst's own end). */
+ * round - the boot wait bound (the world never became ready). */
 SFillBurst CPopulation::ms_FillBurst;
 uint32 CPopulation::ms_nFillBurstAttempts;
 uint32 CPopulation::ms_nFillBurstPlaced;
@@ -118,7 +118,7 @@ uint32 CPopulation::ms_nFillBurstTotalPlaced;
 uint32 CPopulation::ms_nFillBurstEndedLine;
 uint32 CPopulation::ms_nFillBurstEndedStalls;
 uint32 CPopulation::ms_nFillBurstEndedWindow;
-uint32 CPopulation::ms_nFillBurstEndedTargetWait;
+uint32 CPopulation::ms_nFillBurstEndedBootWait;
 float CPopulation::ms_fFillBurstTarget;
 
 /* Arm the pedestrian fill burst (VICE-126). The burst of every trigger has the
@@ -420,7 +420,7 @@ CPopulation::Initialise()
 	ms_nFillBurstEndedLine = 0;
 	ms_nFillBurstEndedStalls = 0;
 	ms_nFillBurstEndedWindow = 0;
-	ms_nFillBurstEndedTargetWait = 0;
+	ms_nFillBurstEndedBootWait = 0;
 
 	// The strays and their counters start empty (VICE-122). The pointers are
 	// only dropped here: the strays belong to the game that ends with this call.
@@ -769,8 +769,8 @@ CountPedBurstEnd(EFillBurstEnded ended)
 		CPopulation::ms_nFillBurstEndedStalls++;
 	else if (ended == FILL_BURST_ENDED_WINDOW)
 		CPopulation::ms_nFillBurstEndedWindow++;
-	else if (ended == FILL_BURST_ENDED_TARGET_WAIT)
-		CPopulation::ms_nFillBurstEndedTargetWait++;
+	else if (ended == FILL_BURST_ENDED_BOOT_WAIT)
+		CPopulation::ms_nFillBurstEndedBootWait++;
 }
 
 /* One frame of the pedestrian fill burst (VICE-126). The attempts come from the
@@ -792,15 +792,15 @@ SpendFillBurstFrame(void)
 	const STrafficRings rings = CurrentTrafficRings();
 	float target = AreaPedCountTarget(playerCentreOfWorld, zoneInfo, rings);
 	CPopulation::ms_fFillBurstTarget = target;
-	/* The target wait (VICE-146 fix): before the zone and the ring are live
-	 * the area target is 0, and the stop line would burn the whole burst on it
-	 * (0 is at 90 % of 0). The frame rides the dedicated wait: it does not
-	 * spend the window and does not burn the stall bound (an invalid target is
-	 * not a placement stall), and the wait has its own bound, so the boot
-	 * burst runs the moment the area is known and a world that never becomes
-	 * live gives it up with a counted reason. */
+	/* The boot wait (VICE-146 fix): before the zone and the ring are live the
+	 * area target is 0, and the stop line would burn the whole burst on it (0
+	 * is at 90 % of 0). The frame rides the dedicated wait: it does not spend
+	 * the window and does not burn the stall bound (the world is still
+	 * loading, which is not a placement stall), and the wait has its own
+	 * bound, so the boot burst runs the moment the world is ready and a world
+	 * that never becomes live gives it up with a counted reason. */
 	if (target <= 0.0f) {
-		CountPedBurstEnd(FillBurstSpendTargetWait(&CPopulation::ms_FillBurst));
+		CountPedBurstEnd(FillBurstSpendBootWait(&CPopulation::ms_FillBurst));
 		return;
 	}
 	if (FillBurstTargetReached((float)CPopulation::ms_nTotalPeds, target)) {
@@ -809,11 +809,17 @@ SpendFillBurstFrame(void)
 		return;
 	}
 	/* The streaming: the frame waits for the zone's models instead of spending
-	 * its attempts on models that are not in memory. The wait does not spend the
-	 * window, so a long load does not burn the burst; it counts against the
-	 * give-up bound of the helper, so it cannot wait forever either. */
+	 * its attempts on models that are not in memory. Before the run's first
+	 * attempt this is the same world-is-loading wait as a zero target - the
+	 * live defect died here with the target at 1377 and no attempt - so it
+	 * rides the boot wait; once the run has started, the wait keeps the
+	 * give-up bound of the helper (VICE-126), so a streaming that never
+	 * arrives cannot keep the burst alive either. */
 	if (!PedModelsAreResident(zoneInfo)) {
-		CountPedBurstEnd(FillBurstSpendFrame(&CPopulation::ms_FillBurst, false, false));
+		if (CPopulation::ms_nFillBurstAttempts == 0)
+			CountPedBurstEnd(FillBurstSpendBootWait(&CPopulation::ms_FillBurst));
+		else
+			CountPedBurstEnd(FillBurstSpendFrame(&CPopulation::ms_FillBurst, false, false));
 		return;
 	}
 

@@ -18,14 +18,17 @@
  *      the burst promises: a productive frame spends the window, a frame the
  *      gates stop does not, a stall is an empty frame that ran, enough stalls in
  *      a row give the burst up, and the stop line ends the burst at the
- *      fraction of the local target. It also checks the target wait (VICE-146,
- *      fixed in the follow-up round): a frame whose local target is not known
- *      yet (0) rides its own wait - it does not spend the window and does not
- *      burn the stall bound, and it outlives that bound - so the boot burst
- *      runs the moment the area is live instead of being disarmed silently at
- *      boot (the live defect). Every helper path that ends a run reports its
- *      reason (the window spent, the give-up bound, or the target wait bound),
- *      and the caller mirror counts them, so a silent disarm fails the run.
+ *      fraction of the local target. It also checks the boot wait (VICE-146,
+ *      fixed in the follow-up round): before the run's first attempt a frame
+ *      whose world is not ready (a zero target, or models that are not
+ *      resident yet) rides its own wait - it does not spend the window and
+ *      does not burn the stall bound, and it outlives that bound - so the
+ *      boot burst runs the moment the world is ready instead of being
+ *      disarmed silently at boot (the live defect, which died on the models
+ *      with the target already at 1377). Every helper path that ends a run
+ *      reports its reason (the window spent, the give-up bound, or the boot
+ *      wait bound), and the caller mirror counts them, so a silent disarm
+ *      fails the run.
  *
  *   C. The triggers. It prints the transitions that arm a burst and the file
  *      that owns each trigger, so the design of the ticket is in one place next
@@ -84,8 +87,8 @@ static void PrintBounds(void)
 	printf("  the stop line:               %.0f %% of the local target\n", 100.0f * FILL_BURST_TARGET_FRACTION);
 	printf("  the give-up bound:           %d frames in a row without a placement (%.1f s)\n",
 		FILL_BURST_STALL_FRAMES, FILL_BURST_STALL_FRAMES / 30.0f);
-	printf("  the target wait bound:       %d frames (%.1f s at 30 fps; its own, not the give-up bound)\n\n",
-		FILL_BURST_TARGET_WAIT_FRAMES, FILL_BURST_TARGET_WAIT_FRAMES / 30.0f);
+	printf("  the boot wait bound:       %d frames (%.1f s at 30 fps; its own, not the give-up bound)\n\n",
+		FILL_BURST_BOOT_WAIT_FRAMES, FILL_BURST_BOOT_WAIT_FRAMES / 30.0f);
 
 	/* The cross-reference the two tables cannot make themselves: the budget
 	 * table does not include the ring table, so the ratio between the burst and
@@ -221,40 +224,42 @@ static void CheckStateMachine(void)
 		"the give-up bound reports the stalls as the end reason");
 	Check(!FillBurstIsRunning(&waiting), "the wait bound ends the burst");
 
-	/* The target wait (VICE-146 fix): a frame whose local target is not known
-	 * yet (0) rides the dedicated wait. It spends no attempt, so the window
-	 * stays whole; it does NOT burn the stall bound - an invalid target is not
-	 * a placement stall - and it must outlive that bound (the live defect: the
-	 * first cut routed this wait through FillBurstSpendFrame, the 30-frame
-	 * stall bound fired inside the helper, and the pedestrian boot burst died
-	 * with no attempt and no recorded reason). This case fails if the wait is
-	 * ever routed back through the stall helper. */
+	/* The boot wait (VICE-146 fix): a frame the callers spend before the
+	 * run's first attempt where the world is not ready - the target is 0, or
+	 * the models of the first seconds are not resident yet - rides the
+	 * dedicated wait. It spends no attempt, so the window stays whole; it
+	 * does NOT burn the stall bound, and it must outlive that bound (the live
+	 * defect: the first cut routed these frames through FillBurstSpendFrame,
+	 * the 30-frame stall bound fired inside the helper, and the pedestrian
+	 * boot burst died with no attempt and no recorded reason; the last live
+	 * read showed the target 1377 - the run died on the models). This case
+	 * fails if the wait is ever routed back through the stall helper. */
 	SFillBurst boot;
 	FillBurstArm(&boot);
 	for (int i = 0; i < FILL_BURST_STALL_FRAMES + 5; i++)
-		Check(FillBurstSpendTargetWait(&boot) == FILL_BURST_NOT_ENDED,
-			"a boot frame without a target does not end the burst");
-	Check(FillBurstIsRunning(&boot), "the target wait outlives the stall bound it must not burn");
-	Check(boot.nFrames == FILL_BURST_FRAMES, "the target wait leaves the window whole");
-	Check(boot.nStalls == 0, "the target wait does not raise the stall counter");
-	Check(boot.nTargetWaits == FILL_BURST_STALL_FRAMES + 5, "the target wait frames have their own counter");
+		Check(FillBurstSpendBootWait(&boot) == FILL_BURST_NOT_ENDED,
+			"a boot frame the world cannot serve does not end the burst");
+	Check(FillBurstIsRunning(&boot), "the boot wait outlives the stall bound it must not burn");
+	Check(boot.nFrames == FILL_BURST_FRAMES, "the boot wait leaves the window whole");
+	Check(boot.nStalls == 0, "the boot wait does not raise the stall counter");
+	Check(boot.nBootWaits == FILL_BURST_STALL_FRAMES + 5, "the boot wait frames have their own counter");
 	Check(FillBurstSpendFrame(&boot, true, true) == FILL_BURST_NOT_ENDED,
-		"the first frame with a target runs");
-	Check(boot.nFrames == FILL_BURST_FRAMES - 1, "the target's frame spends a window frame");
-	Check(boot.nTargetWaits == 0, "a live frame clears the target wait counter");
+		"the first frame the world serves runs");
+	Check(boot.nFrames == FILL_BURST_FRAMES - 1, "the ready frame spends a window frame");
+	Check(boot.nBootWaits == 0, "a ready frame clears the boot wait counter");
 
-	/* A world that never becomes live gives the burst up at the dedicated
+	/* A world that never becomes ready gives the burst up at the dedicated
 	 * bound, with its own reason - never a silent disarm. */
 	SFillBurst neverLive;
 	FillBurstArm(&neverLive);
-	for (int i = 0; i < FILL_BURST_TARGET_WAIT_FRAMES - 1; i++)
-		Check(FillBurstSpendTargetWait(&neverLive) == FILL_BURST_NOT_ENDED,
-			"the target wait below its own bound does not end the burst");
-	Check(FillBurstIsRunning(&neverLive), "the burst survives a long target wait");
-	Check(FillBurstSpendTargetWait(&neverLive) == FILL_BURST_ENDED_TARGET_WAIT,
-		"the target wait bound reports its reason");
-	Check(!FillBurstIsRunning(&neverLive), "the target wait bound ends the burst");
-	Check(neverLive.nFrames == 0, "the ended target wait leaves no window behind");
+	for (int i = 0; i < FILL_BURST_BOOT_WAIT_FRAMES - 1; i++)
+		Check(FillBurstSpendBootWait(&neverLive) == FILL_BURST_NOT_ENDED,
+			"the boot wait below its own bound does not end the burst");
+	Check(FillBurstIsRunning(&neverLive), "the burst survives a long boot wait");
+	Check(FillBurstSpendBootWait(&neverLive) == FILL_BURST_ENDED_BOOT_WAIT,
+		"the boot wait bound reports its reason");
+	Check(!FillBurstIsRunning(&neverLive), "the boot wait bound ends the burst");
+	Check(neverLive.nFrames == 0, "the ended boot wait leaves no window behind");
 
 	/* A placement resets the counter: the bound is a run of frames without one. */
 	SFillBurst recovering;
@@ -276,7 +281,7 @@ static void CheckStateMachine(void)
 	Check(refused.endedByStalls && !refused.endedByWindow, "a failing run reports the give-up bound");
 
 	/* The window's last frame reports its reason too: no spend that ends a run
-	 * is quiet (the stall and target-wait bounds above report likewise). */
+	 * is quiet (the stall and boot-wait bounds above report likewise). */
 	SFillBurst last;
 	FillBurstArm(&last);
 	last.nFrames = 1;
@@ -286,8 +291,8 @@ static void CheckStateMachine(void)
 
 	/* The stop line: 90 % of the local target. The predicate reads true at a
 	 * zero target (0 is at 90 % of 0): that is exactly why the callers check
-	 * the target first and wait (VICE-146), and the caller-guard case below
-	 * holds the wait. */
+	 * the target first and ride the boot wait (VICE-146), and the caller-guard
+	 * case below holds the wait. */
 	Check(!FillBurstTargetReached(89.9f, 100.0f), "89.9 % of the target does not stop the burst");
 	Check(FillBurstTargetReached(90.0f, 100.0f), "90 % of the target stops the burst");
 	Check(FillBurstTargetReached(0.0f, 0.0f), "the stop-line predicate reads true at a zero target");
@@ -295,19 +300,23 @@ static void CheckStateMachine(void)
 
 	/* The caller's guard and reason accounting (VICE-146 fix), as far as an
 	 * offline program can reach: one frame of the callers' own decision, in
-	 * their order - the target first (a 0 target rides the dedicated wait),
-	 * the stop line of a live target second, the frame last (Population.cpp,
-	 * CarCtrl.cpp) - with every end reason counted. The boot must not end the
-	 * burst, and no frame may end it without a reason. */
+	 * their order - the target first, the stop line of a live target, the
+	 * models before the run's first attempt, the frame last (Population.cpp,
+	 * CarCtrl.cpp) - with every end reason counted. Both boot conditions (the
+	 * zero target of the first frames and the models that are not resident
+	 * yet) ride the boot wait, and no frame may end the run without a
+	 * reason. */
 	SFillBurst guarded;
 	int bootWaits = 0, silentEnds = 0;
 	FillBurstArm(&guarded);
-	for (int i = 0; i < FILL_BURST_STALL_FRAMES + 10; i++) {
-		float target = 0.0f;	/* the world is not live yet */
-		if (target <= 0.0f) {
-			/* The caller's wait: the stop line is never reached with a 0 target. */
-			if (FillBurstSpendTargetWait(&guarded) != FILL_BURST_NOT_ENDED)
-				silentEnds++;	/* an end while the world is not live would be wrong */
+	for (int i = 0; i < 40; i++) {
+		float target = i < 20 ? 0.0f : 500.0f;	/* the zone is live from frame 20 */
+		bool modelsResident = false;		/* the models load later still */
+		if (target <= 0.0f || !modelsResident) {
+			/* The caller's boot wait: neither the target nor the models of
+			 * the first seconds are ready yet. */
+			if (FillBurstSpendBootWait(&guarded) != FILL_BURST_NOT_ENDED)
+				silentEnds++;	/* an end while the world is not ready is wrong */
 			bootWaits++;
 			continue;
 		}
@@ -318,25 +327,27 @@ static void CheckStateMachine(void)
 		if (FillBurstSpendFrame(&guarded, true, true) != FILL_BURST_NOT_ENDED)
 			silentEnds++;
 	}
-	Check(bootWaits == FILL_BURST_STALL_FRAMES + 10, "the caller's target wait covers the boot");
-	Check(FillBurstIsRunning(&guarded), "the caller's guard survives the zero-target boot");
-	Check(silentEnds == 0, "no frame of the zero-target boot ends the run");
+	Check(bootWaits == 40, "the boot wait covers the zero target and the loading models");
+	Check(FillBurstIsRunning(&guarded), "the caller's guard survives the boot");
+	Check(silentEnds == 0, "no frame of the boot ends the run");
 	Check(guarded.nFrames == FILL_BURST_FRAMES, "the boot did not spend the window");
-	Check(guarded.nStalls == 0 && guarded.nTargetWaits == FILL_BURST_STALL_FRAMES + 10,
-		"the boot frames are the target wait's own");
+	Check(guarded.nStalls == 0 && guarded.nBootWaits == 40,
+		"the boot frames are the boot wait's own");
 
-	/* The target arrives: the live frames run, spend the window and clear the
-	 * wait, and a run that does end returns its reason - never a silent end. */
+	/* The world is ready: the frames run, spend the window and clear the
+	 * wait, and a run that does end returns its reason - never a silent
+	 * end. */
+	bool modelsResident = true;
 	for (int i = 0; i < 5; i++) {
 		float target = 500.0f;
-		if (FillBurstTargetReached(0.0f, target))
+		if (target <= 0.0f || !modelsResident || FillBurstTargetReached(0.0f, target))
 			break;
 		if (FillBurstSpendFrame(&guarded, true, true) != FILL_BURST_NOT_ENDED)
 			silentEnds++;
 	}
-	Check(silentEnds == 0, "the live frames below the bounds do not end the run");
-	Check(guarded.nFrames == FILL_BURST_FRAMES - 5, "the live frames spend the window");
-	Check(guarded.nStalls == 0 && guarded.nTargetWaits == 0, "the live frames clear the waits");
+	Check(silentEnds == 0, "the ready frames below the bounds do not end the run");
+	Check(guarded.nFrames == FILL_BURST_FRAMES - 5, "the ready frames spend the window");
+	Check(guarded.nStalls == 0 && guarded.nBootWaits == 0, "the ready frames clear the waits");
 
 	SBurstRun stopped = RunBurst(900.0f, 1000.0f, FILL_BURST_FRAMES, true);
 	Check(stopped.endedByStopLine, "the stop line ends the burst");
@@ -347,10 +358,11 @@ static void CheckStateMachine(void)
 		FILL_BURST_FRAMES * FILL_BURST_HIDDEN_ATTEMPTS_PER_FRAME, FILL_BURST_FRAMES / 30.0f);
 	printf("  whatever the gates do; the wall clock of a run is the frames it spends plus its waits\n");
 	printf("  counters for the live rig: CPopulation::ms_FillBurst, ms_nFillBurstAttempts, ms_nFillBurstPlaced,\n");
-	printf("  ms_fFillBurstTarget, and the since-boot pair ms_nFillBurstTotalAttempts / ms_nFillBurstTotalPlaced\n");
-	printf("  with the end reasons ms_nFillBurstEndedLine / Stalls / Window (VICE-146); the same eight on\n");
-	printf("  CCarCtrl. A boot burst that waits for its target is not burned on it, so the totals show\n");
-	printf("  the run once the area is live.\n\n");
+	printf("  ms_fFillBurstTarget, the since-boot pair ms_nFillBurstTotalAttempts / ms_nFillBurstTotalPlaced\n");
+	printf("  and the end reasons ms_nFillBurstEndedLine / Stalls / Window / BootWait (VICE-146); the same\n");
+	printf("  eight minus the boot wait on CCarCtrl (its target and budget have positive floors, so it\n");
+	printf("  cannot wait). A boot burst that waits for its world is neither burned on it nor disarmed\n");
+	printf("  silently, so the totals show the run once the world is ready.\n\n");
 }
 
 /* ------------------------------------------------------------ C. the triggers */

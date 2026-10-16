@@ -38,10 +38,10 @@ game only), so the boot burst stays readable after a later arming reset the
 window rows, and the "ended" rows count the runs by the reason they ended
 (VICE-146): the target's stop line, the full car budget (cars only), the
 give-up bound (a run of frames without a placement), the window spent, or the
-target wait bound (the boot world never became live). A burst waits for a
-target that is not known yet at boot on its own bound (the target-wait state
-rows), without spending its window and without burning the stall bound, so a
-boot run is neither burned on a zero target nor disarmed silently.
+boot wait bound (the world never became ready: no target, or no models of the
+first seconds). A burst waits for its world on that own bound (the boot-wait
+state row), without spending its window and without burning the stall bound,
+so a boot run is neither burned on a zero target nor disarmed silently.
 
 The near bubble rows (VICE-127) are the acceptance of the pop-in ticket: the two
 catchable-zone counters (renamed from the frustum pair at VICE-146) count a car
@@ -93,8 +93,8 @@ SYMBOLS = [
     # "ended" rows count the runs by the reason they ended (VICE-146): the
     # target's stop line, the full car budget (cars only: the pedestrian frame
     # has no budget line), the give-up bound (a run of frames without a
-    # placement), the window spent, or - pedestrian only - the target wait
-    # bound (a boot whose world never became live).
+    # placement), the window spent, or - pedestrian only - the boot wait
+    # bound (a boot whose world never became ready).
     ("peds: burst countdown",        "_ZN11CPopulation24m_CountDownToPedsAtStartE",    "b"),
     ("peds: burst target",           "_ZN11CPopulation19ms_fFillBurstTargetE",         "f"),
     ("peds: burst attempts",         "_ZN11CPopulation21ms_nFillBurstAttemptsE",       "I"),
@@ -104,7 +104,7 @@ SYMBOLS = [
     ("peds: burst ended by line",    "_ZN11CPopulation22ms_nFillBurstEndedLineE",      "I"),
     ("peds: burst ended by stalls",  "_ZN11CPopulation24ms_nFillBurstEndedStallsE",    "I"),
     ("peds: burst ended by window",  "_ZN11CPopulation24ms_nFillBurstEndedWindowE",    "I"),
-    ("peds: burst ended by target wait", "_ZN11CPopulation28ms_nFillBurstEndedTargetWaitE", "I"),
+    ("peds: burst ended by boot wait", "_ZN11CPopulation26ms_nFillBurstEndedBootWaitE", "I"),
     ("cars: burst countdown",        "_ZN8CCarCtrl22CountDownToCarsAtStartE",          "b"),
     ("cars: burst target",           "_ZN8CCarCtrl19ms_fFillBurstTargetE",             "f"),
     ("cars: burst attempts",         "_ZN8CCarCtrl21ms_nFillBurstAttemptsE",           "I"),
@@ -141,19 +141,19 @@ POOLS = [
 ]
 
 # The fill burst (VICE-126): the state of the two work windows, SFillBurst
-# (three ints: the frames left, the stalls, and the target waits of the fix
+# (three ints: the frames left, the stalls, and the boot waits of the fix
 # round). The fields read 0 while the burst is idle; across an interior exit or
 # a cutscene end they show the window spending itself (the frames fall) and the
-# counters above show what it placed. The target wait row is non-zero only
-# while a boot burst waits for its world (the pedestrian burst's path; the car
-# target and budget have positive floors, so its guard cannot wait).
+# counters above show what it placed. The boot wait row is non-zero only while
+# a pedestrian burst waits for its world (the zero target, or the models of the
+# first seconds; the car target and budget have positive floors and its caller
+# does not use the boot wait, so the row is the pedestrian burst's).
 BURSTS = [
     ("burst peds: frames left",  "_ZN11CPopulation12ms_FillBurstE", 0),
     ("burst peds: stalls",       "_ZN11CPopulation12ms_FillBurstE", 4),
-    ("burst peds: target waits", "_ZN11CPopulation12ms_FillBurstE", 8),
+    ("burst peds: boot waits",   "_ZN11CPopulation12ms_FillBurstE", 8),
     ("burst cars: frames left",  "_ZN8CCarCtrl12ms_FillBurstE",     0),
     ("burst cars: stalls",       "_ZN8CCarCtrl12ms_FillBurstE",     4),
-    ("burst cars: target waits", "_ZN8CCarCtrl12ms_FillBurstE",     8),
 ]
 
 # The near bubble (VICE-127). The two catchable-zone counters are the acceptance

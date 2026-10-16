@@ -305,13 +305,14 @@ interior exit and a cutscene end, the counts reach 90 % of their local targets a
 once instead of trickling up. A burst is a bounded work window: 60 frames that
 each spend 25 spawn attempts, or 100 while the fade covers the screen (the black
 frames of a transition and the dark head of a fade), so a burst asks for at most
-6000 attempts. A frame the models cannot serve waits without spending its
-window and counts against the give-up bound; 30 frames in a row without a
-placement give the burst up. A frame whose local target is not known yet (the
-boot frames before the zone and the range are live) rides its own target wait
-(`FILL_BURST_TARGET_WAIT_FRAMES`, 600): it spends neither the window nor the
-give-up bound, and a world that never becomes live gives it up with a counted
-reason (`ms_nFillBurstEndedTargetWait`). The state machine is
+6000 attempts. A frame the models cannot serve after the run has
+started waits without spending its window and counts against the give-up bound;
+30 frames in a row without a placement give the burst up. Before the run's
+first attempt the world is still loading (the local target is not known yet, or
+the zone's models are not resident yet): those frames ride their own boot wait
+(`FILL_BURST_BOOT_WAIT_FRAMES`, 600), spending neither the window nor the
+give-up bound, and a world that never becomes ready gives the burst up with a
+counted reason (`ms_nFillBurstEndedBootWait`). The state machine is
 `src/core/FillBurst.h`, the bounds are in `PopulationBudget.h`, and the triggers
 are the two boot countdowns, the area writer (`CGame::SetCurrArea`) and the end
 of a cutscene (`CCutsceneMgr::DeleteCutsceneData`); ADR 0021 holds the
