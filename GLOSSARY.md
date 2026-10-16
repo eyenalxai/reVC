@@ -238,9 +238,17 @@ case. A name that contains `lod`, `shad`, `reflect` or `street` is not a plant:
 it marks a LOD, a shadow, a reflection or a street light.
 
 A vegetation model without an OBJECT.DAT row spawns as a building. A vehicle
-that hits the building gets the soft hit, and the plant breaks above the smash
-impulse. The planned trunk fall fells a trunk like a light pole in place of the
-break.
+that hits the building gets the soft hit. Above the smash impulse the plant
+falls: a trunk plant topples like a light pole and stays in the world, a leafy
+plant breaks and disappears.
+
+## Felled plant
+
+A trunk plant a hit has pushed over. It stays visible and colliding, and it
+topples with the physics of a light pole: finite mass, no uproot limit, and a
+push at the contact point. A plant building cannot move, so a dynamic object
+copy with the same model and placement takes its place. The building itself is
+only hidden, never removed.
 
 ## Soft hit
 

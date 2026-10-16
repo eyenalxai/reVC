@@ -992,16 +992,17 @@ CPhysical::ApplyCollisionAlt(CEntity *B, CColPoint &colpoint, float &impulse, CV
 				impulse = -(m_fElasticity + 1.0f) * normalSpeed * mass;
 
 			// A car barely slows on an object, a pedestrian or a plant
-			// building. A plant building breaks above the smash impulse;
-			// a real building still stops the car.
+			// building. A trunk plant (a tree or a palm) falls like a light
+			// pole, a leafy plant breaks; a real building still stops the car.
 			bool bSoftHit = false;
 			if(IsVehicle()){
 				ePlantKind plantKind = GetPlantKind(B->GetModelIndex());
 				if(plantKind != PLANT_NONE){
 					if(impulse > VEGETATION_SMASH_IMPULSE && B->bUsesCollision){
-						// A leafy plant breaks. VICE-115 replaces this
-						// with a fall for PLANT_TRUNK (a tree or a palm).
-						SmashVegetation(B);
+						if(plantKind == PLANT_TRUNK)
+							FellVegetation(B, colpoint.point, -colpoint.normal, impulse);
+						else
+							SmashVegetation(B);
 					}
 					bSoftHit = true;
 				}else

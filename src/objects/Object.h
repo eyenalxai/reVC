@@ -118,9 +118,30 @@ public:
 // much lower than the 150 threshold general objects need.
 #define VEGETATION_SMASH_IMPULSE 60.0f
 
+// A felled trunk plant (a tree or a palm) topples like a light pole: finite
+// mass, no uproot limit and a push at the contact point. A plant model has no
+// OBJECT.DAT row, so the fall sets every physical field itself.
+#define VEGETATION_FALL_MASS 700.0f
+#define VEGETATION_FALL_TURN_MASS 5000.0f
+#define VEGETATION_FALL_AIR_RESISTANCE 0.99f
+#define VEGETATION_FALL_ELASTICITY 0.05f
+// The object data buoyancy, 100/percentSubmerged * GRAVITY * mass, with the
+// submerged part of the vegetation rows.
+#define VEGETATION_FALL_PERCENT_SUBMERGED 120.0f
+#define VEGETATION_FALL_BUOYANCY (100.0f/VEGETATION_FALL_PERCENT_SUBMERGED * GRAVITY * VEGETATION_FALL_MASS)
+// The share of the hit impulse that tips the plant over.
+#define VEGETATION_FALL_PUSH_SCALE 0.5f
+
 // Smashes any vegetation entity: hides it, drops its collision and spawns the
 // palm debris and sound. One implementation for palms and vegetation buildings.
 void SmashVegetation(CEntity *entity);
+
+// Tips a trunk plant over in place instead of hiding it: it stays visible and
+// colliding and falls like a light pole. hitPos is the contact point (a zero
+// point is lifted to half the model height), hitDir the direction the plant
+// falls and impulse the hit strength. A vegetation building leaves an object
+// copy in its place and is only hidden: the caller keeps using the entity.
+void FellVegetation(CEntity *entity, const CVector &hitPos, const CVector &hitDir, float impulse);
 
 bool IsObjectPointerValid(CObject* pObject);
 

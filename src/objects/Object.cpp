@@ -6,6 +6,7 @@
 #include "Radar.h"
 #include "Object.h"
 #include "DummyObject.h"
+#include "ModelIndices.h"
 #include "Particle.h"
 #include "General.h"
 #include "ObjectData.h"
@@ -20,6 +21,8 @@
 #define BEACHBALL_MAX_SCORE 250
 // the proportion of the ball speed compared to the player speed when it hits the player
 #define BEACHBALL_SPEED_PROPORTION 0.4f
+// the particles a fell scatters; a smash throws more of them
+#define VEGETATION_FALL_DEBRIS_PARTICLES 16
 
 int16 CObject::nNoTempObjects;
 //int16 CObject::nBodyCastHealth = 1000;
@@ -370,31 +373,16 @@ CObject::RemoveLighting(bool reset)
 	}
 }
 
-// Breaks any vegetation entity: hides it, drops its collision and spawns the
-// palm debris and sound. Palms are objects, vegetation buildings are not, so
-// the moving-list and speed reset only apply to the physical ones.
-void
-SmashVegetation(CEntity *entity)
+// The debris burst and sound a vegetation entity gives off, shared by the
+// smash and the fall. The fall scatters fewer particles than the smash.
+static void
+SpawnVegetationDebris(const CVector &vecPos, float fRadius, int32 nParticles)
 {
 	static RwRGBA primaryColor1 = { 0x39, 0x4D, 0x29, 0xff };
 	static RwRGBA primaryColor2 = { 0x94, 0x7D, 0x73, 0xff };
 	static int8 nFrameGen = 0;
 
-	entity->bIsVisible = false;
-	entity->bUsesCollision = false;
-	if (entity->IsObject()) {
-		CObject *object = (CObject*)entity;
-		if (!object->GetIsStatic())
-			object->RemoveFromMovingList();
-		object->SetMoveSpeed(0.0f, 0.0f, 0.0f);
-		object->SetTurnSpeed(0.0f, 0.0f, 0.0f);
-	}
-	entity->SetIsStatic(true);
-	entity->bExplosionProof = true;
-
-	const CVector &vecPos = entity->GetPosition();
-	float fRadius = entity->GetColModel()->boundingSphere.radius;
-	for (int32 i = 0; i < 32; i++) {
+	for (int32 i = 0; i < nParticles; i++) {
 		CVector particleDir = CVector(
 			CGeneral::GetRandomNumberInRange(-0.25f, 0.25f),
 			CGeneral::GetRandomNumberInRange(-0.25f, 0.25f),
@@ -414,6 +402,120 @@ SmashVegetation(CEntity *entity)
 		}
 	}
 	PlayOneShotScriptObject(SCRIPT_SOUND_BOX_DESTROYED_2, vecPos);
+}
+
+// Breaks any vegetation entity: hides it, drops its collision and spawns the
+// palm debris and sound. Palms are objects, vegetation buildings are not, so
+// the moving-list and speed reset only apply to the physical ones.
+void
+SmashVegetation(CEntity *entity)
+{
+	entity->bIsVisible = false;
+	entity->bUsesCollision = false;
+	if (entity->IsObject()) {
+		CObject *object = (CObject*)entity;
+		if (!object->GetIsStatic())
+			object->RemoveFromMovingList();
+		object->SetMoveSpeed(0.0f, 0.0f, 0.0f);
+		object->SetTurnSpeed(0.0f, 0.0f, 0.0f);
+	}
+	entity->SetIsStatic(true);
+	entity->bExplosionProof = true;
+
+	const CVector &vecPos = entity->GetPosition();
+	float fRadius = entity->GetColModel()->boundingSphere.radius;
+	SpawnVegetationDebris(vecPos, fRadius, 32);
+}
+
+// Gives a trunk plant the physics it topples with. A plant model has no
+// OBJECT.DAT row, so nothing fills these fields by itself, and Init() must not
+// run either: it would reset the state the plant just got.
+static void
+SetVegetationFallPhysics(CObject *object)
+{
+	object->m_fMass = VEGETATION_FALL_MASS;
+	object->m_fTurnMass = VEGETATION_FALL_TURN_MASS;
+	object->m_fAirResistance = VEGETATION_FALL_AIR_RESISTANCE;
+	object->m_fElasticity = VEGETATION_FALL_ELASTICITY;
+	object->m_fBuoyancy = VEGETATION_FALL_BUOYANCY;
+	object->m_fUprootLimit = 0.0f;
+	object->m_fCollisionDamageMultiplier = 1.0f;
+	object->m_nCollisionDamageEffect = DAMAGE_EFFECT_NONE;
+	object->m_nSpecialCollisionResponseCases = COLLRESPONSE_NONE;
+	object->m_bCameraToAvoidThisObject = false;
+	object->bInfiniteMass = false;
+	object->m_phy_flagA08 = false;
+	object->bAffectedByGravity = true;
+	object->bExplosionProof = false;
+	object->SetIsStatic(false);
+}
+
+// Pushes a felled plant over with the hit impulse, the same way a collision
+// turns a light pole. The force acts at the contact point, so the plant gains
+// torque; a hit without a contact point is lifted to half the model height so
+// the fall does not become a slide.
+static void
+PushFelledVegetation(CPhysical *plant, const CVector &hitPos, const CVector &hitDir, float impulse)
+{
+	CVector point = hitPos - plant->GetPosition();
+	if (point.IsZero())
+		point.z = 0.5f * plant->GetColModel()->boundingBox.max.z;
+
+	const CVector force = hitDir * (impulse * VEGETATION_FALL_PUSH_SCALE);
+	plant->ApplyMoveForce(force);
+	plant->ApplyTurnForce(force, point);
+}
+
+// Tips a trunk plant over in place instead of hiding it. A palm object only
+// becomes physical; a vegetation building is a CBuilding without physics, so a
+// dynamic object copy takes its place. The building is not deleted: this runs
+// inside the collision loop and the caller keeps reading the entity.
+void
+FellVegetation(CEntity *entity, const CVector &hitPos, const CVector &hitDir, float impulse)
+{
+	CVector dir = hitDir;
+	dir.Normalise();
+
+	CObject *plant;
+	if (entity->IsObject()) {
+		plant = (CObject*)entity;
+		// Only a plant that still stands falls. The damage effect is cleared
+		// with the fall and marks it, so the other contact points of the same
+		// hit do not fell it a second time.
+		if (plant->m_nCollisionDamageEffect != DAMAGE_EFFECT_SMASH_VEGPALM)
+			return;
+		SetVegetationFallPhysics(plant);
+		plant->AddToMovingList();
+	} else {
+		// A plant building has no physics. The object copy takes its matrix
+		// and its RW object, so the plant does not blink out of view. A full
+		// object pool leaves the plant standing.
+		plant = new CObject;
+		if (plant == nil)
+			return;
+		plant->SetModelIndexNoCreate(entity->GetModelIndex());
+		plant->SetMatrix(entity->GetMatrix());
+		if (entity->m_rwObject) {
+			plant->AttachToRwObject(entity->m_rwObject);
+			entity->DetachFromRwObject();
+		}
+		plant->m_objectMatrix = plant->GetMatrix();
+		SetVegetationFallPhysics(plant);
+		plant->ObjectCreatedBy = GAME_OBJECT;
+		plant->bIsVisible = true;
+		plant->bUsesCollision = true;
+		plant->m_level = entity->m_level;
+		plant->m_area = entity->m_area;
+
+		entity->bIsVisible = false;
+		entity->bUsesCollision = false;
+		entity->bExplosionProof = true;
+		CWorld::Add(plant);
+	}
+
+	PushFelledVegetation(plant, hitPos, dir, impulse);
+	const CVector &debrisPos = hitPos.IsZero() ? entity->GetPosition() : hitPos;
+	SpawnVegetationDebris(debrisPos, entity->GetColModel()->boundingSphere.radius, VEGETATION_FALL_DEBRIS_PARTICLES);
 }
 
 void
@@ -722,7 +824,27 @@ CObject::ObjectDamage(float amount)
 				break;
 			}
 			case DAMAGE_EFFECT_SMASH_VEGPALM:
-				SmashVegetation(this);
+				// A trunk plant topples like a light pole; any other effect-110
+				// model, pot_02 for one, still breaks.
+				if (GetPlantKind(GetModelIndex()) == PLANT_TRUNK) {
+					CVector hitDir;
+					if (m_pDamageEntity && !m_vecDamageNormal.IsZero()) {
+						// The recorded normal points from the plant to the
+						// damager, so the plant falls the other way.
+						hitDir = -m_vecDamageNormal;
+					} else {
+						// Melee and bullets record no direction. Fall away from
+						// the player, the one swinging or shooting; use the
+						// plant's right when the player stands on it.
+						hitDir = GetPosition() - FindPlayerCoors();
+						hitDir.z = 0.0f;
+						if (hitDir.MagnitudeSqr() < 0.01f)
+							hitDir = GetRight();
+						hitDir.Normalise();
+					}
+					FellVegetation(this, GetPosition(), hitDir, amount);
+				} else
+					SmashVegetation(this);
 				break;
 			case DAMAGE_EFFECT_SMASH_BLACKBAG:
 			case DAMAGE_EFFECT_SMASH_BEACHLOUNGE_WOOD:
