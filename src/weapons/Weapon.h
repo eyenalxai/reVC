@@ -65,9 +65,14 @@ public:
 	static void DoDriveByAutoAiming(CEntity *driver,  CVehicle *vehicle, CVector *source, CVector *target);
 	
 	void Reload(void);
+	// Starts a reload and sets the timer; the fast reload flag shortens D.
+	void StartReload(CEntity *shooter);
 	void Update(int32 audioEntity, CPed *pedToAdjustSound);
 	bool IsTypeMelee  (void);
 	bool IsType2Handed(void);
+	// A magazine weapon has a clip of two or more rounds and fires instant
+	// hits. The active reload applies to these weapons only.
+	bool IsMagazineWeapon(void);
 	
 	static void MakePedsJumpAtShot(CPhysical *shooter, CVector *source, CVector *target);
 	

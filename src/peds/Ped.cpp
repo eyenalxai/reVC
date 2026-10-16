@@ -4644,7 +4644,8 @@ CPed::GiveWeapon(eWeaponType weaponType, uint32 ammo, bool unused)
 		} else {
 			GetWeapon(slot).m_nAmmoTotal = Min(99999, GetWeapon(slot).m_nAmmoTotal);
 		}
-		GetWeapon(slot).Reload();
+		// The pickup's ammo goes to the reserve. The clip keeps its rounds:
+		// the player reloads by hand with the active reload on.
 		if (GetWeapon(slot).m_eWeaponState == WEAPONSTATE_OUT_OF_AMMO && GetWeapon(slot).m_nAmmoTotal > 0)
 			GetWeapon(slot).m_eWeaponState = WEAPONSTATE_READY;
 	} else {

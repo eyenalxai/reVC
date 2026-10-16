@@ -235,8 +235,6 @@ CPlayerPed::MakeChangesForNewWeapon(eWeaponType weapon)
 	SetCurrentWeapon(weapon);
 	m_nSelectedWepSlot = m_currentWeapon;
 
-	GetWeapon()->m_nAmmoInClip = Min(GetWeapon()->m_nAmmoTotal, CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->m_nAmountofAmmunition);
-
 	if (CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_CANAIM))
 		ClearWeaponTarget();
 
