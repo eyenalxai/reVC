@@ -138,7 +138,10 @@ CVisibilityPlugins::InsertAtomicIntoBoatSortedList(RpAtomic *a, float dist)
 
 // can't increase this yet unfortunately...
 // probably have to fix fading for this so material alpha isn't overwritten
-#define VEHICLE_LODDIST_MULTIPLIER (TheCamera.GenerationDistMultiplier)
+// The vehicle LOD distances are tuned at the old maximum of the draw distance
+// slider (4.0). They scale with the slider now, which goes up to 16.0.
+#define VEHICLE_LODDIST_REFERENCE 4.0f
+#define VEHICLE_LODDIST_MULTIPLIER (TheCamera.LODDistMultiplier / VEHICLE_LODDIST_REFERENCE)
 
 void
 CVisibilityPlugins::SetRenderWareCamera(RwCamera *camera)
@@ -153,11 +156,11 @@ CVisibilityPlugins::SetRenderWareCamera(RwCamera *camera)
 		ms_cullCompsDist = sq(TheCamera.LODDistMultiplier * 20.0f);
 
 	// How far the vehicle detail parts (_hi/extra, _vlo and low detail) draw.
-	ms_vehicleLod0Dist = sq(250.0f * VEHICLE_LODDIST_MULTIPLIER * LOD_DISTANCE_TEST_MULT);
-	ms_vehicleLod1Dist = sq(320.0f * VEHICLE_LODDIST_MULTIPLIER * LOD_DISTANCE_TEST_MULT);
-	ms_vehicleFadeDist = sq(320.0f * VEHICLE_LODDIST_MULTIPLIER * LOD_DISTANCE_TEST_MULT);
-	ms_bigVehicleLod0Dist = sq(200.0f * VEHICLE_LODDIST_MULTIPLIER * LOD_DISTANCE_TEST_MULT);
-	ms_bigVehicleLod1Dist = sq(350.0f * VEHICLE_LODDIST_MULTIPLIER * LOD_DISTANCE_TEST_MULT);
+	ms_vehicleLod0Dist = sq(250.0f * VEHICLE_LODDIST_MULTIPLIER);
+	ms_vehicleLod1Dist = sq(320.0f * VEHICLE_LODDIST_MULTIPLIER);
+	ms_vehicleFadeDist = sq(320.0f * VEHICLE_LODDIST_MULTIPLIER);
+	ms_bigVehicleLod0Dist = sq(200.0f * VEHICLE_LODDIST_MULTIPLIER);
+	ms_bigVehicleLod1Dist = sq(350.0f * VEHICLE_LODDIST_MULTIPLIER);
 	ms_pedLod1Dist = sq(60.0f * TheCamera.LODDistMultiplier);
 	ms_pedFadeDist = sq(70.0f * TheCamera.LODDistMultiplier);
 }
