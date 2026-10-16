@@ -53,6 +53,8 @@ public:
 	void Detach(void);
 	void Update(void);
 	void UpdateRW(void);
+	// true when the RwMatrix already holds exactly these 12 values
+	bool ValuesMatch(const RwMatrix *matrix) const;
 	CMatrix &operator=(CMatrix const &rhs);
 	CMatrix &operator+=(CMatrix const &rhs);
 	CMatrix &operator*=(CMatrix const &rhs);

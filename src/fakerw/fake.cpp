@@ -72,8 +72,17 @@ RwV3d *RwMatrixGetAt(RwMatrix * matrix) { return &matrix->at; }
 RwV3d *RwMatrixGetPos(RwMatrix * matrix) { return &matrix->pos; }
 // VICE-129: RwMatrixUpdate is always called right after the values were
 // written into the matrix, so this is the point where librw learns that the
-// frame owning this matrix has to resync its LTMs.
-RwMatrix *RwMatrixUpdate(RwMatrix * matrix) { matrix->update(); matrix->flags |= rw::Matrix::CHANGED; return matrix; }
+// frame owning this matrix has to resync its LTMs. The flag only exists when
+// patches/librw-scene-sync.patch was applied to librw; without it the walk
+// recomputes every frame below a marked root anyway.
+RwMatrix *RwMatrixUpdate(RwMatrix * matrix)
+{
+	matrix->update();
+#ifdef REVC_LIBRW_PATCH_APPLIED
+	matrix->flags |= rw::Matrix::CHANGED;
+#endif
+	return matrix;
+}
 //RwMatrix *RwMatrixOptimize(RwMatrix * matrix, const RwMatrixTolerance *tolerance);
 
 

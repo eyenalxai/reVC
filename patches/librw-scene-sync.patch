@@ -1,3 +1,13 @@
+VICE-129: librw scene-graph sync. Recompute a frame's LTM only when its inputs
+changed: Matrix gets a CHANGED flag set by every value writer, syncRecurse uses
+it (and the parent's LTM change) instead of recomputing the whole subtree, and
+syncDirty tests the hierarchy root with ltm == matrix.
+
+Apply from the root of the librw checkout:
+    git apply patches/librw-scene-sync.patch      (or: patch -p1 < ...)
+The CMake build applies it automatically before configuring librw.
+See docs/adr/0014-librw-scene-sync-patch.md.
+
 diff --git a/src/base.cpp b/src/base.cpp
 index 3c3ca08..ed9b28d 100644
 --- a/src/base.cpp
