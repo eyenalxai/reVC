@@ -2606,6 +2606,21 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 	if(CamTargetEntity->m_rwObject == nil)
 		return;
 
+#ifdef FIRST_PERSON
+	// The first person car view uses the player's own ped camera: the ped sits in
+	// the car, so its head is at the driver's seat and the same camera serves both
+	// cases. There is no separate vehicle camera, so nothing moves when the player
+	// gets in. The stock vehicle camera stays for every other case.
+	CPlayerPed *pPlayer = FindPlayerPed();
+	CEntity *vehicleTarget = CamTargetEntity;
+	bool firstPersonCarView = TheCamera.FirstPersonViewEnabled() && pPlayer && pPlayer->InVehicle() &&
+	   vehicleTarget == (CEntity*)pPlayer->m_pMyVehicle && ((CVehicle*)vehicleTarget)->pDriver &&
+	   !((CVehicle*)vehicleTarget)->IsBoat();
+	bool modeReset = ResetStatics;
+	if(firstPersonCarView)
+		CamTargetEntity = pPlayer;
+#endif
+
 	if(ResetStatics){
 		Beta = TargetOrientation;
 		Alpha = 0.0f;
@@ -2696,6 +2711,16 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 			Alpha += SQR(LookUpDown/150.0f)*ydir*1.0f/14.0f * FOV/80.0f * CTimer::GetTimeStep();
 #ifdef FIRST_PERSON
 		}
+		// In the car the view also turns with the vehicle, so the mouse look
+		// stays an offset from the car's heading.
+		if(firstPersonCarView){
+			float carHeading = CGeneral::GetATanOfXY(vehicleTarget->GetForward().x, vehicleTarget->GetForward().y);
+			static float prevCarHeading = 0.0f;
+			if(modeReset)
+				prevCarHeading = carHeading;
+			Beta += carHeading - prevCarHeading;
+			prevCarHeading = carHeading;
+		}
 #endif
 		while(Beta >= PI) Beta -= 2*PI;
 		while(Beta < -PI) Beta += 2*PI;
@@ -2782,27 +2807,6 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		FOV = 60.0f;
 		Source = Multiply3x3(*matrix, CamPos);
 		Source += CamTargetEntity->GetPosition();
-#ifdef FIRST_PERSON
-		// The first person car view keeps the stock seat position: the head bone
-		// of the driving animation sits too low. Use the first person FOV so
-		// nothing jumps when the player gets in, and keep the animation refresh
-		// so the player's own body shows.
-		CPlayerPed *pPlayer = FindPlayerPed();
-		bool firstPersonCarView = TheCamera.FirstPersonViewEnabled() && pPlayer && pPlayer->InVehicle() &&
-		   pPlayer->m_pMyVehicle == (CVehicle*)CamTargetEntity && ((CVehicle*)CamTargetEntity)->pDriver &&
-		   !((CVehicle*)CamTargetEntity)->IsBoat();
-		if(firstPersonCarView){
-			// The world update has already placed the player inside the
-			// vehicle, so only the animation hierarchy needs a refresh here.
-			pPlayer->GetMatrix().UpdateRW();
-			pPlayer->UpdateRwFrame();
-			pPlayer->UpdateRpHAnim();
-			FOV = FrontEndMenuManager.GetFirstPersonFOV();
-			// The interior and the player's own body sit close to the camera,
-			// so the near plane must be close too, like the on-foot view.
-			RwCameraSetNearClipPlane(Scene.camera, FIRST_PERSON_BODY_NEAR_CLIP);
-		}else
-#endif
 		if(((CVehicle*)CamTargetEntity)->IsBoat())
 			Source.z += 0.5f;
 		else if(((CVehicle*)CamTargetEntity)->IsBike() && ((CVehicle*)CamTargetEntity)->pDriver){
@@ -2828,45 +2832,21 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 				DontLookThroughWorldFixer = 0.0f;
 		}
 		Source.z += DontLookThroughWorldFixer;
-#ifdef FIRST_PERSON
-		if(firstPersonCarView){
-			// Look around the car with the mouse, like the on-foot branch does.
-			static float fLookYaw = 0.0f;
-			static float fLookPitch = 0.0f;
-			if(ResetStatics){
-				fLookYaw = 0.0f;
-				fLookPitch = 0.0f;
-			}
-			float MouseX = CPad::GetPad(0)->GetMouseX();
-			float MouseY = CPad::GetPad(0)->GetMouseY();
-			if((MouseX != 0.0f || MouseY != 0.0f) && !CPad::GetPad(0)->ArePlayerControlsDisabled()){
-				fLookYaw -= TheCamera.m_fMouseAccelHorzntl * 3.0f * MouseX * FOV/80.0f;
-				fLookPitch += TheCamera.m_fMouseAccelVertical * 4.0f * MouseY * FOV/80.0f;
-				if(fLookPitch > DEGTORAD(80.0f))
-					fLookPitch = DEGTORAD(80.0f);
-				else if(fLookPitch < -DEGTORAD(80.0f))
-					fLookPitch = -DEGTORAD(80.0f);
-			}
-			// The view turns with the car, the mouse adds the look offset.
-			CVector Fwd = matrix->GetForward();
-			Fwd.Normalise();
-			float heading = CGeneral::GetATanOfXY(Fwd.x, Fwd.y) + fLookYaw;
-			float horiz = Cos(fLookPitch);
-			Front = CVector(Cos(heading)*horiz, Sin(heading)*horiz, Sin(fLookPitch));
-			Up = CVector(0.0f, 0.0f, 1.0f);
-		}else
-#endif
-		{
-			Front = matrix->GetForward();
-			Front.Normalise();
-			Up = matrix->GetUp();
-			Up.Normalise();
-			CVector Right = CrossProduct(Front, Up);
-			Right.Normalise();
-			Up = CrossProduct(Right, Front);
-			Up.Normalise();
-		}
+		Front = matrix->GetForward();
+		Front.Normalise();
+		Up = matrix->GetUp();
+		Up.Normalise();
+		CVector Right = CrossProduct(Front, Up);
+		Right.Normalise();
+		Up = CrossProduct(Right, Front);
+		Up.Normalise();
 	}
+
+#ifdef FIRST_PERSON
+	// Put the vehicle back: the swap is only for this call.
+	if(firstPersonCarView)
+		CamTargetEntity = vehicleTarget;
+#endif
 
 	ResetStatics = false;
 }
