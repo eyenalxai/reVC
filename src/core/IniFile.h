@@ -3,7 +3,7 @@
 
 /* The density slider units and the hard tops of the budgets live in the cap
  * table (VICE-123), with the pools they protect. */
-#include "PopulationCaps.h"
+#include "PopulationBudget.h"
 
 class CIniFile
 {

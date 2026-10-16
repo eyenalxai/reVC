@@ -33,7 +33,7 @@
 // The pedestrian ring comes from the one table (TrafficRings.h): the creation
 // ring, the off-screen band and the removal distances scale with it. The
 // on-foot budget, its driver and passenger allowance, the pool reserve and the
-// spawn rate come from the cap table (PopulationCaps.h, VICE-123).
+// spawn rate come from the cap table (PopulationBudget.h, VICE-123).
 #define PED_AREA_DENSITY_SCALE	3.0f // scale the zone density budget for dense on-foot crowds
 
 PedGroup CPopulation::ms_pPedGroups[NUMPEDGROUPS];
@@ -378,7 +378,7 @@ CPopulation::Update(bool addPeds)
 			ms_nTotalPeds -= ms_nTotalCarPassengerPeds;
 			// The pool is the hard resource behind the budget: a frame whose
 			// free spaces are down to the reserve adds no pedestrian
-			// (PopulationCaps.h, PED_POOL_RESERVE). One scan a frame.
+			// (PopulationBudget.h, PED_POOL_RESERVE). One scan a frame.
 			if (!CCutsceneMgr::IsRunning() && addPeds &&
 				CPools::GetPedPool()->GetNoOfFreeSpaces() >= PED_POOL_RESERVE) {
 				float pcdm = PedCreationDistMultiplier();
@@ -401,7 +401,7 @@ void
 CPopulation::GeneratePedsAtStartOfGame()
 {
 	// The pool check of Update, for the start-of-game burst this places in one
-	// frame (PopulationCaps.h, PED_POOL_RESERVE).
+	// frame (PopulationBudget.h, PED_POOL_RESERVE).
 	if (CPools::GetPedPool()->GetNoOfFreeSpaces() < PED_POOL_RESERVE)
 		return;
 	for (int i = 0; i < 100; i++) {
@@ -584,7 +584,7 @@ CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScree
 	// Yeah, float
 	// The on-foot budget of the area, and the hard top of the count on foot:
 	// MaxNumberOfPedsInUse is an on-foot cap, sized by the pool arithmetic of
-	// PopulationCaps.h without the drivers, because the drivers are added on top
+	// PopulationBudget.h without the drivers, because the drivers are added on top
 	// of it below and the passengers stay out of ms_nTotalPeds entirely.
 	float maxPossiblePedsForArea = (zoneInfo.pedDensity + zoneInfo.carDensity) * playerInfo->m_fRoadDensity * PedDensityMultiplier
 		* (CDarkel::FrenzyOnGoing() ? 1.f : CIniFile::PedNumberMultiplier) * missionAndWeatherMult * PED_AREA_DENSITY_SCALE

@@ -5,7 +5,7 @@
 #include "Vehicle.h"
 /* The car budgets: RANDOM_CARS_PER_INI_UNIT, MAX_RANDOM_CARS, MAX_CARS_IN_USE,
  * the parked target and the fill rate (VICE-123). */
-#include "PopulationCaps.h"
+#include "PopulationBudget.h"
 
 #define GAME_SPEED_TO_METERS_PER_SECOND 50.0f
 #define METERS_PER_SECOND_TO_GAME_SPEED (1.0f / GAME_SPEED_TO_METERS_PER_SECOND)
@@ -17,7 +17,6 @@ class CAutomobile;
 
 enum{
 	MAX_CARS_TO_KEEP = 2,
-	MAX_CAR_MODELS_IN_ARRAY = 25,
 };
 
 #ifdef FIX_BUGS

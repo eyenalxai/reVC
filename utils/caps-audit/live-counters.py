@@ -9,21 +9,27 @@ PIE, so the value of a static symbol lives at
 and the exe is read from /proc/<pid>/exe, which still works after the binary on
 disk was replaced (the running image is kept as a deleted file).
 
-Usage:
+Usage (from the repository root):
     utils/caps-audit/live-counters.py [pid] [exe]
 
 With no pid, the first process named reVC is used. With no exe, the binary the
 process actually runs is used (the right one for the offsets). The program only
 reads: /proc/<pid>/mem is opened read-only and nothing is written or signalled.
 
+The pool sizes are not mirrored here: every CPool carries its own size, and the
+program checks that size against the enum in src/core/config.h (the pool
+arithmetic of PopulationBudget.h is built on those numbers), so a drift shows up
+in the output instead of silently mis-sizing the pool scan.
+
 Measured values (VICE-123, 2026-10-16, max sliders in sunny weather, 2400 car
-budget, 5500 ped cap before this branch):
+budget, ped cap 5500 before the cap change of this branch):
     cars 149..201 of the 2400 budget, peds 2251..5500 of the 5500 cap,
-    parked 0..7, vehicles loaded 57..63 of 90, ped pool 5417/8192,
+    parked 0..12, vehicles loaded 57..65 of 90, ped pool 5417/8192,
     vehicle pool 153/2560, dummy pool 2338/2800, visible entities 361..1233.
 """
 
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -42,10 +48,10 @@ SYMBOLS = [
     ("cars: MaxNumberOfCarsInUse",   "_ZN8CCarCtrl20MaxNumberOfCarsInUseE",            "i"),
     ("cars: CarDensityMultiplier",   "_ZN8CCarCtrl20CarDensityMultiplierE",            "f"),
     ("cars: CarNumberMultiplier",    "_ZN8CIniFile19CarNumberMultiplierE",             "f"),
-    ("peds: PedNumberMultiplier",    "_ZN8CIniFile19PedNumberMultiplierE",             "f"),
     ("peds: MaxNumberOfPedsInUse",   "_ZN11CPopulation20MaxNumberOfPedsInUseE",        "i"),
     ("peds: MaxNumberOfPedsInUseInterior", "_ZN11CPopulation28MaxNumberOfPedsInUseInteriorE", "i"),
     ("peds: PedDensityMultiplier",   "_ZN11CPopulation20PedDensityMultiplierE",        "f"),
+    ("peds: PedNumberMultiplier",    "_ZN8CIniFile19PedNumberMultiplierE",             "f"),
     ("peds: ms_nTotalPeds",          "_ZN11CPopulation13ms_nTotalPedsE",               "I"),
     ("peds: ms_nTotalCarPassengerPeds", "_ZN11CPopulation25ms_nTotalCarPassengerPedsE", "I"),
     ("peds: ms_nNumDummy",           "_ZN11CPopulation12ms_nNumDummyE",                "I"),
@@ -63,16 +69,20 @@ SYMBOLS = [
 ]
 
 # The pools (CPool<T>: entries*, flags*, size, allocPtr). The used count is the
-# number of flags without POOLFLAG_ISFREE; the flags are read in one go.
+# number of flags without POOLFLAG_ISFREE; the flags are read in one go. The
+# second column is the enum name of the size in src/core/config.h, checked
+# against the size the pool object carries.
 POOLS = [
-    ("pool: Peds",            "_ZN6CPools11ms_pPedPoolE",           8192),
-    ("pool: Vehicles",        "_ZN6CPools15ms_pVehiclePoolE",       2560),
-    ("pool: Dummies",         "_ZN6CPools13ms_pDummyPoolE",         2800),
-    ("pool: Objects",         "_ZN6CPools14ms_pObjectPoolE",        460),
-    ("pool: PtrNodes",        "_ZN6CPools15ms_pPtrNodePoolE",       200000),
-    ("pool: EntryInfoNodes",  "_ZN6CPools21ms_pEntryInfoNodePoolE", 20000),
-    ("pool: Buildings",       "_ZN6CPools16ms_pBuildingPoolE",      7000),
+    ("pool: Peds",            "_ZN6CPools11ms_pPedPoolE",           "NUMPEDS"),
+    ("pool: Vehicles",        "_ZN6CPools15ms_pVehiclePoolE",       "NUMVEHICLES"),
+    ("pool: Dummies",         "_ZN6CPools13ms_pDummyPoolE",         "NUMDUMMIES"),
+    ("pool: Objects",         "_ZN6CPools14ms_pObjectPoolE",        "NUMOBJECTS"),
+    ("pool: PtrNodes",        "_ZN6CPools15ms_pPtrNodePoolE",       "NUMPTRNODES"),
+    ("pool: EntryInfoNodes",  "_ZN6CPools21ms_pEntryInfoNodePoolE", "NUMENTRYINFOS"),
+    ("pool: Buildings",       "_ZN6CPools16ms_pBuildingPoolE",      "NUMBUILDINGS"),
 ]
+
+CONFIG = "src/core/config.h"
 
 
 def find_pid():
@@ -103,17 +113,33 @@ def nm_offsets(exe):
     return table
 
 
+def config_sizes():
+    """The pool sizes of src/core/config.h, so the scan cannot mis-size a pool."""
+    sizes = {}
+    try:
+        text = open(CONFIG).read()
+    except OSError:
+        return sizes
+    for match in re.finditer(r"\b([A-Z][A-Z0-9_]*)\s*=\s*(\d+)", text):
+        sizes[match.group(1)] = int(match.group(2))
+    return sizes
+
+
 def main():
     pid = int(sys.argv[1]) if len(sys.argv) > 1 else find_pid()
     exe = sys.argv[2] if len(sys.argv) > 2 else f"/proc/{pid}/exe"
     base = exe_base(pid)
     sym = nm_offsets(exe)
     mem = os.open(f"/proc/{pid}/mem", os.O_RDONLY)
+    sizes = config_sizes()
 
     def read(off, fmt):
         return struct.unpack(fmt, os.pread(mem, struct.calcsize(fmt), base + off))[0]
 
     print(f"reVC pid {pid}, base 0x{base:x}, image {exe}")
+    if not sizes:
+        print(f"  {CONFIG} is not readable from here (run from the repository root):")
+        print("  the pool sizes come from the pool objects themselves, unchecked")
     values = {}
     for label, mangled, fmt in SYMBOLS:
         off = sym.get(mangled)
@@ -128,7 +154,7 @@ def main():
             print(f"  {label:44s} {v}")
 
     print()
-    for label, mangled, size in POOLS:
+    for label, mangled, enum_name in POOLS:
         off = sym.get(mangled)
         if off is None:
             print(f"  {label:44s} symbol missing")
@@ -140,7 +166,12 @@ def main():
         entries, flags, psize, allocptr = struct.unpack("<QQii", os.pread(mem, 24, ptr))
         data = os.pread(mem, psize, flags)
         used = sum(1 for b in data if not (b & 0x80))
-        print(f"  {label:44s} used {used:6d} / {psize:6d}  free {psize - used}")
+        note = ""
+        if enum_name in sizes and sizes[enum_name] != psize:
+            note = f"  DRIFT: config.h says {enum_name} = {sizes[enum_name]}"
+        elif enum_name in sizes:
+            note = f"  {enum_name} = {psize} in config.h"
+        print(f"  {label:44s} used {used:6d} / {psize:6d}  free {psize - used}{note}")
 
     # The ring scale: ApplyPopulationCaps gives min(45 x the car density x
     # scale^2, 2400), so before the top binds, scale = sqrt(budget / (45 x the

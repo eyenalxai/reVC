@@ -281,9 +281,10 @@ the passengers of the cars do not shrink the crowd on the sidewalk.
 
 The hard top for a budget or a count: pedestrians, cars in use, random cars, the
 parked cars of a generator set. The caps live in one table,
-`src/core/PopulationCaps.h` (VICE-123), with the pool each protects and the
-pool arithmetic that ties them together; the table's invariants are checked at
-compile time. The caps stay below the pools.
+`src/core/PopulationBudget.h` (VICE-123), with the fill rates and the streaming
+model budget, the pool each number protects and the arithmetic that ties them
+together; the table's invariants are checked at compile time. The caps stay
+below the pools.
 
 ## Pool
 
@@ -291,7 +292,7 @@ The fixed storage for the entities and their list nodes: pedestrians, vehicles,
 audio entities. A pool never grows; the caps keep the counts below it. The
 population paths of the caps also refuse to create when the free spaces of the
 ped pool fall below the pool reserve, because the passenger count is a random
-draw that no cap bounds.
+draw and the police crews are not counted at all.
 
 ## Driver
 

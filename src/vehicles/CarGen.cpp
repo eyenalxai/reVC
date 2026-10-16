@@ -52,7 +52,7 @@ uint32 CCarGenerator::CalcNextGen()
 void CCarGenerator::DoInternalProcessing()
 {
 	int mi;
-	/* The parked cars follow the ring area like the traffic (PopulationCaps.h,
+	/* The parked cars follow the ring area like the traffic (PopulationBudget.h,
 	 * ParkedCarTarget): 20 at the stock ring, the map's generator count at the
 	 * top. They share the car budget with the traffic, so a full curb trades
 	 * with the random cars, and the whole budget stays inside the vehicle pool

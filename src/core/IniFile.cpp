@@ -36,7 +36,7 @@ void CIniFile::ApplyPopulationCaps()
 	// visible range.
 	// The pedestrian cap is the count ON FOOT: the drivers and the passengers of
 	// the cars are added on top of it where they are compared with the count
-	// (Population.cpp AddToPopulation); the pool arithmetic is in PopulationCaps.h.
+	// (Population.cpp AddToPopulation); the pool arithmetic is in PopulationBudget.h.
 	float ringScale = CurrentTrafficRings().scale;
 	CPopulation::MaxNumberOfPedsInUse = Min(DEFAULT_MAX_NUMBER_OF_PEDS * PedNumberMultiplier * SQR(ringScale), (float)MAX_PEDS_IN_USE);
 	// The ring does not apply indoors.

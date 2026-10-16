@@ -46,7 +46,7 @@
 #include "DrawDistance.h"
 /* The caps and the car target come from the cap table itself (VICE-123), so the
  * sweep cannot print a number the game no longer uses. */
-#include "PopulationCaps.h"
+#include "PopulationBudget.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -62,7 +62,7 @@
 /* The density values the sweep prints the caps at: the stock densities
  * (PedNumberMultiplier 1.0, CarNumberMultiplier 2.0) and the slider tops
  * (3.4 / 3.4, the owner's maximum settings). The caps themselves come from the
- * cap table (PopulationCaps.h). */
+ * cap table (PopulationBudget.h). */
 #define PED_DENSITY_STOCK 1.0f
 #define CAR_DENSITY_STOCK 2.0f
 #define PED_DENSITY_MAX 3.4f

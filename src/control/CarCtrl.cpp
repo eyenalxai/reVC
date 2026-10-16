@@ -135,7 +135,7 @@ CCarCtrl::GenerateRandomCars()
 	 * of the same pool as the crowd (the emergency services of the frame
 	 * included). When the pool is down to its reserve, no car is created: the
 	 * crew of one more frame cannot take the pool the pedestrians need
-	 * (PopulationCaps.h, PED_POOL_RESERVE). The check is one pool scan a frame,
+	 * (PopulationBudget.h, PED_POOL_RESERVE). The check is one pool scan a frame,
 	 * not one per call. */
 	if (CPools::GetPedPool()->GetNoOfFreeSpaces() < PED_POOL_RESERVE)
 		return;
@@ -707,13 +707,17 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 			passengers += (CGeneral::GetRandomNumberInRange(0.0f, 1.0f) < PROBABILITY_OF_PASSENGER_IN_VEHICLE) ? 1 : 0;
 		if (CModelInfo::IsCarModel(carModel) && (CModelInfo::GetModelInfo(carModel)->GetAnimFileIndex() == CAnimManager::GetAnimationBlockIndex("van") && passengers >= 1))
 			passengers = 1;
+		/* The counted passengers stop at their allowance (PopulationBudget.h);
+		 * the police crews and the script passengers are not counted and live
+		 * in the pool reserve. */
+		if (passengers > 0 && CPopulation::ms_nTotalCarPassengerPeds >= MAX_PED_PASSENGERS)
+			passengers = 0;
+		/* One ped pool read for the whole car (the frame's read is in
+		 * GenerateRandomCars): the passengers of one car take at most three
+		 * slots, and the reserve covers them. */
+		if (passengers > 0 && CPools::GetPedPool()->GetNoOfFreeSpaces() < PED_POOL_RESERVE)
+			passengers = 0;
 		for (int i = 0; i < passengers; i++) {
-			/* The pool check of the frame is in GenerateRandomCars; this one
-			 * holds when the frame creates many cars, so the passengers of one
-			 * frame cannot spend the reserve the pedestrians need
-			 * (PopulationCaps.h, PED_POOL_RESERVE). */
-			if (CPools::GetPedPool()->GetNoOfFreeSpaces() < PED_POOL_RESERVE)
-				break;
 			CPed* pPassenger = pVehicle->SetupPassenger(i);
 			if (pPassenger) {
 				++CPopulation::ms_nTotalCarPassengerPeds;
@@ -3245,8 +3249,10 @@ void CCarCtrl::GenerateEmergencyServicesCar(void)
 		return;
 	if (CGame::IsInInterior())
 		return;
-	if (NumFiretrucksOnDuty + NumAmbulancesOnDuty + NumParkedCars + NumMissionCars +
-		NumLawEnforcerCars + NumRandomCars > MaxNumberOfCarsInUse)
+	/* The same car budget as the random traffic and the generator
+	 * (CCarCtrl::NumCarsInUse): the emergency services take their slots from
+	 * the same pool, so the check is the same count and the same top. */
+	if (NumCarsInUse() >= MaxNumberOfCarsInUse)
 		return;
 	if (NumAmbulancesOnDuty == 0){
 		if (gAccidentManager.CountActiveAccidents() < 2){
