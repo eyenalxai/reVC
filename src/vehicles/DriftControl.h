@@ -50,6 +50,7 @@ public:
 	void PrintDebugState(CAutomobile *car);
 
 private:
+	bool TryStartDrift(CAutomobile *car, float fwdSpeed, bool onGround, bool handbrake, bool fromRecover);
 	void UpdateYawControl(CAutomobile *car, float dt);
 	bool UpdateTargetAngle(CAutomobile *car, float dt);
 	void ApplyYawRate(CAutomobile *car, float yawTargetRate, float dt);

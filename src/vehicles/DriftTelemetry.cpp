@@ -315,6 +315,11 @@ CDriftTelemetry::Tick(CAutomobile *car, CDriftControl *ctrl)
 			        ctrl->m_Phase == CDriftControl::DRIFT_PHASE_DRIFT)
 				DriftTelemetryRow(car, ctrl, "RUN");
 			else if(state->ePrevPhase == CDriftControl::DRIFT_PHASE_RECOVER &&
+			        ctrl->m_Phase == CDriftControl::DRIFT_PHASE_DRIFT)
+				// A drift that chains or flips out of the recovery (see ADR
+				// 0008) records the same entry token as a fresh entry.
+				DriftTelemetryRow(car, ctrl, ctrl->m_bHandbrakeTurn ? "TURN" : "ENTER");
+			else if(state->ePrevPhase == CDriftControl::DRIFT_PHASE_RECOVER &&
 			        ctrl->m_Phase == CDriftControl::DRIFT_PHASE_INACTIVE)
 				DriftTelemetryRow(car, ctrl, "END");
 		}
