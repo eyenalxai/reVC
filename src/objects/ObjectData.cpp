@@ -94,7 +94,13 @@ CObjectData::Initialise(const char *filename)
 		*lp = '\n';
 #endif
 
-		assert(id < NUMOBJECTINFO);
+		// Modded object.dat files can be longer than the table. Stop at the
+		// limit instead of writing past it.
+		if(id >= NUMOBJECTINFO){
+			debug("CObjectData: %s has more rows than NUMOBJECTINFO (%d), the rest is skipped\n", filename, NUMOBJECTINFO);
+			break;
+		}
+
 		sscanf(line, "%s %f %f %f %f %f %f %f %d %d %d", name,
 			&ms_aObjectInfo[id].m_fMass,
 			&ms_aObjectInfo[id].m_fTurnMass,
@@ -150,6 +156,11 @@ CObjectData::SetObjectData(int32 modelId, CObject &object)
 	object.m_fUprootLimit = objinfo->m_fUprootLimit;
 	object.m_fCollisionDamageMultiplier = objinfo->m_fCollisionDamageMultiplier;
 	object.m_nCollisionDamageEffect = objinfo->m_nCollisionDamageEffect;
+	// Every object is destructible: the data effects that did nothing now use the
+	// generic smash, so every gate on the effect keeps working unchanged.
+	if (object.m_nCollisionDamageEffect == DAMAGE_EFFECT_NONE ||
+		object.m_nCollisionDamageEffect == DAMAGE_EFFECT_SPLIT_MODEL)
+		object.m_nCollisionDamageEffect = DAMAGE_EFFECT_SMASH_COMPLETELY;
 	object.m_nSpecialCollisionResponseCases = objinfo->m_nSpecialCollisionResponseCases;
 	object.m_bCameraToAvoidThisObject = objinfo->m_bCameraToAvoidThisObject;
 	if(object.m_fMass >= 99998.0f){

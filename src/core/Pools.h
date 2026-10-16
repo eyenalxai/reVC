@@ -9,6 +9,7 @@
 #include "PlayerPed.h"
 #include "Automobile.h"
 #include "DummyPed.h"
+#include "DummyObject.h"
 #include "AudioScriptObject.h"
 
 typedef CPool<CPtrNode> CCPtrNodePool;
@@ -19,6 +20,8 @@ typedef CPool<CBuilding> CBuildingPool;
 typedef CPool<CTreadable> CTreadablePool;
 typedef CPool<CObject, CCutsceneObject> CObjectPool;
 typedef CPool<CDummy, CDummyPed> CDummyPool;
+// The dummy pool allocates CDummyPed sized slots, so a CDummyObject has to fit one.
+static_assert(sizeof(CDummyObject) <= sizeof(CDummyPed), "CDummyObject is too large for the dummy pool");
 typedef CPool<cAudioScriptObject> CAudioScriptObjectPool;
 typedef CPool<CColModel> CColModelPool;
 

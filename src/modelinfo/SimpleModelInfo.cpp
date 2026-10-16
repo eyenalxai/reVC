@@ -71,6 +71,7 @@ CSimpleModelInfo::Init(void)
 	m_ignoreDrawDist  = 0;
 	m_isCodeGlass     = 0;
 	m_isArtistGlass   = 0;
+	m_isVegetation    = 0;
 }
 
 void
