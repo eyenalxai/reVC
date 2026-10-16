@@ -6,6 +6,12 @@ Make technical decisions yourself; do not ask the owner. The owner does not know
 
 All new commits must be written in conventional commit style.
 
+## Builds
+
+After every build, install the binary. Copy `build/src/reVC` into the game folder
+(`~/Games/Steam/steamapps/common/Grand Theft Auto Vice City/`). Write a temporary file
+first, then move it over `reVC`. Do not start the game or kill running instances.
+
 ## Agent skills
 
 ### Issue tracker
