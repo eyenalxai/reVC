@@ -132,7 +132,8 @@ CCarCtrl::GenerateRandomCars()
 	}
 	if (NumRandomCars < MAX_RANDOM_CARS){
 		if (CountDownToCarsAtStart == 0) {
-			for (int i = 0; i < RANDOM_CAR_ATTEMPTS_PER_FRAME; i++)
+			// The ring fills from the target and the lifetime, so the rate follows the spawn distance.
+			for (int i = 0; i < RANDOM_CAR_ATTEMPTS_PER_FRAME * CIniFile::SpawnDistanceMultiplier; i++)
 				GenerateOneRandomCar();
 		} else if (--CountDownToCarsAtStart == 0) {
 			for (int i = 0; i < 100; i++)
@@ -945,6 +946,12 @@ CCarCtrl::AddToCarArray(int32 id, int32 vehclass)
 void
 CCarCtrl::RemoveDistantCars()
 {
+	/* One read of the player centre covers the whole scan: nothing in the loop
+	 * writes any input of FindPlayerCentreOfWorld. The camera was processed
+	 * earlier in the frame, bCarsGeneratedAroundCamera only changes in
+	 * CCarCtrl::Init and its script opcode, and neither the player's own car nor
+	 * the remote vehicle can be removed here. */
+	CVector vecPlayerPos = FindPlayerCentreOfWorld(CWorld::PlayerInFocus);
 	for (int i = CPools::GetVehiclePool()->GetSize()-1; i >= 0; i--) {
 		CVehicle* pVehicle = CPools::GetVehiclePool()->GetSlot(i);
 		if (!pVehicle)
@@ -952,12 +959,12 @@ CCarCtrl::RemoveDistantCars()
 		// PossiblyRemoveVehicle may delete the vehicle, so handle the road
 		// block peds first, while the pointer is still valid.
 		if (pVehicle->bCreateRoadBlockPeds){
-			if ((pVehicle->GetPosition() - FindPlayerCentreOfWorld(CWorld::PlayerInFocus)).Magnitude2D() < DISTANCE_TO_SPAWN_ROADBLOCK_PEDS) {
+			if ((pVehicle->GetPosition() - vecPlayerPos).Magnitude2D() < DISTANCE_TO_SPAWN_ROADBLOCK_PEDS) {
 				CRoadBlocks::GenerateRoadBlockCopsForCar(pVehicle, pVehicle->m_nRoadblockType);
 				pVehicle->bCreateRoadBlockPeds = false;
 			}
 		}
-		PossiblyRemoveVehicle(pVehicle);
+		PossiblyRemoveVehicle(pVehicle, vecPlayerPos);
 	}
 }
 
@@ -992,13 +999,17 @@ CCarCtrl::RemoveCarsIfThePoolGetsFull(void)
 }
 
 void
-CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle)
+CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 {
 #ifdef FIX_BUGS
 	if (pVehicle->bIsLocked)
 		return;
 #endif
-	CVector vecPlayerPos = FindPlayerCentreOfWorld(CWorld::PlayerInFocus);
+	/* One read each for this call: the camera and this car do not move inside
+	 * it, and CGarages::Update and the scripts write the garages between frames,
+	 * not inside this call. bFadeOut is written, not cached, below. */
+	bool bOnScreenAtEntry = pVehicle->GetIsOnScreen();
+	bool bInsideHideOutGarageAtEntry = CGarages::IsPointWithinHideOutGarage(pVehicle->GetPosition());
 	/* BUG: this variable is initialized only in if-block below but can be used outside of it. */
 	if (!IsThisVehicleInteresting(pVehicle) && !pVehicle->bIsLocked &&
 		pVehicle->CanBeDeleted() && !CCranes::IsThisCarBeingTargettedByAnyCrane(pVehicle)){
@@ -1010,7 +1021,7 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle)
 		float distanceToPlayer = (pVehicle->GetPosition() - vecPlayerPos).Magnitude2D();
 		float threshold = OFFSCREEN_DESPAWN_RANGE;
 #ifndef EXTENDED_OFFSCREEN_DESPAWN_RANGE
-		if (pVehicle->GetIsOnScreen() ||
+		if (bOnScreenAtEntry ||
 			TheCamera.Cams[TheCamera.ActiveCam].LookingLeft ||
 			TheCamera.Cams[TheCamera.ActiveCam].LookingRight ||
 			TheCamera.Cams[TheCamera.ActiveCam].LookingBehind ||
@@ -1032,8 +1043,8 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle)
 #endif
 		if (pVehicle->bExtendedRange)
 			threshold *= EXTENDED_RANGE_DESPAWN_MULTIPLIER;
-		if (distanceToPlayer > threshold && !CGarages::IsPointWithinHideOutGarage(pVehicle->GetPosition())){
-			if (pVehicle->GetIsOnScreen()){
+		if (distanceToPlayer > threshold && !bInsideHideOutGarageAtEntry){
+			if (bOnScreenAtEntry){
 				pVehicle->bFadeOut = true;
 			}else{
 				CWorld::Remove(pVehicle);
@@ -1045,14 +1056,14 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle)
 	if ((pVehicle->GetStatus() == STATUS_SIMPLE || pVehicle->GetStatus() == STATUS_PHYSICS &&
 		(pVehicle->AutoPilot.m_nDrivingStyle == DRIVINGSTYLE_STOP_FOR_CARS || pVehicle->AutoPilot.m_nDrivingStyle == DRIVINGSTYLE_STOP_FOR_CARS_IGNORE_LIGHTS)) &&
 		CTimer::GetTimeInMilliseconds() - pVehicle->AutoPilot.m_nTimeToStartMission > 5000 &&
-		!pVehicle->GetIsOnScreen() &&
+		!bOnScreenAtEntry &&
 		(pVehicle->GetPosition() - vecPlayerPos).Magnitude2D() > 22.0f &&
 		!IsThisVehicleInteresting(pVehicle) &&
 		!pVehicle->bIsLocked &&
 		pVehicle->CanBeDeleted() &&
 		!CTrafficLights::ShouldCarStopForLight(pVehicle, true) &&
 		!CTrafficLights::ShouldCarStopForBridge(pVehicle) &&
-		!CGarages::IsPointWithinHideOutGarage(pVehicle->GetPosition())){
+		!bInsideHideOutGarageAtEntry){
 		CWorld::Remove(pVehicle);
 		delete pVehicle;
 		return;
@@ -1061,9 +1072,9 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle)
 		if (pVehicle->m_nTimeOfDeath != 0) {
 			if (CTimer::GetTimeInMilliseconds() > pVehicle->m_nTimeOfDeath + 60000 &&
 				CTimer::GetTimeInMilliseconds() > pVehicle->m_nSetPieceExtendedRangeTime &&
-				!(pVehicle->GetIsOnScreen())) {
+				!bOnScreenAtEntry) {
 				if ((pVehicle->GetPosition() - vecPlayerPos).MagnitudeSqr() > SQR(6.5f)) {
-					if (!CGarages::IsPointWithinHideOutGarage(pVehicle->GetPosition())) {
+					if (!bInsideHideOutGarageAtEntry) {
 						CWorld::Remove(pVehicle);
 						delete pVehicle;
 					}

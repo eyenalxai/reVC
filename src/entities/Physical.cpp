@@ -112,31 +112,7 @@ CPhysical::Add(void)
 	for(y = ystart; y <= yend; y++)
 		for(x = xstart; x <= xend; x++){
 			s = CWorld::GetSector(x, y);
-			if(x == xmid && y == ymid) switch(m_type){
-			case ENTITY_TYPE_VEHICLE:
-				list = &s->m_lists[ENTITYLIST_VEHICLES];
-				break;
-			case ENTITY_TYPE_PED:
-				list = &s->m_lists[ENTITYLIST_PEDS];
-				break;
-			case ENTITY_TYPE_OBJECT:
-				list = &s->m_lists[ENTITYLIST_OBJECTS];
-				break;
-			default:
-				assert(0);
-			}else switch(m_type){
-			case ENTITY_TYPE_VEHICLE:
-				list = &s->m_lists[ENTITYLIST_VEHICLES_OVERLAP];
-				break;
-			case ENTITY_TYPE_PED:
-				list = &s->m_lists[ENTITYLIST_PEDS_OVERLAP];
-				break;
-			case ENTITY_TYPE_OBJECT:
-				list = &s->m_lists[ENTITYLIST_OBJECTS_OVERLAP];
-				break;
-			default:
-				assert(0);
-			}
+			list = CWorld::GetSectorEntityList(s, m_type, x == xmid && y == ymid);
 			CPtrNode *node = list->InsertItem(this);
 			assert(node);
 			m_entryInfoList.InsertItem(list, node, s);
@@ -180,27 +156,7 @@ CPhysical::RemoveAndAdd(void)
 	for(y = ystart; y <= yend; y++)
 		for(x = xstart; x <= xend; x++){
 			s = CWorld::GetSector(x, y);
-			if(x == xmid && y == ymid) switch(m_type){
-			case ENTITY_TYPE_VEHICLE:
-				list = &s->m_lists[ENTITYLIST_VEHICLES];
-				break;
-			case ENTITY_TYPE_PED:
-				list = &s->m_lists[ENTITYLIST_PEDS];
-				break;
-			case ENTITY_TYPE_OBJECT:
-				list = &s->m_lists[ENTITYLIST_OBJECTS];
-				break;
-			}else switch(m_type){
-			case ENTITY_TYPE_VEHICLE:
-				list = &s->m_lists[ENTITYLIST_VEHICLES_OVERLAP];
-				break;
-			case ENTITY_TYPE_PED:
-				list = &s->m_lists[ENTITYLIST_PEDS_OVERLAP];
-				break;
-			case ENTITY_TYPE_OBJECT:
-				list = &s->m_lists[ENTITYLIST_OBJECTS_OVERLAP];
-				break;
-			}
+			list = CWorld::GetSectorEntityList(s, m_type, x == xmid && y == ymid);
 			if(next){
 				// If we still have old nodes, use them
 				next->list->RemoveNode(next->listnode);
@@ -585,7 +541,8 @@ CPhysical::IsSoftHitEntity(CEntity *entity)
 		return false;
 	if(entity->IsObject() || entity->IsPed())
 		return true;
-	// A palm or a tree placed as a building is soft like a prop.
+	// A plant placed as a building (a tree, a palm, a bush or a hedge) is
+	// soft like a prop.
 	return entity->IsBuilding() && IsVegetationModel(entity->GetModelIndex());
 }
 
@@ -1034,14 +991,19 @@ CPhysical::ApplyCollisionAlt(CEntity *B, CColPoint &colpoint, float &impulse, CV
 			else
 				impulse = -(m_fElasticity + 1.0f) * normalSpeed * mass;
 
-			// A car barely slows on an object, a pedestrian or a vegetation
-			// building. A vegetation building breaks above the smash impulse;
-			// a real building still stops the car.
+			// A car barely slows on an object, a pedestrian or a plant
+			// building. A trunk plant (a tree or a palm) falls like a light
+			// pole, a leafy plant breaks; a real building still stops the car.
 			bool bSoftHit = false;
 			if(IsVehicle()){
-				if(B->IsBuilding() && IsVegetationModel(B->GetModelIndex())){
-					if(impulse > VEGETATION_SMASH_IMPULSE && B->bUsesCollision)
-						SmashVegetation(B);
+				ePlantKind plantKind = GetPlantKind(B->GetModelIndex());
+				if(plantKind != PLANT_NONE){
+					if(impulse > VEGETATION_SMASH_IMPULSE && B->bUsesCollision){
+						if(plantKind == PLANT_TRUNK)
+							FellVegetation(B, colpoint.point, -colpoint.normal, impulse);
+						else
+							SmashVegetation(B);
+					}
 					bSoftHit = true;
 				}else
 					bSoftHit = IsSoftHitEntity(B);

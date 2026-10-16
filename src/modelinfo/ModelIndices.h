@@ -599,25 +599,51 @@ NameContainsNoCase(const char *name, const char *part)
 	return false;
 }
 
-// Vegetation: the name mentions a palm or a tree, but is not a LOD, shadow or
-// reflection of one. The object loaders set CSimpleModelInfo::m_isVegetation
+// The plant kind a model name identifies. A trunk word makes a trunk plant
+// (a tree or a palm); any other plant word makes a leafy plant (a bush, a
+// hedge, a planter). A LOD, a shadow, a reflection or a street light is not
+// a plant. The object loaders store the result in CSimpleModelInfo::m_plantKind
 // with this test.
-inline bool
-IsVegetationModelName(const char *name)
+inline ePlantKind
+GetPlantKindFromName(const char *name)
 {
-	return (NameContainsNoCase(name, "palm") || NameContainsNoCase(name, "tree")) &&
-	       !NameContainsNoCase(name, "lod") &&
-	       !NameContainsNoCase(name, "shad") &&
-	       !NameContainsNoCase(name, "reflect");
+	if(NameContainsNoCase(name, "lod") ||
+	   NameContainsNoCase(name, "shad") ||
+	   NameContainsNoCase(name, "reflect") ||
+	   NameContainsNoCase(name, "street"))
+		return PLANT_NONE;
+
+	if(NameContainsNoCase(name, "palm") ||
+	   NameContainsNoCase(name, "palwee") ||
+	   NameContainsNoCase(name, "tree"))
+		return PLANT_TRUNK;
+
+	static const char *leafyParts[] = {
+		"bush", "hedge", "plant", "fern", "ivy",
+		"grass", "shrub", "rose", "cactus"
+	};
+	for(size_t i = 0; i < sizeof(leafyParts)/sizeof(leafyParts[0]); i++)
+		if(NameContainsNoCase(name, leafyParts[i]))
+			return PLANT_LEAFY;
+
+	return PLANT_NONE;
 }
 
-// Reads the flag the object loaders set. Vegetation placed as a building
-// breaks when a vehicle hits it.
+// Reads the kind the object loaders set. A plant placed as a building breaks
+// when a vehicle hits it.
+inline ePlantKind
+GetPlantKind(int16 id)
+{
+	CSimpleModelInfo *mi = (CSimpleModelInfo*)CModelInfo::GetModelInfo(id);
+	if(mi == nil || !mi->IsBuilding())
+		return PLANT_NONE;
+	return (ePlantKind)mi->m_plantKind;
+}
+
 inline bool
 IsVegetationModel(int16 id)
 {
-	CSimpleModelInfo *mi = (CSimpleModelInfo*)CModelInfo::GetModelInfo(id);
-	return mi && mi->m_isVegetation;
+	return GetPlantKind(id) != PLANT_NONE;
 }
 
 inline bool

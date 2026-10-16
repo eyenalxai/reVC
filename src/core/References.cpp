@@ -1,5 +1,7 @@
 #include "common.h"
 
+#include <stdlib.h>
+
 #include "World.h"
 #include "Vehicle.h"
 #include "PlayerPed.h"
@@ -39,6 +41,13 @@ CEntity::RegisterReference(CEntity **pent)
 		ref->pentity = pent;
 		ref->next = m_pFirstReference;
 		m_pFirstReference = ref;
+	} else {
+		// The reference pool is full. The entity would drop this reference, so a
+		// later deletion of the target could not nil the caller's pointer. Stop
+		// instead of leaving a stale pointer in the world.
+		Error("The Reference pool is full; the world holds more references than it was sized for. "
+		      "Raise NUMREFERENCES in src/core/config.h.");
+		abort();
 	}
 }
 
@@ -83,6 +92,11 @@ void
 CEntity::PruneReferences(void)
 {
 	CReference *ref, *next, **lastnextp;
+
+	// Nothing to prune without a reference list.
+	if (m_pFirstReference == nil)
+		return;
+
 	lastnextp = &m_pFirstReference;
 	for(ref = m_pFirstReference; ref; ref = next){
 		next = ref->next;

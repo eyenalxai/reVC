@@ -21,6 +21,8 @@
 #include "DMAudio.h"
 #include "Darkel.h"
 #include "Debug.h"
+#include "DriftControl.h"
+#include "DriftFeedback.h"
 #include "EventList.h"
 #include "FileLoader.h"
 #include "FileMgr.h"
@@ -49,6 +51,7 @@
 #include "Phones.h"
 #include "Pickups.h"
 #include "Plane.h"
+#include "PlayerInfo.h"
 #include "PlayerSkin.h"
 #include "Population.h"
 #include "Radar.h"
@@ -92,9 +95,6 @@
 #include "custompipes.h"
 #include "screendroplets.h"
 #include "VarConsole.h"
-#ifdef USE_TEXTURE_POOL
-#include "TexturePools.h"
-#endif
 
 eLevelName CGame::currLevel;
 int32 CGame::currArea;
@@ -179,23 +179,11 @@ CGame::InitialiseOnceBeforeRW(void)
 	return true;
 }
 
-#ifndef LIBRW
-#ifdef PS2_MATFX
-void ReplaceMatFxCallback();
-#endif // PS2_MATFX
-#ifdef PS2_ALPHA_TEST
-void ReplaceAtomicPipeCallback();
-#endif // PS2_ALPHA_TEST
-#endif // !LIBRW
-
 bool
 CGame::InitialiseRenderWare(void)
 {
 	CFileMgr::SetDir("");
 	ValidateVersion();
-#ifdef USE_TEXTURE_POOL
-	_TexturePoolsInitialise();
-#endif
 
 	CTxdStore::Initialise();
 	CVisibilityPlugins::Initialise();
@@ -244,7 +232,6 @@ CGame::InitialiseRenderWare(void)
 
 	CreateDebugFont();
 
-#ifdef LIBRW
 #ifdef PS2_MATFX
 	rw::MatFX::envMapApplyLight = true;
 	rw::MatFX::envMapUseMatColor = true;
@@ -256,14 +243,6 @@ CGame::InitialiseRenderWare(void)
 #endif
 	rw::RGBA envcol = { 64, 64, 64, 255 };
 	rw::MatFX::envMapColor = envcol;
-#else
-#ifdef PS2_MATFX
-	ReplaceMatFxCallback();
-#endif // PS2_MATFX
-#ifdef PS2_ALPHA_TEST
-	ReplaceAtomicPipeCallback();
-#endif // PS2_ALPHA_TEST
-#endif // LIBRW
 
 	PUSH_MEMID(MEMID_TEXTURES);
 	CFont::Initialise();
@@ -314,9 +293,6 @@ void CGame::ShutdownRenderWare(void)
 	
 	CVisibilityPlugins::Shutdown();
 	
-#ifdef USE_TEXTURE_POOL
-	_TexturePoolsShutdown();
-#endif
 }
 
 bool CGame::InitialiseOnceAfterRW(void)
@@ -381,9 +357,6 @@ bool CGame::Initialise(const char* datFile)
 	if (CIniFile::PedNumberMultiplier == 1.0f && CIniFile::CarNumberMultiplier == 2.0f)
 #endif
 		CIniFile::LoadIniFile();
-#endif
-#ifdef USE_TEXTURE_POOL
-	_TexturePoolsUnknown(false);
 #endif
 	currLevel = LEVEL_BEACH;
 	currArea = AREA_MAIN_MAP;
@@ -571,9 +544,6 @@ bool CGame::Initialise(const char* datFile)
 	CCollision::ms_collisionInMemory = currLevel;
 	for (int i = 0; i < MAX_PADS; i++)
 		CPad::GetPad(i)->Clear(true);
-#ifdef USE_TEXTURE_POOL
-	_TexturePoolsUnknown(true);
-#endif
 
 #ifndef MASTER
 	PlayerCoords = FindPlayerCoors();
@@ -591,9 +561,6 @@ bool CGame::Initialise(const char* datFile)
 
 bool CGame::ShutDown(void)
 {
-#ifdef USE_TEXTURE_POOL
-	_TexturePoolsUnknown(false);
-#endif
 	CReplay::FinishPlayback();
 	CReplay::EmptyReplayBuffer();
 	CPlane::Shutdown();
@@ -644,9 +611,6 @@ bool CGame::ShutDown(void)
 	CTxdStore::RemoveTxdSlot(gameTxdSlot);
 	CMBlur::MotionBlurClose();
 	CdStreamRemoveImages();
-#ifdef USE_TEXTURE_POOL
-	_TexturePoolsFinalShutdown();
-#endif
 	return true;
 }
 
@@ -739,9 +703,6 @@ void CGame::ReloadIPLs(void)
 
 void CGame::ShutDownForRestart(void)
 {
-#ifdef USE_TEXTURE_POOL
-	_TexturePoolsUnknown(false);
-#endif
 	CReplay::FinishPlayback();
 	CReplay::EmptyReplayBuffer();
 	DMAudio.DestroyAllGameCreatedEntities();
@@ -837,9 +798,6 @@ void CGame::InitialiseWhenRestarting(void)
 	CTimer::Update();
 	
 	DMAudio.ChangeMusicMode(MUSICMODE_GAME);
-#ifdef USE_TEXTURE_POOL
-	_TexturePoolsUnknown(true);
-#endif
 }
 
 void CGame::Process(void) 
@@ -940,6 +898,16 @@ void CGame::Process(void)
 		CSpecialFX::Update();
 		CRopes::Update();
 		CTimeCycle::Update();
+
+		// The drift feedback is stepped once a frame here: after the physics
+		// step wrote the drift state, and before the camera below reads the
+		// strength (see DriftFeedback.h and ADR 0012). IsDriftCar keeps the
+		// step on the player's car; the enable flag is not tested here, so
+		// the module's own check still runs every frame.
+		CVehicle *playerVeh = FindPlayerVehicle();
+		if(IsDriftCar(playerVeh))
+			CDriftFeedback::Update((CAutomobile*)playerVeh, CTimer::GetTimeStepInSeconds());
+
 		if (CReplay::ShouldStandardCameraBeProcessed())
 			TheCamera.Process();
 		CCullZones::Update();

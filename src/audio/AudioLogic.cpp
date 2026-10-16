@@ -5525,22 +5525,15 @@ cAudioManager::GetPlayerTalkSfx(CPed *ped, uint16 sound)
 		break;
 	case SOUND_PED_ON_FIRE: {
 		cooldown_phrase(8);
-		switch(m_nPlayerMood) {
-		case PLAYER_MOOD_PISSED_OFF:
-			GetPhrase(sfx, ped->m_lastComment, SFX_PLAYER_PISSED_OFF_SHOOT_1, 29);
-			break;
-		case PLAYER_MOOD_ANGRY:
-			GetPhrase(sfx, ped->m_lastComment, SFX_PLAYER_ANGRY_SHOOT_1, 39);
-			break;
-		case PLAYER_MOOD_WISECRACKING:
-			GetPhrase(sfx, ped->m_lastComment, SFX_PLAYER_WISECRACKING_SHOOT_1, 9);
-			break;
-		default:
-			GetPhrase(sfx, ped->m_lastComment, SFX_PLAYER_CALM_SHOOT_1, 35);
-			break;
-		}
+		sfx = GetPlayerShootSfx(ped);
 		break;
 	}
+	// The active reload feedback (VICE-118) must play on every judged reload.
+	// Its two cases call the same mood switches as the taunt cases, but with
+	// no cooldown_phrase: they must not share the taunt counters.
+	case SOUND_PED_RELOAD_PERFECT:
+		sfx = GetPlayerShootSfx(ped);
+		break;
 	case SOUND_PED_AIMING: {
 		cooldown_phrase(8);
 		switch(m_nPlayerMood) {
@@ -5664,22 +5657,13 @@ cAudioManager::GetPlayerTalkSfx(CPed *ped, uint16 sound)
 	case SOUND_PED_CRASH_CAR:
 	case SOUND_PED_ANNOYED_DRIVER: {
 		cooldown_phrase(4);
-		switch(m_nPlayerMood) {
-		case PLAYER_MOOD_PISSED_OFF:
-			GetPhrase(sfx, ped->m_lastComment, SFX_PLAYER_PISSED_OFF_CRASH_1, 44);
-			break;
-		case PLAYER_MOOD_ANGRY:
-			GetPhrase(sfx, ped->m_lastComment, SFX_PLAYER_ANGRY_CRASH_1, 41);
-			break;
-		case PLAYER_MOOD_WISECRACKING:
-			GetPhrase(sfx, ped->m_lastComment, SFX_PLAYER_WISECRACKING_CRASH_1, 19);
-			break;
-		default:
-			GetPhrase(sfx, ped->m_lastComment, SFX_PLAYER_CALM_CRASH_1, 43);
-			break;
-		}
+		sfx = GetPlayerCrashSfx(ped);
 		break;
 	}
+	// The jammed reload feedback (VICE-118), see SOUND_PED_RELOAD_PERFECT.
+	case SOUND_PED_RELOAD_JAM:
+		sfx = GetPlayerCrashSfx(ped);
+		break;
 	case SOUND_PED_SOLICIT: {
 		cooldown_phrase(4);
 		switch(m_nPlayerMood) {
@@ -5699,6 +5683,54 @@ cAudioManager::GetPlayerTalkSfx(CPed *ped, uint16 sound)
 		break;
 	}
 	default: return GetGenericMaleTalkSfx(ped, sound);
+	}
+	return sfx;
+}
+
+// The mood phrases of the shooting taunt. GetPlayerTalkSfx wraps them in the
+// taunt cooldown; the active reload cases call them directly, with no gate.
+uint32
+cAudioManager::GetPlayerShootSfx(CPed *ped)
+{
+	uint32 sfx;
+
+	switch(m_nPlayerMood) {
+	case PLAYER_MOOD_PISSED_OFF:
+		GetPhrase(sfx, ped->m_lastComment, SFX_PLAYER_PISSED_OFF_SHOOT_1, 29);
+		break;
+	case PLAYER_MOOD_ANGRY:
+		GetPhrase(sfx, ped->m_lastComment, SFX_PLAYER_ANGRY_SHOOT_1, 39);
+		break;
+	case PLAYER_MOOD_WISECRACKING:
+		GetPhrase(sfx, ped->m_lastComment, SFX_PLAYER_WISECRACKING_SHOOT_1, 9);
+		break;
+	default:
+		GetPhrase(sfx, ped->m_lastComment, SFX_PLAYER_CALM_SHOOT_1, 35);
+		break;
+	}
+	return sfx;
+}
+
+// The mood phrases of the crash and annoyed-driver taunt, with the same split
+// as GetPlayerShootSfx.
+uint32
+cAudioManager::GetPlayerCrashSfx(CPed *ped)
+{
+	uint32 sfx;
+
+	switch(m_nPlayerMood) {
+	case PLAYER_MOOD_PISSED_OFF:
+		GetPhrase(sfx, ped->m_lastComment, SFX_PLAYER_PISSED_OFF_CRASH_1, 44);
+		break;
+	case PLAYER_MOOD_ANGRY:
+		GetPhrase(sfx, ped->m_lastComment, SFX_PLAYER_ANGRY_CRASH_1, 41);
+		break;
+	case PLAYER_MOOD_WISECRACKING:
+		GetPhrase(sfx, ped->m_lastComment, SFX_PLAYER_WISECRACKING_CRASH_1, 19);
+		break;
+	default:
+		GetPhrase(sfx, ped->m_lastComment, SFX_PLAYER_CALM_CRASH_1, 43);
+		break;
 	}
 	return sfx;
 }

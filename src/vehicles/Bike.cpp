@@ -1,4 +1,5 @@
 #include "common.h"
+#include "main.h"
 #include "General.h"
 #include "Pad.h"
 #include "DMAudio.h"
@@ -42,7 +43,7 @@ const uint32 CBike::nSaveStructSize =
 #ifdef COMPATIBLE_SAVES
 	1260;
 #else
-	sizeof(CBoat);
+	sizeof(CBike);
 #endif
 
 
@@ -2018,6 +2019,11 @@ CBike::DoDriveByShootings(void)
 
 	weapon->Update(pDriver->m_audioEntityId, nil);
 
+	// The drive-by reload uses the same input as the on-foot path: the
+	// player starts a reload or judges the running one (VICE-90).
+	if (pDriver->IsPlayer())
+		((CPlayerPed*)pDriver)->ProcessActiveReloadInput(CPad::GetPad(0));
+
 	bool lookingLeft = false;
 	bool lookingRight = false;
 	if(TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_TOPDOWN ||
@@ -2083,13 +2089,16 @@ CBike::DoDriveByShootings(void)
 		// The free aim fires at once: the drive-by arm is only a stand-in and
 		// the first person car view does not show it
 		if (aiming || !anim || !anim->IsRunning()) {
-			if (CPad::GetPad(0)->GetCarGunFired() && CTimer::GetTimeInMilliseconds() > weapon->m_nTimer) {
-				weapon->FireFromCar(this, lookingLeft, lookingRight, aiming);
-				weapon->m_nTimer = CTimer::GetTimeInMilliseconds() + 70;
-			}
+			if (CPad::GetPad(0)->GetCarGunFired() && CTimer::GetTimeInMilliseconds() > weapon->m_nTimer)
+				weapon->FireFromCarWithCadence(this, lookingLeft, lookingRight, aiming);
 		}
 	}else{
-		weapon->Reload();
+		// The stock code refills the clip while the player does not aim.
+		// With the active reload on the clip is a magazine and refills only
+		// through the reload key (VICE-90); an AI driver and the toggle off
+		// keep the stock refill.
+		if (!gActiveReloadEnabled || !pDriver->IsPlayer())
+			weapon->Reload();
 		anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_LHS);
 		if(anim)
 			anim->blendDelta = -1000.0f;

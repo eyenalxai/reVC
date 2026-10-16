@@ -1,6 +1,7 @@
 #include "common.h"
 #include "main.h"
 
+#include "DMAudio.h"
 #include "Timer.h"
 #include "Weapon.h"
 #include "Ped.h"
@@ -19,6 +20,7 @@ static uint32 ms_nWindowStart;		// the window, absolute times
 static uint32 ms_nWindowEnd;
 static bool ms_bJudged;			// the first judging press came in
 static bool ms_bAnimationRequested;	// the reload animation is started
+static bool ms_bPerfect;		// a perfect judgment, until it is consumed
 static eActiveReloadResult ms_eResult;	// the last judgment, for the HUD
 static uint32 ms_nResultTime;
 
@@ -70,6 +72,7 @@ ActiveReload::Reset(void)
 {
 	ms_bActive = false;
 	ms_bAnimationRequested = false;
+	ms_bPerfect = false;
 	ResetResult();
 }
 
@@ -94,6 +97,7 @@ ActiveReload::Start(eWeaponType weaponType, uint32 duration)
 	ms_nWindowEnd = ms_nStart + (uint32)(ms_nDuration*ACTIVE_RELOAD_WINDOW_END);
 	ms_bJudged = false;
 	ms_bAnimationRequested = false;
+	ms_bPerfect = false;
 	ResetResult();
 }
 
@@ -106,20 +110,31 @@ ActiveReload::Judge(CWeapon *weapon)
 	if (weapon == nil || weapon->m_eWeaponType != ms_eWeaponType || weapon->m_eWeaponState != WEAPONSTATE_RELOADING)
 		return;
 
+	CPed *player = FindPlayerPed();
 	uint32 now = CTimer::GetTimeInMilliseconds();
 
 	if (now < ms_nWindowStart) {
-		// Too soon: the reload is jammed and takes half the base time more.
+		// Too soon: the reload is jammed and takes half the base time more,
+		// and the protagonist makes the annoyed line (VICE-89). The line
+		// uses its own sound id, so the crash taunt cooldown cannot drop it
+		// (VICE-118).
 		weapon->m_nTimer += (uint32)(ms_nDuration*ACTIVE_RELOAD_JAM_FRACTION);
 		ms_bJudged = true;
 		ms_eResult = ACTIVE_RELOAD_JAM;
 		ms_nResultTime = now;
+		if (player)
+			player->Say(SOUND_PED_RELOAD_JAM);
 	} else if (now <= ms_nWindowEnd) {
-		// In the window: the reload finishes almost at once.
+		// In the window: the reload finishes almost at once, and the
+		// protagonist makes the cocky line (VICE-89). Its own sound id keeps
+		// it away from the shoot taunt cooldown (VICE-118).
 		weapon->m_nTimer = now + ACTIVE_RELOAD_PERFECT_TAIL_MS;
 		ms_bJudged = true;
 		ms_eResult = ACTIVE_RELOAD_PERFECT;
 		ms_nResultTime = now;
+		ms_bPerfect = true;
+		if (player)
+			player->Say(SOUND_PED_RELOAD_PERFECT);
 	}
 	// Later presses and presses after the window do nothing.
 }
@@ -138,6 +153,18 @@ ActiveReload::Judged(CWeapon *weapon)
 		return false;
 
 	return TrackedWeapon() == weapon;
+}
+
+bool
+ActiveReload::ConsumePerfect(void)
+{
+	ForgetStaleReload();
+
+	if (!ms_bPerfect)
+		return false;
+
+	ms_bPerfect = false;
+	return true;
 }
 
 bool

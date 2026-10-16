@@ -135,7 +135,7 @@ LookForBatCB(RwObject *object, void *data)
 {
 	static CMatrix MatLTM;
 
-	if(CVisibilityPlugins::GetAtomicModelInfo((RpAtomic*)object) == (CSimpleModelInfo*)data){
+	if(CVisibilityPlugins::GetAtomicExt((RpAtomic*)object)->modelInfo == (CSimpleModelInfo*)data){
 		MatLTM = CMatrix(RwFrameGetLTM(RpAtomicGetFrame((RpAtomic*)object)));
 		CVector p1 = MatLTM * CVector(0.02f, 0.05f, 0.07f);
 		CVector p2 = MatLTM * CVector(0.246f, 0.0325f, 0.796f);

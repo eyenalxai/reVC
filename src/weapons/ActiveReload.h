@@ -63,6 +63,11 @@ public:
 	// unjudged reload keeps the stock animation extension.
 	static bool Judged(CWeapon *weapon);
 
+	// The one-shot signal a perfect judgment leaves behind: true once, then
+	// cleared. The player consumes it to abort the reload animation of a
+	// perfect reload (VICE-88). A jam does not set it.
+	static bool ConsumePerfect(void);
+
 	// The reload animation of the tracked reload: the first call claims it
 	// and returns true, later calls return false, so a long jam does not
 	// start the animation again. A new or forgotten reload clears the claim.

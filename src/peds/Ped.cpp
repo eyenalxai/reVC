@@ -1112,7 +1112,12 @@ CPed::MoveHeadToLook(void)
 
 	if (m_pLookTarget) {
 		if (m_pLookTarget->IsPed()) {
-			((CPed*)m_pLookTarget)->m_pedIK.GetComponentPosition(lookPos, PED_MID);
+			// A deleted ped can leave a stale look target. Its clump is nil then,
+			// and the IK cannot read a position from it, so use the ped's position.
+			if (m_pLookTarget->GetClump() == nil)
+				lookPos = m_pLookTarget->GetPosition();
+			else
+				((CPed*)m_pLookTarget)->m_pedIK.GetComponentPosition(lookPos, PED_MID);
 		} else {
 			lookPos = m_pLookTarget->GetPosition();
 		}
@@ -4632,7 +4637,7 @@ static RwObject*
 RemoveAllModelCB(RwObject *object, void *data)
 {
 	RpAtomic *atomic = (RpAtomic*)object;
-	if (CVisibilityPlugins::GetAtomicModelInfo(atomic)) {
+	if (CVisibilityPlugins::GetAtomicExt(atomic)->modelInfo) {
 		RpClumpRemoveAtomic(RpAtomicGetClump(atomic), atomic);
 		RpAtomicDestroy(atomic);
 	}
@@ -4645,8 +4650,8 @@ CPed::RemoveWeaponModel(int modelId)
 	// modelId is not used!! This function just removes the current weapon.
 	if(m_pWeaponModel){
 		if (modelId == -1
-			|| CVisibilityPlugins::GetAtomicModelInfo(m_pWeaponModel) == CModelInfo::GetModelInfo(modelId)) {
-			CVisibilityPlugins::GetAtomicModelInfo(m_pWeaponModel)->RemoveRef();
+			|| CVisibilityPlugins::GetAtomicExt(m_pWeaponModel)->modelInfo == CModelInfo::GetModelInfo(modelId)) {
+			CVisibilityPlugins::GetAtomicExt(m_pWeaponModel)->modelInfo->RemoveRef();
 			RwFrame* frm = RpAtomicGetFrame(m_pWeaponModel);
 			RpAtomicDestroy(m_pWeaponModel);
 			RwFrameDestroy(frm);

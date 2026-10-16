@@ -457,6 +457,14 @@ void ControllerTypeAfterChange(int8 before, int8 after)
 {
 	FrontEndMenuManager.LoadController(after);
 }
+
+// A stale reVC.ini value must not index controllerTypesPaths (Frontend.cpp) and
+// this list out of bounds; LoadINISettings clamps it behind the option reads.
+void ClampControllerType(void)
+{
+	const int8 lastType = (int8)(ARRAY_SIZE(controllerTypes) - 1);
+	FrontEndMenuManager.m_PrefsControllerType = Clamp(FrontEndMenuManager.m_PrefsControllerType, 0, lastType);
+}
 #endif
 
 CMenuScreenCustom aScreens[] = {

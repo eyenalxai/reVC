@@ -4,8 +4,8 @@
 #include "General.h"
 #include "Ped.h"
 
-// Corresponds to ped sounds (from SOUND_PED_DEATH to SOUND_PED_TAXI_CALL)
-PedAudioData CommentWaitTime[56] = {
+// Corresponds to ped sounds (from SOUND_PED_DEATH to SOUND_PED_RELOAD_JAM)
+PedAudioData CommentWaitTime[58] = {
   { 500, 800, 500, 2 },
   { 500, 800, 500, 2 },
   { 500, 800, 500, 2 },
@@ -61,7 +61,11 @@ PedAudioData CommentWaitTime[56] = {
   { 2000, 1000, 4000, 2000 },
   { 1500, 1000, 2500, 1000 },
   { 1000, 1000, 5000, 5000 },
-  { 0, 0, 0, 0 }
+  { 0, 0, 0, 0 },
+  // The reload feedback sounds (VICE-118): play on the next service tick,
+  // but re-queue the same line only after 0.5-1.5 s.
+  { 0, 500, 500, 1000 },
+  { 0, 500, 500, 1000 }
 };
 
 bool
@@ -107,13 +111,15 @@ CPed::Say(uint16 audio)
 		return;
 
 	if (TheCamera.m_CameraAverageSpeed > 1.65f) {
-		if (audio != SOUND_PED_DAMAGE && audio != SOUND_PED_HIT && audio != SOUND_PED_LAND)
+		if (audio != SOUND_PED_DAMAGE && audio != SOUND_PED_HIT && audio != SOUND_PED_LAND &&
+			audio != SOUND_PED_RELOAD_PERFECT && audio != SOUND_PED_RELOAD_JAM)
 			return;
 
 	} else if (TheCamera.m_CameraAverageSpeed > 1.25f) {
 		if (audio != SOUND_PED_DEATH &&
 			audio != SOUND_PED_DAMAGE && audio != SOUND_PED_HIT && audio != SOUND_PED_LAND &&
-			audio != SOUND_PED_TAXI_WAIT && audio != SOUND_PED_EVADE)
+			audio != SOUND_PED_TAXI_WAIT && audio != SOUND_PED_EVADE &&
+			audio != SOUND_PED_RELOAD_PERFECT && audio != SOUND_PED_RELOAD_JAM)
 			return;
 
 	} else if (TheCamera.m_CameraAverageSpeed > 0.9f) {
@@ -129,6 +135,8 @@ CPed::Say(uint16 audio)
 			case SOUND_PED_CRASH_VEHICLE:
 			case SOUND_PED_CRASH_CAR:
 			case SOUND_PED_ANNOYED_DRIVER:
+			case SOUND_PED_RELOAD_PERFECT:
+			case SOUND_PED_RELOAD_JAM:
 				break;
 			default:
 				return;

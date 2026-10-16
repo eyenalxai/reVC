@@ -88,10 +88,10 @@ public:
 	void ProcessControl(void);
 	void ClearAdrenaline(void);
 	void UseSprintEnergy(void);
-	void UpdatePlayerMovement(CPad *padUsed, bool bCanSprint);
+	void UpdatePlayerMovement(CPad *padUsed);
 	bool IsMoveControllerInCharge(void);
 	bool CanMoveInWeaponSight(void);
-	float GetTargetMoveSpeed(bool bCanSprint) const;
+	float GetMoveAnimPlayback(AnimationId animId) const;
 	float GetMoveAnimReferenceSpeed(void);
 	class CPlayerInfo *GetPlayerInfoForThisPlayerPed();
 	void SetRealMoveAnim(void);
@@ -103,9 +103,12 @@ public:
 	bool IsThisPedAnAimingPriority(CPed*);
 	void PlayerControlSniper(CPad*);
 	void PlayerControlM16(CPad*);
+	void FireWeaponWhenHeld(CPad*);
+	void ProcessAirborneWeapon(CPad*);
 	void PlayerControlFighter(CPad*);
 	void ProcessWeaponSwitch(CPad*);
 	void ProcessActiveReload(CPad*);
+	void ProcessActiveReloadInput(CPad*);
 	void MakeObjectTargettable(int32);
 	void PlayerControl1stPersonRunAround(CPad *padUsed);
 	void EvaluateNeighbouringTarget(CEntity*, CEntity**, float*, float, float, bool, bool);

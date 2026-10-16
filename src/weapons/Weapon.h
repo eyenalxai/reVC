@@ -43,6 +43,12 @@ public:
 	// Fires the drive-by; aiming fires the free aim along the camera instead,
 	// and left/right only apply to the drive-by
 	bool FireFromCar   (CVehicle *shooter, bool left, bool right, bool aiming);
+	// The drive-by fire of the vehicle callers: fires and then sets the
+	// 70 ms drive-by cadence only when a shot left the barrel. A failed
+	// attempt, an empty clip or a started reload leaves the timer alone,
+	// so the call can never shorten a running reload (VICE-90). The aiming
+	// flag fires the free aim along the camera instead (VICE-110).
+	void FireFromCarWithCadence(CVehicle *shooter, bool left, bool right, bool aiming);
 	bool FireMelee     (CEntity *shooter, CVector &fireSource);
 	bool FireInstantHit(CEntity *shooter, CVector *fireSource);
 	

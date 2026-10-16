@@ -40,16 +40,22 @@ bool gbDontRenderPeds;
 bool gbDontRenderObjects;
 bool gbDontRenderVehicles;
 
-// unused
-int16 TestCloseThings;
-int16 TestBigThings;
-
 struct EntityInfo
 {
 	CEntity *ent;
 	float sort;
 };
 
+// Sorted vehicles that one render pass hands over to the next: the pass that
+// fills the list hands the vehicles to the pass that draws them. A pass clears
+// the list, fills it with the nodes it owns and draws every node, so no node
+// survives into another pass and no vehicle is drawn twice.
+//   RenderEverythingBarRoads (old renderer) fills it with the vehicles it does
+//   not draw itself, for RenderBoats.
+//   RenderBoats (new renderer) fills it with the boats and the vehicles that
+//   touch water and draws them; RenderVehicles then clears it, fills it with
+//   the other vehicles and draws them.
+//   ClearForFrame empties it at the start of a new-renderer frame.
 CLinkList<EntityInfo> gSortedVehiclesAndPeds;
 
 int32 CRenderer::ms_nNoOfVisibleEntities;
@@ -67,11 +73,6 @@ CVUVECTOR CRenderer::ms_vecCameraPosition;
 CVehicle *CRenderer::m_pFirstPersonVehicle;
 bool CRenderer::m_loadingPriority;
 float CRenderer::ms_lodDistScale = 1.2f;
-
-// unused
-BlockedRange CRenderer::aBlockedRanges[16];
-BlockedRange* CRenderer::pFullBlockedRanges;
-BlockedRange* CRenderer::pEmptyBlockedRanges;
 
 void
 CRenderer::Init(void)
@@ -442,13 +443,32 @@ CRenderer::RenderOneBuilding(CEntity *ent, float camdist)
 	ent->bImBeingRendered = false;	// TODO: this seems wrong, but do we even need it?
 }
 
+// The roads pass and the opaque pass split the visible buildings by the same
+// rule and render the two halves in the same order.
 void
-CRenderer::RenderWorld(int pass)
+CRenderer::RenderBuildings(bool roads)
 {
 	int i;
 	CEntity *e;
 	CLink<CVisibilityPlugins::AlphaObjectInfo> *node;
 
+	for(i = 0; i < ms_nNoOfVisibleBuildings; i++){
+		e = ms_aVisibleBuildingPtrs[i];
+		if((e->bIsBIGBuilding || IsRoad(e)) == roads)
+			RenderOneBuilding(e);
+	}
+	for(node = CVisibilityPlugins::m_alphaBuildingList.tail.prev;
+	    node != &CVisibilityPlugins::m_alphaBuildingList.head;
+	    node = node->prev){
+		e = node->item.entity;
+		if((e->bIsBIGBuilding || IsRoad(e)) == roads)
+			RenderOneBuilding(e, node->item.sort);
+	}
+}
+
+void
+CRenderer::RenderWorld(int pass)
+{
 	RwRenderStateSet(rwRENDERSTATEFOGENABLE, (void*)TRUE);
 	SetCullMode(rwCULLMODECULLBACK);
 	DeActivateDirectional();
@@ -460,36 +480,14 @@ CRenderer::RenderWorld(int pass)
 		// Roads
 		PUSH_RENDERGROUP("CRenderer::RenderWorld - Roads");
 		RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)FALSE);
-		for(i = 0; i < ms_nNoOfVisibleBuildings; i++){
-			e = ms_aVisibleBuildingPtrs[i];
-			if(e->bIsBIGBuilding || IsRoad(e))
-				RenderOneBuilding(e);
-		}
-		for(node = CVisibilityPlugins::m_alphaBuildingList.tail.prev;
-		    node != &CVisibilityPlugins::m_alphaBuildingList.head;
-		    node = node->prev){
-			e = node->item.entity;
-			if(e->bIsBIGBuilding || IsRoad(e))
-				RenderOneBuilding(e, node->item.sort);
-		}
+		RenderBuildings(true);
 		POP_RENDERGROUP();
 		break;
 	case 1:
 		// Opaque
 		PUSH_RENDERGROUP("CRenderer::RenderWorld - Opaque");
 		RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)FALSE);
-		for(i = 0; i < ms_nNoOfVisibleBuildings; i++){
-			e = ms_aVisibleBuildingPtrs[i];
-			if(!(e->bIsBIGBuilding || IsRoad(e)))
-				RenderOneBuilding(e);
-		}
-		for(node = CVisibilityPlugins::m_alphaBuildingList.tail.prev;
-		    node != &CVisibilityPlugins::m_alphaBuildingList.head;
-		    node = node->prev){
-			e = node->item.entity;
-			if(!(e->bIsBIGBuilding || IsRoad(e)))
-				RenderOneBuilding(e, node->item.sort);
-		}
+		RenderBuildings(false);
 		// Now we have iterated through all visible buildings (unsorted and sorted)
 		// and the transparency list is done.
 
@@ -536,6 +534,9 @@ CRenderer::RenderVehicles(void)
 	CLink<EntityInfo> *node;
 
 	PUSH_RENDERGROUP("CRenderer::RenderVehicles");
+	// RenderBoats filled and drew this list already; drop its nodes so no
+	// vehicle is drawn twice.
+	gSortedVehiclesAndPeds.Clear();
 	// not the real thing
 	for(i = 0; i < ms_nNoOfVisibleVehicles; i++){
 		e = ms_aVisibleVehiclePtrs[i];
@@ -968,20 +969,6 @@ CRenderer::ConstructRenderList(void)
 }
 	ms_vecCameraPosition = TheCamera.GetPosition();
 
-	// unused
-	pFullBlockedRanges = nil;
-	pEmptyBlockedRanges = aBlockedRanges;
-	for(int i = 0; i < 16; i++){
-		aBlockedRanges[i].prev = &aBlockedRanges[i-1];
-		aBlockedRanges[i].next = &aBlockedRanges[i+1];
-	}
-	aBlockedRanges[0].prev = nil;
-	aBlockedRanges[15].next = nil;
-
-	// unused
-	TestCloseThings = 0;
-	TestBigThings = 0;
-
 	ScanWorld();
 }
 
@@ -1006,16 +993,18 @@ enum Corners
 	CORNER_LOD_RIGHT,
 	CORNER_PRIO_LEFT,
 	CORNER_PRIO_RIGHT,
+	CORNER_COUNT
 };
 
-void
-CRenderer::ScanWorld(void)
+// Set up the frustum the sector scans work with: the four corners of the far
+// clip plane, the LOD corners and the priority corners, all in world space.
+// Returns the far clip plane.
+static float
+CalcFrustumVectors(CVector (&vectors)[CORNER_COUNT])
 {
 	float f = RwCameraGetFarClipPlane(TheCamera.m_pRwCamera);
 	RwV2d vw = *RwCameraGetViewWindow(TheCamera.m_pRwCamera);
-	CVector vectors[9];
 	RwMatrix *cammatrix;
-	RwV2d poly[3];
 
 	memset(vectors, 0, sizeof(vectors));
 	vectors[CORNER_FAR_TOPLEFT].x = -vw.x * f;
@@ -1033,19 +1022,6 @@ CRenderer::ScanWorld(void)
 
 	cammatrix = RwFrameGetMatrix(RwCameraGetFrame(TheCamera.m_pRwCamera));
 
-	m_pFirstPersonVehicle = nil;
-	CVisibilityPlugins::InitAlphaEntityList();
-	CWorld::AdvanceCurrentScanCode();
-
-	// unused
-	static CVector prevPos;
-	static CVector prevFwd;
-	static bool smallMovement;
-	smallMovement = (TheCamera.GetPosition() - prevPos).MagnitudeSqr() < SQR(4.0f) &&
-		DotProduct(TheCamera.GetForward(), prevFwd) > 0.98f;
-	prevPos = TheCamera.GetPosition();
-	prevFwd = TheCamera.GetForward();
-
 	if(cammatrix->at.z > 0.0f){
 		// looking up, bottom corners are further away
 		vectors[CORNER_LOD_LEFT] = vectors[CORNER_FAR_BOTLEFT] * LOD_DISTANCE/f;
@@ -1061,32 +1037,66 @@ CRenderer::ScanWorld(void)
 	vectors[CORNER_PRIO_RIGHT].x = vectors[CORNER_LOD_RIGHT].x * 0.2f;
 	vectors[CORNER_PRIO_RIGHT].y = vectors[CORNER_LOD_RIGHT].y * 0.2f;
 	vectors[CORNER_PRIO_RIGHT].z = vectors[CORNER_LOD_RIGHT].z;
-	RwV3dTransformPoints(vectors, vectors, 9, cammatrix);
+	RwV3dTransformPoints(vectors, vectors, CORNER_COUNT, cammatrix);
+
+	return f;
+}
+
+// The top-down cameras look straight down; their scan covers the sectors of
+// the far corners clamped to the ground plane instead of the frustum polygon.
+static bool
+IsTopDownCamera(void)
+{
+	int mode = TheCamera.Cams[TheCamera.ActiveCam].Mode;
+	return mode == CCam::MODE_TOPDOWN ||
+#ifdef FIX_BUGS
+	       mode == CCam::MODE_GTACLASSIC ||
+#endif
+	       mode == CCam::MODE_TOP_DOWN_PED;
+}
+
+// Clamp the four far corners of a top-down camera to the ground plane and
+// return the sector range they cover.
+static void
+ClampFrustumToSectors(CVector (&vectors)[CORNER_COUNT], int &x1, int &x2, int &y1, int &y2)
+{
+	CRect rect;
+
+	LimitFrustumVector(vectors[CORNER_FAR_TOPLEFT], vectors[CORNER_CAM], -100.0f);
+	rect.ContainPoint(vectors[CORNER_FAR_TOPLEFT]);
+	LimitFrustumVector(vectors[CORNER_FAR_TOPRIGHT], vectors[CORNER_CAM], -100.0f);
+	rect.ContainPoint(vectors[CORNER_FAR_TOPRIGHT]);
+	LimitFrustumVector(vectors[CORNER_FAR_BOTRIGHT], vectors[CORNER_CAM], -100.0f);
+	rect.ContainPoint(vectors[CORNER_FAR_BOTRIGHT]);
+	LimitFrustumVector(vectors[CORNER_FAR_BOTLEFT], vectors[CORNER_CAM], -100.0f);
+	rect.ContainPoint(vectors[CORNER_FAR_BOTLEFT]);
+
+	x1 = CWorld::GetSectorIndexX(rect.left);
+	if(x1 < 0) x1 = 0;
+	x2 = CWorld::GetSectorIndexX(rect.right);
+	if(x2 >= NUMSECTORS_X-1) x2 = NUMSECTORS_X-1;
+	y1 = CWorld::GetSectorIndexY(rect.top);
+	if(y1 < 0) y1 = 0;
+	y2 = CWorld::GetSectorIndexY(rect.bottom);
+	if(y2 >= NUMSECTORS_Y-1) y2 = NUMSECTORS_Y-1;
+}
+
+void
+CRenderer::ScanWorld(void)
+{
+	CVector vectors[CORNER_COUNT];
+	RwV2d poly[3];
+	int x1, x2, y1, y2;
+
+	float f = CalcFrustumVectors(vectors);
+
+	m_pFirstPersonVehicle = nil;
+	CVisibilityPlugins::InitAlphaEntityList();
+	CWorld::AdvanceCurrentScanCode();
 
 	m_loadingPriority = false;
-	if(TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_TOPDOWN ||
-#ifdef FIX_BUGS
-	   TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_GTACLASSIC ||
-#endif
-	   TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_TOP_DOWN_PED){
-		CRect rect;
-		int x1, x2, y1, y2;
-		LimitFrustumVector(vectors[CORNER_FAR_TOPLEFT], vectors[CORNER_CAM], -100.0f);
-		rect.ContainPoint(vectors[CORNER_FAR_TOPLEFT]);
-		LimitFrustumVector(vectors[CORNER_FAR_TOPRIGHT], vectors[CORNER_CAM], -100.0f);
-		rect.ContainPoint(vectors[CORNER_FAR_TOPRIGHT]);
-		LimitFrustumVector(vectors[CORNER_FAR_BOTRIGHT], vectors[CORNER_CAM], -100.0f);
-		rect.ContainPoint(vectors[CORNER_FAR_BOTRIGHT]);
-		LimitFrustumVector(vectors[CORNER_FAR_BOTLEFT], vectors[CORNER_CAM], -100.0f);
-		rect.ContainPoint(vectors[CORNER_FAR_BOTLEFT]);
-		x1 = CWorld::GetSectorIndexX(rect.left);
-		if(x1 < 0) x1 = 0;
-		x2 = CWorld::GetSectorIndexX(rect.right);
-		if(x2 >= NUMSECTORS_X-1) x2 = NUMSECTORS_X-1;
-		y1 = CWorld::GetSectorIndexY(rect.top);
-		if(y1 < 0) y1 = 0;
-		y2 = CWorld::GetSectorIndexY(rect.bottom);
-		if(y2 >= NUMSECTORS_Y-1) y2 = NUMSECTORS_Y-1;
+	if(IsTopDownCamera()){
+		ClampFrustumToSectors(vectors, x1, x2, y1, y2);
 		for(; x1 <= x2; x1++)
 			for(int y = y1; y <= y2; y++)
 				ScanSectorList(CWorld::GetSector(x1, y)->m_lists);
@@ -1152,71 +1162,17 @@ CRenderer::ScanWorld(void)
 void
 CRenderer::RequestObjectsInFrustum(void)
 {
-	float f = RwCameraGetFarClipPlane(TheCamera.m_pRwCamera);
-	RwV2d vw = *RwCameraGetViewWindow(TheCamera.m_pRwCamera);
-	CVector vectors[9];
-	RwMatrix *cammatrix;
+	CVector vectors[CORNER_COUNT];
 	RwV2d poly[3];
+	int x1, x2, y1, y2;
 
-	memset(vectors, 0, sizeof(vectors));
-	vectors[CORNER_FAR_TOPLEFT].x = -vw.x * f;
-	vectors[CORNER_FAR_TOPLEFT].y = vw.y * f;
-	vectors[CORNER_FAR_TOPLEFT].z = f;
-	vectors[CORNER_FAR_TOPRIGHT].x = vw.x * f;
-	vectors[CORNER_FAR_TOPRIGHT].y = vw.y * f;
-	vectors[CORNER_FAR_TOPRIGHT].z = f;
-	vectors[CORNER_FAR_BOTRIGHT].x = vw.x * f;
-	vectors[CORNER_FAR_BOTRIGHT].y = -vw.y * f;
-	vectors[CORNER_FAR_BOTRIGHT].z = f;
-	vectors[CORNER_FAR_BOTLEFT].x = -vw.x * f;
-	vectors[CORNER_FAR_BOTLEFT].y = -vw.y * f;
-	vectors[CORNER_FAR_BOTLEFT].z = f;
-
-	cammatrix = RwFrameGetMatrix(RwCameraGetFrame(TheCamera.m_pRwCamera));
+	CalcFrustumVectors(vectors);
 
 	CWorld::AdvanceCurrentScanCode();
 	ms_vecCameraPosition = TheCamera.GetPosition();
 
-	if(cammatrix->at.z > 0.0f){
-		// looking up, bottom corners are further away
-		vectors[CORNER_LOD_LEFT] = vectors[CORNER_FAR_BOTLEFT] * LOD_DISTANCE/f;
-		vectors[CORNER_LOD_RIGHT] = vectors[CORNER_FAR_BOTRIGHT] * LOD_DISTANCE/f;
-	}else{
-		// looking down, top corners are further away
-		vectors[CORNER_LOD_LEFT] = vectors[CORNER_FAR_TOPLEFT] * LOD_DISTANCE/f;
-		vectors[CORNER_LOD_RIGHT] = vectors[CORNER_FAR_TOPRIGHT] * LOD_DISTANCE/f;
-	}
-	vectors[CORNER_PRIO_LEFT].x = vectors[CORNER_LOD_LEFT].x * 0.2f;
-	vectors[CORNER_PRIO_LEFT].y = vectors[CORNER_LOD_LEFT].y * 0.2f;
-	vectors[CORNER_PRIO_LEFT].z = vectors[CORNER_LOD_LEFT].z;
-	vectors[CORNER_PRIO_RIGHT].x = vectors[CORNER_LOD_RIGHT].x * 0.2f;
-	vectors[CORNER_PRIO_RIGHT].y = vectors[CORNER_LOD_RIGHT].y * 0.2f;
-	vectors[CORNER_PRIO_RIGHT].z = vectors[CORNER_LOD_RIGHT].z;
-	RwV3dTransformPoints(vectors, vectors, 9, cammatrix);
-
-	if(TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_TOPDOWN ||
-#ifdef FIX_BUGS
-	   TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_GTACLASSIC ||
-#endif
-	   TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_TOP_DOWN_PED){
-		CRect rect;
-		int x1, x2, y1, y2;
-		LimitFrustumVector(vectors[CORNER_FAR_TOPLEFT], vectors[CORNER_CAM], -100.0f);
-		rect.ContainPoint(vectors[CORNER_FAR_TOPLEFT]);
-		LimitFrustumVector(vectors[CORNER_FAR_TOPRIGHT], vectors[CORNER_CAM], -100.0f);
-		rect.ContainPoint(vectors[CORNER_FAR_TOPRIGHT]);
-		LimitFrustumVector(vectors[CORNER_FAR_BOTRIGHT], vectors[CORNER_CAM], -100.0f);
-		rect.ContainPoint(vectors[CORNER_FAR_BOTRIGHT]);
-		LimitFrustumVector(vectors[CORNER_FAR_BOTLEFT], vectors[CORNER_CAM], -100.0f);
-		rect.ContainPoint(vectors[CORNER_FAR_BOTLEFT]);
-		x1 = CWorld::GetSectorIndexX(rect.left);
-		if(x1 < 0) x1 = 0;
-		x2 = CWorld::GetSectorIndexX(rect.right);
-		if(x2 >= NUMSECTORS_X-1) x2 = NUMSECTORS_X-1;
-		y1 = CWorld::GetSectorIndexY(rect.top);
-		if(y1 < 0) y1 = 0;
-		y2 = CWorld::GetSectorIndexY(rect.bottom);
-		if(y2 >= NUMSECTORS_Y-1) y2 = NUMSECTORS_Y-1;
+	if(IsTopDownCamera()){
+		ClampFrustumToSectors(vectors, x1, x2, y1, y2);
 		for(; x1 <= x2; x1++)
 			for(int y = y1; y <= y2; y++)
 				ScanSectorList_RequestModels(CWorld::GetSector(x1, y)->m_lists);
@@ -1486,8 +1442,43 @@ CRenderer::ScanBigBuildingList(CPtrList &list)
 	}
 }
 
+// The four sector scans differ only in these flags: `stream` selects the way
+// the scan requests models, `bTreatGlassAsOffscreen` keeps an invisible glass
+// entity in the offscreen pass, `bMarkPriority` lets a request of a model that
+// is not loaded yet set the loading priority, and `bHoldBackRequests` stops
+// the requests while that priority is set and the request queue is full (the
+// old ms_numModelsRequested limit).
+// scanSectorListFlags = ScanSectorList, scanPriorityFlags = _Priority,
+// scanSubwayFlags = _Subway (GTA_TRAIN), scanRequestModelsFlags = _RequestModels.
+static const CRenderer::SectorScanFlags scanSectorListFlags = {
+	CRenderer::SCAN_STREAM_VISIBILITY,	// stream
+	true,					// bTreatGlassAsOffscreen
+	false,					// bMarkPriority
+	true,					// bHoldBackRequests
+};
+static const CRenderer::SectorScanFlags scanPriorityFlags = {
+	CRenderer::SCAN_STREAM_VISIBILITY,	// stream
+	true,					// bTreatGlassAsOffscreen
+	true,					// bMarkPriority
+	false,					// bHoldBackRequests
+};
+#ifdef GTA_TRAIN
+static const CRenderer::SectorScanFlags scanSubwayFlags = {
+	CRenderer::SCAN_STREAM_NONE,		// stream
+	false,					// bTreatGlassAsOffscreen
+	false,					// bMarkPriority
+	false,					// bHoldBackRequests
+};
+#endif
+static const CRenderer::SectorScanFlags scanRequestModelsFlags = {
+	CRenderer::SCAN_STREAM_FRUSTUM,		// stream
+	false,					// bTreatGlassAsOffscreen
+	false,					// bMarkPriority
+	false,					// bHoldBackRequests
+};
+
 void
-CRenderer::ScanSectorList(CPtrList *lists)
+CRenderer::ScanSectorList(CPtrList *lists, const SectorScanFlags &flags)
 {
 	CPtrNode *node;
 	CPtrList *list;
@@ -1502,6 +1493,15 @@ CRenderer::ScanSectorList(CPtrList *lists)
 			if(ent->m_scanCode == CWorld::GetCurrentScanCode())
 				continue;	// already seen
 			ent->m_scanCode = CWorld::GetCurrentScanCode();
+
+			// the frustum scan streams every model that needs it and
+			// leaves the entity state alone
+			if(flags.stream == SCAN_STREAM_FRUSTUM){
+				if(ShouldModelBeStreamed(ent, ms_vecCameraPosition))
+					CStreaming::RequestModel(ent->GetModelIndex(), 0);
+				continue;
+			}
+
 			ent->bOffscreen = false;
 
 			switch(SetupEntityVisibility(ent)){
@@ -1509,7 +1509,7 @@ CRenderer::ScanSectorList(CPtrList *lists)
 				InsertEntityIntoList(ent);
 				break;
 			case VIS_INVISIBLE:
-				if(!IsGlass(ent->GetModelIndex()))
+				if(!flags.bTreatGlassAsOffscreen || !IsGlass(ent->GetModelIndex()))
 					break;
 				// fall through
 			case VIS_OFFSCREEN:
@@ -1522,9 +1522,13 @@ CRenderer::ScanSectorList(CPtrList *lists)
 					ms_aInVisibleEntityPtrs[ms_nNoOfInVisibleEntities++] = ent;
 				break;
 			case VIS_STREAMME:
-				if(!CStreaming::ms_disableStreaming)
-					if(!m_loadingPriority || CStreaming::ms_numModelsRequested < 10)
-						CStreaming::RequestModel(ent->GetModelIndex(), 0);
+				if(flags.stream != SCAN_STREAM_VISIBILITY || CStreaming::ms_disableStreaming)
+					break;
+				if(flags.bHoldBackRequests && m_loadingPriority && CStreaming::ms_numModelsRequested >= 10)
+					break;
+				CStreaming::RequestModel(ent->GetModelIndex(), 0);
+				if(flags.bMarkPriority && CStreaming::ms_aInfoForModel[ent->GetModelIndex()].m_loadState != STREAMSTATE_LOADED)
+					m_loadingPriority = true;
 				break;
 			}
 		}
@@ -1532,108 +1536,29 @@ CRenderer::ScanSectorList(CPtrList *lists)
 }
 
 void
+CRenderer::ScanSectorList(CPtrList *lists)
+{
+	ScanSectorList(lists, scanSectorListFlags);
+}
+
+void
 CRenderer::ScanSectorList_Priority(CPtrList *lists)
 {
-	CPtrNode *node;
-	CPtrList *list;
-	CEntity *ent;
-	int i;
-	float dx, dy;
-
-	for(i = 0; i < NUMSECTORENTITYLISTS; i++){
-		list = &lists[i];
-		for(node = list->first; node; node = node->next){
-			ent = (CEntity*)node->item;
-			if(ent->m_scanCode == CWorld::GetCurrentScanCode())
-				continue;	// already seen
-			ent->m_scanCode = CWorld::GetCurrentScanCode();
-			ent->bOffscreen = false;
-
-			switch(SetupEntityVisibility(ent)){
-			case VIS_VISIBLE:
-				InsertEntityIntoList(ent);
-				break;
-			case VIS_INVISIBLE:
-				if(!IsGlass(ent->GetModelIndex()))
-					break;
-				// fall through
-			case VIS_OFFSCREEN:
-				ent->bOffscreen = true;
-				dx = ms_vecCameraPosition.x - ent->GetPosition().x;
-				dy = ms_vecCameraPosition.y - ent->GetPosition().y;
-				if(dx > -30.0f && dx < 30.0f &&
-				   dy > -30.0f && dy < 30.0f &&
-				   ms_nNoOfInVisibleEntities < NUMINVISIBLEENTITIES - 1)
-					ms_aInVisibleEntityPtrs[ms_nNoOfInVisibleEntities++] = ent;
-				break;
-			case VIS_STREAMME:
-				if(!CStreaming::ms_disableStreaming){
-					CStreaming::RequestModel(ent->GetModelIndex(), 0);
-					if(CStreaming::ms_aInfoForModel[ent->GetModelIndex()].m_loadState != STREAMSTATE_LOADED)
-						m_loadingPriority = true;
-				}
-				break;
-			}
-		}
-	}
+	ScanSectorList(lists, scanPriorityFlags);
 }
 
 #ifdef GTA_TRAIN
 void
 CRenderer::ScanSectorList_Subway(CPtrList *lists)
 {
-	CPtrNode *node;
-	CPtrList *list;
-	CEntity *ent;
-	int i;
-	float dx, dy;
-
-	for(i = 0; i < NUMSECTORENTITYLISTS; i++){
-		list = &lists[i];
-		for(node = list->first; node; node = node->next){
-			ent = (CEntity*)node->item;
-			if(ent->m_scanCode == CWorld::GetCurrentScanCode())
-				continue;	// already seen
-			ent->m_scanCode = CWorld::GetCurrentScanCode();
-			ent->bOffscreen = false;
-			switch(SetupEntityVisibility(ent)){
-			case VIS_VISIBLE:
-				InsertEntityIntoList(ent);
-				break;
-			case VIS_OFFSCREEN:
-				ent->bOffscreen = true;
-				dx = ms_vecCameraPosition.x - ent->GetPosition().x;
-				dy = ms_vecCameraPosition.y - ent->GetPosition().y;
-				if(dx > -30.0f && dx < 30.0f &&
-				   dy > -30.0f && dy < 30.0f &&
-				   ms_nNoOfInVisibleEntities < NUMINVISIBLEENTITIES - 1)
-					ms_aInVisibleEntityPtrs[ms_nNoOfInVisibleEntities++] = ent;
-				break;
-			}
-		}
-	}
+	ScanSectorList(lists, scanSubwayFlags);
 }
 #endif
 
 void
 CRenderer::ScanSectorList_RequestModels(CPtrList *lists)
 {
-	CPtrNode *node;
-	CPtrList *list;
-	CEntity *ent;
-	int i;
-
-	for(i = 0; i < NUMSECTORENTITYLISTS; i++){
-		list = &lists[i];
-		for(node = list->first; node; node = node->next){
-			ent = (CEntity*)node->item;
-			if(ent->m_scanCode == CWorld::GetCurrentScanCode())
-				continue;	// already seen
-			ent->m_scanCode = CWorld::GetCurrentScanCode();
-			if(ShouldModelBeStreamed(ent, ms_vecCameraPosition))
-				CStreaming::RequestModel(ent->GetModelIndex(), 0);
-		}
-	}
+	ScanSectorList(lists, scanRequestModelsFlags);
 }
 
 // Put big buildings in front

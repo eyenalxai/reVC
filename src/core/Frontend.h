@@ -518,6 +518,10 @@ struct CMenuScreenCustom
 	} m_aEntries[NUM_MENUROWS];
 };
 extern CMenuScreenCustom aScreens[MENUPAGES];
+#ifdef GAMEPAD_MENU
+// MenuScreensCustom.cpp: keeps the stored controller type inside the list
+void ClampControllerType(void);
+#endif
 #endif
 
 struct MenuTrapezoid

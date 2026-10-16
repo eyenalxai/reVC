@@ -19,12 +19,16 @@ public:
 	bool bObjectUsesCollision;
 	bool bObjectRenderDamaged;
 	bool bObjectExplosionProof;
+	// A felled plant stays a plant that fell: the object takes the fall physics
+	// again, so it does not come back standing and infinite-mass.
+	bool bObjectFelled;
 
 	CDummyObject(void) {
 		bConvertedFromObject = false;
 		bObjectUsesCollision = false;
 		bObjectRenderDamaged = false;
 		bObjectExplosionProof = false;
+		bObjectFelled = false;
 	}
 	CDummyObject(CObject *obj);
 };

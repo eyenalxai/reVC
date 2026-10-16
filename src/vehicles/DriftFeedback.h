@@ -28,8 +28,9 @@ class CAutomobile;
 class CDriftFeedback
 {
 public:
-	// Steps the smoothed strength. The player's car and the chase camera
-	// both call in; only the first call in a frame does the work.
+	// Steps the smoothed strength once a frame. CGame::Process calls it after
+	// the physics step and before the camera reads the strength (see Game.cpp);
+	// the car's skid marks, smoke and lean read it later in the same frame.
 	static void Update(CAutomobile *car, float timeStep);
 
 	// Signed strength of the drift, 0 while the feature is off.

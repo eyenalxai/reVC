@@ -20,4 +20,5 @@ CDummyObject::CDummyObject(CObject *obj)
 	bObjectUsesCollision = obj->bUsesCollision;
 	bObjectRenderDamaged = obj->bRenderDamaged;
 	bObjectExplosionProof = obj->bExplosionProof;
+	bObjectFelled = obj->bIsFelled;
 }
