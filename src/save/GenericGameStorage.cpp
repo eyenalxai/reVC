@@ -97,6 +97,8 @@ do {\
 	if (!ReadDataFromFile(file, (uint8 *) &size, 4))\
 		return false;\
 	size = align4bytes(size);\
+	if (size > sizeof(work_buff))\
+		size = sizeof(work_buff);\
 	if (!ReadDataFromFile(file, work_buff, size))\
 		return false;\
 	buf = work_buff;\

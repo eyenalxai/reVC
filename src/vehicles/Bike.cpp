@@ -42,7 +42,7 @@ const uint32 CBike::nSaveStructSize =
 #ifdef COMPATIBLE_SAVES
 	1260;
 #else
-	sizeof(CBoat);
+	sizeof(CBike);
 #endif
 
 
