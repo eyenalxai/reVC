@@ -71,11 +71,11 @@ static inline float TrafficRingsMax(float a, float b) { return a > b ? a : b; }
 #define RING_CAR_CAMERA_MIN		82.5f	/* a fresh on-screen spawn this close to the camera is deleted */
 #define RING_MAX_FOV_FACTOR		2.2f	/* the camera caps the FOV factor here (Camera.cpp) */
 
-/* The LOD distance of the stock ring: 300 m times the draw distance the game
- * ships with (DrawDistance.h, Renderer.cpp ms_lodDistScale). The ring request
- * is the live LOD distance over this, so the default draw distance gives the
- * stock ring and a higher one grows it. */
-#define RING_LOD_REFERENCE		(300.0f * DRAWDIST_DEFAULT)
+/* The LOD distance of the stock ring: the LOD distance base times the draw
+ * distance the game ships with (DrawDistance.h; the renderer starts at it).
+ * The ring request is the live LOD distance over this, so the default draw
+ * distance gives the stock ring and a higher one grows it. */
+#define RING_LOD_REFERENCE		(LOD_DISTANCE_BASE * DRAWDIST_DEFAULT)
 
 /* The boat. A water path node sits off the car path, so the water ring is 1.5
  * times the car ring. A vehicle with the extended range (a boat, or a set piece
@@ -240,13 +240,17 @@ ComputeTrafficRings(const STrafficRingInput &in)
 /*
  * The mapping of the old spawn distance key (VICE-125). The old slider v scaled
  * the ring by v; the draw distance d scales it by d / the default, so the draw
- * distance DRAWDIST_DEFAULT x v gives the same ring at every FOV factor
- * (the factor cancels between the two).
+ * distance DRAWDIST_DEFAULT x v asks for the old ring at every FOV factor (the
+ * factor cancels between the two). The visible cap of the table still bounds
+ * the ring wherever it did before, so where the cap binds the mapped draw
+ * distance gives the cap, not the old request.
  *
  * LegacyRangeDrawDistance returns the draw distance an old file maps to, or a
  * negative number when the file's own draw distance stands: the map applies to
  * a file that raised the spawn distance and never moved the draw distance, so a
- * file that set the draw distance keeps it.
+ * file that set the draw distance keeps it. The caller removes the old key from
+ * the loaded structure; the file itself loses the key with the next save, so
+ * until that save a later load maps the key again.
  */
 #define RING_LEGACY_RANGE_MAX		4.0f	/* the old slider's top */
 

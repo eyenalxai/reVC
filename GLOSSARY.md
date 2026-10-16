@@ -212,17 +212,27 @@ player: pedestrians were created at 100-130 m and removed at 131/145 m, cars
 spawned between 120 m and 250 m and despawned at 280 m, all times the value.
 VICE-125 removed the slider, because the range is the draw distance now. An old
 file that raised the value and never moved the draw distance is loaded with the
-draw distance that gives the same ring (`1.2 x` the old value); the key is
-dropped with the next save.
+draw distance that asks for the same ring (`1.2 x` the old value, capped by the
+visible range like every ring); the file loses the old key with the next save,
+so until that save a later load maps it again.
 
 ## Draw distance (range control)
 
 The Display settings slider `DrawDistance`, the one control of the range since
 VICE-125. It scales the LOD multiplier the renderer draws the world with
 (`CRenderer::ms_lodDistScale`, 0.925 to 16.0, 1.2 at stock), and the traffic
-ring follows it: the ring scale is the LOD distance over its stock value, 300 x
-1.2. The ring of a lowered draw distance stops at the stock ring, so the lower
-part of the slider moves the world only.
+ring follows it: the ring scale is the LOD distance over its stock value. The
+ring of a lowered draw distance stops at the stock ring, so the lower part of
+the slider moves the world only. Its bounds and the LOD distance base live in
+`src/core/DrawDistance.h`.
+
+## LOD distance
+
+The distance the world is drawn at: the LOD distance base (300 m) times the LOD
+multiplier, which is the FOV factor times the draw distance (`Camera.cpp` sets
+the multiplier; `Renderer.h` LOD_DISTANCE and the ring both read the base). The
+visible range takes the smaller of the LOD distance and the weather far clip,
+and the ring request is the LOD distance over its stock value (300 x 1.2).
 
 ## Traffic ring
 
@@ -235,16 +245,15 @@ frame.
 ## Visible range
 
 The distance the traffic ring may reach: the smaller of the LOD distance and
-the weather far clip of the camera. The LOD distance is 300 times the LOD
-multiplier (the draw distance times the FOV factor); the far clip is weather
-data (SUNNY 2000 m, FOGGY 150 m).
+the weather far clip of the camera. The far clip is weather data (SUNNY 2000 m,
+FOGGY 150 m).
 
 ## Ring scale
 
 The one number that scales the traffic ring table: the LOD distance over its
-stock value (300 x 1.2, the shipped draw distance), capped so the on-screen car
-ring stays inside the visible range. 1.0 at the stock settings (the default draw
-distance, FOV 70).
+stock value, capped so the on-screen car ring stays inside the visible range.
+1.0 at the stock settings (the default draw distance 1.2, FOV 70), where the
+stock LOD distance is 360 m (300 x 1.2).
 
 ## Despawn reserve
 

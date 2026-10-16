@@ -25,7 +25,7 @@
  *
  * Build and run (from the repository root):
  *
- *	c++ -std=c++17 -I src -I src/core -I utils/traffic-rings -O2 -o /tmp/one-range-evidence utils/one-range-control/evidence.cpp
+ *	c++ -std=c++17 -I src -I src/core -I src/extras -I utils/traffic-rings -O2 -o /tmp/one-range-evidence utils/one-range-control/evidence.cpp
  *	/tmp/one-range-evidence
  *
  * The program writes its temporary ini files under /tmp (never into a game
@@ -83,7 +83,7 @@ static void Fail(const char *what)
 
 static float LodDistance(float fovFactor, float drawDistance)
 {
-	return 300.0f * fovFactor * drawDistance;
+	return LOD_DISTANCE_BASE * fovFactor * drawDistance;
 }
 
 static STrafficRings RingsAt(float drawDistance, float fovFactor, float farClip)
@@ -178,6 +178,8 @@ struct SKeyRow
 	std::string section;
 	std::string key;
 	std::string type;	/* SETTINGS_XXX for the registry, slider/dynamic/select for a CFO row */
+	bool bounded;		/* the registry row names bounds instead of SETTINGS_NO_BOUND */
+	double min, max;	/* and they are these (the literals of the row, or the draw distance macros) */
 };
 
 /* The quoted strings of a line, in order. */
@@ -231,6 +233,28 @@ static bool ReadRegistryPlan(const char *path, std::vector<SKeyRow> &out)
 		sscanf(line.c_str() + type, "%31s", name);
 		row.type = name;
 		row.type = row.type.substr(0, row.type.find_first_of(",) "));
+		row.bounded = line.find("SETTINGS_NO_BOUND") == std::string::npos;
+		row.min = 0.0;
+		row.max = 0.0;
+		if (row.bounded) {
+			/* the two tokens after the type: a literal or one of the draw
+			 * distance macros (the only named bounds in the table) */
+			std::string rest = line.substr(line.find(",", type) + 1);
+			double vals[2] = { 0.0, 0.0 };
+			for (int v = 0; v < 2; v++) {
+				size_t comma = rest.find(',');
+				std::string token = rest.substr(0, comma);
+				rest = (comma == std::string::npos) ? "" : rest.substr(comma + 1);
+				if (token.find("DRAWDIST_MIN") != std::string::npos)
+					vals[v] = DRAWDIST_MIN;
+				else if (token.find("DRAWDIST_MAX") != std::string::npos)
+					vals[v] = DRAWDIST_MAX;
+				else
+					vals[v] = strtod(token.c_str(), NULL);
+			}
+			row.min = vals[0];
+			row.max = vals[1];
+		}
 		out.push_back(row);
 	}
 	return true;
@@ -261,6 +285,11 @@ static bool ReadCfoPlan(const char *path, std::vector<SKeyRow> &out)
 			row.type = "dynamic";
 		else
 			row.type = "select";
+		/* Their bounds are the slider arguments and the engine clamps the
+		 * density values after the read (re3.cpp); this model carries the
+		 * values straight through, so they stay unbounded here. */
+		row.bounded = false;
+		row.min = row.max = 0.0;
 		out.push_back(row);
 	}
 	return true;
@@ -300,14 +329,21 @@ static std::string RoundTripValue(const SKeyRow &row, const std::string &text)
 	if (IsStringRow(row.type))
 		return text;
 	if (IsFloatRow(row.type)) {
-		float v = strtof(text.c_str(), NULL);
-		sprintf(out, "%f", (double)v);
+		double v = strtof(text.c_str(), NULL);
+		/* SettingsLoadValue clamps a bounded row as it parses it */
+		if (row.bounded)
+			v = v < row.min ? row.min : (v > row.max ? row.max : v);
+		sprintf(out, "%f", v);
 	} else if (row.type == "SETTINGS_UINT32" || row.type == "SETTINGS_UINT8" || row.type == "SETTINGS_BOOL" || row.type == "dynamic") {
-		unsigned int v = (unsigned int)strtoul(text.c_str(), NULL, 0);
-		sprintf(out, "%u", v);
+		double v = (unsigned int)strtoul(text.c_str(), NULL, 0);
+		if (row.bounded)
+			v = v < row.min ? row.min : (v > row.max ? row.max : v);
+		sprintf(out, "%u", (unsigned int)v);
 	} else {
-		long v = strtol(text.c_str(), NULL, 0);
-		sprintf(out, "%ld", v);
+		double v = (long)strtol(text.c_str(), NULL, 0);
+		if (row.bounded)
+			v = v < row.min ? row.min : (v > row.max ? row.max : v);
+		sprintf(out, "%ld", (long)v);
 	}
 	return out;
 }
@@ -432,6 +468,9 @@ static void RoundTrip(float legacyValue, float fileDrawDistance, const std::vect
 		printf("  %s\n", name);
 		printf("    the old key: SpawnDistance %.1f, the file's draw distance %.1f\n",
 			(double)legacyValue, (double)fileDrawDistance);
+		if (fileDrawDistance < DRAWDIST_MIN || fileDrawDistance > DRAWDIST_MAX)
+			printf("    the registry clamp: %.1f -> %s (the slider's range)\n",
+				(double)fileDrawDistance, back["Display"].get("DrawDistance").c_str());
 		printf("    saved: draw distance %s, the spawn distance key %s, the user key %s\n",
 			back["Display"].get("DrawDistance").c_str(),
 			back["Display"].has("SpawnDistance") ? "STILL WRITTEN" : "gone",
@@ -458,8 +497,22 @@ static void SectionRoundTrip(void)
 	DumpPlan("the settings registry", registry, "src/core/Settings.cpp");
 	DumpPlan("the custom frontend options", cfo, "src/core/MenuScreensCustom.cpp");
 
-	if (!HasKey(registry, "Display", "DrawDistance"))
+	if (!HasKey(registry, "Display", "DrawDistance")) {
 		Fail("the registry no longer holds Display/DrawDistance");
+	} else {
+		/* the row's bounds are the ones the clamp uses; the model above read
+		 * them out of the row, and here they are checked against the header */
+		for (size_t i = 0; i < registry.size(); i++) {
+			if (registry[i].section == "Display" && registry[i].key == "DrawDistance") {
+				printf("  the registry clamps Display/DrawDistance to its own bounds: %.3f .. %.0f\n",
+					registry[i].min, registry[i].max);
+				if (!registry[i].bounded ||
+					fabs(registry[i].min - DRAWDIST_MIN) > 0.0005 ||
+					fabs(registry[i].max - DRAWDIST_MAX) > 0.0005)
+					Fail("the draw distance row's bounds are not DRAWDIST_MIN .. DRAWDIST_MAX");
+			}
+		}
+	}
 	if (HasKey(registry, "Display", "SpawnDistance") || HasKey(cfo, "Display", "SpawnDistance"))
 		Fail("the removed spawn distance key is still in the plan");
 	else
@@ -491,6 +544,10 @@ static void SectionRoundTrip(void)
 		"an old file with the spawn distance at 4.0 and the draw distance untouched");
 	RoundTrip(4.0f, 8.0f, registry, cfo, "/tmp/one-range-control-old-set.ini",
 		"an old file with the spawn distance at 4.0 and its own draw distance 8.0");
+	RoundTrip(4.0f, 99.0f, registry, cfo, "/tmp/one-range-control-old-high.ini",
+		"an old file with a stale draw distance of 99.0 (above the slider top)");
+	RoundTrip(4.0f, 0.5f, registry, cfo, "/tmp/one-range-control-old-low.ini",
+		"an old file with a stale draw distance of 0.5 (below the slider bottom)");
 
 	printf("  the legacy map (re3.cpp, LegacyRangeDrawDistance):\n");
 	for (int i = 1; i <= 4; i++) {

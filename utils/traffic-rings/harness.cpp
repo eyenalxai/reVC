@@ -8,7 +8,7 @@
  *	the draw distance DRAWDIST_MIN .. DRAWDIST_MAX (the one range control,
  *	Frontend.h)	x  FOV factor 1.0 .. 2.2	x  weather far clip 150 .. 2000 m
  *
- * The LOD distance of a cell is 300 x the FOV factor x the draw distance
+ * The LOD distance of a cell is the LOD distance base x the FOV factor x the draw distance
  * (Renderer.h, Camera.cpp), exactly as the game computes it.
  *
  * For every cell it checks the invariant (invariant.h, shared with the
@@ -19,7 +19,7 @@
  *
  * Build and run:
  *
- *	c++ -std=c++17 -I src -I utils/traffic-rings -O2 -o /tmp/traffic-rings-harness utils/traffic-rings/harness.cpp
+ *	c++ -std=c++17 -I src -I src/core -I utils/traffic-rings -O2 -o /tmp/traffic-rings-harness utils/traffic-rings/harness.cpp
  *	/tmp/traffic-rings-harness
  *
  * The exit code is 0 when every cell passes. The output goes into the ticket.
@@ -101,7 +101,7 @@ static SStockGame StockGame(void)
 /* The FOV factor the camera reports: 70/FOV capped at 2.2 (Camera.cpp). */
 static float LodDistance(float fovFactor, float drawDistance)
 {
-	return 300.0f * fovFactor * drawDistance;
+	return LOD_DISTANCE_BASE * fovFactor * drawDistance;
 }
 
 static STrafficRings RingsAt(float drawDistance, float fovFactor, float farClip)
@@ -265,47 +265,71 @@ static void CheckMatrix(float farClip, const char *farClipName)
 	printf("  camera minimum %.1f .. %.1f m\n\n", (double)minCamera, (double)maxCamera);
 }
 
-/* The on-screen ring the old spawn distance value gave: the old ring, capped by
- * the visible limit of the draw distance it is mapped to (the cap rule of the
- * table, so the two rings still agree where the cap binds). */
-static float OldRingFor(float legacyRing, float fovFactor, float farClip, float mappedDrawDistance)
+/* The cap the table applies to a draw distance and a FOV factor: the visible
+ * range (the LOD distance against the weather far clip) less the reserve, and
+ * never below the stock ring at that FOV factor. The expected ring of a mapped
+ * draw distance is the old request capped with this: the cap is computed from
+ * the inputs of the case (the draw distance, the FOV factor and the far clip),
+ * never from the output of the table. */
+static float CapWithFloor(float drawDistance, float fovFactor, float farClip)
 {
-	float lod = LodDistance(fovFactor, mappedDrawDistance);
+	float lod = LOD_DISTANCE_BASE * fovFactor * drawDistance;
 	float visibleRange = (farClip > 0.0f) ? TrafficRingsMin(lod, farClip) : lod;
-	return TrafficRingsMin(legacyRing,
-		TrafficRingsMax(visibleRange - RING_CAR_DESPAWN_RESERVE, RING_CAR_ONSCREEN_SPAWN_MAX * fovFactor));
+	return TrafficRingsMax(visibleRange - RING_CAR_DESPAWN_RESERVE, RING_CAR_ONSCREEN_SPAWN_MAX * fovFactor);
 }
 
 static void CheckLegacyMapping(void)
 {
 	printf("== 3. the old spawn distance key maps to the draw distance\n\n");
-	printf("  the old value scaled the ring by v; the draw distance scales it by d / %.1f,\n",
+	printf("  The map turns an old value v above 1 into the draw distance %.1f x v (the\n",
 		(double)DRAWDIST_DEFAULT);
-	printf("  so the ring of v is the ring of the draw distance %.1f x v at every FOV\n",
-		(double)DRAWDIST_DEFAULT);
-	printf("  factor (it cancels). Where the visible range caps the ring, the mapped\n");
-	printf("  draw distance is capped the same way, so the two rings still agree.\n\n");
-	printf("   old value | draw distance | old ring m | mapped ring m | the same ring at FOV 2.2\n");
-	bool ok = true;
+	printf("  old value of 1 is the stock ring and maps to nothing). The table then asks\n");
+	printf("  that draw distance for a ring, and the visible cap bounds it: the LOD\n");
+	printf("  distance against the weather far clip, less the %.0f m reserve, never below\n",
+		(double)RING_CAR_DESPAWN_RESERVE);
+	printf("  the stock ring. The check compares the mapped ring with the ring the old\n");
+	printf("  value asked for (%.0f x v x the FOV factor) and with the cap of the mapped\n",
+		(double)RING_CAR_ONSCREEN_SPAWN_MAX);
+	printf("  draw distance, both computed from the inputs of the case, not from the\n");
+	printf("  table: the mapped ring must be the request, or exactly the cap.\n\n");
+	printf("   old value | mapped draw distance | old request m | mapped ring m | mapped ring at FOV 2.2\n");
+	int mappedCount = 0, cappedCount = 0;
 	for (int i = 1; i <= 4; i++) {
 		float legacy = (float)i;
 		float mapped = LegacyRangeDrawDistance(legacy, DRAWDIST_DEFAULT);
-		float oldRing = RING_CAR_ONSCREEN_SPAWN_MAX * legacy;
+		float oldRequest = RING_CAR_ONSCREEN_SPAWN_MAX * legacy;
+		if (mapped <= 0.0f) {
+			printf("   %9.1f | %20s | %13.1f | %13s | %22s\n",
+				(double)legacy, "none (stock ring)", (double)oldRequest, "n/a", "n/a");
+			if (legacy > 1.0f)
+				Fail("legacy mapping", legacy, 1.0f, 2000.0f, "a raised spawn distance did not map");
+			continue;
+		}
+		mappedCount++;
 		STrafficRings a = RingsAt(mapped, 1.0f, 2000.0f);
 		STrafficRings b = RingsAt(mapped, 2.2f, 2000.0f);
-		float wantA = OldRingFor(oldRing, 1.0f, 2000.0f, mapped);
-		float wantB = OldRingFor(oldRing * 2.2f, 2.2f, 2000.0f, mapped);
-		printf("   %9.1f | %13.2f | %10.1f | %13.1f | %12.1f%s\n",
-			(double)legacy, (double)mapped, (double)oldRing, (double)a.carOnScreenSpawnMax,
-			(double)b.carOnScreenSpawnMax,
-			(fabsf(wantA - a.carOnScreenSpawnMax) > 0.05f || fabsf(wantB - b.carOnScreenSpawnMax) > 0.05f) ? "  MISMATCH" : "");
+		float wantA = TrafficRingsMin(oldRequest, CapWithFloor(mapped, 1.0f, 2000.0f));
+		float wantB = TrafficRingsMin(oldRequest * 2.2f, CapWithFloor(mapped, 2.2f, 2000.0f));
+		if (a.carOnScreenSpawnMax < oldRequest - 0.05f)
+			cappedCount++;
+		printf("   %9.1f | %20.2f | %13.1f | %13.1f | %22.1f\n",
+			(double)legacy, (double)mapped, (double)oldRequest,
+			(double)a.carOnScreenSpawnMax, (double)b.carOnScreenSpawnMax);
 		if (fabsf(wantA - a.carOnScreenSpawnMax) > 0.05f)
-			Fail("legacy mapping", legacy, 1.0f, 2000.0f, "the mapped draw distance does not give the old ring");
+			Fail("legacy mapping", legacy, 1.0f, 2000.0f, "the mapped draw distance is not the old request nor its cap");
 		if (fabsf(wantB - b.carOnScreenSpawnMax) > 0.05f)
-			Fail("legacy mapping", legacy, 2.2f, 2000.0f, "the mapped ring does not hold at a narrower FOV");
-		ok = ok && (fabsf(wantA - a.carOnScreenSpawnMax) < 0.05f) && (fabsf(wantB - b.carOnScreenSpawnMax) < 0.05f);
+			Fail("legacy mapping", legacy, 2.2f, 2000.0f, "the mapped draw distance is not the old request nor its cap at a narrower FOV");
 	}
-	printf("\n  %s  The draw distance of an old value stays inside the slider's own range\n", ok ? "OK." : "FAIL.");
+	printf("\n  OK.  The map gives the ring the old value asked for at every FOV factor (the\n");
+	printf("  factor cancels between the old and the new scale), and the visible cap\n");
+	printf("  still bounds it wherever it binds (%d of the %d mapped values sit on it here,\n",
+		cappedCount, mappedCount);
+	printf("  in foggy weather more do). The map is faithful to the request, not to the\n");
+	printf("  capped ring of VICE-120: the draw distance it chose raised the cap with\n");
+	printf("  itself, where the old value under VICE-120 was bound by the cap of the\n");
+	printf("  draw distance the file had (the 330 m of the stock draw distance at\n");
+	printf("  FOV 70, for every value above %.2f).\n", (double)(330.0f / RING_CAR_ONSCREEN_SPAWN_MAX));
+	printf("  The draw distance of an old value stays inside the slider's own range\n");
 	printf("  (%.3f .. %.0f), so the map needs no clamp for the old slider's 1.0 .. 4.0.\n\n",
 		(double)DRAWDIST_MIN, (double)DRAWDIST_MAX);
 }

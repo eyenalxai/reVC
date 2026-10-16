@@ -167,12 +167,6 @@ void RestoreDefDisplay(int8 action) {
 	#ifdef FREE_CAM
 		TheCamera.bFreeCam = false;
 	#endif
-	#ifdef PED_CAR_DENSITY_SLIDERS
-		// The density values come from gta3.ini; reload them and the caps with
-		// them. The range of the ring is the draw distance (the GRAPHICS block
-		// below where it is built in, else the draw distance slider).
-		CIniFile::LoadIniFile();
-	#endif
 	#ifdef GRAPHICS_MENU_OPTIONS // otherwise Frontend will handle those
 		FrontEndMenuManager.m_PrefsBrightness = 256;
 		FrontEndMenuManager.m_PrefsLOD = DRAWDIST_DEFAULT;
@@ -182,6 +176,12 @@ void RestoreDefDisplay(int8 action) {
 		FrontEndMenuManager.m_PrefsRadarMode = 0;
 		FrontEndMenuManager.m_PrefsShowHud = true;
 		FrontEndMenuManager.SaveSettings();
+	#endif
+	#ifdef PED_CAR_DENSITY_SLIDERS
+		// The density values come from gta3.ini. The draw distance above is the
+		// ring's scale, so reload the caps after the reset, not before: a cap
+		// must follow the control it is computed from.
+		CIniFile::LoadIniFile();
 	#endif
 }
 

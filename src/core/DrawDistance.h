@@ -19,4 +19,12 @@
 #define DRAWDIST_DEFAULT 1.2f
 #define DRAWDIST_RANGE (DRAWDIST_MAX - DRAWDIST_MIN)
 
+/*
+ * The base of the LOD distance: the renderer draws the world to
+ * LOD_DISTANCE_BASE x the LOD multiplier (Renderer.h LOD_DISTANCE, Camera.cpp),
+ * and the ring request is the same product over its stock value (TrafficRings.h
+ * RING_LOD_REFERENCE). Both read the base here, so the two cannot drift.
+ */
+#define LOD_DISTANCE_BASE 300.0f
+
 #endif // __GTA_DRAWDISTANCE_H__

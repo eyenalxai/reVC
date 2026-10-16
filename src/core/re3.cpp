@@ -594,8 +594,9 @@ bool LoadINISettings()
 	// The spawn distance slider is gone (VICE-125): the one range control is
 	// the draw distance. An old file that raised the spawn distance and never
 	// moved the draw distance maps onto the draw distance that gives the same
-	// ring; a file that set the draw distance keeps it. The key goes away with
-	// the next save, so this runs once.
+	// ring; a file that set the draw distance keeps it. The key is removed from
+	// the loaded structure, so the next save drops it from the file; until that
+	// save (an exit without one, for example), a later load maps it again.
 	float legacyRange;
 	if (ReadIniIfExists("Display", "SpawnDistance", &legacyRange)) {
 		float mapped = LegacyRangeDrawDistance(legacyRange, FrontEndMenuManager.m_PrefsLOD);
