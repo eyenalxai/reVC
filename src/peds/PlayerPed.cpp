@@ -28,6 +28,74 @@
 
 #define PAD_MOVE_TO_GAME_WORLD_MOVE 60.0f
 
+// The player's movement tuning. m_vecMoveSpeed is in engine velocity units,
+// one unit per 1/50 second, so one engine unit is 50 units per second; the
+// accelerations and the friction below are 20 and 4 units per second squared.
+// The ground turns the direction almost as fast as the body turns toward it, so
+// the legs stay with the movement; the air steers with a small authority.
+#define PLAYER_GROUND_ACCEL		(20.0f / 50.0f)
+#define PLAYER_GROUND_FRICTION		(20.0f / 50.0f)
+#define PLAYER_GROUND_TURN_RATE		12.0f	// radians per second
+#define PLAYER_AIR_ACCEL		(4.0f / 50.0f)
+#define PLAYER_AIR_TURN_RATE		1.6f	// radians per second
+
+// The measured root-motion speeds of the player's walk, run and sprint
+// animations in units per second (see the movement spec), in engine units.
+#define PLAYER_WALK_SPEED		(0.786f / 50.0f)
+#define PLAYER_RUN_SPEED		(6.439f / 50.0f)
+#define PLAYER_SPRINT_SPEED		(14.668f / 50.0f)
+
+// One row per ePlayerMovementState. The slide state will add its own row: a
+// low friction and a high turn rate.
+struct tPlayerMovementState
+{
+	float accel;		// engine units per second squared
+	float friction;		// engine units per second squared
+	float turnRate;		// radians per second, the air state steers with it
+};
+
+static const tPlayerMovementState playerMovementStates[PLAYERMOVE_NUMSTATES] = {
+	{ PLAYER_GROUND_ACCEL, PLAYER_GROUND_FRICTION, PLAYER_GROUND_TURN_RATE },	// PLAYERMOVE_GROUND
+	{ PLAYER_AIR_ACCEL, 0.0f, PLAYER_AIR_TURN_RATE },	// PLAYERMOVE_AIR
+};
+
+// The speed of the walk/run blend for a m_fMoveSpeed value, in engine units
+static float
+MoveSpeedToReferenceSpeed(float moveSpeed)
+{
+	if (moveSpeed < 1.0f)
+		return PLAYER_WALK_SPEED;
+	if (moveSpeed < 2.0f)
+		return PLAYER_WALK_SPEED + (moveSpeed - 1.0f) * (PLAYER_RUN_SPEED - PLAYER_WALK_SPEED);
+	return PLAYER_RUN_SPEED;
+}
+
+// Move a velocity toward a target, at most maxDelta units per second
+static CVector2D
+MoveVelocityTowards(const CVector2D &velocity, const CVector2D &target, float maxDelta)
+{
+	CVector2D change = target - velocity;
+	float magnitude = change.Magnitude();
+	if (magnitude <= maxDelta)
+		return target;
+	return velocity + change * (maxDelta / magnitude);
+}
+
+// Turn a velocity toward a direction without changing its speed
+static CVector2D
+SteerVelocityTowards(const CVector2D &velocity, const CVector2D &target, float maxTurn)
+{
+	float angle = Atan2(velocity.y, velocity.x);
+	float targetAngle = Atan2(target.y, target.x);
+	float turn = CGeneral::LimitRadianAngle(targetAngle - angle);
+	if (turn > maxTurn)
+		turn = maxTurn;
+	else if (turn < -maxTurn)
+		turn = -maxTurn;
+	float newAngle = angle + turn;
+	return CVector2D(Cos(newAngle), Sin(newAngle)) * velocity.Magnitude();
+}
+
 #ifdef FIRST_PERSON
 // The first person aim pose aims at a point this far along the aim ray
 #define FIRST_PERSON_AIM_DISTANCE 30.0f
@@ -314,6 +382,8 @@ CPlayerPed::SetInitialState(void)
 	m_bCanBeDamaged = true;
 	m_pedStats->m_temper = 50;
 	m_fWalkAngle = 0.0f;
+	m_fMoveHeading = 0.0f;
+	m_nMovementState = PLAYERMOVE_GROUND;
 	if (m_attachedTo && !bUsesCollision)
 		bUsesCollision = true;
 
@@ -533,6 +603,18 @@ CPlayerPed::SetRealMoveAnim(void)
 			}
 		}
 	}
+	// Match the animation playback to the real speed the controller drives the
+	// ped at, so the legs do not slide while the speed changes
+	float animSpeed = 1.0f;
+	if (!m_bAdrenalineActive && bIsStanding) {
+		float referenceSpeed = GetMoveAnimReferenceSpeed();
+		if (referenceSpeed > 0.0f) {
+			CVector2D realVelocity = CVector2D(m_vecMoveSpeed);
+			if (m_pCurrentPhysSurface)
+				realVelocity -= CVector2D(m_pCurrentPhysSurface->GetSpeed(m_vecOffsetFromPhysSurface));
+			animSpeed = Clamp(realVelocity.Magnitude() / referenceSpeed, 0.4f, 2.0f);
+		}
+	}
 	if (m_bAdrenalineActive) {
 		if (CTimer::GetTimeInMilliseconds() > m_nAdrenalineTime) {
 			m_bAdrenalineActive = false;
@@ -556,11 +638,17 @@ CPlayerPed::SetRealMoveAnim(void)
 			if (curSprintAssoc)
 				curSprintAssoc->speed = 2.0f;
 		}
-	} else if (curSprintAssoc) {
-		if (TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_FIXED) {
-			curSprintAssoc->speed = 0.7f;
-		} else
-			curSprintAssoc->speed = 1.0f;
+	} else {
+		if (curWalkAssoc)
+			curWalkAssoc->speed = animSpeed;
+		if (curRunAssoc)
+			curRunAssoc->speed = animSpeed;
+		if (curSprintAssoc) {
+			if (TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_FIXED) {
+				curSprintAssoc->speed = 0.7f * animSpeed;
+			} else
+				curSprintAssoc->speed = animSpeed;
+		}
 	}
 }
 
@@ -885,18 +973,9 @@ CPlayerPed::PlayerControlM16(CPad *padUsed)
 
 #ifdef FIRST_PERSON
 	if (TheCamera.Using1stPersonView() && !m_attachedTo) {
-		// Aiming down the sights: the player walks at the first person walk
-		// speed. Never sprints, and keeps the weapon aim state.
-		float leftRight = padUsed->GetPedWalkLeftRight();
-		float upDown = padUsed->GetPedWalkUpDown();
-		float padMove = CVector2D(leftRight, upDown).Magnitude();
-		float padMoveInGameUnit = padMove / PAD_MOVE_TO_GAME_WORLD_MOVE;
-		if (padMoveInGameUnit > 0.0f) {
-			m_fRotationDest = CGeneral::LimitRadianAngle(TheCamera.Orientation);
-			m_fMoveSpeed = Min(padMoveInGameUnit, 0.07f * CTimer::GetTimeStep() + m_fMoveSpeed);
-		} else {
-			m_fMoveSpeed = 0.0f;
-		}
+		// Aiming down the sights: the player keeps moving at the sight speed.
+		// Never sprints, and keeps the weapon aim state.
+		UpdatePlayerMovement(padUsed, false);
 		SetRealMoveAnim();
 	}
 #endif
@@ -934,8 +1013,11 @@ CPlayerPed::PlayerControlFighter(CPad *padUsed)
 	float upDown = padUsed->GetPedWalkUpDown();
 	float padMove = CVector2D(leftRight, upDown).Magnitude();
 
+	// The fight moves drive the ped with their own root motion, so the
+	// controller only turns the body and picks the animation blend here
+	UpdatePlayerMovement(padUsed, false);
+
 	if (padMove > 0.0f) {
-		m_fRotationDest = CGeneral::GetRadianAngleBetweenPoints(0.0f, 0.0f, -leftRight, upDown) - TheCamera.Orientation;
 		m_takeAStepAfterAttack = padMove > (2 * PAD_MOVE_TO_GAME_WORLD_MOVE);
 		if (padUsed->GetSprint() && padMove > (1 * PAD_MOVE_TO_GAME_WORLD_MOVE))
 			bIsAttacking = false;
@@ -955,30 +1037,9 @@ CPlayerPed::PlayerControlFighter(CPad *padUsed)
 void
 CPlayerPed::PlayerControl1stPersonRunAround(CPad *padUsed)
 {
-	float leftRight = padUsed->GetPedWalkLeftRight();
-	float upDown = padUsed->GetPedWalkUpDown();
-	float padMove = CVector2D(leftRight, upDown).Magnitude();
-	float padMoveInGameUnit = padMove / PAD_MOVE_TO_GAME_WORLD_MOVE;
-	if (padMoveInGameUnit > 0.0f) {
-		m_fRotationDest = CGeneral::LimitRadianAngle(TheCamera.Orientation);
-		m_fMoveSpeed = Min(padMoveInGameUnit, 0.07f * CTimer::GetTimeStep() + m_fMoveSpeed);
-	} else {
-		m_fMoveSpeed = 0.0f;
-	}
-
-	if (m_nPedState == PED_JUMP) {
-		if (bIsInTheAir) {
-			if (bUsesCollision && !bHitSteepSlope && (!bHitSomethingLastFrame || m_vecDamageNormal.z > 0.6f)
-				&& m_fDistanceTravelled < CTimer::GetTimeStepInSeconds() && m_vecMoveSpeed.MagnitudeSqr() < 0.01f) {
-
-				float angleSin = Sin(m_fRotationCur); // originally sin(DEGTORAD(RADTODEG(m_fRotationCur))) o_O
-				float angleCos = Cos(m_fRotationCur);
-				ApplyMoveForce(-angleSin * 3.0f, 3.0f * angleCos, 0.05f);
-			}
-		} else if (bIsLanding) {
-			m_fMoveSpeed = 0.0f;
-		}
-	}
+	// The body faces the camera and the pad moves it: one controller for the
+	// first person view and the mouse third person camera
+	UpdatePlayerMovement(padUsed, true);
 
 	if (m_nPedState == PED_ANSWER_MOBILE) {
 		SetRealMoveAnim();
@@ -1592,28 +1653,110 @@ CPlayerPed::MovementDisabledBecauseOfTargeting(void)
 	return m_pPointGunAt && !CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_CANAIM_WITHARM);
 }
 
-void
-CPlayerPed::PlayerControlZelda(CPad *padUsed)
+// The movement controller owns the player's horizontal velocity whenever the
+// on-foot controls are in charge. The fight state keeps its animation driven
+// steps, the free camera hands the ped back to the animations, and the script
+// driven states (car entry, get up, seek) are not player movement.
+bool
+CPlayerPed::IsMoveControllerInCharge(void)
 {
-	float smoothSprayRate = DoWeaponSmoothSpray();
-	float camOrientation = TheCamera.Orientation;
+	if (m_attachedTo || m_nPedState == PED_FIGHT)
+		return false;
+
+	if (m_nPedState != PED_JUMP) {
+		switch (m_nPedState) {
+		case PED_NONE:
+		case PED_IDLE:
+		case PED_FLEE_POS:
+		case PED_FLEE_ENTITY:
+		case PED_ATTACK:
+		case PED_AIM_GUN:
+		case PED_ANSWER_MOBILE:
+		case PED_SNIPER_MODE:
+			break;
+		default:
+			return false;
+		}
+
+		if (RpAnimBlendClumpGetFirstAssociation(GetClump(), ASSOC_BLOCK))
+			return false;
+
+		// The sight camera modes route the input to the weapon controls
+		if (TheCamera.Using1stPersonWeaponMode()) {
+			// The sniper and the laser scope are stationary
+			if (GetWeapon()->m_eWeaponType == WEAPONTYPE_SNIPERRIFLE ||
+			    GetWeapon()->m_eWeaponType == WEAPONTYPE_LASERSCOPE)
+				return false;
+#ifdef FIRST_PERSON
+			// The first person sight view keeps the player moving
+			return TheCamera.Using1stPersonView();
+#else
+			return false;
+#endif
+		}
+	}
+
+	return CanStrafeOrMouseControl();
+}
+
+// The speed the current animation state moves the ped at, in engine units. The
+// sprint animation is the fastest and only runs with a light weapon.
+float
+CPlayerPed::GetTargetMoveSpeed(bool bCanSprint) const
+{
+	if (bCanSprint && m_nMoveState == PEDMOVE_SPRINT)
+		return PLAYER_SPRINT_SPEED;
+	return MoveSpeedToReferenceSpeed(m_fMoveSpeed);
+}
+
+// The speed the current walk/run/sprint animation blend moves the ped at, in
+// engine units. SetRealMoveAnim scales the animation playback by (real speed /
+// this), so the legs do not slide while the speed changes.
+float
+CPlayerPed::GetMoveAnimReferenceSpeed(void)
+{
+	float referenceSpeed = MoveSpeedToReferenceSpeed(m_fMoveSpeed);
+	CAnimBlendAssociation *sprintAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_RUNFAST);
+	if (sprintAssoc)
+		referenceSpeed = (1.0f - sprintAssoc->blendAmount) * referenceSpeed + sprintAssoc->blendAmount * PLAYER_SPRINT_SPEED;
+	return referenceSpeed;
+}
+
+// One movement controller for the player, called by every on-foot control path
+// in place of its movement block. It owns the player's horizontal velocity
+// (m_vecMoveSpeed x/y) in both views: the camera only sets the view position
+// and the direction basis. The movement state decides the acceleration and the
+// friction, so a jump keeps the momentum and the air steering stays limited.
+void
+CPlayerPed::UpdatePlayerMovement(CPad *padUsed, bool bCanSprint)
+{
 	float leftRight = padUsed->GetPedWalkLeftRight();
 	float upDown = padUsed->GetPedWalkUpDown();
-	float padMoveInGameUnit;
+	// The smooth spray is a weapon behaviour; the fight stance has its own moves
+	float smoothSprayRate = m_nPedState == PED_FIGHT ? -1.0f : DoWeaponSmoothSpray();
 	bool smoothSprayWithoutMove = false;
 
 	if (MovementDisabledBecauseOfTargeting()) {
-		upDown = 0.0f;
 		leftRight = 0.0f;
+		upDown = 0.0f;
 	}
 
-	if (smoothSprayRate > 0.0f && upDown > 0.0f) {
+	float padMoveInGameUnit = CVector2D(leftRight, upDown).Magnitude() / PAD_MOVE_TO_GAME_WORLD_MOVE;
+
+	// The free camera cases (the first person view and the mouse third person
+	// camera) keep the body facing the camera; the classic camera turns the body
+	// toward the movement direction.
+	bool bFacingCamera = TheCamera.Cams[0].Using3rdPersonMouseCam()
+#ifdef FIRST_PERSON
+		|| TheCamera.Using1stPersonView()
+#endif
+		;
+
+	// The classic camera holds the ped in place while a smooth spray turns it
+	if (!bFacingCamera && smoothSprayRate > 0.0f && upDown > 0.0f) {
 		padMoveInGameUnit = 0.0f;
 		smoothSprayWithoutMove = true;
-	} else {
-		padMoveInGameUnit = CVector2D(leftRight, upDown).Magnitude() / PAD_MOVE_TO_GAME_WORLD_MOVE;
 	}
-
 #ifdef FREE_CAM
 	if (TheCamera.Cams[0].Using3rdPersonMouseCam() && smoothSprayRate > 0.0f) {
 		padMoveInGameUnit = 0.0f;
@@ -1621,35 +1764,100 @@ CPlayerPed::PlayerControlZelda(CPad *padUsed)
 	}
 #endif
 
-	if (padMoveInGameUnit > 0.0f || smoothSprayWithoutMove) {
+	bool bHasInput = padMoveInGameUnit > 0.0f || smoothSprayWithoutMove;
+	if (bHasInput) {
 		float padHeading = CGeneral::GetRadianAngleBetweenPoints(0.0f, 0.0f, -leftRight, upDown);
-		float neededTurn = CGeneral::LimitRadianAngle(padHeading - camOrientation);
-		if (smoothSprayRate > 0.0f) {
+		m_fMoveHeading = CGeneral::LimitRadianAngle(padHeading - TheCamera.Orientation);
+
+		if (!bFacingCamera && smoothSprayRate > 0.0f)
 			m_fRotationDest = m_fRotationCur - leftRight / 128.0f * smoothSprayRate * CTimer::GetTimeStep();
-		} else {
-			m_fRotationDest = neededTurn;
-		}
+		else if (bFacingCamera)
+			m_fRotationDest = CGeneral::LimitRadianAngle(TheCamera.Orientation);
+		else
+			m_fRotationDest = m_fMoveHeading;
 
-		float maxAcc = 0.07f * CTimer::GetTimeStep();
-		m_fMoveSpeed = Min(padMoveInGameUnit, m_fMoveSpeed + maxAcc);
+		// The walk angle picks the strafe animation groups
+		m_fWalkAngle = bFacingCamera ? padHeading : 0.0f;
 
+		m_fMoveSpeed = Min(padMoveInGameUnit, m_fMoveSpeed + 0.07f * CTimer::GetTimeStep());
 	} else {
 		m_fMoveSpeed = 0.0f;
+		m_fWalkAngle = 0.0f;
 	}
 
-	if (m_nPedState == PED_JUMP) {
-		if (bIsInTheAir) {
-			if (bUsesCollision && !bHitSteepSlope && (!bHitSomethingLastFrame || m_vecDamageNormal.z > 0.6f)
-				&& m_fDistanceTravelled < CTimer::GetTimeStepInSeconds() && m_vecMoveSpeed.MagnitudeSqr() < 0.01f) {
+	if (!IsMoveControllerInCharge())
+		return;
 
-				float angleSin = Sin(m_fRotationCur); // originally sin(DEGTORAD(RADTODEG(m_fRotationCur))) o_O
-				float angleCos = Cos(m_fRotationCur);
-				ApplyMoveForce(-angleSin * 3.0f, 3.0f * angleCos, 0.05f);
-			}
-		} else if (bIsLanding) {
-			m_fMoveSpeed = 0.0f;
+	// The ground and the air tune the acceleration and the friction; the slide
+	// state will plug in here.
+	m_nMovementState = bIsStanding ? PLAYERMOVE_GROUND : PLAYERMOVE_AIR;
+	const tPlayerMovementState &state = playerMovementStates[m_nMovementState];
+
+	// The ped's own velocity is the velocity without the surface it stands on
+	CVector2D surfaceSpeed;
+	if (m_pCurrentPhysSurface) {
+		surfaceSpeed = m_pCurrentPhysSurface->GetSpeed(m_vecOffsetFromPhysSurface);
+		if (bIsStanding) {
+			// A turning surface carries the ped around with it
+			m_fRotationCur += m_pCurrentPhysSurface->m_vecTurnSpeed.z * CTimer::GetTimeStep();
+			m_fRotationDest += m_pCurrentPhysSurface->m_vecTurnSpeed.z * CTimer::GetTimeStep();
 		}
 	}
+	CVector2D velocity = CVector2D(m_vecMoveSpeed) - surfaceSpeed;
+
+	float dt = CTimer::GetTimeStepInSeconds();
+	float ownSpeed = velocity.Magnitude();
+	// The smooth spray holds the ped in place: the facing turns but the input
+	// does not move it
+	bool bMoving = padMoveInGameUnit > 0.0f;
+	float targetSpeed = bMoving ? GetTargetMoveSpeed(bCanSprint) : 0.0f;
+	CVector2D targetVelocity = CVector2D(-Sin(m_fMoveHeading), Cos(m_fMoveHeading)) * targetSpeed;
+
+	if (m_nMovementState == PLAYERMOVE_AIR) {
+		if (bMoving) {
+			// Keep the momentum and steer toward the input
+			if (ownSpeed > 0.0f)
+				velocity = SteerVelocityTowards(velocity, targetVelocity, state.turnRate * dt);
+			if (ownSpeed < targetSpeed) {
+				// Air control speeds the ped up to the target, never past it
+				velocity = MoveVelocityTowards(velocity, targetVelocity, state.accel * dt);
+				float newSpeed = velocity.Magnitude();
+				if (newSpeed > targetSpeed)
+					velocity *= targetSpeed / newSpeed;
+			}
+		}
+	} else if (m_nSurfaceTouched == SURFACE_STEEP_CLIFF && (m_vecDamageNormal.x != 0.0f || m_vecDamageNormal.y != 0.0f)) {
+		// A steep slope pushes the ped off instead of taking the input
+		CVector2D reactionForce(m_vecDamageNormal.x, m_vecDamageNormal.y);
+		reactionForce.Normalise();
+		velocity += 0.02f * reactionForce;
+		float intoSlope = DotProduct2D(reactionForce, velocity);
+		if (intoSlope < 0.0f)
+			velocity -= intoSlope * reactionForce;
+		m_vecMoveSpeed.z = -0.001f;
+	} else if (bMoving) {
+		// The direction follows the input at the ground turn rate, so the legs
+		// stay with the movement; the speed follows the target at the
+		// acceleration or the friction.
+		if (ownSpeed > 0.0f)
+			velocity = SteerVelocityTowards(velocity, targetVelocity, state.turnRate * dt);
+		float rate = ownSpeed > targetSpeed ? state.friction : state.accel;
+		velocity = MoveVelocityTowards(velocity, targetVelocity, rate * dt);
+	} else {
+		velocity = MoveVelocityTowards(velocity, CVector2D(0.0f, 0.0f), state.friction * dt);
+	}
+
+	m_vecMoveSpeed.x = velocity.x + surfaceSpeed.x;
+	m_vecMoveSpeed.y = velocity.y + surfaceSpeed.y;
+	m_moved = velocity;
+}
+
+void
+CPlayerPed::PlayerControlZelda(CPad *padUsed)
+{
+	// The classic camera turns the body toward the movement direction; the
+	// controller owns the velocity
+	UpdatePlayerMovement(padUsed, true);
 
 	if (m_nPedState == PED_ANSWER_MOBILE) {
 		SetRealMoveAnim();

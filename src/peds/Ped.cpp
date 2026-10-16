@@ -1441,6 +1441,32 @@ CPed::CalculateNewVelocity(void)
 
 	CVector2D forward(Sin(m_fRotationCur), Cos(m_fRotationCur));
 
+	// The player's horizontal velocity comes from the movement controller
+	// (CPlayerPed::UpdatePlayerMovement), so the animation root motion is a
+	// visual only. The legs and the speed based camera follow the controller.
+	if (IsPlayer() && ((CPlayerPed*)this)->IsMoveControllerInCharge()) {
+		if (FindPlayerPed() == this) {
+			float localWalkAngle = CGeneral::LimitRadianAngle(((CPlayerPed*)this)->m_fMoveHeading - m_fRotationCur);
+
+			if (localWalkAngle < -0.5f * PI) {
+				localWalkAngle += PI;
+			} else if (localWalkAngle > 0.5f * PI) {
+				localWalkAngle -= PI;
+			}
+
+			TheCamera.Cams[TheCamera.ActiveCam].m_fPlayerVelocity = m_moved.Magnitude();
+
+			if ((TheCamera.Cams[TheCamera.ActiveCam].GetWeaponFirstPersonOn() || TheCamera.Cams[0].Using3rdPersonMouseCam()
+#ifdef FIRST_PERSON
+				|| TheCamera.Using1stPersonView()
+#endif
+				) && CanStrafeOrMouseControl())
+				OrientLegsForMovement(localWalkAngle);
+		}
+
+		return;
+	}
+
 	m_moved.x = CrossProduct2D(m_vecAnimMoveDelta, forward); // (m_vecAnimMoveDelta.x * Cos(m_fRotationCur)) + -Sin(m_fRotationCur) * m_vecAnimMoveDelta.y;
 	m_moved.y = DotProduct2D(m_vecAnimMoveDelta, forward);  // m_vecAnimMoveDelta.y* Cos(m_fRotationCur) + (m_vecAnimMoveDelta.x * Sin(m_fRotationCur));
 
@@ -1477,6 +1503,14 @@ CPed::CalculateNewVelocity(void)
 		m_moved = CVector2D(-Sin(walkAngle), Cos(walkAngle)) * pedSpeed;
 	}
 
+	OrientLegsForMovement(localWalkAngle);
+}
+
+// Rotate the upper legs toward the movement direction, so a ped that walks
+// sideways or backward keeps its legs in step with the body
+void
+CPed::OrientLegsForMovement(float localWalkAngle)
+{
 	CAnimBlendAssociation *idleAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_IDLE);
 	CAnimBlendAssociation *fightAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_FIGHT_IDLE);
 	if(!fightAssoc)
@@ -1536,6 +1570,13 @@ CPed::UpdatePosition(void)
 {
 	if (CReplay::IsPlayingBack() || !bIsStanding || m_attachedTo)
 		return;
+
+	// The movement controller owns the player's horizontal velocity and adds
+	// the speed of the surface itself (CPlayerPed::UpdatePlayerMovement)
+	if (IsPlayer() && ((CPlayerPed*)this)->IsMoveControllerInCharge()) {
+		SetHeading(m_fRotationCur);
+		return;
+	}
 
 	CVector2D velocityChange;
 
@@ -9248,8 +9289,10 @@ CPed::FinishLaunchCB(CAnimBlendAssociation *animAssoc, void *arg)
 		ped->ApplyMoveForce(0.0f, 0.0f, 8.5f);
 	else
 		ped->ApplyMoveForce(0.0f, 0.0f, 4.5f);
-	
-	if (sq(velocityFromAnim) > ped->m_vecMoveSpeed.MagnitudeSqr2D() || ped->m_pCurrentPhysSurface) {
+
+	// The player's horizontal momentum carries through the jump: the movement
+	// controller owns it (CPlayerPed::UpdatePlayerMovement)
+	if (!ped->IsPlayer() && (sq(velocityFromAnim) > ped->m_vecMoveSpeed.MagnitudeSqr2D() || ped->m_pCurrentPhysSurface)) {
 
 #ifdef FREE_CAM
 		if (TheCamera.Cams[0].Using3rdPersonMouseCam() && !CCamera::bFreeCam) {

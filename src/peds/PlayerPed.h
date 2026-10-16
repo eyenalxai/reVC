@@ -7,6 +7,16 @@ class CPad;
 class CCopPed;
 class CWanted;
 
+// The movement states of the player's controller. Each state has its own
+// acceleration and friction in playerMovementStates (PlayerPed.cpp); the
+// planned slide state will slot in here without a rewrite.
+enum ePlayerMovementState
+{
+	PLAYERMOVE_GROUND,	// the feet are on a surface
+	PLAYERMOVE_AIR,		// in the air: keep the momentum, steer a little
+	PLAYERMOVE_NUMSTATES,
+};
+
 class CPlayerPed : public CPed
 {
 public:
@@ -40,6 +50,8 @@ public:
 	int16 m_nAttackDirToCheck;
 	float m_fWalkAngle; //angle between heading and walking direction
 	float m_fFPSMoveHeading;
+	float m_fMoveHeading; // world heading of the controller's movement direction
+	uint8 m_nMovementState; // ePlayerMovementState
 	RpAtomic* m_pMinigunTopAtomic; //atomic for the spinning part of the minigun model
 	float m_fGunSpinSpeed; // for minigun
 	float m_fGunSpinAngle;
@@ -76,6 +88,10 @@ public:
 	void ProcessControl(void);
 	void ClearAdrenaline(void);
 	void UseSprintEnergy(void);
+	void UpdatePlayerMovement(CPad *padUsed, bool bCanSprint);
+	bool IsMoveControllerInCharge(void);
+	float GetTargetMoveSpeed(bool bCanSprint) const;
+	float GetMoveAnimReferenceSpeed(void);
 	class CPlayerInfo *GetPlayerInfoForThisPlayerPed();
 	void SetRealMoveAnim(void);
 	void RestoreSprintEnergy(float);

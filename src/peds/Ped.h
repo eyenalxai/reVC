@@ -709,6 +709,7 @@ public:
 	void CalculateNewOrientation(void);
 	float WorkOutHeadingForMovingFirstPerson(float);
 	void CalculateNewVelocity(void);
+	void OrientLegsForMovement(float localWalkAngle);
 	bool CanSeeEntity(CEntity*, float threshold = CAN_SEE_ENTITY_ANGLE_THRESHOLD);
 	void RestorePreviousObjective(void);
 	void SetIdle(void);
