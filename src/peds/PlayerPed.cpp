@@ -1079,6 +1079,7 @@ CPlayerPed::UpdateFirstPersonAim(CPad *padUsed)
 	if (m_bFirstPersonAimActive)
 		ClearAimFlag();
 }
+#endif
 
 // The shot of the held fire button: the stationary sights and the airborne
 // player fire straight from the hand, because neither runs the attack
