@@ -687,6 +687,7 @@ public:
 	bool OurPedCanSeeThisOne(CEntity *target, bool shootablesDoBlock = false);
 	void Avoid(void);
 	void Attack(void);
+	bool TryStartReloadAnimation(void);
 	void ClearAimFlag(void);
 	void ClearLookFlag(void);
 	void RestorePreviousState(void);

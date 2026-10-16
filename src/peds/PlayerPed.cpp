@@ -9,6 +9,7 @@
 #include "Pad.h"
 #include "Camera.h"
 #include "WeaponEffects.h"
+#include "ActiveReload.h"
 #include "ModelIndices.h"
 #include "World.h"
 #include "RpAnimBlend.h"
@@ -816,6 +817,33 @@ switchDetectDone:
 			MakeChangesForNewWeapon(m_nSelectedWepSlot);
 		}
 	}
+}
+
+// The active reload of the player: the reload key starts a reload, a later
+// press judges the timing window, and an idle player plays the reload
+// animation. The timing itself lives in src/weapons/ActiveReload.
+void
+CPlayerPed::ProcessActiveReload(CPad *padUsed)
+{
+	ActiveReload::Update();
+
+	CWeapon *weapon = GetWeapon();
+
+	if (padUsed->ReloadJustDown()) {
+		if (ActiveReload::InProgress())
+			ActiveReload::Judge(weapon);
+		else if (weapon->CanReload())
+			weapon->StartReload(this);
+	}
+
+	// Attack() starts the animation for the player who reloads in a fight;
+	// this covers the player who reloads while standing still. The helper
+	// skips a reload association that already runs. With the fast reload flag
+	// the stock code skips the animation completely, and the helper's side
+	// effects must not run every frame, so no per-frame attempt is made then.
+	if (weapon->m_eWeaponState == WEAPONSTATE_RELOADING
+		&& !CWorld::Players[CWorld::PlayerInFocus].m_bFastReload)
+		TryStartReloadAnimation();
 }
 
 #ifdef FIRST_PERSON
@@ -2017,6 +2045,7 @@ CPlayerPed::ProcessControl(void)
 	}
 	if (padUsed && IsPedShootable() && m_nPedState != PED_ANSWER_MOBILE && m_nLastPedState != PED_ANSWER_MOBILE) {
 		ProcessWeaponSwitch(padUsed);
+		ProcessActiveReload(padUsed);
 		GetWeapon()->Update(m_audioEntityId, this);
 	}
 	ProcessAnimGroups();

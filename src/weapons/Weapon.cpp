@@ -37,6 +37,7 @@
 #include "Sprite.h"
 #include "Pickups.h"
 #include "SaveBuf.h"
+#include "ActiveReload.h"
 
 float fReloadAnimSampleFraction[5] = {  0.5f,  0.7f,  0.75f,  0.75f,  0.7f };
 float fSeaSparrowAimingAngle = 10.0f;
@@ -3026,6 +3027,18 @@ CWeapon::StartReload(CEntity *shooter)
 
 	m_eWeaponState = WEAPONSTATE_RELOADING;
 	m_nTimer = CTimer::GetTimeInMilliseconds() + duration;
+
+	if (isPlayer && IsMagazineWeapon())
+		ActiveReload::Start(m_eWeaponType, duration);
+}
+
+bool
+CWeapon::CanReload(void)
+{
+	return IsMagazineWeapon()
+		&& m_nAmmoInClip < GetInfo()->m_nAmountofAmmunition
+		&& m_nAmmoTotal > 0
+		&& (m_eWeaponState == WEAPONSTATE_READY || m_eWeaponState == WEAPONSTATE_FIRING || m_eWeaponState == WEAPONSTATE_OUT_OF_AMMO);
 }
 
 void
@@ -3113,7 +3126,9 @@ CWeapon::Update(int32 audioEntity, CPed *pedToAdjustSound)
 					}
 					if (reloadAssoc->GetProgress() >= soundStart && (reloadAssoc->currentTime - reloadAssoc->timeStep) / reloadAssoc->hierarchy->totalLength < soundStart)
 						DMAudio.PlayOneShot(audioEntity, SOUND_WEAPON_RELOAD, m_eWeaponType);
-					if (CTimer::GetTimeInMilliseconds() > m_nTimer && reloadAssoc->GetProgress() < 0.9f) {
+					// A reload the player finished inside the window keeps
+					// the short timer; the animation must not stretch it.
+					if (!ActiveReload::JudgedPerfect(this) && CTimer::GetTimeInMilliseconds() > m_nTimer && reloadAssoc->GetProgress() < 0.9f) {
 						m_nTimer = CTimer::GetTimeInMilliseconds();
 					}
 				} else {

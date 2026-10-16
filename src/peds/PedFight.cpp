@@ -615,6 +615,45 @@ CPed::FinishedReloadCB(CAnimBlendAssociation *reloadAssoc, void *arg)
 	}
 }
 
+// Plays the reload animation of a ped whose weapon is reloading. The attack
+// handler breaks out of the attack for it, and the player's per-frame path
+// calls it so an idle player plays the animation too. Returns true when the
+// caller must not continue the attack.
+bool
+CPed::TryStartReloadAnimation(void)
+{
+	CWeaponInfo *ourWeapon = CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType);
+
+	if (GetWeapon()->m_eWeaponState != WEAPONSTATE_RELOADING)
+		return false;
+
+	if (GetReloadAnim(ourWeapon) == (AnimationId)0)
+		return false;
+
+	// An association that already runs must not be started twice.
+	if (RpAnimBlendClumpGetAssociation(GetClump(), GetReloadAnim(ourWeapon)))
+		return false;
+
+	if (GetCrouchReloadAnim(ourWeapon) && RpAnimBlendClumpGetAssociation(GetClump(), GetCrouchReloadAnim(ourWeapon)))
+		return false;
+
+	if (!CWorld::Players[CWorld::PlayerInFocus].m_bFastReload) {
+		CAnimBlendAssociation *newReloadAssoc = CAnimManager::BlendAnimation(
+			GetClump(), ourWeapon->m_AnimToPlay,
+			bIsDucking && GetCrouchReloadAnim(ourWeapon) ? GetCrouchReloadAnim(ourWeapon) : GetReloadAnim(ourWeapon),
+			8.0f);
+		newReloadAssoc->SetFinishCallback(FinishedReloadCB, this);
+	}
+
+	ClearLookFlag();
+	ClearAimFlag();
+	bIsAttacking = false;
+	bIsPointingGunAt = false;
+	m_shootTimer = CTimer::GetTimeInMilliseconds();
+	DMAudio.PlayOneShot(m_audioEntityId, SOUND_WEAPON_AK47_BULLET_ECHO, GetWeapon()->m_eWeaponType);
+	return true;
+}
+
 uint8
 CPed::CheckForPointBlankPeds(CPed *pedToVerify)
 {
@@ -972,24 +1011,10 @@ CPed::Attack(void)
 
 	// Anim loop end, either start the loop again or finish the attack
 	if (weaponAnimTime > animLoopEnd || !weaponAnimAssoc->IsRunning() && ourWeapon->m_eWeaponFire != WEAPON_FIRE_PROJECTILE) {
-		if (GetWeapon()->m_eWeaponState == WEAPONSTATE_RELOADING) {
-			if (GetReloadAnim(ourWeapon) && !reloadAnimAssoc) {
-				if (!CWorld::Players[CWorld::PlayerInFocus].m_bFastReload) {
-					CAnimBlendAssociation *newReloadAssoc = CAnimManager::BlendAnimation(
-						GetClump(), ourWeapon->m_AnimToPlay,
-						bIsDucking && GetCrouchReloadAnim(ourWeapon) ? GetCrouchReloadAnim(ourWeapon) : GetReloadAnim(ourWeapon),
-						8.0f);
-					newReloadAssoc->SetFinishCallback(FinishedReloadCB, this);
-				}
-				ClearLookFlag();
-				ClearAimFlag();
-				bIsAttacking = false;
-				bIsPointingGunAt = false;
-				m_shootTimer = CTimer::GetTimeInMilliseconds();
-				DMAudio.PlayOneShot(m_audioEntityId, SOUND_WEAPON_AK47_BULLET_ECHO, GetWeapon()->m_eWeaponType);
-				return;
-			}
-		}
+		// A reload takes over the attack: the ped plays the reload
+		// animation instead of another attack loop.
+		if (TryStartReloadAnimation())
+			return;
 		if (weaponAnimTime - 2.0f * weaponAnimAssoc->timeStep <= animLoopEnd
 			&& (bIsAttacking || CTimer::GetTimeInMilliseconds() < m_shootTimer)
 			&& (GetWeapon()->m_eWeaponState != WEAPONSTATE_RELOADING
