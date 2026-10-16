@@ -4637,7 +4637,7 @@ static RwObject*
 RemoveAllModelCB(RwObject *object, void *data)
 {
 	RpAtomic *atomic = (RpAtomic*)object;
-	if (CVisibilityPlugins::GetAtomicModelInfo(atomic)) {
+	if (CVisibilityPlugins::GetAtomicExt(atomic)->modelInfo) {
 		RpClumpRemoveAtomic(RpAtomicGetClump(atomic), atomic);
 		RpAtomicDestroy(atomic);
 	}
@@ -4650,8 +4650,8 @@ CPed::RemoveWeaponModel(int modelId)
 	// modelId is not used!! This function just removes the current weapon.
 	if(m_pWeaponModel){
 		if (modelId == -1
-			|| CVisibilityPlugins::GetAtomicModelInfo(m_pWeaponModel) == CModelInfo::GetModelInfo(modelId)) {
-			CVisibilityPlugins::GetAtomicModelInfo(m_pWeaponModel)->RemoveRef();
+			|| CVisibilityPlugins::GetAtomicExt(m_pWeaponModel)->modelInfo == CModelInfo::GetModelInfo(modelId)) {
+			CVisibilityPlugins::GetAtomicExt(m_pWeaponModel)->modelInfo->RemoveRef();
 			RwFrame* frm = RpAtomicGetFrame(m_pWeaponModel);
 			RpAtomicDestroy(m_pWeaponModel);
 			RwFrameDestroy(frm);

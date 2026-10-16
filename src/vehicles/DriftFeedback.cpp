@@ -10,7 +10,6 @@
 
 // One set of state is enough: only the player's car can drift.
 static float ms_fStrength;	// signed drift strength, -1..1
-static uint32 ms_nLastFrame = (uint32)-1;
 static RwMatrix ms_savedRootMatrix;
 static RwFrame *ms_pLeanedFrame;
 
@@ -19,16 +18,17 @@ static RwFrame *ms_pLeanedFrame;
 static float
 DriftFeedbackTarget(CAutomobile *car)
 {
-	if(!gDriftEnabled || car == nil)
+	if(!gDriftEnabled)
 		return 0.0f;
-	// AI cars and traffic never feed the feedback.
-	if(car->GetStatus() != STATUS_PLAYER)
+	// AI cars, traffic and every non-car vehicle never feed the feedback.
+	if(!IsDriftCar(car))
 		return 0.0f;
-	// The drift controller only keeps the slip angle fresh while it runs.
-	if(!car->m_DriftControl.IsActive())
+	// Only a running drift feeds it; otherwise the strength eases out.
+	CDriftControl::tSnapshot snap = car->m_DriftControl.GetSnapshot(car);
+	if(!snap.bActive)
 		return 0.0f;
 
-	float slip = car->m_DriftControl.m_fSlipAngle;
+	float slip = snap.fSlip;
 	float slipDeg = Abs(slip)*RADTODEG(1.0f);
 	if(slipDeg <= DRIFT_FEEDBACK_SLIP_MIN)
 		return 0.0f;
@@ -44,10 +44,6 @@ CDriftFeedback::Update(CAutomobile *car, float timeStep)
 		ms_fStrength = 0.0f;
 		return;
 	}
-
-	if(ms_nLastFrame == CTimer::GetFrameCounter())
-		return;
-	ms_nLastFrame = CTimer::GetFrameCounter();
 
 	float target = DriftFeedbackTarget(car);
 	float dt = Min(timeStep, DRIFT_FEEDBACK_MAX_STEP);
