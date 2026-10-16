@@ -66,10 +66,26 @@ CMatrix::Update(void)
 	GetPosition() = m_attachment->pos;
 }
 
+bool
+CMatrix::ValuesMatch(const RwMatrix *matrix) const
+{
+	const CVector &r = GetRight(), &f = GetForward(), &u = GetUp(), &p = GetPosition();
+	return matrix->right.x == r.x && matrix->right.y == r.y &&
+	       matrix->right.z == r.z &&
+	       matrix->up.x == f.x && matrix->up.y == f.y && matrix->up.z == f.z &&
+	       matrix->at.x == u.x && matrix->at.y == u.y && matrix->at.z == u.z &&
+	       matrix->pos.x == p.x && matrix->pos.y == p.y && matrix->pos.z == p.z;
+}
+
 void
 CMatrix::UpdateRW(void)
 {
 	if (m_attachment) {
+		// VICE-129: skip the write when nothing changed. The RwMatrixUpdate
+		// below marks the RwMatrix as written, and librw only recomputes the
+		// LTMs of frames whose matrix was really written.
+		if (ValuesMatch(m_attachment))
+			return;
 		m_attachment->right = GetRight();
 		m_attachment->up = GetForward();
 		m_attachment->at = GetUp();
@@ -588,6 +604,10 @@ Invert(const CMatrix &src, CMatrix &dst)
 void
 CMatrix::CopyToRwMatrix(RwMatrix* matrix)
 {
+	// VICE-129: no write, no RwMatrixUpdate (and no "matrix written" mark)
+	// when the values are already there.
+	if (ValuesMatch(matrix))
+		return;
 	matrix->right = GetRight();
 	matrix->up = GetForward();
 	matrix->at = GetUp();

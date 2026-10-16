@@ -52,6 +52,7 @@ CClumpModelInfo::CreateInstance(RwMatrix *m)
 	if(m_clump){
 		RpClump *clump = (RpClump*)CreateInstance();
 		*RwFrameGetMatrix(RpClumpGetFrame(clump)) = *m;
+		RwMatrixUpdate(RwFrameGetMatrix(RpClumpGetFrame(clump)));
 		return (RwObject*)clump;
 	}
 	return nil;

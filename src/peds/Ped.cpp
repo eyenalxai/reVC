@@ -5128,6 +5128,7 @@ CPed::Render(void)
 		RwMatrix *mat = &RpHAnimHierarchyGetMatrixArray(hier)[idx];
 		RwFrame *frame = RpAtomicGetFrame(m_pWeaponModel);
 		*RwFrameGetMatrix(frame) = *mat;
+		RwMatrixUpdate(RwFrameGetMatrix(frame));
 		RwFrameUpdateObjects(frame);
 		RpAtomicRender(m_pWeaponModel);
 		if (IsPlayer()) {
@@ -5135,6 +5136,7 @@ CPed::Render(void)
 			if (player->m_pMinigunTopAtomic) {
 				frame = RpAtomicGetFrame(player->m_pMinigunTopAtomic);
 				*RwFrameGetMatrix(frame) = *mat;
+				RwMatrixUpdate(RwFrameGetMatrix(frame));
 
 				player->m_fGunSpinAngle = player->m_fGunSpinSpeed * CTimer::GetTimeStep() + player->m_fGunSpinAngle;
 				if (player->m_fGunSpinAngle > TWOPI)
