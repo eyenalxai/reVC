@@ -31,9 +31,16 @@ length.
 
 The rate at which the drift turns the whole car — the nose and the direction of
 travel together — while it grips, so the path curves and the slip stays at the
-hold angle. It follows the target angle (60 degrees per second at the full
+hold angle. It follows the target angle (110 degrees per second at the full
 angle), is signed by the entry direction, and fades with the grip cut. A faster
 drift takes a wider corner: the path radius is the speed over the curve rate.
+
+## Yaw authority (turn authority)
+
+How hard the drift layer may turn the car's nose: the maximum yaw rate — the
+rate the nose turns around the car's up axis — and how fast the yaw rate may
+change. The authority is absolute: it does not scale with speed, so a drift
+turns the same at any speed. It also caps the curve rate.
 
 ## Handbrake turn
 

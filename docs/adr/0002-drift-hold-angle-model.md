@@ -32,7 +32,8 @@ an angle but is not arcade enough, and the map's narrow roads and straight
    degrees. The handbrake turn shares the floor through `GetMinGrip`, so it
    gets the raised value too.)
 4. The yaw authority is absolute: it never scales with speed, and the layer
-   keeps writing the car's turn speed directly.
+   keeps writing the car's turn speed directly. (ADR 0009 raises the authority:
+   `DRIFT_YAW_MAX` 1.5 -> 2.6 rad/s and `DRIFT_YAW_ACCEL` 6 -> 12 rad/s^2.)
 5. A finished drift stacks its boost (originally 0.05 or 0.09 of the top speed
    per tier, cap 0.25, a chain to 1.25x) on a boost level that pushes and
    drains, instead of one impulse. The numbers and the push direction were
