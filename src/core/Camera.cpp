@@ -4093,6 +4093,27 @@ CCamera::InFirstPersonCarView(void)
 	return Cams[ActiveCam].Mode == CCam::MODE_1STPERSON &&
 		pTargetEntity && pTargetEntity->IsVehicle();
 }
+
+bool
+CCamera::UsingCarAds(void)
+{
+	// The car ADS: the aim button held while the camera serves the player's
+	// vehicle. Third person aims along the mouse follow camera, the first
+	// person car view along its own camera. The drive-by belongs to the
+	// driver, so a player who rides as a passenger does not aim the car.
+	if(!CPad::GetPad(0)->GetTarget())
+		return false;
+
+	CVehicle *vehicle = FindPlayerVehicle();
+	if(vehicle == nil || vehicle->pDriver != FindPlayerPed())
+		return false;
+
+	if(InFirstPersonCarView())
+		return pTargetEntity == (CEntity*)vehicle;
+
+	return Cams[ActiveCam].Using3rdPersonMouseCam() &&
+	       Cams[ActiveCam].CamTargetEntity == (CEntity*)vehicle;
+}
 #endif
 
 

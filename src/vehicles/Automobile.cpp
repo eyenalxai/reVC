@@ -3930,8 +3930,18 @@ CAutomobile::DoDriveByShootings(void)
 		leftAnim = ANIM_STD_CAR_DRIVEBY_LEFT_LO;
 	}
 
-	if(lookingLeft || lookingRight){
-		if(lookingLeft){
+	// The car ADS: the aim button aims freely with the camera instead of the
+	// look keys. The free aim shot has no animation of its own, so the drive-by
+	// arm stands in.
+	bool aiming = false;
+#ifdef FIRST_PERSON
+	aiming = TheCamera.UsingCarAds();
+#endif
+
+	if(lookingLeft || lookingRight || aiming){
+		if(aiming)
+			anim = UpdateDriveByAimAnim(ASSOCGRP_STD, leftAnim, rightAnim);
+		else if(lookingLeft){
 			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), rightAnim);
 			if(anim)
 				anim->blendDelta = -1000.0f;
@@ -3947,9 +3957,11 @@ CAutomobile::DoDriveByShootings(void)
 				anim = CAnimManager::AddAnimation(pDriver->GetClump(), ASSOCGRP_STD, rightAnim);
 		}
 
-		if (!anim || !anim->IsRunning()) {
+		// The free aim fires at once: the drive-by arm is only a stand-in and
+		// the first person car view does not show it
+		if (aiming || !anim || !anim->IsRunning()) {
 			if (CPad::GetPad(0)->GetCarGunFired() && CTimer::GetTimeInMilliseconds() > weapon->m_nTimer) {
-				weapon->FireFromCar(this, lookingLeft, true);
+				weapon->FireFromCar(this, lookingLeft, true, aiming);
 				weapon->m_nTimer = CTimer::GetTimeInMilliseconds() + 70;
 			}
 		}

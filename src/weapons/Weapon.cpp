@@ -461,7 +461,7 @@ CWeapon::Fire(CEntity *shooter, CVector *fireSource)
 }
 
 bool
-CWeapon::FireFromCar(CVehicle *shooter, bool left, bool right)
+CWeapon::FireFromCar(CVehicle *shooter, bool left, bool right, bool aiming)
 {
 	ASSERT(shooter!=nil);
 
@@ -471,7 +471,15 @@ CWeapon::FireFromCar(CVehicle *shooter, bool left, bool right)
 	if ( m_nAmmoInClip <= 0 )
 		return false;
 
-	if ( FireInstantHitFromCar(shooter, left, right) )
+	bool fired;
+#ifdef FIRST_PERSON
+	if ( aiming )
+		fired = FireInstantHitFromCarFreeAim(shooter);
+	else
+#endif
+		fired = FireInstantHitFromCar(shooter, left, right);
+
+	if ( fired )
 	{
 		DMAudio.PlayOneShot(shooter->m_audioEntityId, SOUND_WEAPON_SHOT_FIRED, 0.0f);
 
@@ -2672,6 +2680,45 @@ CWeapon::FireInstantHitFromCar(CVehicle *shooter, bool left, bool right)
 
 	DoDriveByAutoAiming(FindPlayerPed(), shooter, &source, &target);
 
+	return FireFromCarAt(shooter, source, target);
+}
+
+#ifdef FIRST_PERSON
+// The free aim in a car: the target comes from the camera and the shot leaves
+// the right hand like the drive-by. There is no auto aim and no drive-by
+// spread: the crosshair decides where the shot goes.
+bool
+CWeapon::FireInstantHitFromCarFreeAim(CVehicle *shooter)
+{
+	ASSERT(shooter!=nil);
+	ASSERT(shooter->pDriver!=nil);
+
+	CWeaponInfo *info = GetInfo();
+
+	CVector source, target;
+
+	source = info->m_vecFireOffset;
+	shooter->pDriver->TransformToNode(source, PED_HANDR);
+	source += CTimer::GetTimeStep() * shooter->m_vecMoveSpeed;
+
+	CVector camSource;
+	if ( TheCamera.InFirstPersonCarView() )
+		GetFirstPersonSightsRay(info->m_fRange, camSource, target);
+	else
+		TheCamera.Find3rdPersonCamTargetVector(info->m_fRange, source, camSource, target);
+
+	return FireFromCarAt(shooter, source, target);
+}
+#endif
+
+// The shot from a car once the source and the target are known: the events, the
+// gun flash, the line of sight and the victim handling are shared by the stock
+// drive-by and the free aim
+bool
+CWeapon::FireFromCarAt(CVehicle *shooter, CVector &source, CVector &target)
+{
+	CWeaponInfo *info = GetInfo();
+
 	CEventList::RegisterEvent(EVENT_GUNSHOT, EVENT_ENTITY_PED, FindPlayerPed(), FindPlayerPed(), 1000);
 
 	if ( !TheCamera.GetLookingLRBFirstPerson() )
@@ -2697,6 +2744,12 @@ CWeapon::FireInstantHitFromCar(CVehicle *shooter, bool left, bool right)
 	ProcessLineOfSight(source, target, point, victim, m_eWeaponType, shooter, true, true, true, true, true, true, false);
 	CWorld::pIgnoreEntity = NULL;
 	CWorld::bIncludeBikers = false;
+
+	// The driver is never a target of the vehicle's own gunfire: the free aim
+	// can point back through the player, and a bike or boat driver is in the
+	// line of sight
+	if ( victim == (CEntity*)shooter->pDriver )
+		victim = nil;
 
 	if ( !(CTimer::GetFrameCounter() & 3) )
 		MakePedsJumpAtShot(shooter, &source, &target);

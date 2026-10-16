@@ -33,6 +33,9 @@
 #include "Weather.h"
 #include "Coronas.h"
 #include "SaveBuf.h"
+#include "AnimManager.h"
+#include "RpAnimBlend.h"
+#include "AnimBlendAssociation.h"
 
 bool CVehicle::bWheelsOnlyCheat;
 bool CVehicle::bAllDodosCheat;
@@ -2508,6 +2511,31 @@ CVehicle::GetVehicleAppearance(void)
 	if (flags == HANDLING_IS_BOAT)
 		return VEHICLE_APPEARANCE_BOAT;
 	return VEHICLE_APPEARANCE_NONE;
+}
+
+// The drive-by arm for the car ADS. There is no free aim arm animation, so the
+// drive-by one stands in: the arm comes out on the side the camera aims at. It
+// is picked when the arm comes out and kept while it stays out, so swinging the
+// camera does not restart the animation and hold up the fire.
+CAnimBlendAssociation *
+CVehicle::UpdateDriveByAimAnim(AssocGroupId group, AnimationId leftAnim, AnimationId rightAnim)
+{
+	CAnimBlendAssociation *anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), leftAnim);
+	if(anim && anim->blendDelta >= 0.0f)
+		return anim;
+
+	anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), rightAnim);
+	if(anim && anim->blendDelta >= 0.0f)
+		return anim;
+
+	AnimationId aimAnim = DotProduct(TheCamera.Cams[TheCamera.ActiveCam].Front, GetRight()) < 0.0f ?
+		leftAnim : rightAnim;
+
+	anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), aimAnim);
+	if(anim == nil || anim->blendDelta < 0.0f)
+		anim = CAnimManager::AddAnimation(pDriver->GetClump(), group, aimAnim);
+
+	return anim;
 }
 
 bool

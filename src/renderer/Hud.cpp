@@ -311,6 +311,14 @@ void CHud::Draw()
 			}
 		}
 
+#ifdef FIRST_PERSON
+		// The car ADS shows the crosshair in the first person car view too; the
+		// third person view draws it at the camera crosshair position above
+		bool carAds = TheCamera.UsingCarAds();
+		if (carAds && Mode == CCam::MODE_1STPERSON)
+			DrawCrossHairPC = 1;
+#endif
+
 		if (DrawCrossHair || DrawCrossHairPC) {
 			RwRenderStateSet(rwRENDERSTATETEXTUREFILTER, (void *)rwFILTERLINEAR);
 
@@ -348,6 +356,9 @@ void CHud::Draw()
 			} else {
 				if (Mode == CCam::MODE_M16_1STPERSON ||
 				    Mode == CCam::MODE_M16_1STPERSON_RUNABOUT ||
+#ifdef FIRST_PERSON
+				    carAds ||
+#endif
 				    Mode == CCam::MODE_HELICANNON_1STPERSON) {
 					rect.left = (SCREEN_WIDTH / 2) - SCREEN_SCALE_X(32.0f);
 					rect.top = (SCREEN_HEIGHT / 2) - SCREEN_SCALE_Y(32.0f);

@@ -1489,15 +1489,19 @@ CCam::Process_FollowPedWithMouse(const CVector &CameraTarget, float TargetOrient
 #ifdef FIRST_PERSON
 	// Third person aim down the sights: Target pulls the camera in and zooms
 	// the view a little. The first person view and the weapon cameras have
-	// their own sights, and the stock lock-on camera modes do not change.
+	// their own sights, and the stock lock-on camera modes do not change. The
+	// car ADS pulls the follow camera of the player's vehicle in the same way.
 	bool AdsAiming = false;
-	if(Mode == MODE_FOLLOWPED && CamTargetEntity->IsPed() &&
+	if(Mode == MODE_FOLLOWPED &&
 	   !TheCamera.FirstPersonViewEnabled() &&
 	   !TheCamera.Using1stPersonView() && !TheCamera.Using1stPersonWeaponMode() &&
 	   CPad::GetPad(0)->GetTarget()){
-		CPed *TargetPed = (CPed*)CamTargetEntity;
-		AdsAiming = TargetPed->m_nMoveState != PEDMOVE_SPRINT &&
-			CWeaponInfo::GetWeaponInfo(TargetPed->GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_CANAIM);
+		if(CamTargetEntity->IsPed()){
+			CPed *TargetPed = (CPed*)CamTargetEntity;
+			AdsAiming = TargetPed->m_nMoveState != PEDMOVE_SPRINT &&
+				CWeaponInfo::GetWeaponInfo(TargetPed->GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_CANAIM);
+		}else if(CamTargetEntity->IsVehicle())
+			AdsAiming = TheCamera.UsingCarAds();
 	}
 	WellBufferMe(AdsAiming ? 1.0f : 0.0f, &m_fAdsAmount, &m_fAdsAmountSpeed, 0.2f, 0.1f, false);
 	AdsDistScale = 1.0f - (1.0f - fAdsDistanceScale)*m_fAdsAmount;
@@ -2746,8 +2750,9 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		// The first person view setting overrides the default FOV
 		if(TheCamera.FirstPersonViewEnabled())
 			FOV = FrontEndMenuManager.GetFirstPersonFOV();
-		// Aiming down the sights zooms in
-		if(TheCamera.UsingFirstPersonSights())
+		// Aiming down the sights zooms in; the car ADS zooms the car view too
+		if(TheCamera.UsingFirstPersonSights() ||
+		   (firstPersonCarView && TheCamera.UsingCarAds()))
 			FOV = TheCamera.GetFirstPersonSightsFOV();
 #endif
 
