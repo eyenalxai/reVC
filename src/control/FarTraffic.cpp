@@ -74,6 +74,9 @@
  *	ms_nFarTrafficDemotions		the cull's hand-overs
  *	ms_nFarTrafficInReach		the acceptance: far cars inside the reach, must stay 0
  *	ms_nFarTrafficRefused		the creation attempts that placed nothing
+ *	ms_nFarTrafficRefusedNoSite	those the network could not place at all
+ *	ms_nFarTrafficRefusedBand	those whose placements all fell outside the band
+ *	ms_nFarTrafficRefusedGate	those whose in-band placements the gate refused
  *	ms_nFarTrafficRefusedModel	those stopped by the streaming
  *	ms_nFarTrafficRefusedPool	those stopped by a pool reserve (or a driver)
  *	ms_nFarTrafficAttempts		the attempts
@@ -105,6 +108,9 @@ unsigned int CFarTraffic::ms_nFarTrafficSafetyPromotions;
 unsigned int CFarTraffic::ms_nFarTrafficDemotions;
 unsigned int CFarTraffic::ms_nFarTrafficInReach;
 unsigned int CFarTraffic::ms_nFarTrafficRefused;
+unsigned int CFarTraffic::ms_nFarTrafficRefusedNoSite;
+unsigned int CFarTraffic::ms_nFarTrafficRefusedBand;
+unsigned int CFarTraffic::ms_nFarTrafficRefusedGate;
 unsigned int CFarTraffic::ms_nFarTrafficRefusedModel;
 unsigned int CFarTraffic::ms_nFarTrafficRefusedPool;
 unsigned int CFarTraffic::ms_nFarTrafficAttempts;
@@ -370,6 +376,19 @@ FarTrafficUpdateCar(CVehicle *pVehicle)
 	CFarTraffic::ms_nFarTrafficUpdates++;
 }
 
+/* What one site call found. The attempt's counters subdivide by the furthest
+ * stage the placements reached, so a live read names the cause: the network
+ * could not place at any site of the attempt (`placements == 0` everywhere),
+ * the placements all fell outside the band (the site distance against the
+ * band's edges), or the near bubble's gate and the car build refused every
+ * in-band placement. */
+struct SFarTrafficSiteResult
+{
+	int32 placements;	/* the collector's answer: 0 = the network does not reach the site */
+	bool inBand;		/* a placement passed the band's own check */
+	bool gated;		/* an in-band placement reached the creation gate */
+};
+
 /* One creation attempt at one site: the placement is the near spawner's own
  * (the path network's bracket of the site distance), the model comes from the
  * zone's loaded class arrays, and the car is built by the near spawner's own
@@ -378,8 +397,12 @@ FarTrafficUpdateCar(CVehicle *pVehicle)
  * the near spawner's own arguments. */
 static bool
 FarTrafficTrySite(const SFarTrafficBand &band, const CVector &playerPos, const CVector2D &playerSpeed,
-	float spawnDist, float dirX, float dirY, float angleLimit, bool forward)
+	float spawnDist, float dirX, float dirY, float angleLimit, bool forward, SFarTrafficSiteResult *pResult)
 {
+	pResult->placements = 0;
+	pResult->inBand = false;
+	pResult->gated = false;
+
 	/* The residency rule: a far car is only built with a model the streamer
 	 * already holds (`CStreaming::HasModelLoaded`, the engine's own check).
 	 * The model comes from the population's loaded class arrays, so it is a
@@ -397,18 +420,20 @@ FarTrafficTrySite(const SFarTrafficBand &band, const CVector &playerPos, const C
 	CCarCreationPlacement placements[CAR_SPAWN_ATTEMPTS];
 	int32 numPlacements = ThePaths.CollectCarCreationCoors(playerPos.x, playerPos.y, dirX, dirY,
 		spawnDist, angleLimit, forward, false, placements, CAR_SPAWN_ATTEMPTS);
+	pResult->placements = numPlacements;
 	for (int32 i = 0; i < numPlacements; i++) {
 		/* The water paths are not the layer's: a far car is a road car, and
 		 * the boat rings are their own band (TrafficRings.h). */
 		if (ThePaths.m_pathNodes[placements[i].node1].bWaterPath)
 			continue;
-		/* The placement is placed at the site distance, and the bracket's own
-		 * length can put it inside or outside the band: the layer's site rule
-		 * is the band's (FarTrafficCreateSiteIsInBand), asked with the final
-		 * position. */
+		/* The placement lands at or inside the site distance (the collector's
+		 * interpolation), and the bracket's own geometry can put it anywhere
+		 * in the band or outside it: the layer's site rule is the band's
+		 * (FarTrafficCreateSiteIsInBand), asked with the final position. */
 		float dist = (placements[i].position - playerPos).Magnitude2D();
 		if (!FarTrafficCreateSiteIsInBand(band, dist))
 			continue;
+		pResult->inBand = true;
 		CVehicle *pCar = nil;
 		if (CCarCtrl::CreateCarFromPlacement(placements[i], carClass, carModel, playerPos,
 				playerSpeed, false, false, true, &pCar) && pCar) {
@@ -416,29 +441,47 @@ FarTrafficTrySite(const SFarTrafficBand &band, const CVector &playerPos, const C
 			CFarTraffic::ms_nFarTrafficCreations++;
 			return true;
 		}
+		pResult->gated = true;
 	}
 	return false;
 }
 
-/* The two sites of one frame: the fog ahead (the oncoming traffic of a long
- * straight road, created in the haze) and the road behind (the same-direction
- * traffic that keeps flowing after the player stops). Both are hidden by the
- * near bubble's own arms - the fade for the first, the off-frustum margin for
- * the second - and the layer asks no line-of-sight ray for either. */
+/* One attempt's sites, farthest first: the fog (the haze of a long sight line),
+ * then the near site ahead (the fallback when the network does not reach the
+ * fog - the city is 3.6 km across and the visible range reaches 2 km), then the
+ * near site behind (the traffic the player passed). The attempt is over when a
+ * car is built; the stage the last placement reached names the refusal. */
 static void
 FarTrafficTryCreate(const SFarTrafficBand &band, const CVector &playerPos, const CVector2D &playerSpeed)
 {
+	SFarTrafficSiteResult fog, ahead, behind;
+	float nearDist = FarTrafficNearSiteDistance(band);
+
 	CFarTraffic::ms_nFarTrafficAttempts++;
-	bool placed = FarTrafficTrySite(band, playerPos, playerSpeed,
-		band.createOuter, TheCamera.CamFrontXNorm, TheCamera.CamFrontYNorm, 0.707f, true);
-	/* The behind site keeps the rear half of the camera (a direction cosine of
-	 * zero): the bubble's soft arm needs the position off the frustum by the
-	 * margin, and the rear half is outside it for every FOV the game has. */
-	if (!placed)
-		placed = FarTrafficTrySite(band, playerPos, playerSpeed,
-			band.inner, TheCamera.CamFrontXNorm, TheCamera.CamFrontYNorm, 0.0f, false);
-	if (!placed)
-		CFarTraffic::ms_nFarTrafficRefused++;
+	if (FarTrafficTrySite(band, playerPos, playerSpeed,
+			FarTrafficFogSiteDistance(band), TheCamera.CamFrontXNorm, TheCamera.CamFrontYNorm,
+			0.707f, true, &fog))
+		return;
+	/* The near site ahead keeps the front cone (within 45 degrees of the
+	 * camera's forward), where the fog site's own filter sat. */
+	if (FarTrafficTrySite(band, playerPos, playerSpeed,
+			nearDist, TheCamera.CamFrontXNorm, TheCamera.CamFrontYNorm, 0.707f, true, &ahead))
+		return;
+	/* The rear half: off the frustum by the bubble's margin for every FOV the
+	 * game has, so the soft arm is this site's own. */
+	if (FarTrafficTrySite(band, playerPos, playerSpeed,
+			nearDist, TheCamera.CamFrontXNorm, TheCamera.CamFrontYNorm, 0.0f, false, &behind))
+		return;
+
+	/* Nothing was built: the counters say which stage refused every site of
+	 * the attempt, so a live read names the cause instead of one lump. */
+	CFarTraffic::ms_nFarTrafficRefused++;
+	if (fog.placements == 0 && ahead.placements == 0 && behind.placements == 0)
+		CFarTraffic::ms_nFarTrafficRefusedNoSite++;
+	else if (!fog.inBand && !ahead.inBand && !behind.inBand)
+		CFarTraffic::ms_nFarTrafficRefusedBand++;
+	else
+		CFarTraffic::ms_nFarTrafficRefusedGate++;
 }
 
 /*

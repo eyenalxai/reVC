@@ -826,6 +826,13 @@ NowSeconds(void)
  * water-path branch, the placement interpolation of the accepted pairs, the
  * reservoir shuffle of the four kept placements, and the object collision
  * queries of the car build that follows). The live frame read decides.
+ *
+ * The scan's own geometry is checked in Section 6 (the site margin): the
+ * placement lands at or INSIDE the target distance, never outside it (the
+ * distance from the player along a node segment is convex, so its value at the
+ * collector's interpolated parameter is at most the interpolated distance,
+ * which is exactly the target). A site aimed at an edge lands inside the band
+ * - the live zero-creation defect - and the margin is the fix.
  */
 #define SCAN_NODES 3351
 #define SCAN_LINKS_PER_NODE 2
@@ -970,6 +977,154 @@ Section5Cost(void)
 	Check(sink != 12345.0f, "keep the measurement honest");
 }
 
+/* ------------------------------------------------------------------ F. the site margin */
+
+/*
+ * The zero-creation defect of the layer's first live session and the margin
+ * that fixes it, proved on the collector's own arithmetic.
+ *
+ * `CPathFind::CollectCarCreationCoors` places a candidate at the parameter
+ * f2 = |d1| / (|d1| + |d2|) between its two path nodes, where d = the node's
+ * distance to the player minus the target. The distance from the player along
+ * a segment is a convex function of the parameter (the squared distance is a
+ * convex quadratic and the square root of it keeps the convexity along a
+ * line), and the weighted average of the two radii at f2 is exactly the target,
+ * so the placement's radius is AT MOST the target and at least the chord's
+ * sagitta below it. A site aimed at the band's inner edge therefore lands
+ * inside the band and every placement fails the layer's own band check - which
+ * is what the live counters showed: 25024 attempts, 0 creations, and no model
+ * and no pool refusal to blame.
+ *
+ * The check below reproduces the arithmetic with the shipped node spacing and
+ * the band's own radii: it measures the worst shortfall and holds it under
+ * FAR_TRAFFIC_SITE_MARGIN.
+ */
+static void
+Section6SiteMargin(void)
+{
+	/* The shipped car path spacing: the node pairs the collector brackets are
+	 * one link apart (the near ring's own reserve derivation works from the
+	 * same order; 100 m is a generous highway spacing). */
+	const float spacings[] = { 10.0f, 20.0f, 40.0f, 60.0f, 100.0f };
+	const int nSpacings = sizeof(spacings) / sizeof(spacings[0]);
+	const float fovFactors[] = { 1.0f, 1.5f, 2.2f };
+	const int nFov = sizeof(fovFactors) / sizeof(fovFactors[0]);
+	const float farClips[] = { 2000.0f, 1150.0f, 650.0f, 300.0f };
+	const int nFar = sizeof(farClips) / sizeof(farClips[0]);
+	const float drawDistances[] = { 16.0f, 8.0f, 4.0f, 2.0f, DRAWDIST_DEFAULT };
+	const int nDd = sizeof(drawDistances) / sizeof(drawDistances[0]);
+
+	int cells = 0, siteChecks = 0, failed = 0;
+	float minInner = 1e9f, maxOuter = 0.0f;
+
+	printf("== 6. the site margin and the collector's own arithmetic\n\n");
+	for (int f = 0; f < nFar; f++)
+	for (int j = 0; j < nFov; j++)
+	for (int i = 0; i < nDd; i++) {
+		SFarTrafficBand b = BandAt(drawDistances[i], fovFactors[j], farClips[f]);
+		STrafficRings r = RingsAt(drawDistances[i], fovFactors[j], farClips[f]);
+		if (FarTrafficCap(b) <= 0)
+			continue;
+		cells++;
+
+		/* The layer's sites: the near site must sit inside the band (and past
+		 * the margin), the fog site inside the band's fog margin. */
+		float nearSite = FarTrafficNearSiteDistance(b);
+		float fogSite = FarTrafficFogSiteDistance(b);
+		if (FarTrafficCreateSiteIsInBand(b, nearSite) &&
+		    FarTrafficCreateSiteIsInBand(b, fogSite) &&
+		    nearSite >= b.inner + FAR_TRAFFIC_SITE_MARGIN &&
+		    nearSite <= fogSite)
+			siteChecks++;
+		else {
+			Fail("a cell puts the near site outside its own band");
+			failed++;
+		}
+		/* The near site is at or beyond the in-view band minimum of VICE-146
+		 * (the band arm or the soft arm is then its own arm, and the creation
+		 * is covered). */
+		if (nearSite >= r.carOnScreenSpawnMin)
+			siteChecks++;
+		else {
+			Fail("a cell puts the near site under the in-view band minimum");
+			failed++;
+		}
+		if (b.inner < minInner)
+			minInner = b.inner;
+		if (b.outer > maxOuter)
+			maxOuter = b.outer;
+	}
+
+	/* The shortfall sweep: a bracketing pair of adjacent nodes (s apart) whose
+	 * target circle the segment crosses somewhere inside itself; the collector
+	 * interpolates the placement with f2 = |d1| / (|d1| + |d2|). The sweep
+	 * walks the crossing's place in the segment, the circle's point and the
+	 * segment's direction, and holds the worst shortfall under the margin.
+	 * The radii are the matrix's own tightest inner edge and its widest outer
+	 * edge (the shortfall shrinks with the radius, so the inner edge is the
+	 * worst case). */
+	const float sweepRadii[] = { minInner, maxOuter };
+	const int nRadii = sizeof(sweepRadii) / sizeof(sweepRadii[0]);
+	float worstShortfall = 0.0f, worstAtR = 0.0f, worstSpacing = 0.0f;
+	int outsideCount = 0;
+	for (int ir = 0; ir < nRadii; ir++)
+	for (int is = 0; is < nSpacings; is++) {
+		float R = sweepRadii[ir], s = spacings[is];
+		for (int a = 1; a < 20; a++) {
+			float fa = (float)a / 20.0f;	/* the crossing's place in the segment */
+			for (int phi = 0; phi < 360; phi += 10) {
+				float cp = (float)cos(phi * 3.14159265f / 180.0f);
+				float sp = (float)sin(phi * 3.14159265f / 180.0f);
+				for (int u = 0; u < 360; u += 15) {
+					float cu = (float)cos(u * 3.14159265f / 180.0f);
+					float su = (float)sin(u * 3.14159265f / 180.0f);
+					float Cx = R * cp, Cy = R * sp;
+					float n1x = Cx - s * fa * cu, n1y = Cy - s * fa * su;
+					float n2x = Cx + s * (1.0f - fa) * cu, n2y = Cy + s * (1.0f - fa) * su;
+					float r1 = (float)sqrt(n1x * n1x + n1y * n1y);
+					float r2 = (float)sqrt(n2x * n2x + n2y * n2y);
+					float d1 = r1 - R, d2 = r2 - R;
+					if (d1 * d2 >= 0.0f)
+						continue;	/* not a bracket */
+					float f2 = (float)fabs(d1) / ((float)fabs(d1) + (float)fabs(d2));
+					float px = n1x * (1.0f - f2) + n2x * f2;
+					float py = n1y * (1.0f - f2) + n2y * f2;
+					float radius = (float)sqrt(px * px + py * py);
+					/* The property: the placement lands at or inside its
+					 * target (a float tolerance for the collinear cases). */
+					if (radius > R + 0.01f) {
+						outsideCount++;
+						continue;
+					}
+					float shortfall = R - radius;
+					if (shortfall > worstShortfall) {
+						worstShortfall = shortfall;
+						worstAtR = R;
+						worstSpacing = s;
+					}
+				}
+			}
+		}
+	}
+
+	printf("  cells with an open band: %d, the site checks that passed: %d of %d, failed: %d\n",
+		cells, siteChecks, cells * 2, failed);
+	printf("  the worst shortfall of a bracketing placement below its target: %.2f m\n",
+		(double)worstShortfall);
+	printf("    (a %.0f m node spacing at a %.0f m site distance; the placement never lands\n",
+		(double)worstSpacing, (double)worstAtR);
+	printf("    outside its target: %d such cases over the sweep)\n", outsideCount);
+	printf("  the site margin (FAR_TRAFFIC_SITE_MARGIN): %.0f m - a factor of %.1f over the\n",
+		(double)FAR_TRAFFIC_SITE_MARGIN,
+		worstShortfall > 0.0f ? (double)(FAR_TRAFFIC_SITE_MARGIN / worstShortfall) : 0.0);
+	printf("    shortfall, so a site aimed %.0f m past the band's edge places inside it\n\n",
+		(double)FAR_TRAFFIC_SITE_MARGIN);
+	Check(worstShortfall < FAR_TRAFFIC_SITE_MARGIN,
+		"the site margin must cover the collector's shortfall");
+	Check(outsideCount == 0, "a placement must never land outside its target distance");
+	Check(failed == 0, "the sites must sit inside their band at every cell");
+}
+
 /* ------------------------------------------------------------------ main */
 
 int
@@ -981,6 +1136,7 @@ main(void)
 	Section3CapUnderPressure();
 	Section4Events();
 	Section5Cost();
+	Section6SiteMargin();
 
 	if (g_failures == 0)
 		printf("RESULT: every check passed.\n");
