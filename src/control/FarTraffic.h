@@ -102,25 +102,25 @@
  *			rear half is off the frustum by the bubble's margin for
  *			every FOV the game has, so the soft arm is the site's own.
  *
- * The ray is refused (rayAllowed false) for the far layer: a site two
- * kilometres out spends a line-of-sight ray of that length, and the frame's
- * four rays are the near traffic's blind spots. The price is exact and it is
- * the conservative direction: an occluded far site is not created at all.
- * Removals ask the shared gate with its ray (the near cull's own behaviour);
- * the layer makes at most FAR_TRAFFIC_REMOVE_ATTEMPTS of them a frame, so even
- * the ray is bounded.
+ * The ray is refused (rayAllowed false) for the far layer, on both gates: a
+ * site two kilometres out spends a line-of-sight ray of that length, and the
+ * frame's four rays are the near traffic's blind spots. The price is exact and
+ * it is the conservative direction: an occluded far site or removal is refused,
+ * not confirmed. Removals are bounded at FAR_TRAFFIC_REMOVE_ATTEMPTS gate
+ * answers a frame, so the layer's removals never touch the frame's ray budget
+ * at all.
  *
  * The switches
  * ------------
  *
  * A car of the layer that the player comes near is promoted to a full traffic
  * car (the driver, the collision, the AI, the budget), and a traffic car that
- * leaves the near band is demoted into the layer instead of being deleted. Both
- * switches are one function of the car's state and nothing else, because both
- * of them are invisible:
+ * leaves the near band is demoted into the layer instead of being deleted. A
+ * switch writes nothing the renderer draws of the car itself:
  *
  *	the matrix, the model, the colours, the status (SIMPLE), the clump and its
- *	alpha are the same on both sides of a switch, so no frame can show it;
+ *	alpha are the same on both sides of a switch, so no frame can show the car
+ *	change;
  *	the promotions of a frame are checked for every far car (not only the
  *	staggered share), so a car sits inside the band for one frame at most;
  *	the demotion happens where the near cull already decided the car is out of
@@ -128,14 +128,29 @@
  *	rule - a car the player watched drive away does not blink out, it changes
  *	which budget counts it;
  *	the promotion happens at the band's inner edge, at least RING_CAR_DESPAWN
- *	(280 m) from the player, and a far car is never left inside the near
- *	bubble: the player cannot reach a car that is not a full vehicle (the
- *	harness checks the rule).
+ *	(280 m) from the player - the engine's own floor for the ring table's
+ *	despawn - so the player cannot reach a car that is not a full vehicle.
  *
- * The promotion refuses when the ped pool is short of PED_POOL_RESERVE or the
- * driver cannot be created; the car stays far one more frame and the refusal is
- * counted. The demotion refuses when the layer is off or its cap is full, and
- * the near cull deletes the car as it always did.
+ * The one fact a promotion does add is the driver: SetUpDriver creates the ped
+ * and the engine's own in-car rule draws it (CPed::Render: only inside
+ * 25 x TheCamera.LODDistMultiplier, never before the car's own reveal, see
+ * below). The layer holds the driver's rendering while the car still holds its
+ * invisible frame (CVehicle::bDriverWaitsForReveal), so a promotion of an
+ * unseen car shows the driver with the car's last fade step and never before
+ * the car itself; a promotion of a car the player is already watching adds a
+ * few pixels of a driver inside a car that is already opaque, at 280 m or
+ * more. The harness carries the fact list and this one exception.
+ *
+ * The reach is sealed: a promotion that the pool refuses (the ped reserve)
+ * leaves the car far only outside the player's reach (NEAR_BUBBLE_REMOVE_DISTANCE,
+ * the bubble plus its reserve); inside it the layer makes the car real without
+ * a driver (FAR_TRAFFIC_SAFETY_PROMOTE) rather than leave a car the player
+ * could drive through. `ms_nFarTrafficSafetyPromotions` counts those switches
+ * and `ms_nFarTrafficInReach` is the acceptance gauge: the far cars inside the
+ * reach after a frame, which must read 0.
+ *
+ * The demotion refuses when the layer is off or its cap is full, and the near
+ * cull deletes the car as it always did.
  *
  * Missions and the scripts
  * ------------------------
@@ -154,16 +169,24 @@
  *	ms_nFarTrafficCreations		creations since the counters were zeroed
  *	ms_nFarTrafficRemovals		removals
  *	ms_nFarTrafficPromotions	the switches to a full traffic car
+ *	ms_nFarTrafficSafetyPromotions	the switches the pool forced without a driver
  *	ms_nFarTrafficDemotions		the switches back (the cull's hand-overs)
+ *	ms_nFarTrafficInReach		the acceptance: the far cars inside the
+ *					player's reach that the gate pass had
+ *					to decide on; must stay 0
  *	ms_nFarTrafficRefused		the creation attempts the rule stopped
  *	ms_nFarTrafficRefusedModel	a refusal of a model that is not streamed
- *	ms_nFarTrafficRefusedPool	the pool reserves of a creation or a driver
+ *	ms_nFarTrafficRefusedPool	a refusal of a pool reserve (a creation, or
+ *					the driver of a promotion)
  *	ms_nFarTrafficAttempts		the creation attempts
  *	ms_nFarTrafficUpdates		the car updates of the stagger (the cost)
  *
  * The first four are the ticket's counters (the cap holds, the layer's churn);
  * the refusals split by cause so a live reading says why a road stays bare: an
- * absent model (the streaming) is not the rule refusing.
+ * absent model (the streaming) is not the rule refusing. `ms_nFarTrafficInReach`
+ * is the second acceptance row next to the near bubble's two frustum counters:
+ * it counts the cars that a frame of the layer left far where the player could
+ * reach them, which the safety promotion of the switches makes impossible.
  *
  * No engine header is included here. The evidence program in utils/far-traffic
  * reads the band, the cap, the switches and the counters from this header
@@ -291,14 +314,17 @@ FarTrafficAdoptSiteIsInBand(const SFarTrafficBand &band, float dist)
 
 /* The switch of one far car, decided every frame for every car of the layer.
  * `canPromote` is the pool's answer of the frame (the driver's ped slot and the
- * reserves); a car that cannot be promoted stays far while the player cannot
- * reach it and is given up inside the reach, so the layer never leaves a car
- * the player could drive through. */
+ * reserves). A car inside the band's inner edge becomes traffic: with a driver
+ * when the pool can afford one, and without a driver at the player's reach
+ * (FAR_TRAFFIC_SAFETY_PROMOTE) - the layer never leaves a car the player could
+ * reach that is not a real vehicle. */
 enum EFarTrafficSwitch
 {
-	FAR_TRAFFIC_KEEP = 0,	/* nothing: the car stays far */
-	FAR_TRAFFIC_PROMOTE,	/* it reached the near band: it becomes traffic */
-	FAR_TRAFFIC_REMOVE,	/* the band is gone or it is beyond the fog: it goes */
+	FAR_TRAFFIC_KEEP = 0,		/* nothing: the car stays far */
+	FAR_TRAFFIC_PROMOTE,		/* it reached the near band: it becomes traffic */
+	FAR_TRAFFIC_SAFETY_PROMOTE,	/* the same, without a driver: the pool refused
+					 * one and the player is too close to wait */
+	FAR_TRAFFIC_REMOVE,		/* the band is gone or it is beyond the fog: it goes */
 };
 
 static inline EFarTrafficSwitch
@@ -318,9 +344,14 @@ FarTrafficSwitchFor(const SFarTrafficBand &band, float dist, bool canPromote)
 	if (dist <= band.inner) {
 		if (canPromote)
 			return FAR_TRAFFIC_PROMOTE;
-		/* The promotion refused (the pool's reserves): the car stays far
-		 * only while the player cannot reach it. */
-		return dist <= NEAR_BUBBLE_REMOVE_DISTANCE ? FAR_TRAFFIC_REMOVE : FAR_TRAFFIC_KEEP;
+		/* The promotion's driver refused (the ped reserve): the car stays
+		 * far only while the player cannot reach it. Inside the reach it is
+		 * made real anyway, without a driver: a far car is a shell the
+		 * player can drive through, and that is not allowed where the
+		 * player can be. */
+		if (dist <= NEAR_BUBBLE_REMOVE_DISTANCE)
+			return FAR_TRAFFIC_SAFETY_PROMOTE;
+		return FAR_TRAFFIC_KEEP;
 	}
 	if (dist > band.removeOuter)
 		return FAR_TRAFFIC_REMOVE;
@@ -341,9 +372,14 @@ FarTrafficUpdatesThisFrame(unsigned int frameCounter, int index)
 static_assert(RING_CAR_DESPAWN > NEAR_BUBBLE_REMOVE_DISTANCE,
 	"the far band must start outside the near bubble");
 /* The cap must fit the pool margin of the car budget: the layer can never take
- * a slot the near traffic or the cars outside the budget need. */
+ * a slot the near traffic or the cars outside the budget need. The second check
+ * keeps the cars outside the budget (the planes, the trains, the helicopter, the
+ * set pieces, the shortcut car; PopulationBudget.h) at least as much of the
+ * margin as the layer takes, so the layer can never be the one that fills it. */
 static_assert(MAX_CARS_IN_USE + FAR_TRAFFIC_MAX <= NUMVEHICLES,
 	"the far cap must stay inside the vehicle pool's margin");
+static_assert(2 * FAR_TRAFFIC_MAX <= NUMVEHICLES - MAX_CARS_IN_USE,
+	"the cars outside the budget must keep at least the layer's own room");
 static_assert(FAR_TRAFFIC_MAX >= FAR_TRAFFIC_MIN_CARS, "the cap must not sit below its own floor");
 static_assert(FAR_TRAFFIC_MIN_BAND > 0.0f, "an open band must have a width");
 static_assert(FAR_TRAFFIC_STAGGER > 1, "the stagger shares the layer over more than one frame");
@@ -384,7 +420,9 @@ public:
 	static unsigned int ms_nFarTrafficCreations;
 	static unsigned int ms_nFarTrafficRemovals;
 	static unsigned int ms_nFarTrafficPromotions;
+	static unsigned int ms_nFarTrafficSafetyPromotions;
 	static unsigned int ms_nFarTrafficDemotions;
+	static unsigned int ms_nFarTrafficInReach;
 	static unsigned int ms_nFarTrafficRefused;
 	static unsigned int ms_nFarTrafficRefusedModel;
 	static unsigned int ms_nFarTrafficRefusedPool;

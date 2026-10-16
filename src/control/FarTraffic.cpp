@@ -10,10 +10,12 @@
 #include "Game.h"
 #include "General.h"
 #include "PathFind.h"
+#include "Ped.h"
 #include "Pools.h"
 #include "Streaming.h"
 #include "Timer.h"
 #include "Vehicle.h"
+#include "VisibilityPlugins.h"
 #include "World.h"
 #include "Zones.h"
 
@@ -68,12 +70,28 @@
  *	ms_nFarTrafficCreations		creations (the ticket's count)
  *	ms_nFarTrafficRemovals		removals (the ticket's count)
  *	ms_nFarTrafficPromotions	the switches to a full traffic car
+ *	ms_nFarTrafficSafetyPromotions	the switches without a driver (the pool refused)
  *	ms_nFarTrafficDemotions		the cull's hand-overs
+ *	ms_nFarTrafficInReach		the acceptance: far cars inside the reach, must stay 0
  *	ms_nFarTrafficRefused		the creation attempts that placed nothing
  *	ms_nFarTrafficRefusedModel	those stopped by the streaming
  *	ms_nFarTrafficRefusedPool	those stopped by a pool reserve (or a driver)
  *	ms_nFarTrafficAttempts		the attempts
  *	ms_nFarTrafficUpdates		the car updates of the stagger
+ *
+ * The frame's work, exactly:
+ *
+ *	the gate pass	every car, every frame: a distance, a switch, and - when a
+ *			car must go - one gate answer from the frame's own bound of
+ *			FAR_TRAFFIC_REMOVE_ATTEMPTS answers. A refused answer spends
+ *			the frame's attempt all the same, so the bound is on the
+ *			gates the layer asks, not on the cars it removes. A promotion
+ *			and a safety promotion are not bounded: a car inside the band
+ *			may not wait a frame in which the player could reach it.
+ *	the creations	at most FAR_TRAFFIC_CREATE_ATTEMPTS placement scans, only
+ *			while the layer is under its cap and the pool holds its
+ *			reserves. A refused reserve is counted.
+ *	the stagger	a third of the layer, moved.
  */
 
 /* The counters. Cumulative, like the fill burst's and the near bubble's; the
@@ -83,7 +101,9 @@ unsigned int CFarTraffic::ms_nFarTrafficCap;
 unsigned int CFarTraffic::ms_nFarTrafficCreations;
 unsigned int CFarTraffic::ms_nFarTrafficRemovals;
 unsigned int CFarTraffic::ms_nFarTrafficPromotions;
+unsigned int CFarTraffic::ms_nFarTrafficSafetyPromotions;
 unsigned int CFarTraffic::ms_nFarTrafficDemotions;
+unsigned int CFarTraffic::ms_nFarTrafficInReach;
 unsigned int CFarTraffic::ms_nFarTrafficRefused;
 unsigned int CFarTraffic::ms_nFarTrafficRefusedModel;
 unsigned int CFarTraffic::ms_nFarTrafficRefusedPool;
@@ -201,11 +221,14 @@ CFarTraffic::ApplyTrafficState(CVehicle *pVehicle)
 }
 
 /* Turn one far car into a full traffic car, in the frame the gate pass found it
- * at the near band's edge. The switch writes nothing the renderer draws: the
- * matrix, the model, the colours, the status and the clump alpha are the car's
- * own and stay. */
+ * at the near band's edge. The switch writes nothing the renderer draws of the
+ * car: the matrix, the model, the colours, the status and the clump alpha are
+ * the car's own and stay. `bWithDriver` is the normal path; a safety promotion
+ * (the pool refused the driver and the player is inside the reach) makes the car
+ * real without one, because a far car is a shell the player can drive through
+ * and that is not allowed where the player can be. */
 static void
-FarTrafficPromoteCar(int32 index)
+FarTrafficPromoteCar(int32 index, bool bWithDriver)
 {
 	CVehicle *pVehicle = ms_aFarCars[index].pVehicle;
 
@@ -214,26 +237,42 @@ FarTrafficPromoteCar(int32 index)
 	pVehicle->VehicleCreatedBy = RANDOM_VEHICLE;
 	CCarCtrl::UpdateCarCount(pVehicle, false);
 	CFarTraffic::ApplyTrafficState(pVehicle);
-	/* A driver, from the population's own path (CPopulation::AddPedInCar
-	 * through CVehicle::SetUpDriver): the pool was checked this frame. */
-	pVehicle->SetUpDriver();
+	if (bWithDriver) {
+		/* A driver, from the population's own path (CPopulation::AddPedInCar
+		 * through CVehicle::SetUpDriver): the pool was checked this frame. The
+		 * driver rides the car's reveal: if the car still holds its invisible
+		 * frame, the driver's rendering waits for it (CPed::Render tests
+		 * bRenderPedInCar; CVehicle::UpdateClumpAlpha releases it at the last
+		 * fade step), so a promotion cannot show a driver before its car. */
+		CPed *pDriver = pVehicle->SetUpDriver();
+		if (pDriver && pDriver->bRenderPedInCar &&
+			CVisibilityPlugins::GetClumpAlpha(pVehicle->GetClump()) < 255) {
+			pDriver->bRenderPedInCar = false;
+			pVehicle->bDriverWaitsForReveal = true;
+		}
+	}
 	/* The car is a fresh traffic car from this frame: the stuck cull may not
 	 * chase it before it has driven, exactly as a fresh spawn. */
 	pVehicle->AutoPilot.m_nTimeToStartMission = CTimer::GetTimeInMilliseconds();
-	CFarTraffic::ms_nFarTrafficPromotions++;
+	if (bWithDriver)
+		CFarTraffic::ms_nFarTrafficPromotions++;
+	else
+		CFarTraffic::ms_nFarTrafficSafetyPromotions++;
 	FarTrafficDropEntry(index);
 }
 
 /* Give one far car up: the band closed, the cap dropped or the car is beyond
  * the fog. The near bubble's removal rule decides whether the player can see it
  * go; the layer spends at most FAR_TRAFFIC_REMOVE_ATTEMPTS gate answers a
- * frame. */
+ * frame, and it asks the gate with its ray refused (a removal of the layer's is
+ * a fog or a rear-half one; an occluded hint waits a frame instead of spending
+ * a two-kilometre ray). */
 static bool
 FarTrafficRemoveCar(int32 index, const CVector &playerPos)
 {
 	CVehicle *pVehicle = ms_aFarCars[index].pVehicle;
 
-	if (!CCarCtrl::NearBubbleAllowsRemoval(pVehicle, playerPos, 0.0f))
+	if (!CCarCtrl::NearBubbleAllowsRemoval(pVehicle, playerPos, 0.0f, false))
 		return false;
 	CCarCtrl::NearBubbleCountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, false);
 	CWorld::Remove(pVehicle);
@@ -457,7 +496,7 @@ CFarTraffic::Process(void)
 	ms_nFarTrafficCap = cap;
 
 	/* The gate pass: every car, every frame. */
-	int removalsLeft = FAR_TRAFFIC_REMOVE_ATTEMPTS;
+	int removalGates = FAR_TRAFFIC_REMOVE_ATTEMPTS;
 	/* The ped pool is read once for the whole pass (the read is a scan of the
 	 * pool): a promotion spends its car's driver, and the pass follows the
 	 * count locally. */
@@ -470,11 +509,18 @@ CFarTraffic::Process(void)
 		CVehicle *pVehicle = ms_aFarCars[i].pVehicle;
 		float dist = (pVehicle->GetPosition() - playerPos).Magnitude2D();
 		EFarTrafficSwitch what = FarTrafficSwitchFor(band, dist, pedFree >= PED_POOL_RESERVE);
-		if (what == FAR_TRAFFIC_PROMOTE) {
-			/* A promotion is a car and its driver: the reserve covers both
-			 * (the near spawner's own arithmetic reads the same number). */
-			pedFree -= FAR_TRAFFIC_PROMOTION_PEDS;
-			FarTrafficPromoteCar(i);
+		if (what == FAR_TRAFFIC_PROMOTE || what == FAR_TRAFFIC_SAFETY_PROMOTE) {
+			/* The promotions are not bounded by a per-frame allowance: a car
+			 * that reached the band's edge may not wait where the player
+			 * could come to it. The normal one takes its driver from the
+			 * pool's reserve (a car and a driver); the safety one has no
+			 * driver to take, and the refusal is counted. */
+			bool bWithDriver = what == FAR_TRAFFIC_PROMOTE;
+			if (bWithDriver)
+				pedFree -= FAR_TRAFFIC_PROMOTION_PEDS;
+			else
+				CFarTraffic::ms_nFarTrafficRefusedPool++;
+			FarTrafficPromoteCar(i, bWithDriver);
 			continue;
 		}
 		/* A wreck is no longer traffic: an explosion can still reach a far car
@@ -484,14 +530,18 @@ CFarTraffic::Process(void)
 			what = FAR_TRAFFIC_REMOVE;
 		if (what == FAR_TRAFFIC_REMOVE || ms_nFarCars > cap) {
 			/* The removals are the layer's own churn and each one asks the
-			 * near bubble's removal rule (it may spend one of the frame's
-			 * rays); a frame makes at most FAR_TRAFFIC_REMOVE_ATTEMPTS of
-			 * them, and the rest wait for the next frame - a car beyond the
-			 * fog or of a closed band is hidden-ish and leaves a frame
-			 * later, exactly as the near cull's own removals do. */
-			if (removalsLeft > 0 && FarTrafficRemoveCar(i, playerPos)) {
-				removalsLeft--;
-				continue;
+			 * near bubble's removal rule. The frame's allowance counts the
+			 * gates the layer asks, not the cars it removes: a refused answer
+			 * spends the allowance too, so one frame cannot spend more than
+			 * FAR_TRAFFIC_REMOVE_ATTEMPTS answers (and, with the gate's ray
+			 * refused, not one of the frame's rays). A car that must go waits
+			 * for the next frame; a car beyond the fog is hidden-ish and
+			 * leaves a frame later, exactly as the near cull's own removals
+			 * do. */
+			if (removalGates > 0) {
+				removalGates--;
+				if (FarTrafficRemoveCar(i, playerPos))
+					continue;
 			}
 			i++;
 			continue;
@@ -499,15 +549,34 @@ CFarTraffic::Process(void)
 		i++;
 	}
 
+	/* The acceptance gauge: after a frame of the gate pass, no car of the layer
+	 * is inside the player's reach - every car that reached it was promoted (or
+	 * made real without a driver). The gauge is read from the state the pass
+	 * decided on, which is the state the rule answers for: the frame's creations
+	 * land inside the band (280 m or more out) and the staggered move steps a
+	 * car by under two metres between its updates, so a car that drifts across
+	 * the 120 m line is promoted by the next frame's pass. It must stay 0. */
+	CFarTraffic::ms_nFarTrafficInReach = 0;
+	for (int32 i = 0; i < ms_nFarCars; i++) {
+		if (!FarTrafficEntryIsLive(ms_aFarCars[i]))
+			continue;
+		if ((ms_aFarCars[i].pVehicle->GetPosition() - playerPos).Magnitude2D() <= NEAR_BUBBLE_REMOVE_DISTANCE)
+			CFarTraffic::ms_nFarTrafficInReach++;
+	}
+
 	/* The creation attempts: only while the layer is under its cap and the
 	 * band is open. The pool reserves are the layer's promise to the rest of
-	 * the game: a creation never takes the last slots. */
-	if (band.active && ms_nFarCars < cap &&
-		CPools::GetVehiclePool()->GetNoOfFreeSpaces() >= FAR_TRAFFIC_POOL_RESERVE &&
-		pedFree >= PED_POOL_RESERVE) {
-		CVector2D playerSpeed = FindPlayerSpeed();
-		for (int i = 0; i < FAR_TRAFFIC_CREATE_ATTEMPTS && ms_nFarCars < cap; i++)
-			FarTrafficTryCreate(band, playerPos, playerSpeed);
+	 * the game: a creation never takes the last slots, and a refused reserve is
+	 * counted so a live reading tells it from the rule refusing. */
+	if (band.active && ms_nFarCars < cap) {
+		if (CPools::GetVehiclePool()->GetNoOfFreeSpaces() < FAR_TRAFFIC_POOL_RESERVE ||
+			pedFree < PED_POOL_RESERVE) {
+			CFarTraffic::ms_nFarTrafficRefusedPool++;
+		} else {
+			CVector2D playerSpeed = FindPlayerSpeed();
+			for (int i = 0; i < FAR_TRAFFIC_CREATE_ATTEMPTS && ms_nFarCars < cap; i++)
+				FarTrafficTryCreate(band, playerPos, playerSpeed);
+		}
 	}
 
 	/* The stagger: the share of the layer this frame owns moves. */

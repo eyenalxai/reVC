@@ -93,15 +93,19 @@ Three facts bound any change here:
    microsecond a frame on the development machine, so the bound that matters is
    the pool margin below, not the update).
    **The pool accounting, stated:** `MAX_CARS_IN_USE (2400) +
-   FAR_TRAFFIC_MAX (64) <= NUMVEHICLES (2560)` (a compile-time assert), so the
-   layer can never take the slot of a car the budget counts; the cars outside
-   the budget keep the remaining 96 slots of the margin. A creation
+   FAR_TRAFFIC_MAX (64) <= NUMVEHICLES (2560)` and
+   `2 x FAR_TRAFFIC_MAX <= NUMVEHICLES - MAX_CARS_IN_USE` (both compile-time
+   asserts), so the layer can never take the slot of a car the budget counts and
+   the cars outside the budget (the planes, the trains, the helicopter, the set
+   pieces, the shortcut car) keep at least as much of the margin as the layer
+   takes - the remaining 96 slots against the layer's 64. A creation
    additionally refuses while the vehicle pool is down to
    `FAR_TRAFFIC_POOL_RESERVE` (16) free slots or the ped pool to
-   `PED_POOL_RESERVE` (332, the near spawner's own reserve), and a promotion
-   refuses while the ped pool cannot hold its driver. **No path of the layer
-   asserts**: every refusal is a counter
-   (`ms_nFarTrafficRefused`, `...RefusedModel`, `...RefusedPool`).
+   `PED_POOL_RESERVE` (332, the near spawner's own reserve), and a promotion's
+   driver is not created while the ped pool cannot hold it (the promotion
+   happens without one; see Decision 6). **No path of the layer asserts**:
+   every refusal is a counter (`ms_nFarTrafficRefused`, `...RefusedModel`,
+   `...RefusedPool`).
 4. **The events go through the near bubble's rule, not beside it.** A far
    creation is a creation: it is built by the near spawner's function, which
    asks `CCarCtrl::NearBubbleAllowsCreation` with the final position and, when
@@ -124,33 +128,65 @@ Three facts bound any change here:
    or the camera's back already hides. The price is exact and conservative: an
    occluded far site is refused, and the counts that bypass the gate cannot
    pass unnoticed because the counters are the bubble's own.
-5. **Removals ask the bubble's removal rule.** `FarTrafficRemoveCar` calls
-   `CCarCtrl::NearBubbleAllowsRemoval` (the same gate the near cull uses: the
+5. **Removals ask the bubble's removal rule, and the layer pays no ray for
+   them either.** `FarTrafficRemoveCar` calls
+   `CCarCtrl::NearBubbleAllowsRemoval` - the same gate the near cull uses (the
    distance beyond the bubble and its reserve, the fresh-spawn grace, and a
-   hidden arm - off the frustum by the margin, beyond the fade, under a fade,
-   or behind a confirmed ray). A removal the gate refuses waits for a hiding
-   frame, exactly as a near removal does. A frame makes at most
-   `FAR_TRAFFIC_REMOVE_ATTEMPTS` (2) removal attempts, so the layer cannot
-   drain the frame's four rays; the removals the layer makes on its own are the
-   band's own (beyond `removeOuter = createOuter + FAR_TRAFFIC_OUTER_HYSTERESIS`
-   (100 m), the closed band, or a cap that dropped) and those are beyond the
-   fog, which the ladder hides with the fade arm.
-6. **The switches are invisible, and each has one home.**
+   hidden arm: off the frustum by the margin, beyond the fade, under a fade) -
+   with the gate's ray option false (the gate grew the option for the layer,
+   `NearBubbleAllowsRemoval(..., bool rayAllowed = true)`; the near paths are
+   unchanged and keep their ray). The removal arms of the layer are therefore
+   the fog's and the camera's back; an occluded hint is refused, not confirmed,
+   which costs a frame of waiting and never a two-kilometre ray.
+   The frame's bound counts the *gates the layer asks*, not the cars it
+   removes: `removalGates` is spent by every answer, a refusal included, so one
+   frame cannot ask more than `FAR_TRAFFIC_REMOVE_ATTEMPTS` (2) answers and
+   cannot touch the near traffic's ray budget at all. A car that must go and
+   does not get its answer waits for the next frame (a car beyond the fog is
+   hidden-ish and leaves a frame later, exactly as the near cull's own removals
+   do). The removals the layer makes on its own are the band's own (beyond
+   `removeOuter = createOuter + FAR_TRAFFIC_OUTER_HYSTERESIS` (100 m), the
+   closed band, or a cap that dropped), and those are beyond the fog.
+6. **The switches: one home each, and the honest list of what they write.**
    - **Promotion** (`FarTrafficPromoteCar`): a far car that reaches `inner`
      becomes traffic again - the class back to `RANDOM_VEHICLE` and the car
      budget count with it (`CCarCtrl::UpdateCarCount`), `SetUpDriver` from the
      population's own path, collision, the moving list and the audio
-     (`CFarTraffic::ApplyTrafficState`). The matrix, the model, the colours, the
-     status (`STATUS_SIMPLE` on both sides) and the clump alpha are untouched,
-     so the switch is not an appearance: nothing the renderer draws changes, at
-     any distance. The gate pass checks every car every frame (not only the
-     staggered share), so a car sits inside the band for one frame at most; a
-     refused promotion (the ped pool's reserve) leaves the car far only outside
-     the player's reach (the bubble plus its reserve, 120 m) and gives it up
-     inside it, so a far car is never left where the player could touch it. The
-     promotion distance is the near traffic's own despawn, at least 280 m: the
-     player reaches a far car never, and the harness checks the rule over the
-     whole control matrix of the ring table.
+     (`CFarTraffic::ApplyTrafficState`). The car's own facts - the matrix, the
+     model, the colours, the status (`STATUS_SIMPLE` on both sides), the clump
+     and its alpha - are untouched, so no frame can show the car change. The
+     gate pass checks every car every frame (not only the staggered share), so
+     a car sits inside the band for one frame at most. The promotion distance
+     is the near traffic's own despawn: the engine's floor for it is
+     `RING_CAR_DESPAWN` (280 m), and even the harness's below-floor stress cell
+     (a 70/110 FOV factor, which the engine clamps away) puts it at 189 m - both
+     outside the reach (120 m) with room to spare, and the harness checks the
+     rule over the whole control matrix of the ring table.
+     **The two facts a promotion does write that the player could see**: the
+     driver ped (created by `SetUpDriver`; the engine's own in-car rule draws it
+     only inside `25 x TheCamera.LODDistMultiplier` metres and on screen,
+     `CPed::Render`) and the audio entity (switched on; the engine sound of a
+     car at the band's edge is a distance-culled sample, not a new source).
+     The driver is held to the car's own reveal: when the car still holds its
+     invisible frame (alpha 0, the VICE-127 soft-arm reveal), the layer clears
+     the driver's `bRenderPedInCar` and sets `CVehicle::bDriverWaitsForReveal`;
+     `CVehicle::UpdateClumpAlpha` releases it at the car's last fade step, so a
+     promotion of an unseen car cannot show a driver before its car. A promotion
+     of a car the player is already watching adds a few pixels of a driver
+     inside an opaque car at 280 m or more. The harness carries the fact list
+     with this one exception (one written-and-drawn fact, held).
+   - **The reach is sealed** (the safety promotion): when the ped pool is short
+     of `PED_POOL_RESERVE`, the switch cannot give the car a driver. Outside the
+     player's reach (`NEAR_BUBBLE_REMOVE_DISTANCE`, the bubble plus its
+     reserve) the car stays far and waits for the pool - a far car is a shell
+     the player cannot touch from there. Inside the reach it is made real
+     anyway, without a driver (`FAR_TRAFFIC_SAFETY_PROMOTE`): collision, the
+     moving list, the audio, the budget - a driverless traffic car that the
+     near cull will clear like any other car. The layer never leaves a car the
+     player could drive through, and the acceptance gauge
+     `ms_nFarTrafficInReach` (the far cars inside the reach after a frame) must
+     read 0; `ms_nFarTrafficSafetyPromotions` and `ms_nFarTrafficRefusedPool`
+     record how often the pool forced one.
    - **Hand-over** (`CFarTraffic::AdoptOnCull`, the demotion): the near cull
      (`CCarCtrl::PossiblyRemoveVehicle`) has already decided a traffic car is
      outside the bubble, past its grace and hidden, and is about to delete it;
@@ -207,44 +243,69 @@ Three facts bound any change here:
     `ms_nFarTrafficCars` and `ms_nFarTrafficCap` (the live pair: a cap of zero
     is a closed band, not a fault), `ms_nFarTrafficCreations`,
     `ms_nFarTrafficRemovals`, `ms_nFarTrafficPromotions`,
-    `ms_nFarTrafficDemotions` (the hand-overs), the refusals by cause
-    (`Refused`, `RefusedModel`, `RefusedPool`), `ms_nFarTrafficAttempts` and
+    `ms_nFarTrafficSafetyPromotions` (the driverless reach seals),
+    `ms_nFarTrafficDemotions` (the hand-overs), `ms_nFarTrafficInReach` (the
+    acceptance gauge, must stay 0), the refusals by cause (`Refused`,
+    `RefusedModel`, `RefusedPool`), `ms_nFarTrafficAttempts` and
     `ms_nFarTrafficUpdates` (the stagger's work).
 
 ## The reading of "hidden" for a switch
 
 The ticket says the two switches happen hidden. Under VICE-127's rule that
 phrase has one meaning for the *events* (creation and removal: a blind spot,
-checked by the ladder) and another, exact one for the *switches*: a switch is
-hidden when no frame can show it, which the state list of Decision 6 makes true
-by construction - the renderer reads the matrix, the model, the clump, the
-alpha, the colours and the visibility flag, and a switch writes none of them.
-The two readings meet at the same place: the promotion happens at the band's
-inner edge (>= 280 m out, outside the bubble and its reserve), and the hand-over
-happens only where the near cull's own blind-spot rule already allowed a
-removal. The evidence program carries both: the sites through the bubble's
-ladder, and the switch's fact list (7 written, 0 of them drawn).
+checked by the ladder) and a narrower one for the *switches*: the car the switch
+touches is already there, and what the player could catch is a *change* to it.
+The switch therefore keeps every fact the renderer reads of the car - the
+matrix, the model, the colours, the status, the clump and its alpha, the
+visibility flag - and the only drawn fact it writes is the promotion's driver,
+which the layer holds to the car's own reveal (`bDriverWaitsForReveal`, released
+by `UpdateClumpAlpha`), so a driver cannot appear before its car and only
+appears at all inside the engine's own in-car draw range
+(`25 x LODDistMultiplier`, far inside the bubble at the stock settings). The
+two readings meet at the same place: the promotion happens at the band's inner
+edge (>= 280 m out by the engine's own floor, 189 m even under the harness's
+below-floor stress cell - outside the bubble and its reserve either way), and
+the hand-over happens only where the near cull's own blind-spot rule already
+allowed a removal. The evidence program carries both: the sites through the
+bubble's ladder, and the switch's fact list (7 written of 13, 1 drawn and held).
 
 ## What bounds the work
 
-- The gate pass is a distance and a switch per car, every frame: at the hard
-  top 64 cars, 0.2 us on the development machine (the harness measures it).
+The numbers below are the harness's, quoted once (its Section 5 print; the
+arithmetic varies a few per cent run to run). The first three are a **lower
+bound** of the layer's work: they are the mirrored arithmetic, and the engine
+calls each update pays - the node pick's branch, the alpha ramp's on-screen
+test, the sector re-insert (`RemoveAndAdd`) and the RW-frame write - are not in
+them. The engine-side gates and the car build are not linked in the harness at
+all; the live frame read and the owner's play-test are their measurement.
+
+- The gate pass is a distance and a switch per car, every frame: 4 ns a car
+  (0.2 us at the hard top of 64).
 - The staggered movement is the rail pose of a car - the lane offsets, the
-  curve, the heading, the path's own height, the matrix and RW-frame write -
-  measured at about 20-25 ns a car, so the frame's share (a third of the layer)
-  is 0.4-0.5 us. It touches no collision query: the near rail path's ground cast
+  curve, the heading, the path's own height, the matrix write - 20-25 ns a car,
+  so the frame's share (a third of ~58 at the owner's settings) is 0.4-0.6 us;
+  the layer's whole own arithmetic is 0.6-0.7 us a frame, under 0.002 % of a
+  33 ms frame. It touches no collision query: the near rail path's ground cast
   (`DragCarToPoint`) is not part of it.
-- The creation attempts are the near spawner's own work (the node scan of
-  `CollectCarCreationCoors` and a car build), bounded at two a frame and zero
-  while the layer is full. The near spawner spends six of the same calls a
-  frame at the capped ring, and ADR 0024 measures that pattern at 4.8 us; the
-  far site's larger radius raises the scan of one call, so the layer's fill is
-  a bounded cost of the frames that are filling, not of every frame.
+- The creation attempts are the near spawner's own work: the node scan of
+  `CollectCarCreationCoors` at the far radii (a walk of the ~3,351 car nodes -
+  ADR 0024's count - with the per-link bracket test) and a car build. The
+  harness mirrors that scan over a synthetic graph of the shipped counts: about
+  12 us for the fog site's whole-graph radius and 7 us for the behind site's, so
+  both sites of an attempt and both attempts of a filling frame are about
+  39 us. The mirror is not the engine call (the water-path branch, the accepted
+  pairs' interpolation, the reservoir shuffle and the car build's object
+  queries are not in it); it says the right order of magnitude, and the layer
+  makes no attempt at all while it is full. The live frame read decides the
+  rest.
 - The streams (`RemoveDistantCars`, the pool valve) skip a far car on one
   compare; the layer's list is at most 64 entries, validated against the pool
   slot before use.
-- A promotion creates one driver ped (one `CPopulation::AddPedInCar`), and only
-  while the ped pool holds `PED_POOL_RESERVE`.
+- The removals ask at most two gate answers a frame and never a ray (Decision
+  5), so the near traffic's four-ray budget is untouched.
+- A promotion creates one driver ped (one `CPopulation::AddPedInCar`), only
+  while the ped pool holds `PED_POOL_RESERVE`; when it does not, the reach's
+  seal makes the car real without the driver.
 
 ## The scope boundaries, stated
 
@@ -275,7 +336,8 @@ ladder, and the switch's fact list (7 written, 0 of them drawn).
   but it would need its own clump, LOD, shadow, alpha and streaming handling -
   a second vehicle renderer to keep in step with the first, and a promotion
   that re-creates the car (a visible switch). Rejected; the pool vehicle in a
-  far state reuses everything and makes the switches invisible.
+  far state reuses everything, and the switches change state only - the one
+  drawn fact a promotion writes, the driver, rides the car's own reveal.
 - **`PERMANENT_VEHICLE` for the far class.** It is already outside every budget,
   but `CanBeDeleted` refuses it and the save/load paths treat it as the planes
   and the trains; a new enum value is the honest one.
@@ -283,9 +345,11 @@ ladder, and the switch's fact list (7 written, 0 of them drawn).
   target (`GetRandomCarTarget`, `NumCarsInUse`) - the layer would trade the
   street it fills the distance of for the street at the player's feet.
   Rejected; the pool margin carries them instead.
-- **A ray for the far sites.** A two kilometre line-of-sight ray per attempt,
-  against the near traffic's four rays a frame. Rejected; the fog and the
-  camera's back are the layer's sites and the occluder arm waits.
+- **A ray for the far sites or removals.** A two kilometre line-of-sight ray per
+  attempt or per removal, against the near traffic's four rays a frame.
+  Rejected; the fog and the camera's back are the layer's sites, the occluder
+  arm waits, and the removal gate grew a ray option so the layer can refuse it
+  without touching the near paths' behaviour.
 - **A constant cap of 64.** It jams a thin band (an 80 m shell of churn at a
   barely open draw distance). Rejected in favour of the band-area scaling with
   the constant as the top.
@@ -293,6 +357,16 @@ ladder, and the switch's fact list (7 written, 0 of them drawn).
   traffic with a driver and a budget slot; doing that at the fog pays the near
   traffic's price for a car no one can reach. Rejected; the switch is at the
   near band's edge.
+- **A promotion that refuses and waits when the pool has no driver.** It was the
+  first version and it is a ghost path: the car stays collision-off while the
+  player walks up to it (the removal gate refuses to delete a visible car, so
+  the layer cannot tidy up in view either). Rejected; the reach's seal promotes
+  the car without a driver instead (Decision 6).
+- **Promotion only while the car is hidden.** Then the oncoming cars of an open
+  road would never promote while the player watches them and would arrive as
+  ghosts (or as a driverless car appearing at the reach). Rejected; the driver
+  is held to the car's own reveal instead, which makes a promotion of an unseen
+  car independent of the moment it happens.
 - **Demoting near cars into the layer everywhere.** The near cull uses the
   hand-over at its own removal site (hidden, past the hysteresis); adopting
   cars that are still inside the ring would double-handle them (the near AI and
@@ -310,21 +384,34 @@ ladder, and the switch's fact list (7 written, 0 of them drawn).
   blinking out. At the stock draw distance the band is closed and nothing
   changes.
 - **The pool cannot overflow**: the budget, the far cap and the reserve are an
-  arithmetic of constants with a compile-time assert, and every refusal is
-  counted. A full far layer costs the near traffic nothing of its target.
+  arithmetic of constants with two compile-time asserts, and every refusal is
+  counted. A full far layer costs the near traffic nothing of its target, and
+  the cars outside the budget keep at least as much of the pool's margin as the
+  layer takes.
 - **A far car is never reachable**: the promotion happens at the near traffic's
-  own despawn (>= 280 m), checked over the whole control matrix; a refused
-  promotion cannot leave a car inside the bubble plus its reserve.
-- **The switches cannot be seen**: the promotion and the hand-over write no
-  fact the renderer reads, and the hand-over is a blind-spot event by the near
-  bubble's rule.
-- **The frame cost is bounded and measured**: the layer's own arithmetic is
-  under a microsecond a frame at the hard top (the harness measures 0.6-0.7 us:
-  under 0.002 % of a 33 ms frame), the creations are bounded at two attempts a
-  frame and stop while the layer is full, and the removals at two gate answers a
-  frame. What remains to be read live is the layer's effect on the frame at the
-  owner's settings (the counters and the frame recipe of the ticket), and the
-  owner's own note on the long roads - the play-test list in the ticket's
-  comment.
+  own despawn (280 m by the engine's floor, 189 m under the harness's
+  below-floor stress cell), checked over the whole control matrix; and a car the
+  pool cannot give a driver is made real without one inside the player's reach
+  (the reach's seal, `FAR_TRAFFIC_SAFETY_PROMOTE`). The gauge
+  `ms_nFarTrafficInReach` reads the end state of every frame and must stay 0.
+- **The switches cannot be seen, with one fact held back**: the car's own facts
+  are untouched by every switch, and the one drawn fact a promotion writes - the
+  driver - is held to the car's own reveal and drawn by the engine only inside
+  its own in-car range. The hand-over is a blind-spot event by the near bubble's
+  rule.
+- **The frame cost is bounded and measured**: the layer's own arithmetic (a
+  lower bound; the engine calls each update pays are not in the harness's
+  number) is 0.6-0.7 us a frame at the owner's settings - under 0.002 % of a
+  33 ms frame - the creations are bounded at two attempts a frame (about 39 us a
+  frame when the mirrored scans are counted, and nothing at all while the layer
+  is full), and the removals at two ray-free gate answers a frame. What remains
+  to be read live is the layer's effect on the frame at the owner's settings
+  (the counters and the frame recipe of the ticket), and the owner's own note on
+  the long roads - the play-test list in the ticket's comment.
 - **The random stream shifts** as the burst's does (Decision 10); it is a
   documented, measurable price, not a hidden one.
+- **What the evidence cannot reach**: the harness reads the rules and mirrors
+  the arithmetic; it cannot exercise the engine-side gates
+  (`NearBubbleAllowsCreation/Removal`'s occlusion, fade and ray budget), the
+  real node graph of the placement scan, the car build or the promotions'
+  drivers. Those are the live rig's counters and the owner's frame read.

@@ -222,9 +222,12 @@ CCarCtrl::NearBubbleAllowsCreation(const CVector &pos, const CVector &playerCent
  * plus its reserve, whichever is farther. The occluded hint is confirmed by
  * the same ray the creations use: a stale occluder cannot fade a car out in
  * view. A removal that finds the ray budget spent waits; the car is hidden-ish
- * and leaves a frame later. */
+ * and leaves a frame later. `rayAllowed` is false for the far layer (VICE-128):
+ * its removals are the fog's and the camera's back, and a line-of-sight ray of
+ * two kilometres is not its work - an occluded hint is refused there instead of
+ * confirmed, the conservative direction. */
 bool
-CCarCtrl::NearBubbleAllowsRemoval(CVehicle *pVehicle, const CVector &playerCentre, float ringThreshold)
+CCarCtrl::NearBubbleAllowsRemoval(CVehicle *pVehicle, const CVector &playerCentre, float ringThreshold, bool rayAllowed)
 {
 	/* The visibility of the car itself: its bounding sphere, or the named
 	 * radius of the bubble where the car is smaller. */
@@ -244,7 +247,7 @@ CCarCtrl::NearBubbleAllowsRemoval(CVehicle *pVehicle, const CVector &playerCentr
 	}
 
 	ENearBubbleArm arm;
-	bool allowed = NearBubbleResolve(c, pVehicle->GetBoundCentre(), true, &arm);
+	bool allowed = NearBubbleResolve(c, pVehicle->GetBoundCentre(), rayAllowed, &arm);
 
 	if (!allowed)
 		ms_nNearBubbleRefused++;

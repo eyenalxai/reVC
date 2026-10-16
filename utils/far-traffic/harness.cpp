@@ -29,17 +29,25 @@
  *	   does not pay a ray for) is the layer's only refused arm, and every
  *	   removal the layer makes on its own is beyond the fog the ladder hides
  *	   with. The switches are checked against the list of facts they write:
- *	   none of them is a fact the renderer draws.
+ *	   the car's own facts are kept, and the one fact a switch writes that the
+ *	   renderer draws (the driver of a promotion) is held to the car's own
+ *	   reveal.
  *
- *	E. The cost. The layer's own arithmetic is measured: the per-car update
- *	   (the path curve, the lane offsets, the heading and the height of the
- *	   rail) and the per-frame gate pass, at the cap and at the stagger. This
- *	   is the arithmetic only: the layer touches no collision query, no sector
- *	   scan and no path search by construction, so the collision-path work of
- *	   the frame is unchanged and the number here is the layer's whole own
- *	   price. The engine-side costs (the placement scan of a creation attempt,
- *	   the driver of a promotion) are named in the ADR and measured live by
- *	   utils/caps-audit/live-counters.py and the frame recipe of the ticket.
+ *	E. The cost. Two numbers, both labelled for what they are:
+ *	   - the movement of the frame's share and the gate pass are the layer's
+ *	     own arithmetic, mirrored: a LOWER BOUND of the update, because the
+ *	     engine calls each update pays (the sector re-insert, the RW-frame
+ *	     write and the alpha ramp's on-screen test) are not in it;
+ *	   - the creation attempt's placement scan (CPathFind::
+ *	     CollectCarCreationCoors) is mirrored over a synthetic graph of the
+ *	     shipped node and link counts, because the engine's own call is not
+ *	     linked here. The live frame read is the measurement that decides.
+ *
+ *	   What this program cannot exercise at all: the engine-side gates
+ *	   (CCarCtrl::NearBubbleAllowsCreation/Removal - the occlusion, the fade,
+ *	   the ray budget, the pool reserves), the pay of a real car build and the
+ *	   real scan's data (the shipped node graph). Those are the live rig's and
+ *	   the owner's frame recipe's business.
  *
  * Build and run:
  *
@@ -88,6 +96,14 @@ RingsAt(float drawDistance, float fovFactor, float farClip)
 	STrafficRingInput in;
 	in.lodDistance = LOD_DISTANCE_BASE * fovFactor * drawDistance;
 	in.fovFactor = fovFactor;
+	/* The engine clamps the factor at 1.0 before the table reads it
+	 * (TrafficRings.cpp: the camera's GenerationDistMultiplier never goes
+	 * below 1), so the matrix keeps the clamp and the printed floor is the
+	 * engine's own. The bare formula's tighter cell (a 70/110 factor, kept out
+	 * of the matrix by this clamp) is quoted in the ADR as the margin's stress
+	 * case. */
+	if (in.fovFactor < 1.0f)
+		in.fovFactor = 1.0f;
 	in.farClip = farClip;
 	return ComputeTrafficRings(in);
 }
@@ -152,7 +168,7 @@ static void
 Section2Matrix(void)
 {
 	const int nSteps = 16;
-	const float fovFactors[] = { 1.0f, 70.0f / 110.0f, 1.25f, 1.5f, 1.75f, 2.0f, 2.2f };
+	const float fovFactors[] = { 1.0f, 1.25f, 1.5f, 1.75f, 2.0f, 2.2f };
 	const int nFov = sizeof(fovFactors) / sizeof(fovFactors[0]);
 	const float farClips[] = { 2000.0f, 1150.0f, 650.0f, 300.0f };
 	const int nFar = sizeof(farClips) / sizeof(farClips[0]);
@@ -202,8 +218,14 @@ Section2Matrix(void)
 	printf("  failures: %d\n", failed);
 	printf("  the tightest inner edge over the matrix: %.0f m (the reach is %.0f m,\n",
 		(double)minInner, (double)NEAR_BUBBLE_REMOVE_DISTANCE);
-	printf("    the ring's own stock despawn is %.0f m: no slider takes it inside the bubble)\n",
+	printf("    the ring's own stock despawn is %.0f m: no slider takes it inside the bubble;\n",
 		(double)RING_CAR_DESPAWN);
+	printf("    the same arithmetic without the engine's FOV floor (a %.3f factor, the near\n",
+		(double)(70.0f / 110.0f));
+	printf("    harness's stress cell) gives %.0f m, still %.0f m outside the reach)\n",
+		(double)TrafficRingsMax(280.0f * (70.0f / 110.0f), 250.0f * (70.0f / 110.0f) + 30.0f),
+		(double)(TrafficRingsMax(280.0f * (70.0f / 110.0f), 250.0f * (70.0f / 110.0f) + 30.0f)
+			- NEAR_BUBBLE_REMOVE_DISTANCE));
 	printf("  the widest outer edge over the matrix: %.0f m (the far clip of the weather)\n", (double)maxOuter);
 	printf("  the cap over the matrix: %d..%d of the hard top %d\n\n", minCap, maxCap, FAR_TRAFFIC_MAX);
 
@@ -485,44 +507,55 @@ Section4Events(void)
 
 	/* The switches, and the list of facts they write. A promotion and a
 	 * hand-over may happen while the player is looking at the car (the car is
-	 * a dot at the band's inner edge, hundreds of metres out), and they cannot
-	 * show, because not one of the facts they write is drawn. The table is the
-	 * argument, fact by fact. */
-	struct SSwitchFact { const char *name; bool written; bool rendered; };
+	 * a dot at the band's inner edge, hundreds of metres out). The car's own
+	 * facts are kept by every switch; the one fact a switch writes that the
+	 * renderer draws is the driver of a promotion, and the layer holds it to
+	 * the car's own reveal (CVehicle::bDriverWaitsForReveal, released by
+	 * CVehicle::UpdateClumpAlpha at the last fade step; CPed::Render tests it
+	 * and culls the in-car ped beyond 25 x LODDistMultiplier anyway). */
+	struct SSwitchFact { const char *name; bool written; bool rendered; bool heldUntilReveal; };
 	static const SSwitchFact facts[] = {
-		{ "the class (VehicleCreatedBy)",                     true,  false },
-		{ "the collision flag (bUsesCollision)",              true,  false },
-		{ "the static flag (bIsStatic)",                      true,  false },
-		{ "the moving entity list",                           true,  false },
-		{ "the audio entity's status",                        true,  false },
-		{ "the driver ped (created or flagged away)",         true,  false },
-		{ "the car budget count (NumRandomCars)",             true,  false },
-		{ "the model index",                                  false, true  },
-		{ "the matrix (position, heading)",                   false, true  },
-		{ "the colour pair",                                  false, true  },
-		{ "the status (STATUS_SIMPLE on both sides)",         false, true  },
-		{ "the clump and its alpha",                          false, true  },
-		{ "the visible flag",                                 false, true  },
+		{ "the class (VehicleCreatedBy)",                    true,  false, false },
+		{ "the collision flag (bUsesCollision)",             true,  false, false },
+		{ "the static flag (bIsStatic)",                     true,  false, false },
+		{ "the moving entity list",                          true,  false, false },
+		{ "the audio entity's status",                       true,  false, false },
+		{ "the driver ped (created, or flagged away)",       true,  true,  true  },
+		{ "the car budget count (NumRandomCars)",            true,  false, false },
+		{ "the model index",                                 false, true,  false },
+		{ "the matrix (position, heading)",                  false, true,  false },
+		{ "the colour pair",                                 false, true,  false },
+		{ "the status (STATUS_SIMPLE on both sides)",        false, true,  false },
+		{ "the clump and its alpha",                         false, true,  false },
+		{ "the visible flag",                                false, true,  false },
 	};
 	const int nFacts = sizeof(facts) / sizeof(facts[0]);
-	int writtenRendered = 0;
-	for (int i = 0; i < nFacts; i++)
-		if (facts[i].written && facts[i].rendered)
-			writtenRendered++;
-	printf("  the switch's facts: %d written, %d of them drawn\n",
-		nFacts - writtenRendered, writtenRendered);
+	int written = 0, drawn = 0, unheldDrawn = 0;
+	for (int i = 0; i < nFacts; i++) {
+		if (facts[i].written)
+			written++;
+		if (facts[i].written && facts[i].rendered) {
+			drawn++;
+			if (!facts[i].heldUntilReveal)
+				unheldDrawn++;
+		}
+	}
+	printf("  the switch's facts: %d of %d written, %d of them drawn, %d drawn unheld\n",
+		written, nFacts, drawn, unheldDrawn);
 	for (int i = 0; i < nFacts; i++)
 		printf("    %-45s %s\n", facts[i].name,
-			facts[i].written ? (facts[i].rendered ? "written and drawn" : "written") : "kept");
+			facts[i].written ? (facts[i].rendered ?
+				(facts[i].heldUntilReveal ? "written, drawn only with the car's reveal" : "written and drawn")
+				: "written") : "kept");
 	printf("\n");
-	Check(writtenRendered == 0, "a switch must write no fact the renderer draws");
+	Check(unheldDrawn == 0,
+		"a switch must not write a fact the renderer draws before the car's own reveal");
 
 	/* The reach: no far car may stay far where the player can touch it. The
-	 * gate pass promotes at the band's inner edge; a refused promotion (the
-	 * pool's reserves) leaves the car far only outside the reach and gives it
-	 * up inside it. The sweep is every distance of a band at both pool
-	 * answers. */
-	int promoted = 0, kept = 0, removed = 0, badKeep = 0, badPromote = 0, unknownKeep = 0;
+	 * gate pass promotes at the band's inner edge; a promotion the pool
+	 * refuses is made real without a driver inside the reach. The sweep is
+	 * every distance of a band at both pool answers. */
+	int promoted = 0, safety = 0, kept = 0, removed = 0, badKeep = 0, badPromote = 0, badSafety = 0, unknownKeep = 0;
 	for (int f = 0; f < nFar; f++)
 	for (int j = 0; j < nFov; j++)
 	for (int i = 0; i < nDd; i++) {
@@ -539,6 +572,14 @@ Section4Events(void)
 					 * matrix section checks it). */
 					if (dist > b.inner || b.inner <= NEAR_BUBBLE_REMOVE_DISTANCE)
 						badPromote++;
+				} else if (what == FAR_TRAFFIC_SAFETY_PROMOTE) {
+					safety++;
+					/* The safety promotion is the reach's own seal: it may
+					 * only fire where the player could touch the car (inside
+					 * the reach) and never as a normal promotion (it is the
+					 * branch the pool's refusal takes). */
+					if (dist > NEAR_BUBBLE_REMOVE_DISTANCE || canPromote)
+						badSafety++;
 				} else if (what == FAR_TRAFFIC_KEEP) {
 					kept++;
 					/* A kept car is never beyond the fog and never inside
@@ -557,13 +598,17 @@ Section4Events(void)
 			}
 		}
 	}
-	printf("  the switch sweep: %d promotions, %d keeps, %d removals\n", promoted, kept, removed);
+	printf("  the switch sweep: %d promotions, %d safety promotions, %d keeps, %d removals\n",
+		promoted, safety, kept, removed);
 	printf("  a promotion past the inner edge or inside the reach: %d\n", badPromote);
+	printf("  a safety promotion outside the reach or with a driver due: %d\n", badSafety);
 	printf("  a kept far car beyond the fog or inside the reach (a refused promotion): %d\n", badKeep);
 	printf("  the boot band's keeps (it holds no car): %d\n\n", unknownKeep);
 	Check(badPromote == 0, "a promotion must happen at the band's inner edge, outside the reach");
+	Check(badSafety == 0, "a safety promotion must be the reach's own seal");
 	Check(badKeep == 0, "a far car may not be kept beyond the fog or inside the player's reach");
 	Check(promoted > 0 && removed > 0, "the switch must promote and remove over the sweep");
+	Check(safety > 0, "the reach must be sealed by the safety promotion over the sweep");
 
 	/* The stagger: the share of one frame, over the frames of a cycle. */
 	int share[FAR_TRAFFIC_STAGGER];
@@ -593,9 +638,13 @@ Section4Events(void)
  * matrix write. Nothing here is engine state: the point is the shape of the
  * work, and its price on this machine.
  *
- * What the number is not: the placement scan of a creation attempt and the
- * driver of a promotion are engine calls (a node scan, a ped creation) and they
- * are quoted from the live measurement in the ADR, not measured here.
+ * The numbers here are the layer's own arithmetic, mirrored, and they are a
+ * LOWER BOUND of the update: the engine calls each update pays (the node pick's
+ * branch, the alpha ramp's on-screen test, the sector re-insert and the RW-frame
+ * write) are not in them. The creation attempt's placement scan is measured
+ * separately, mirrored over a synthetic graph of the shipped node and link
+ * counts, because the engine's own call is not linked here; the live frame read
+ * is the measurement that decides.
  */
 
 /* Mirrors CCurves::CalcCurvePoint (src/control/Curves.cpp), which the near
@@ -735,10 +784,85 @@ NowSeconds(void)
 	return ts.tv_sec + ts.tv_nsec * 1e-9;
 }
 
+/*
+ * The creation attempt's placement scan, mirrored from
+ * CPathFind::CollectCarCreationCoors (PathFind.cpp): a walk of every car path
+ * node, the squared-distance reject against max(spawnDist + 70, spawnDist x
+ * 1.7), and - for the nodes inside that reach - a test of every link (the
+ * bracketing distance test d1 x d2 < 0 and, for a bracketing pair, the
+ * interpolation, the direction normalise and the dot against the angle limit).
+ *
+ * The graph is synthetic with the shipped counts: 3,351 car nodes (ADR 0024)
+ * laid out like a city street grid over the map's 3.6 km, two links a node.
+ * The engine's own call is not linked here, so this is the scan's shape and
+ * price on this machine; what the mirror does not pay is named in the ADR (the
+ * water-path branch, the placement interpolation of the accepted pairs, the
+ * reservoir shuffle of the four kept placements, and the object collision
+ * queries of the car build that follows). The live frame read decides.
+ */
+#define SCAN_NODES 3351
+#define SCAN_LINKS_PER_NODE 2
+
+static float ms_aScanNodeX[SCAN_NODES];
+static float ms_aScanNodeY[SCAN_NODES];
+static short ms_aScanLink[SCAN_NODES][SCAN_LINKS_PER_NODE];
+
+static void
+ScanSetup(void)
+{
+	for (int i = 0; i < SCAN_NODES; i++) {
+		ms_aScanNodeX[i] = (float)((i % 61) * 60) + (float)(i / 61);
+		ms_aScanNodeY[i] = (float)((i / 61) * 55);
+	}
+	for (int i = 0; i < SCAN_NODES; i++) {
+		ms_aScanLink[i][0] = (short)((i + 1) % SCAN_NODES);
+		ms_aScanLink[i][1] = (short)((i + SCAN_NODES - 1) % SCAN_NODES);
+	}
+}
+
+static int
+ScanBench(float x, float y, float spawnDist, float dirX, float dirY, float angleLimit, bool forward)
+{
+	float maxDist = spawnDist + 70.0f;
+	if (spawnDist * 1.7f > maxDist)
+		maxDist = spawnDist * 1.7f;
+	int found = 0;
+	for (int n1 = 0; n1 < SCAN_NODES; n1++) {
+		float dx1 = ms_aScanNodeX[n1] - x;
+		float dy1 = ms_aScanNodeY[n1] - y;
+		float dist1 = (float)sqrt(dx1 * dx1 + dy1 * dy1);
+		if (dist1 >= maxDist)
+			continue;
+		float d1 = dist1 - spawnDist;
+		for (int j = 0; j < SCAN_LINKS_PER_NODE; j++) {
+			int n2 = ms_aScanLink[n1][j];
+			float dx2 = ms_aScanNodeX[n2] - x;
+			float dy2 = ms_aScanNodeY[n2] - y;
+			float dist2 = (float)sqrt(dx2 * dx2 + dy2 * dy2);
+			float d2 = dist2 - spawnDist;
+			if (d1 * d2 >= 0.0f)
+				continue;
+			float f2 = (float)fabs(d1) / ((float)fabs(d1) + (float)fabs(d2));
+			float f1 = 1.0f - f2;
+			float px = ms_aScanNodeX[n1] * f1 + ms_aScanNodeX[n2] * f2 - x;
+			float py = ms_aScanNodeY[n1] * f1 + ms_aScanNodeY[n2] * f2 - y;
+			float mag = (float)sqrt(px * px + py * py);
+			if (mag <= 0.0f)
+				continue;
+			float dot = (px / mag) * dirX + (py / mag) * dirY;
+			if (forward ? !(dot > angleLimit) : !(dot <= angleLimit))
+				continue;
+			found++;
+		}
+	}
+	return found;
+}
+
 static void
 Section5Cost(void)
 {
 	const int rounds = 300;
+	const int scanRounds = 200;
 	const SFarTrafficBand band = BandAt(OWNER_DRAWDIST, OWNER_FOV, SUNNY_FARCLIP);
 	const int cap = FarTrafficCap(band);
 	const int perFrame = (cap + FAR_TRAFFIC_STAGGER - 1) / FAR_TRAFFIC_STAGGER;
@@ -749,6 +873,9 @@ Section5Cost(void)
 	printf("== 5. the layer's own cost\n\n");
 	printf("  the reference layer: the owner's band (%.0f..%.0f m), the cap %d cars\n",
 		(double)band.inner, (double)band.outer, cap);
+	printf("  (the arithmetic below is a LOWER BOUND: the engine calls each update pays - the\n");
+	printf("   node pick, the alpha ramp's on-screen test, the sector re-insert and the RW\n");
+	printf("   frame - are not part of it)\n\n");
 
 	for (int i = 0; i < cap; i++)
 		BenchSetup(&cars[i], i);
@@ -781,13 +908,38 @@ Section5Cost(void)
 	printf("  the layer's own arithmetic a frame: %.2f us (%.4f %% of a 33 ms frame)\n\n",
 		(perUpdate * perFrame + perGate * cap) / 1000.0,
 		(perUpdate * perFrame + perGate * cap) / 1000.0 / 33000.0 * 100.0);
-	printf("  The bounds: the layer's arithmetic is under 50 us a frame at the hard top (a\n");
-	printf("  small share of the frame), and the work does not touch the collision path at\n");
-	printf("  all - no ground cast, no sector scan, no path search. The engine-side calls are\n");
-	printf("  the two creation attempts a frame (the near spawner's own placement scan, its\n");
-	printf("  cost measured for VICE-130 in ADR 0024) and the promotions' drivers; the live\n");
-	printf("  rig and the frame recipe of the ticket measure those in the running game.\n\n");
+
+	/* The creation attempt's placement scan (the engine call the attempt
+	 * makes, mirrored over the shipped graph's counts). */
+	ScanSetup();
+	t0 = NowSeconds();
+	for (int r = 0; r < scanRounds; r++)
+		sink += (float)ScanBench(1800.0f, 900.0f, band.createOuter, 0.8f, 0.6f, 0.707f, true);
+	t1 = NowSeconds();
+	double perFogScan = (t1 - t0) / scanRounds * 1e6;
+	t0 = NowSeconds();
+	for (int r = 0; r < scanRounds; r++)
+		sink += (float)ScanBench(1800.0f, 900.0f, band.inner, 0.8f, 0.6f, 0.0f, false);
+	t1 = NowSeconds();
+	double perBehindScan = (t1 - t0) / scanRounds * 1e6;
+	printf("  the creation attempt's placement scan, mirrored over %d car nodes and %d links a\n",
+		SCAN_NODES, SCAN_LINKS_PER_NODE);
+	printf("  node (the engine's own call is not linked here; the graph is synthetic):\n");
+	printf("    the fog site (a %.0f m radius, the whole graph in reach): %.1f us a call\n",
+		(double)band.createOuter, perFogScan);
+	printf("    the behind site (a %.0f m radius): %.1f us a call\n",
+		(double)band.inner, perBehindScan);
+	printf("    both sites of an attempt, and both attempts of a filling frame: %.1f us\n",
+		2.0 * (perFogScan + perBehindScan));
+	printf("  a full layer makes no attempt at all: the scans are the filling frames' cost,\n");
+	printf("  about a second and a half of frames per band (the near spawner spends six of the\n");
+	printf("  same calls a frame at the capped ring).\n\n");
+	printf("  The bounds: the layer's own arithmetic is under 50 us a frame at the hard top (a\n");
+	printf("  small share of the frame), and it does not touch the collision path at all - no\n");
+	printf("  ground cast, no sector scan, no path search. The engine-side gates, the car build\n");
+	printf("  and the promotions' drivers are the live rig's and the frame recipe's business.\n\n");
 	Check(perUpdate * perFrame + perGate * cap < 50000.0, "the layer's arithmetic must stay under 50 us a frame");
+	Check(perFogScan + perBehindScan < 500.0, "one creation attempt's scans must stay under 500 us");
 	Check(sink != 12345.0f, "keep the measurement honest");
 }
 

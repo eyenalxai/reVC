@@ -281,6 +281,7 @@ public:
 	uint8 bCreatedAsPoliceVehicle : 1;// True if this guy was created as a police vehicle (enforcer, policecar, miamivice car etc)
 	uint8 bRestingOnPhysical : 1; // Dont go static cause car is sitting on a physical object that might get removed
 	uint8 bParking : 1;
+	uint8 bDriverWaitsForReveal : 1; // The far layer promoted this car while it held its invisible frame: its driver is drawn only when the car itself is opaque (VICE-128)
 	uint8 bCanPark : 1;
 #if (!defined GTA_PS2 || defined FIX_BUGS)
 	uint8 m_bombType : 3;

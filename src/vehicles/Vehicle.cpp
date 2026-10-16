@@ -139,6 +139,7 @@ CVehicle::CVehicle(uint8 CreatedBy)
 	bCreatedAsPoliceVehicle = false;
 	bRestingOnPhysical = false;
 	bParking = false;
+	bDriverWaitsForReveal = false;
 	bCanPark = CGeneral::GetRandomNumberInRange(0.0f, 1.0f) < 0.0f;	// never true. probably doesn't work very well
 	bIsVan = false;
 	bIsBus = false;
@@ -1693,9 +1694,11 @@ CVehicle::CanBeDeleted(void)
 	case MISSION_VEHICLE: return false;
 	case PARKED_VEHICLE: return true;
 	case PERMANENT_VEHICLE: return false;
-	/* A far car is removable: it is the car the layer itself gives up (the
-	 * band closed, the cap dropped) and, in the pool's last resort, the cull
-	 * may take it like any other car outside the bubble (VICE-128). */
+	/* A far car is removable: the layer gives its own cars up (the band closed,
+	 * the cap dropped) and the cutscene cleanup deletes every vehicle that
+	 * passes this test (CCutsceneMgr::RemoveEverythingFromTheWorld..., the
+	 * loop at CutsceneMgr.cpp:634). The near cull and the pool valve never see
+	 * a far car at all: both skip its class (VICE-128). */
 	case FAR_TRAFFIC_VEHICLE: return true;
 	}
 	return true;
@@ -2118,6 +2121,16 @@ CVehicle::UpdateClumpAlpha(void)
 		clumpAlpha += FillBurstIsHidden() ? VEHICLE_ALPHA_HIDDEN_STEP : VEHICLE_ALPHA_FADE_IN_STEP;
 		if(clumpAlpha > 255)
 			clumpAlpha = 255;
+	}
+	/* The driver of a promotion rides the car's own reveal (VICE-128): the far
+	 * layer created it while the car still held its invisible frame and held
+	 * its rendering (bRenderPedInCar, the flag CPed::Render tests), so the
+	 * driver appears with the car's last fade step and never before the car
+	 * itself. Only a driver the engine would draw is held (a bus driver is
+	 * never drawn and the flag is never set), so the re-enable is clean. */
+	if(bDriverWaitsForReveal && clumpAlpha == 255 && pDriver){
+		pDriver->bRenderPedInCar = true;
+		bDriverWaitsForReveal = false;
 	}
 	CVisibilityPlugins::SetClumpAlpha((RpClump*)m_rwObject, clumpAlpha);
 }

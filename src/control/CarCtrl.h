@@ -148,10 +148,12 @@ public:
 
 	/* The near bubble (VICE-127): the gates of the spawns and the culls, and
 	 * the counters the acceptance reads (NearBubble.h, NearBubble.cpp). The
-	 * frame begins them once, from GenerateRandomCars. */
+	 * frame begins them once, from GenerateRandomCars. `rayAllowed` false (the
+	 * far layer's option, VICE-128) refuses the two arms that would confirm
+	 * with a line-of-sight ray instead of spending one. */
 	static void NearBubbleBeginFrame(void);
 	static bool NearBubbleAllowsCreation(const CVector &pos, const CVector &playerCentre, float radius, bool rayAllowed);
-	static bool NearBubbleAllowsRemoval(CVehicle *pVehicle, const CVector &playerCentre, float ringThreshold);
+	static bool NearBubbleAllowsRemoval(CVehicle *pVehicle, const CVector &playerCentre, float ringThreshold, bool rayAllowed = true);
 	static void NearBubbleCountCreation(const CVector &pos, float radius);
 	static void NearBubbleCountRemoval(const CVector &pos, float radius, bool wasInvisible);
 	static void NearBubbleCountOtherCreation(const CVector &pos, float radius);
