@@ -452,9 +452,10 @@ the view where the mouse put it.
 ## Car ADS
 
 Aiming from the driver's seat with the mouse aim button: the follow camera
-pulls in and the free aim fires along the camera instead of the stock sideways
-drive-by. Only the drive-by vehicles (car, bike, boat) and the drive-by weapon
-take it, and the bullets ignore the player's own car.
+pulls in and the free aim fires along the camera. Only the drive-by vehicles
+(car, bike, boat) and the drive-by weapon take it, and the bullets ignore the
+player's own car. The stock sideways drive-by of the look keys is gone
+(VICE-138); a bike keeps its stock forward drive-by on the plain fire button.
 
 ## First person sights
 

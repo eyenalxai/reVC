@@ -550,7 +550,7 @@ CWeapon::Fire(CEntity *shooter, CVector *fireSource)
 }
 
 bool
-CWeapon::FireFromCar(CVehicle *shooter, bool left, bool right, bool aiming)
+CWeapon::FireFromCar(CVehicle *shooter, bool aiming)
 {
 	ASSERT(shooter!=nil);
 
@@ -564,7 +564,10 @@ CWeapon::FireFromCar(CVehicle *shooter, bool left, bool right, bool aiming)
 	if ( aiming )
 		fired = FireInstantHitFromCarFreeAim(shooter);
 	else
-		fired = FireInstantHitFromCar(shooter, left, right);
+		// The plain fire of a bike keeps the stock drive-by shot, which fires
+		// forward now: the side look keys and their side shot are gone
+		// (VICE-138)
+		fired = FireInstantHitFromCar(shooter);
 
 	if ( fired )
 	{
@@ -612,11 +615,11 @@ CWeapon::FireFromCar(CVehicle *shooter, bool left, bool right, bool aiming)
 // became FIRING: a failed shot attempt, an empty clip and a started reload
 // leave the timer alone, and the write can never shorten a reload (VICE-90).
 void
-CWeapon::FireFromCarWithCadence(CVehicle *shooter, bool left, bool right, bool aiming)
+CWeapon::FireFromCarWithCadence(CVehicle *shooter, bool aiming)
 {
 	eWeaponState stateBefore = m_eWeaponState;
 
-	FireFromCar(shooter, left, right, aiming);
+	FireFromCar(shooter, aiming);
 
 	if (stateBefore != WEAPONSTATE_FIRING && m_eWeaponState == WEAPONSTATE_FIRING)
 		m_nTimer = CTimer::GetTimeInMilliseconds() + 70;
@@ -2652,9 +2655,14 @@ CWeapon::FireM16_1stPerson(CEntity *shooter)
 	return true;
 }
 
+// The drive-by shot of a vehicle that fires without the car ADS (a bike): the
+// shot leaves the hand along the heading and the auto aim turns it. The stock
+// side picks of the look keys are gone (VICE-138), so there is one shot.
 bool
-CWeapon::FireInstantHitFromCar(CVehicle *shooter, bool left, bool right)
+CWeapon::FireInstantHitFromCar(CVehicle *shooter)
 {
+	ASSERT(shooter!=nil);
+
 	CWeaponInfo *info = GetInfo();
 
 	CVehicleModelInfo *modelInfo = shooter->GetModelInfo();
@@ -2670,36 +2678,7 @@ CWeapon::FireInstantHitFromCar(CVehicle *shooter, bool left, bool right)
 			shooter->pDriver->TransformToNode(source, PED_HANDR);
 			source += CTimer::GetTimeStep() * shooter->m_vecMoveSpeed;
 			
-			if ( left )
-				target = source - info->m_fRange * shooter->GetRight();
-			else if ( right )
-				target = source + info->m_fRange * shooter->GetRight();
-			else
-				target = source + info->m_fRange * shooter->GetForward();
-				
-		}
-		else if ( left )
-		{
-			source = shooter->GetMatrix() * CVector(-shooter->GetColModel()->boundingBox.max.x + -0.25f,
-													float(CGeneral::GetRandomNumber() & 255) * 0.001f + modelInfo->GetFrontSeatPosn().y - 0.05f,
-													modelInfo->GetFrontSeatPosn().z + 0.63f);
-			source += CTimer::GetTimeStep() * shooter->m_vecMoveSpeed;
-	
-	
-			target = shooter->GetMatrix() * CVector(-info->m_fRange,
-														modelInfo->GetFrontSeatPosn().y,
-														modelInfo->GetFrontSeatPosn().z + 0.6f);
-		}
-		else if ( right )
-		{
-			source = shooter->GetMatrix() * CVector(shooter->GetColModel()->boundingBox.max.x + 0.25f,
-													float(CGeneral::GetRandomNumber() & 255) * 0.001f + modelInfo->GetFrontSeatPosn().y - 0.18f,
-													modelInfo->GetFrontSeatPosn().z + 0.52f);
-			source += CTimer::GetTimeStep() * shooter->m_vecMoveSpeed;
-	
-			target = shooter->GetMatrix() * CVector(info->m_fRange,
-														modelInfo->GetFrontSeatPosn().y,
-														modelInfo->GetFrontSeatPosn().z + 0.5f);
+			target = source + info->m_fRange * shooter->GetForward();
 		}
 		else
 		{
@@ -2715,21 +2694,13 @@ CWeapon::FireInstantHitFromCar(CVehicle *shooter, bool left, bool right)
 	}
 	else
 	{
-		if ( left )
-			source = info->m_vecFireOffset;
-		else
-		{
-			source    = 1.8f * info->m_vecFireOffset;
-			source.z -= 0.1f;
-		}
+		source    = 1.8f * info->m_vecFireOffset;
+		source.z -= 0.1f;
 		
 		shooter->pDriver->TransformToNode(source, PED_HANDR);
 		source += CTimer::GetTimeStep() * shooter->m_vecMoveSpeed;
 		
-		if ( left )
-			target = source - info->m_fRange * shooter->GetRight();
-		else
-			target = source + info->m_fRange * shooter->GetRight();
+		target = source + info->m_fRange * shooter->GetForward();
 	}
 
 	target += CVector(float(CGeneral::GetRandomNumber()&255)*0.01f-1.28f,
@@ -3523,14 +3494,10 @@ CWeapon::HasWeaponAmmoToBeUsed(void)
 bool
 CPed::IsPedDoingDriveByShooting(void)
 {
-#ifdef FIX_BUGS
-	if (FindPlayerPed() == this && CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->m_nWeaponSlot == WEAPONSLOT_SUBMACHINEGUN) {
-#else
-	if (FindPlayerPed() == this && GetWeapon()->m_eWeaponType == WEAPONTYPE_UZI) {
-#endif
-		if (TheCamera.Cams[TheCamera.ActiveCam].LookingLeft || TheCamera.Cams[TheCamera.ActiveCam].LookingRight)
-			return true;
-	}
+	// The car ADS is the way the player aims and shoots from a vehicle now: the
+	// stock side look keys that drove the old drive-by are gone (VICE-138)
+	if (FindPlayerPed() == this)
+		return TheCamera.UsingCarAds();
 	return false;
 }
 

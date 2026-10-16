@@ -83,8 +83,6 @@ CCam::Init(void)
 	CA_MIN_DISTANCE = 0.0f;
 	CA_MAX_DISTANCE = 0.0f;
 	LookingBehind = false;
-	LookingLeft = false;
-	LookingRight = false;
 	m_fPlayerInFrontSyphonAngleOffSet = DEGTORAD(20.0f);
 	m_fSyphonModeTargetZOffSet = 0.5f;
 	m_fRadiusForDead = 1.5f;
@@ -329,38 +327,19 @@ CCam::Process(void)
 	if(TheCamera.m_uiTransitionState == 0)
 		KeepTrackOfTheSpeed(Source, m_cvecTargetCoorsForFudgeInter, Up, m_fTrueAlpha, m_fTrueBeta, FOV);
 
-	// Look Behind, Left, Right
+	// Look behind. The stock car side look and its drive-by aim are gone
+	// (VICE-138); the look behind stays.
 	LookingBehind = false;
-	LookingLeft = false;
-	LookingRight = false;
 	SourceBeforeLookBehind = Source;
 	if(&TheCamera.Cams[TheCamera.ActiveCam] == this){
-		// The follow camera in a vehicle keeps the car look-around, so the
-		// look keys still drive the drive-by aim.
 		if((Mode == MODE_CAM_ON_A_STRING || Mode == MODE_1STPERSON || Mode == MODE_BEHINDBOAT ||
 		    Mode == MODE_BEHINDCAR || Mode == MODE_FOLLOWPED) &&
 		   CamTargetEntity->IsVehicle()){
-			bool bDisableLR = CamTargetEntity &&
-				(((CVehicle*)CamTargetEntity)->GetVehicleAppearance() == VEHICLE_APPEARANCE_HELI || CamTargetEntity->GetModelIndex() == MI_RCBARON);
 			if(CPad::GetPad(0)->GetLookBehindForCar()){
 				LookBehind();
 				if(DirectionWasLooking != LOOKING_BEHIND)
 					TheCamera.m_bJust_Switched = true;
 				DirectionWasLooking = LOOKING_BEHIND;
-			}else if(bDisableLR){
-				if(DirectionWasLooking != LOOKING_FORWARD)
-					TheCamera.m_bJust_Switched = true;
-				DirectionWasLooking = LOOKING_FORWARD;
-			}else if(CPad::GetPad(0)->GetLookLeft()){
-				LookLeft();
-				if(DirectionWasLooking != LOOKING_LEFT)
-					TheCamera.m_bJust_Switched = true;
-				DirectionWasLooking = LOOKING_LEFT;
-			}else if(CPad::GetPad(0)->GetLookRight()){
-				LookRight();
-				if(DirectionWasLooking != LOOKING_RIGHT)
-					TheCamera.m_bJust_Switched = true;
-				DirectionWasLooking = LOOKING_RIGHT;
 			}else{
 				if(DirectionWasLooking != LOOKING_FORWARD)
 					TheCamera.m_bJust_Switched = true;
@@ -713,169 +692,6 @@ CCam::LookBehind(void)
 		TheCamera.AvoidTheGeometry(OrigSource, TargetCoors, Source, FOV);
 		Front = TargetCoors - Source;
 		GetVectorsReadyForRW();
-	}
-}
-
-float BOAT_1STPERSON_L_OFFSETX = 0.7f;
-float BOAT_1STPERSON_R_OFFSETX = 0.3f;
-float BOAT_1STPERSON_LR_OFFSETZ = 0.2f;
-
-void
-CCam::LookLeft(void)
-{
-	float Dist, TargetOrientation;
-	CVector TargetCoors, TargetFwd;
-
-	if((Mode == MODE_CAM_ON_A_STRING || Mode == MODE_BEHINDBOAT || Mode == MODE_BEHINDCAR) && CamTargetEntity->IsVehicle()){
-		LookingLeft = true;
-		TargetCoors = CamTargetEntity->GetPosition();
-		Front = CamTargetEntity->GetPosition() - Source;
-		if(Mode == MODE_CAM_ON_A_STRING)
-			Dist = CA_MAX_DISTANCE;
-		else if(Mode == MODE_BEHINDBOAT){
-			Dist = 9.0f;
-			float Offset = 0.0f;
-			if(GetBoatLook_L_R_HeightOffset(Offset) && !CCullZones::Cam1stPersonForPlayer())
-				Source.z = TargetCoors.z + Offset;
-		}else
-			Dist = 9.0f;
-		TargetFwd = CamTargetEntity->GetForward();
-		TargetFwd.Normalise();
-		TargetOrientation = CGeneral::GetATanOfXY(TargetFwd.x, TargetFwd.y);
-		Source.x = Dist*Cos(TargetOrientation - HALFPI) + TargetCoors.x;
-		Source.y = Dist*Sin(TargetOrientation - HALFPI) + TargetCoors.y;
-
-		CColModel *colModel = CamTargetEntity->GetColModel();
-		CVector OrigSource = Source;
-		TheCamera.AvoidTheGeometry(OrigSource, TargetCoors, Source, FOV);
-
-		CVector TopRight = CamTargetEntity->GetPosition() +
-			CamTargetEntity->GetRight()*colModel->boundingBox.max.x +
-			CamTargetEntity->GetUp()*colModel->boundingBox.max.z;
-		float Height = Min(Max(m_cvecTargetCoorsForFudgeInter.z, TopRight.z)+0.1f, OrigSource.z);
-		Source.z = Max(Height, Source.z);
-
-		Front = CamTargetEntity->GetPosition() - Source;
-		Front.z += 1.1f;
-		if(Mode == MODE_BEHINDBOAT)
-			Front.z += 1.2f;
-		GetVectorsReadyForRW();
-	}
-	if(Mode == MODE_FOLLOWPED && CamTargetEntity->IsVehicle()){
-		// The follow camera in a vehicle: swing to the car's left side at the
-		// distance the camera is at now
-		LookingLeft = true;
-		TargetFwd = CamTargetEntity->GetForward();
-		TargetFwd.Normalise();
-		LookAroundVehicle(CGeneral::GetATanOfXY(TargetFwd.x, TargetFwd.y) - HALFPI, fFollowCamVehicleLookDown);
-	}
-	if(Mode == MODE_1STPERSON && CamTargetEntity->IsVehicle()){
-		LookingLeft = true;
-		RwCameraSetNearClipPlane(Scene.camera, 0.25f);
-		if(((CVehicle*)CamTargetEntity)->IsBoat()){
-			if(((CVehicle*)CamTargetEntity)->pDriver){
-				CVector neck(0.0f, 0.0f, 0.0f);
-				CPed *driver = ((CVehicle*)CamTargetEntity)->pDriver;
-				driver->SetPedPositionInCar();
-				driver->GetMatrix().UpdateRW();
-				driver->UpdateRwFrame();
-				driver->UpdateRpHAnim();
-				driver->m_pedIK.GetComponentPosition(neck, PED_NECK);
-				Source = neck +
-					BOAT_1STPERSON_L_OFFSETX*CamTargetEntity->GetRight() +
-					BOAT_1STPERSON_LR_OFFSETZ*CamTargetEntity->GetUp();
-			}else
-				Source.z -= 0.5f;
-		}
-
-		Up = CamTargetEntity->GetUp();
-		Up.Normalise();
-		Front = CamTargetEntity->GetForward();
-		Front.Normalise();
-		Front = -CrossProduct(Front, Up);
-		Front.Normalise();
-		if(((CVehicle*)CamTargetEntity)->GetVehicleAppearance() == VEHICLE_APPEARANCE_BIKE)
-			Source -= 1.45f*Front;
-	}
-}
-
-void
-CCam::LookRight(void)
-{
-	float Dist, TargetOrientation;
-	CVector TargetCoors, TargetFwd;
-	CColPoint colPoint;
-
-	if((Mode == MODE_CAM_ON_A_STRING || Mode == MODE_BEHINDBOAT || Mode == MODE_BEHINDCAR) && CamTargetEntity->IsVehicle()){
-		LookingRight = true;
-		TargetCoors = CamTargetEntity->GetPosition();
-		Front = CamTargetEntity->GetPosition() - Source;
-		if(Mode == MODE_CAM_ON_A_STRING)
-			Dist = CA_MAX_DISTANCE;
-		else if(Mode == MODE_BEHINDBOAT){
-			Dist = 9.0f;
-			float Offset = 0.0f;
-			if(GetBoatLook_L_R_HeightOffset(Offset) && !CCullZones::Cam1stPersonForPlayer())
-				Source.z = TargetCoors.z + Offset;
-		}else
-			Dist = 9.0f;
-		TargetFwd = CamTargetEntity->GetForward();
-		TargetFwd.Normalise();
-		TargetOrientation = CGeneral::GetATanOfXY(TargetFwd.x, TargetFwd.y);
-		Source.x = Dist*Cos(TargetOrientation + HALFPI) + TargetCoors.x;
-		Source.y = Dist*Sin(TargetOrientation + HALFPI) + TargetCoors.y;
-
-		CColModel *colModel = CamTargetEntity->GetColModel();
-		CVector OrigSource = Source;
-		TheCamera.AvoidTheGeometry(OrigSource, TargetCoors, Source, FOV);
-
-		CVector TopLeft = CamTargetEntity->GetPosition() +
-			CamTargetEntity->GetRight()*colModel->boundingBox.min.x +
-			CamTargetEntity->GetUp()*colModel->boundingBox.max.z;
-		float Height = Min(Max(m_cvecTargetCoorsForFudgeInter.z, TopLeft.z)+0.1f, OrigSource.z);
-		Source.z = Max(Height, Source.z);
-
-		Front = CamTargetEntity->GetPosition() - Source;
-		Front.z += 1.1f;
-		if(Mode == MODE_BEHINDBOAT)
-			Front.z += 1.2f;
-		GetVectorsReadyForRW();
-	}
-	if(Mode == MODE_FOLLOWPED && CamTargetEntity->IsVehicle()){
-		// The follow camera in a vehicle: swing to the car's right side at the
-		// distance the camera is at now
-		LookingRight = true;
-		TargetFwd = CamTargetEntity->GetForward();
-		TargetFwd.Normalise();
-		LookAroundVehicle(CGeneral::GetATanOfXY(TargetFwd.x, TargetFwd.y) + HALFPI, fFollowCamVehicleLookDown);
-	}
-	if(Mode == MODE_1STPERSON && CamTargetEntity->IsVehicle()){
-		LookingRight = true;
-		RwCameraSetNearClipPlane(Scene.camera, 0.25f);
-		if(((CVehicle*)CamTargetEntity)->IsBoat()){
-			if(((CVehicle*)CamTargetEntity)->pDriver){
-				CVector neck(0.0f, 0.0f, 0.0f);
-				CPed *driver = ((CVehicle*)CamTargetEntity)->pDriver;
-				driver->SetPedPositionInCar();
-				driver->GetMatrix().UpdateRW();
-				driver->UpdateRwFrame();
-				driver->UpdateRpHAnim();
-				driver->m_pedIK.GetComponentPosition(neck, PED_NECK);
-				Source = neck +
-					BOAT_1STPERSON_R_OFFSETX*CamTargetEntity->GetRight() +
-					BOAT_1STPERSON_LR_OFFSETZ*CamTargetEntity->GetUp();
-			}else
-				Source.z -= 0.5f;
-		}
-
-		Up = CamTargetEntity->GetUp();
-		Up.Normalise();
-		Front = CamTargetEntity->GetForward();
-		Front.Normalise();
-		Front = CrossProduct(Front, Up);
-		Front.Normalise();
-		if(((CVehicle*)CamTargetEntity)->GetVehicleAppearance() == VEHICLE_APPEARANCE_BIKE)
-			Source -= 1.45f*Front;
 	}
 }
 
@@ -1907,7 +1723,7 @@ CCam::RotCamIfInFrontCar(CVector &TargetCoors, float TargetOrientation)
 		m_bFixingBeta = true;
 
 	CPad *pad = CPad::GetPad(0);
-	if(!(pad->GetLookBehindForCar() || pad->GetLookBehindForPed() || pad->GetLookLeft() || pad->GetLookRight()))
+	if(!(pad->GetLookBehindForCar() || pad->GetLookBehindForPed()))
 		if(DirectionWasLooking != LOOKING_FORWARD)
 			TheCamera.m_bCamDirectlyBehind = true;
 
@@ -5167,7 +4983,7 @@ CCam::Process_FollowCar_SA(const CVector& CameraTarget, float TargetOrientation,
 	CPad* pad = CPad::GetPad(0);
 
 	// Next direction is non-existent in III
-	uint8 nextDirectionIsForward = !(pad->GetLookBehindForCar() || pad->GetLookBehindForPed() || pad->GetLookLeft() || pad->GetLookRight()) &&
+	uint8 nextDirectionIsForward = !(pad->GetLookBehindForCar() || pad->GetLookBehindForPed()) &&
 		DirectionWasLooking == LOOKING_FORWARD;
 
 	if (car->GetModelIndex() == MI_FIRETRUCK) {
@@ -5308,7 +5124,7 @@ CCam::Process_FollowCar_SA(const CVector& CameraTarget, float TargetOrientation,
 			TheCamera.m_bCamDirectlyInFront = true;
 
 	// Taken from RotCamIfInFrontCar, because we don't call it anymore
-	if (!(pad->GetLookBehindForCar() || pad->GetLookBehindForPed() || pad->GetLookLeft() || pad->GetLookRight()))
+	if (!(pad->GetLookBehindForCar() || pad->GetLookBehindForPed()))
 		if (DirectionWasLooking != LOOKING_FORWARD)
 			TheCamera.m_bCamDirectlyBehind = true;
 

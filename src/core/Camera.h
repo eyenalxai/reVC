@@ -104,8 +104,6 @@ public:
 	bool    m_bTheHeightFixerVehicleIsATrain;
 	bool    LookBehindCamWasInFront;
 	bool    LookingBehind;
-	bool    LookingLeft;
-	bool    LookingRight;
 	bool    ResetStatics; //for interpolation type stuff to work
 	bool    Rotating;
 
@@ -224,8 +222,6 @@ public:
 	void FixCamWhenObscuredByVehicle(const CVector &TargetCoors);
 	bool GetBoatLook_L_R_HeightOffset(float &Offset);
 	void LookBehind(void);
-	void LookLeft(void);
-	void LookRight(void);
 	void LookAroundVehicle(float bearing, float frontZOffset);
 	void ClipIfPedInFrontOfPlayer(void);
 	void KeepTrackOfTheSpeed(const CVector &source, const CVector &target, const CVector &up, const float &alpha, const float &beta, const float &fov);
@@ -303,8 +299,6 @@ struct CQueuedMode
 enum
 {
 	LOOKING_BEHIND,
-	LOOKING_LEFT,
-	LOOKING_RIGHT,
 	LOOKING_FORWARD,
 };
 

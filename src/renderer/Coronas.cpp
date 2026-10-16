@@ -115,8 +115,6 @@ CCoronas::Update(void)
 	LightsMult = Min(LightsMult + 0.03f * CTimer::GetTimeStep(), 1.0f);
 
 	int CamLook = 0;
-	if(TheCamera.Cams[TheCamera.ActiveCam].LookingLeft) CamLook |= 1;
-	if(TheCamera.Cams[TheCamera.ActiveCam].LookingRight) CamLook |= 2;
 	if(TheCamera.Cams[TheCamera.ActiveCam].LookingBehind) CamLook |= 4;
 	// BUG?
 	if(TheCamera.GetLookDirection() == LOOKING_BEHIND) CamLook |= 8;
