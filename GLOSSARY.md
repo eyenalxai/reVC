@@ -155,13 +155,22 @@ speed changes.
 ## Magazine weapon
 
 A weapon that fires instant hits and has a clip of two or more rounds. The
-active reload applies to magazine weapons only.
+definition covers every such weapon, the SPAS-12 included. The player's
+shotgun, stubby shotgun and sniper rifle are also magazine weapons; the
+rocket launcher stays one-shot. AI peds keep the per-shot cycle for the
+magazine weapons. The active reload applies to magazine weapons only.
+
+## Per-shot cycle
+
+The pump or bolt cycle an AI ped pays after each shot of a magazine weapon,
+so the AI does not use the magazines.
 
 ## Active reload
 
 The timed reload of a magazine weapon. The player starts it with the reload
 key; a press inside the reload window finishes the reload fast, and a press
-before the window jams it. With the feature on, the player's reload is manual
+before the window jams it. The reload also works in a vehicle, with the same
+window and timing bar. With the feature on, the player's reload is manual
 only: the clip never refills by itself.
 
 ## Reload window
