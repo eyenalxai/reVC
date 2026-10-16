@@ -1,7 +1,6 @@
 #ifndef __GTA_COLMODEL_H__
 #define __GTA_COLMODEL_H__
 
-#include "templates.h"
 #include "ColBox.h"
 #include "ColSphere.h"
 #include "ColLine.h"
@@ -24,14 +23,20 @@ struct CColModel
 	CompressedVector *vertices;
 	CColTriangle *triangles;
 	CColTrianglePlane *trianglePlanes;
+	CColTriangleBasis *triangleBasis;	// optional, see VICE-121
+	CColTriangleAccelNode *triangleAccel;
+	int32 numTriangleAccelNodes;
+	// Set once when the model runs without the broad phase and stays set: the
+	// model is too small for the tree to pay off, one of its triangles cannot
+	// be bounded conservatively, or the triangle cache is at its cap.
+	bool triangleAccelDisabled;
 
 	CColModel(void);
 	~CColModel(void);
 	void RemoveCollisionVolumes(void);
 	void CalculateTrianglePlanes(void);
+	void CalculateTriangleAccel(void);
 	void RemoveTrianglePlanes(void);
-	CLink<CColModel*> *GetLinkPtr(void);
-	void SetLinkPtr(CLink<CColModel*>*);
 	void GetTrianglePoint(CVector &v, int i) const;
 
 	void *operator new(size_t) throw();

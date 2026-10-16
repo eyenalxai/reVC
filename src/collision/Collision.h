@@ -24,11 +24,25 @@ struct CStoredCollPoly
 #define MAX_COLLISION_POINTS 32
 #endif
 
+// Cap for the per-triangle caches (planes, basis and acceleration tree) of
+// all resident models together. Planes are always allocated, the tests need
+// them; when the cap is already reached, a new model keeps its planes but is
+// left without a basis and without the broad phase, which gives the same
+// results at the speed of the old code. A single huge model can therefore
+// lose its acceleration silently. The measured resident set of the whole
+// game content is around 17 MB, so this is a safety net, not a budget.
+// See VICE-121 and docs/adr/0016.
+#ifndef COLTRI_CACHE_MAX_BYTES
+#define COLTRI_CACHE_MAX_BYTES (64*1024*1024)
+#endif
+
 class CCollision
 {
 public:
 	static eLevelName ms_collisionInMemory;
-	static CLinkList<CColModel*> ms_colModelCache;
+	// Per-triangle cache accounting, see VICE-121.
+	static int32 ms_numCachedTriangles;	// triangles with a resident plane cache
+	static int32 ms_numCachedBytes;		// bytes held by planes, basis and broad phase
 
 	static void Init(void);
 	static void Shutdown(void);
@@ -40,7 +54,13 @@ public:
 	static void DrawColModel_Coloured(const CMatrix &mat, const CColModel &colModel, int32 id);
 
 	static void CalculateTrianglePlanes(CColModel *model);
-	static void RemoveTrianglePlanes(CColModel *model);
+#ifndef VU_COLLISION
+	// The broad phase of ProcessColModels: appends the triangles of model the
+	// sphere can reach, in ascending index order. Walks the acceleration tree
+	// when the model has one and scans every triangle otherwise. Exposed so
+	// tools/collision_check can compare the pruned list against the full scan.
+	static int32 CollectSphereTriangles(const CColSphere &sphere, CColModel &model, int32 *indices);
+#endif
 
 	// all these return true if there's a collision
 	static bool TestSphereSphere(const CSphere &s1, const CSphere &s2);
@@ -49,7 +69,7 @@ public:
 	static bool TestVerticalLineBox(const CColLine &line, const CBox &box);
 	static bool TestLineTriangle(const CColLine &line, const CompressedVector *verts, const CColTriangle &tri, const CColTrianglePlane &plane);
 	static bool TestLineSphere(const CColLine &line, const CColSphere &sph);
-	static bool TestSphereTriangle(const CColSphere &sphere, const CompressedVector *verts, const CColTriangle &tri, const CColTrianglePlane &plane);
+	static bool TestSphereTriangle(const CColSphere &sphere, const CompressedVector *verts, const CColTriangle &tri, const CColTrianglePlane &plane, const CColTriangleBasis *basis = nil);
 	static bool TestLineOfSight(const CColLine &line, const CMatrix &matrix, CColModel &model, bool ignoreSeeThrough, bool ignoreShootThrough);
 
 	static bool ProcessSphereSphere(const CColSphere &s1, const CColSphere &s2, CColPoint &point, float &mindistsq);
@@ -58,7 +78,7 @@ public:
 	static bool ProcessVerticalLineTriangle(const CColLine &line, const CompressedVector *verts, const CColTriangle &tri, const CColTrianglePlane &plane, CColPoint &point, float &mindist, CStoredCollPoly *poly);
 	static bool ProcessLineTriangle(const CColLine &line , const CompressedVector *verts, const CColTriangle &tri, const CColTrianglePlane &plane, CColPoint &point, float &mindist, CStoredCollPoly *poly = nil);
 	static bool ProcessLineSphere(const CColLine &line, const CColSphere &sphere, CColPoint &point, float &mindist);
-	static bool ProcessSphereTriangle(const CColSphere &sph, const CompressedVector *verts, const CColTriangle &tri, const CColTrianglePlane &plane, CColPoint &point, float &mindistsq);
+	static bool ProcessSphereTriangle(const CColSphere &sph, const CompressedVector *verts, const CColTriangle &tri, const CColTrianglePlane &plane, CColPoint &point, float &mindistsq, const CColTriangleBasis *basis = nil);
 	static bool ProcessLineOfSight(const CColLine &line, const CMatrix &matrix, CColModel &model, CColPoint &point, float &mindist, bool ignoreSeeThrough, bool ignoreShootThrough);
 	static bool ProcessVerticalLine(const CColLine &line, const CMatrix &matrix, CColModel &model, CColPoint &point, float &mindist, bool ignoreSeeThrough, bool ignoreShootThrough, CStoredCollPoly *poly);
 	static int32 ProcessColModels(const CMatrix &matrixA, CColModel &modelA, const CMatrix &matrixB, CColModel &modelB, CColPoint *spherepoints, CColPoint *linepoints, float *linedists);

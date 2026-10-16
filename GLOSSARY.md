@@ -375,3 +375,22 @@ its parent changed, and syncs the objects that hang on the frame only when its
 LTM changed. `Frame::syncDirty` runs the pass once for each camera begin-update,
 so the walk is part of the frame cost. Marking a frame whose matrices did not
 change costs a visit but no LTM work. See ADR 0014.
+## Triangle basis
+
+The per-triangle frame the sphere/triangle tests work in: the normalized first
+edge, the in-plane vector at right angles to it, and the third vertex's
+coordinates in that frame. It depends only on the triangle, so the collision
+model computes it once (VICE-121).
+
+## Broad phase
+
+The part of `ProcessColModels` that picks which of model B's triangles are
+worth the narrow phase's math. It appends the candidates in ascending triangle
+index order, because the narrow phase keeps the first of equal distances.
+
+## Acceleration tree
+
+A per-model binary tree over contiguous, ascending runs of triangles. Each node
+bounds its run; the broad phase descends only into the nodes the query sphere
+can reach. The model builds it lazily, on its first collision.
+>>>>>>> origin/refactor/collision-cost
