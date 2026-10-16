@@ -41,43 +41,54 @@
  *
  * The rule is written against one set: the *catchable* positions - in the
  * frustum, inside the fade and fog of the weather, not occluded - are the ones
- * the player can catch an event at, and the ladder below lets an event through
- * only outside that set, or under the fade that covers the screen. Every arm
- * is a statement about the view:
+ * the player can catch an event at, and the ladder lets an event through only
+ * outside that set, or under the fade that covers the screen. Every arm is a
+ * statement about the view:
  *
- *	1. occluded	COcclusion::IsPositionOccluded: an occluder volume covers
- *			the position, so the camera cannot see it however it turns.
- *			The active occluder set is built during the render, one
- *			frame before the gates read it, so the answer counts only
- *			while the set belongs to the current view (the camera has
- *			barely moved: NEAR_BUBBLE_OCCLUDER_*); a stale set is
- *			ignored and the other arms decide.
+ *	1. the occluded hint
+ *			COcclusion::IsPositionOccluded says an occluder volume
+ *			covers the position. The active set is built during the
+ *			render, one frame before the gates read it, by projecting
+ *			the volumes with the *previous* camera, so the answer is
+ *			not trusted on its own: it selects the position for a
+ *			confirmation ray (arm 4), the exact test. A stale or wrong
+ *			set can waste a ray or refuse a spawn, never allow a
+ *			visible one. The set is read only while the camera still
+ *			matches the view it was built for (NEAR_BUBBLE_OCCLUDER_*:
+ *			2 m, a direction cosine of 0.9995, 2 degrees), so a turned
+ *			camera spends no rays on stale candidates at all.
  *	2. beyond the fade
  *			the position is at or past the visible range (min(LOD
  *			distance, weather far clip)): the world fades and the fog
  *			hides there, whether the camera looks at it or not;
- *	3. the soft distance
- *			the position is off the frustum and at least
- *			NEAR_BUBBLE_SOFT_DISTANCE away: the traffic behind the
- *			camera. This is the arm that keeps a street with no
- *			occluders alive (the owner's long roads and the beach): the
- *			bands of the ring sit inside the visible range, so arms 1
- *			and 2 alone would leave an open street with no creation
- *			sites at all and the traffic would drain. A car created
- *			here starts at alpha 0 (the game fades every fresh car in)
- *			and only a turn of the camera can reveal it;
- *	4. a line-of-sight ray
- *			the position is off the frustum and *close* (inside
- *			NEAR_BUBBLE_SOFT_DISTANCE): a blocked ray (a building
- *			between the camera and the position) means a turn cannot
- *			reveal it. The ray is the one expensive test, so a frame
- *			may spend at most NEAR_BUBBLE_LOS_RAYS_PER_FRAME of them; a
- *			candidate that finds the budget spent is refused, not
- *			created.
+ *	3. the soft arm
+ *			the position is off the frustum by the margin
+ *			(NEAR_BUBBLE_SOFT_MARGIN: a radius margin, about 12 degrees
+ *			of bearing at the soft distance, so a flick cannot reveal a
+ *			fresh creation) and at least NEAR_BUBBLE_SOFT_DISTANCE away.
+ *			This is the traffic behind the camera, and it is the arm
+ *			that keeps a street with no occluders alive: the ring's
+ *			bands sit *inside* the visible range by the table's own
+ *			design, so with the occluders and the fog alone an open
+ *			street has no creation site at all and its traffic drains
+ *			(the model in utils/near-bubble Section 6). The arm's
+ *			distance is the side band less the widest lane offset, so
+ *			every placement of the band sits at or beyond it; a car
+ *			created here starts at alpha 0 and holds it until the
+ *			player can see it (CVehicle::UpdateClumpAlpha), so the
+ *			reveal is the fade itself;
+ *	4. the confirmation ray
+ *			a line of sight (CWorld::GetIsLineOfSightClear, buildings
+ *			only) that is blocked by a building means the position is
+ *			hidden, however the stale data read. The ray is the one
+ *			expensive test, so a frame may spend at most
+ *			NEAR_BUBBLE_LOS_RAYS_PER_FRAME of them; a candidate that
+ *			finds the budget spent is refused, not created.
  *
- * Anything left - in the frustum, inside the fade, not occluded - is refused.
- * The refused creation costs nothing: the placement loop of the caller moves to
- * its next candidate and the frame keeps its budget.
+ * Anything left - in the frustum or within the margin of it, not occluded,
+ * inside the fade - is refused. The refused creation costs nothing: the
+ * placement loop of the caller moves to its next candidate and the frame keeps
+ * its budget.
  *
  * The removal rule
  * ----------------
@@ -89,10 +100,13 @@
  *	- the distance is beyond the removal threshold: the ring's own despawn
  *	  (which already sits the reserve past the spawn band, the hysteresis of
  *	  the table) and the bubble plus its reserve, whichever is farther;
- *	- the car is hidden: off the frustum, occluded, or beyond the fade. A
- *	  removal is a soft event (the game fades the car out), so it does not
- *	  spend a ray: the cheap arms decide, and a car the player can see keeps
- *	  driving instead of disappearing.
+ *	- the car is hidden by an arm that does not rest on stale data: off the
+ *	  frustum by the margin, beyond the fade, under a fade, or behind a
+ *	  confirmation ray. The occluded hint is confirmed exactly like a
+ *	  creation's, so a stale occluder cannot fade a car out in view; the
+ *	  removal spends from the same ray budget, and a removal that finds the
+ *	  budget spent simply waits - the car is hidden-ish and leaves a frame
+ *	  later.
  *
  * The fill burst (VICE-126)
  * -------------------------
@@ -102,7 +116,11 @@
  * creation in that state may sit in the frustum - the player cannot see it -
  * and the counters record it as fade exempt, so the acceptance of the ticket
  * (the frustum counters stay zero) reads cleanly. The bubble still applies:
- * even a hidden frame does not create a car at the player's elbow.
+ * even a hidden frame does not create a car at the player's elbow. The fill's
+ * mass is opaque when the screen returns: the ramp of a car's alpha runs at
+ * the hidden step while the fade covers the screen (CVehicle::
+ * UpdateClumpAlpha), and the cars that hold their invisible frame (the soft
+ * arm) fade in only when first seen.
  *
  * The counters (the acceptance)
  * -----------------------------
@@ -117,6 +135,11 @@
  *					counter is exactly the fade's own work.
  *	hidden creations / removals	the events the rule allowed outside the
  *					catchable set.
+ *	occluder creations / removals	those of the hidden events the occluded
+ *					hint selected and the confirmation ray allowed:
+ *					the arm the play-test can quantify.
+ *	ray creations			the placements the close blind spot allowed
+ *					through the confirmation ray.
  *	refused				the events the rule stopped.
  *	bypassed			the events the top-down camera's view allowed.
  *	rays / rays total		the rays of the frame (at most the budget)
@@ -140,7 +163,10 @@
  * population, and the "other" pair above carries the rest. The parked cars of
  * the generators go through the same creation rule but have their own
  * unobserved gate (CarGen.cpp) and are parked vehicles, so they are in neither
- * fill.
+ * fill. The trains are created once at boot at the origin (CTrain::InitTrains)
+ * as permanent, locked vehicles - not a traffic event, and not counted; the
+ * planes and the helicopter come from the scripts and the cheats, whose cars
+ * the "other" rows carry.
  *
  * No engine header is included here. The evidence program in utils/near-bubble
  * reads the ladder and the targets from this header alone; the engine calls
@@ -159,13 +185,26 @@
 #define NEAR_BUBBLE_REMOVE_RESERVE	RING_CAR_DESPAWN_RESERVE
 #define NEAR_BUBBLE_REMOVE_DISTANCE	(NEAR_BUBBLE_RADIUS + NEAR_BUBBLE_REMOVE_RESERVE)
 
+/* The widest lane offset of the shipped paths (PathFind.h LANE_WIDTH x the
+ * widest lane count and the two-way offset, the arithmetic utils/traffic-rings
+ * derives: (4 - 1 + 0.5) x 5). A side-band placement lands up to this past its
+ * ring along the radius, so the soft distance takes it off the ring: every
+ * placement of the band sits at or beyond the soft distance. */
+#define NEAR_BUBBLE_SIDE_PLACEMENT_SLACK 17.5f
+
 /* The soft distance of the creation rule: the off-frustum traffic behind the
- * camera. It is the removal distance, the gap the traffic keeps around the
- * player: inside it a creation needs the occluders or a blocked ray, at or
- * beyond it the car appears behind the camera with the game's own fade-in.
- * The side band (RING_CAR_SIDE_SPAWN, 120 m at every ring scale) sits on it,
- * so a street with no occluders keeps its traffic. */
-#define NEAR_BUBBLE_SOFT_DISTANCE	NEAR_BUBBLE_REMOVE_DISTANCE
+ * camera. It is the side band less the placement slack, so the whole side band
+ * qualifies - the arm that keeps a street with no occluders alive (the ring's
+ * bands sit inside the visible range by the table's design). Inside it the
+ * confirmation ray decides. */
+#define NEAR_BUBBLE_SOFT_DISTANCE	(RING_CAR_SIDE_SPAWN - NEAR_BUBBLE_SIDE_PLACEMENT_SLACK)
+
+/* The margin the soft and ray arms require a position to be off the frustum
+ * by: a radius margin, about 12 degrees of bearing at the soft distance
+ * (asin(NEAR_BUBBLE_SOFT_MARGIN / NEAR_BUBBLE_SOFT_DISTANCE)), so a flick of
+ * the camera cannot reveal a fresh creation; the margin is in front of the
+ * position before the position is even out of the view cone. */
+#define NEAR_BUBBLE_SOFT_MARGIN		25.0f
 
 /* The radius the visibility tests use for a car: the bounding sphere of the
  * largest shipped vehicle sits below this, so the tests are conservative. */
@@ -173,45 +212,53 @@
 
 /* The line-of-sight budget of one frame: the rays are the collision path's
  * work, so they are the scarcest resource of the rule. Four rays reach the
- * close band of the frame; a refused candidate costs nothing and the placement
- * loop moves on. */
+ * occluded hints and the close band of the frame; a refused candidate costs
+ * nothing and the placement loop moves on. */
 #define NEAR_BUBBLE_LOS_RAYS_PER_FRAME	4
-/* The longest ray: the soft distance, a handful of sectors. The ray decides
- * the close band only; everything farther is the soft arm's. */
+/* The longest ray: the soft distance, a couple of sectors. Inside it the
+ * occluded hints and the close band live. */
 #define NEAR_BUBBLE_LOS_RANGE		NEAR_BUBBLE_SOFT_DISTANCE
 
-/* The staleness the occluder set is trusted for (see the creation rule): the
- * set is built during the render and read by the gates of the next frame, so
- * the camera may have moved a frame's worth. Past this, "occluded" is ignored
- * and the other arms decide - the conservative direction, a refused spawn
- * instead of a pop. A dot of 0.99 is about 8 degrees. */
-#define NEAR_BUBBLE_OCCLUDER_MAX_MOVE	5.0f
-#define NEAR_BUBBLE_OCCLUDER_MIN_DOT	0.99f
-#define NEAR_BUBBLE_OCCLUDER_MAX_FOV	5.0f
+/* The staleness the occluder hint is read for. The set is built during the
+ * render and read by the gates of the next frame, so the camera may have moved
+ * a frame's worth; past this the hint is ignored and the other arms decide. A
+ * dot of 0.9995 is about 1.8 degrees; the move is a frame at 60 m/s. The hint
+ * never decides on its own - the confirmation ray does - so the window's cost
+ * is a wasted ray, not a pop. */
+#define NEAR_BUBBLE_OCCLUDER_MAX_MOVE	2.0f
+#define NEAR_BUBBLE_OCCLUDER_MIN_DOT	0.9995f
+#define NEAR_BUBBLE_OCCLUDER_MAX_FOV	2.0f
 
 /* The fresh-spawn grace of a car: the five seconds the stuck cull waits before
  * it is allowed to take a car at all, so a car that was just placed can never
  * be the one the cull gives up on. */
 #define NEAR_BUBBLE_GRACE_MS		5000
 
-/* The answer of the ladder for one candidate. */
-enum ENearBubbleAnswer
+/* The arm of the ladder that answered for a candidate: the reason an event was
+ * allowed, refused, or sent to the confirmation ray. The counters subdivide
+ * the hidden events by it. */
+enum ENearBubbleArm
 {
-	NEAR_BUBBLE_REFUSED = 0,	/* the event is not allowed here */
-	NEAR_BUBBLE_ALLOWED,		/* the position is hidden: the event may happen */
-	NEAR_BUBBLE_SEEK_LOS		/* the close blind spot: a blocked ray allows it */
+	NEAR_BUBBLE_ARM_NONE = 0,	/* refused */
+	NEAR_BUBBLE_ARM_BYPASS,		/* the top-down camera's view */
+	NEAR_BUBBLE_ARM_OCCLUDER,	/* the occluded hint: a ray confirms it */
+	NEAR_BUBBLE_ARM_FADE_DISTANCE,	/* beyond the visible range */
+	NEAR_BUBBLE_ARM_SOFT,		/* off the frustum by the margin, beyond the soft distance */
+	NEAR_BUBBLE_ARM_RAY,		/* off the frustum by the margin, close: a ray decides */
+	NEAR_BUBBLE_ARM_FADE,		/* the screen fade covers the event */
 };
 
 /* One candidate as the frame sees it. The caller fills the facts from the
  * engine (TheCamera, COcclusion, CurrentTrafficRings) and the harness fills
- * them from its own matrix. `occluded` is the *trusted* answer: the caller
- * folds the staleness of the occluder set in before it sets the field. */
+ * them from its own matrix. `occluded` is the *trusted* hint: the caller folds
+ * the staleness of the occluder set in before it sets the field. */
 struct SNearBubbleCandidate
 {
 	float distToPlayer;	/* 2D: the bubble is a disc on the map */
 	float distToCamera;	/* 3D, the distance the renderer fades with */
 	float visibleRange;	/* CurrentTrafficRings().visibleRange */
 	bool inFrustum;		/* TheCamera.IsSphereVisible(pos, radius) */
+	bool inFrustumMargin;	/* IsSphereVisible(pos, radius + NEAR_BUBBLE_SOFT_MARGIN) */
 	bool occluded;		/* COcclusion::IsPositionOccluded(pos, radius), trusted */
 	bool fadeHides;		/* FillBurstIsHidden(): the fade covers the screen */
 	bool bypassView;	/* the top-down camera: the view is not the player's */
@@ -229,45 +276,74 @@ NearBubblePositionIsCatchable(const SNearBubbleCandidate &c)
 		(c.visibleRange <= 0.0f || c.distToCamera < c.visibleRange);
 }
 
-static inline ENearBubbleAnswer
-NearBubbleAnswerFor(const SNearBubbleCandidate &c)
+/* The arm that answers for a candidate. The answer is derived from it, so the
+ * counters can subdivide by the arm and the ladder stays one function. */
+static inline ENearBubbleArm
+NearBubbleArmFor(const SNearBubbleCandidate &c)
 {
 	/* The bubble. Nothing appears or disappears in it, whatever the view,
 	 * the fade or the camera mode: a car placed at the player's elbow is
 	 * there when the view that covered it is gone. */
 	if (c.distToPlayer <= NEAR_BUBBLE_RADIUS)
-		return NEAR_BUBBLE_REFUSED;
+		return NEAR_BUBBLE_ARM_NONE;
 	/* The top-down camera looks at the map from above, where the street level
 	 * is not the subject and the traffic must keep flowing: the visibility
-	 * arms below step aside, the bubble above does not. */
+	 * arms step aside, the bubble above does not. */
 	if (c.bypassView)
-		return NEAR_BUBBLE_ALLOWED;
+		return NEAR_BUBBLE_ARM_BYPASS;
 	/* Outside the catchable set the event is hidden, and the arms are the
 	 * ways a position lands there. The subdivision is structural: with the
 	 * predicate above, an occluded position is out, a position beyond the
 	 * fade is out, and what is left over is off the frustum. */
 	if (!NearBubblePositionIsCatchable(c)) {
-		/* The occluder volumes: the camera cannot see the position at all. */
+		/* The occluder volumes, as a hint: the confirmation ray (the
+		 * caller resolves it) decides. */
 		if (c.occluded)
-			return NEAR_BUBBLE_ALLOWED;
+			return NEAR_BUBBLE_ARM_OCCLUDER;
 		/* The fade and the fog: the world is not drawn at this distance,
 		 * whether the frustum covers the position or not. A visible range
-		 * of zero is the boot path before the time cycle and asks for the
+		 * of zero is the boot path before the time cycle and uses the
 		 * close arms instead. */
 		if (c.visibleRange > 0.0f && c.distToCamera >= c.visibleRange)
-			return NEAR_BUBBLE_ALLOWED;
-		/* Off the frustum: the traffic behind the camera. Far enough, the
-		 * soft arm allows it; closer, a blocked line of sight must. */
+			return NEAR_BUBBLE_ARM_FADE_DISTANCE;
+		/* The position must be off the view cone by the margin: in the
+		 * cone, or within the margin of it, an event is refused (a turn
+		 * of the camera would reveal it at once). */
+		if (c.inFrustumMargin)
+			return NEAR_BUBBLE_ARM_NONE;
+		/* Off the view cone: the traffic behind the camera. Far enough,
+		 * the soft arm allows it; closer, the ray must confirm a
+		 * building between the camera and it. */
 		if (c.distToCamera >= NEAR_BUBBLE_SOFT_DISTANCE)
-			return NEAR_BUBBLE_ALLOWED;
-		return NEAR_BUBBLE_SEEK_LOS;
+			return NEAR_BUBBLE_ARM_SOFT;
+		return NEAR_BUBBLE_ARM_RAY;
 	}
 	/* In the frustum, inside the fade, nothing between the camera and the
 	 * position: only the fade that covers the screen lets an event through
 	 * (the fill burst of a transition), and the counters mark it exempt. */
 	if (c.fadeHides)
-		return NEAR_BUBBLE_ALLOWED;
-	return NEAR_BUBBLE_REFUSED;
+		return NEAR_BUBBLE_ARM_FADE;
+	return NEAR_BUBBLE_ARM_NONE;
+}
+
+/* The answer of the ladder for one candidate. */
+enum ENearBubbleAnswer
+{
+	NEAR_BUBBLE_REFUSED = 0,	/* the event is not allowed here */
+	NEAR_BUBBLE_ALLOWED,		/* the position is hidden: the event may happen */
+	NEAR_BUBBLE_SEEK_LOS		/* the occluded hint or the close blind spot:
+					 * a blocked ray allows it, a clear one refuses */
+};
+
+static inline ENearBubbleAnswer
+NearBubbleAnswerFor(const SNearBubbleCandidate &c)
+{
+	ENearBubbleArm arm = NearBubbleArmFor(c);
+	if (arm == NEAR_BUBBLE_ARM_NONE)
+		return NEAR_BUBBLE_REFUSED;
+	if (arm == NEAR_BUBBLE_ARM_OCCLUDER || arm == NEAR_BUBBLE_ARM_RAY)
+		return NEAR_BUBBLE_SEEK_LOS;
+	return NEAR_BUBBLE_ALLOWED;
 }
 
 /* The bubble's share of a budget: the cars the ring holds over its area, times
@@ -296,25 +372,31 @@ static_assert(NEAR_BUBBLE_REMOVE_DISTANCE > NEAR_BUBBLE_RADIUS,
 	"a removal must leave the bubble");
 static_assert(NEAR_BUBBLE_REMOVE_DISTANCE <= RING_CAR_DESPAWN,
 	"the removal threshold must stay inside the despawn of the ring");
-/* The soft distance is the side band itself: the band's placement error pulls
- * a fresh car no more than the reserve back, so the side band always places at
- * or beyond the soft distance and a street with no occluders keeps its
- * traffic. */
+/* The soft distance takes the side band's placement slack off its ring, so
+ * every placement of the band sits at or beyond the arm. */
 static_assert(NEAR_BUBBLE_SOFT_DISTANCE <= RING_CAR_SIDE_SPAWN,
-	"the soft distance must not reach inside the side band");
+	"the soft distance must not reach past the side band");
+static_assert(NEAR_BUBBLE_SOFT_DISTANCE + NEAR_BUBBLE_SIDE_PLACEMENT_SLACK >= RING_CAR_SIDE_SPAWN,
+	"the soft distance must cover the side band's placement slack");
 static_assert(NEAR_BUBBLE_SOFT_DISTANCE > NEAR_BUBBLE_RADIUS,
 	"the soft distance must leave the bubble");
-/* The ray reaches the soft distance by construction, and the close band inside
- * it is a few sectors. */
+/* The margin is a bearing the camera must turn by before an event behind it
+ * can be seen. */
+static_assert(NEAR_BUBBLE_SOFT_MARGIN > NEAR_BUBBLE_ENTITY_RADIUS,
+	"the margin must dominate the entity's own radius");
+static_assert(NEAR_BUBBLE_SOFT_MARGIN < NEAR_BUBBLE_SOFT_DISTANCE,
+	"the margin must stay inside the soft distance");
+/* The ray reaches the soft distance by construction; the close band inside it
+ * shares the ray with the occluded hints. */
 static_assert(NEAR_BUBBLE_LOS_RANGE == NEAR_BUBBLE_SOFT_DISTANCE,
 	"the ray covers the close band");
 static_assert(NEAR_BUBBLE_LOS_RAYS_PER_FRAME > 0, "the ray budget must make progress");
 static_assert(NEAR_BUBBLE_ENTITY_RADIUS > 0.0f, "the visibility tests need a radius");
 static_assert(NEAR_BUBBLE_GRACE_MS > 0, "the fresh-spawn grace must last a frame at least");
-static_assert(NEAR_BUBBLE_OCCLUDER_MAX_MOVE > 0.0f, "the occluder set must allow a frame of movement");
+static_assert(NEAR_BUBBLE_OCCLUDER_MAX_MOVE > 0.0f, "the occluder hint must allow a frame of movement");
 static_assert(NEAR_BUBBLE_OCCLUDER_MIN_DOT > 0.0f && NEAR_BUBBLE_OCCLUDER_MIN_DOT <= 1.0f,
-	"the occluder trust is a direction cosine");
-static_assert(NEAR_BUBBLE_OCCLUDER_MAX_FOV >= 0.0f && NEAR_BUBBLE_OCCLUDER_MAX_FOV <= 30.0f,
-	"the occluder trust allows a zoom of a few degrees");
+	"the occluder hint is a direction cosine");
+static_assert(NEAR_BUBBLE_OCCLUDER_MAX_FOV >= 0.0f && NEAR_BUBBLE_OCCLUDER_MAX_FOV <= 5.0f,
+	"the occluder hint allows a frame of zoom");
 
 #endif // __GTA_NEARBUBBLE_H__

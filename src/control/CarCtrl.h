@@ -206,14 +206,19 @@ public:
 	 * the acceptance: a car placed or deleted where the player could catch it
 	 * is counted there, and both are zero while the bubble holds. The fade
 	 * counters are the catchable events a fade covered (the fill burst's
-	 * work); the other pair counts the cars created outside the traffic
-	 * spawner, and their fill is the rest of the car target. */
+	 * work); the hidden events subdivide by the arm (the occluded hint and
+	 * the close blind spot, both confirmed by the ray); the other pair counts
+	 * the cars created outside the traffic spawner, and their fill is the
+	 * rest of the car target. */
 	static uint32 ms_nNearBubbleCreationsInFrustum;
 	static uint32 ms_nNearBubbleRemovalsInFrustum;
 	static uint32 ms_nNearBubbleFadeCreations;
 	static uint32 ms_nNearBubbleFadeRemovals;
 	static uint32 ms_nNearBubbleHiddenCreations;
 	static uint32 ms_nNearBubbleHiddenRemovals;
+	static uint32 ms_nNearBubbleOccluderCreations;
+	static uint32 ms_nNearBubbleOccluderRemovals;
+	static uint32 ms_nNearBubbleRayCreations;
 	static uint32 ms_nNearBubbleRefused;
 	static uint32 ms_nNearBubbleBypassed;
 	static uint32 ms_nNearBubbleRays;

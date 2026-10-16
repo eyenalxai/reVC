@@ -320,24 +320,35 @@ removes an entity inside (VICE-127). The radius is the car side band (120 m)
 less the placement reserve of the ring table (30 m), so no spawn band places
 inside it; the population inside the bubble is the traffic that drove in from
 outside. A creation outside the bubble is allowed only while the player cannot
-see the position: occluded by an occluder volume (trusted only while the
-occluder set belongs to the current view), beyond the visible range (the fade
-and the fog), behind the soft distance (the traffic behind the camera, which
-starts at alpha 0), or off the frustum and behind a blocked line-of-sight ray
-(bounded per frame). A removal needs the fresh-spawn grace, the removal distance
-(the bubble plus its reserve, at least the ring's despawn) and the same hidden
-condition. The rules live in `src/control/NearBubble.h`, the engine arms and the
-counters in `NearBubble.cpp`; ADR 0025 holds the decisions.
+see the position: beyond the visible range (the fade and the fog), behind the
+soft distance (the traffic behind the camera, off the view cone by the margin),
+or behind the confirmation ray (the occluded hint and the close blind spot are
+never allowed on their own: a blocked line of sight decides, bounded per frame).
+A removal needs the fresh-spawn grace, the removal distance (the bubble plus its
+reserve, at least the ring's despawn) and the same hidden condition. A car
+created off the view cone holds its alpha 0 until it is first on screen, so the
+reveal itself is the fade. The rules live in `src/control/NearBubble.h`, the
+engine arms and the counters in `NearBubble.cpp`; ADR 0025 holds the decisions.
 
 ## Soft distance
 
-The removal gap of the near bubble (120 m) that the creation rule also uses
-(VICE-127): a car off the frustum at or beyond it may be created - the traffic
-behind the camera, below the detail the draw distance gives it. It is the arm
-that keeps a street with no occluders alive, because the ring's bands sit inside
-the visible range by the ring table's design; inside it, the close line-of-sight
-ray decides. The side band places exactly on it (`NEAR_BUBBLE_SOFT_DISTANCE` =
-`NEAR_BUBBLE_REMOVE_DISTANCE`).
+The distance at which the soft arm of the near bubble begins (VICE-127): the car
+side band less the widest lane offset of the shipped paths (17.5 m), so every
+placement of the band sits at or beyond it. A car off the view cone by the
+margin and at or beyond it may be created - the traffic behind the camera - and
+inside it only the confirmation ray decides. It is the arm that keeps a street
+with no occluders alive, because the ring's bands sit inside the visible range
+by the ring table's design (`NEAR_BUBBLE_SOFT_DISTANCE`).
+
+## Confirmation ray
+
+The one test that allows a car to be created or removed behind the near bubble's
+hints (VICE-127): `CWorld::GetIsLineOfSightClear` against the buildings, so a
+blocked line of sight means no turn of the camera can reveal the position. The
+occluded hint is a frame old and can be wrong against a turned camera, so it
+only selects the position; the close blind spot (off the view cone by the
+margin, inside the soft distance) uses the same ray. A frame spends at most four
+of them (`NEAR_BUBBLE_LOS_RAYS_PER_FRAME`).
 
 ## Frustum counter
 

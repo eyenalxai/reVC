@@ -10,6 +10,7 @@
 #include "Pools.h"
 #include "HandlingMgr.h"
 #include "CarCtrl.h"
+#include "FillBurst.h"
 #include "Population.h"
 #include "ModelIndices.h"
 #include "World.h"
@@ -2095,11 +2096,22 @@ CVehicle::UpdateClumpAlpha(void)
 {
 	int clumpAlpha = CVisibilityPlugins::GetClumpAlpha((RpClump*)m_rwObject);
 	if(bFadeOut){
-		clumpAlpha -= 8;
+		clumpAlpha -= VEHICLE_ALPHA_FADE_OUT_STEP;
 		if(clumpAlpha < 0)
 			clumpAlpha = 0;
 	}else if(clumpAlpha < 255){
-		clumpAlpha += 16;
+		/* A car created out of sight holds its invisible frame until the
+		 * player can see it (VICE-127, the soft arm): the fade-in is the
+		 * reveal itself, so a camera turn finds a car forming, never an
+		 * opaque one that appeared from nowhere. An in-view creation is
+		 * on screen at once and keeps the original ramp. */
+		if(clumpAlpha == 0 && !GetIsOnScreen())
+			return;
+		/* While the fade of a transition covers the screen the ramp runs at
+		 * the hidden step: the mass a fill burst creates (VICE-126) is
+		 * opaque when the screen returns, because the dark head of a fade is
+		 * shorter than the sixteen steps of the normal ramp. */
+		clumpAlpha += FillBurstIsHidden() ? VEHICLE_ALPHA_HIDDEN_STEP : VEHICLE_ALPHA_FADE_IN_STEP;
 		if(clumpAlpha > 255)
 			clumpAlpha = 255;
 	}

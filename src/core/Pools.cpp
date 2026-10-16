@@ -165,6 +165,10 @@ INITSAVEBUF
 			assert(0);
 		--CCarCtrl::NumRandomCars;
 		pVehicle->Load(buf);
+		/* The save does not carry the near bubble's flag (VICE-127): a car of
+		 * the random class restored from a save is the traffic's own again,
+		 * so it does not hide in the "other fill" after a load. */
+		pVehicle->bIsTrafficCar = pVehicle->VehicleCreatedBy == RANDOM_VEHICLE;
 		CWorld::Add(pVehicle);
 #else
 		char* vbuf = new char[Max(CBike::nSaveStructSize, Max(CAutomobile::nSaveStructSize, CBoat::nSaveStructSize))];
@@ -234,6 +238,9 @@ INITSAVEBUF
 		(pVehicle->GetAddressOfEntityProperties())[0] = (pBufferVehicle->GetAddressOfEntityProperties())[0];
 		(pVehicle->GetAddressOfEntityProperties())[1] = (pBufferVehicle->GetAddressOfEntityProperties())[1];
 		pVehicle->AutoPilot = pBufferVehicle->AutoPilot;
+		/* The save does not carry the near bubble's flag (VICE-127): a car of
+		 * the random class restored from a save is the traffic's own again. */
+		pVehicle->bIsTrafficCar = pVehicle->VehicleCreatedBy == RANDOM_VEHICLE;
 		CCarCtrl::UpdateCarCount(pVehicle, false);
 		CWorld::Add(pVehicle);
 		delete[] vbuf;

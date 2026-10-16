@@ -30,6 +30,16 @@ enum {
  * VICE-127) survives a render. */
 #define VEHICLE_RENDERED_GRACE_MS 3000
 
+/* The steps of a vehicle's clump alpha (CVehicle::UpdateClumpAlpha): the
+ * original 16 a frame towards opaque and 8 a frame towards invisible, and the
+ * hidden step (VICE-127) the ramp runs at while the fade covers the screen, so
+ * a car created behind a transition's fade is opaque when the screen returns
+ * (the dark head of a fade is a quarter of its duration, shorter than the 16
+ * steps of the normal ramp). */
+#define VEHICLE_ALPHA_FADE_IN_STEP 16
+#define VEHICLE_ALPHA_FADE_OUT_STEP 8
+#define VEHICLE_ALPHA_HIDDEN_STEP 64
+
 enum eCarNodes
 {
 	CAR_WHEEL_RF = 1,

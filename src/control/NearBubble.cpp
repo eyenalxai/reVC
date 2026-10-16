@@ -19,9 +19,18 @@
  *
  * One frame of the bubble: CCarCtrl::NearBubbleBeginFrame resets the ray
  * budget and publishes the target of the fill; every creation and removal the
- * traffic makes asks the two gates below. The gates spend the rays, count the
- * events and say no where the rule says no. A refused event costs one ladder:
- * the placement loop of the caller moves to its next candidate.
+ * traffic makes asks the two gates below. The gates resolve the arm, spend the
+ * confirmation ray when the arm asks for one (the occluded hint and the close
+ * blind spot), count the events and say no where the rule says no. A refused
+ * event costs one ladder: the placement loop of the caller moves to its next
+ * candidate.
+ *
+ * The one test that decides: the line-of-sight ray. The occluder volumes are a
+ * frame old and their screen-space answer against a turned camera can be
+ * wrong, so they only *select* a position for the ray; the arm the counters
+ * attribute is the hint's, and the allowance is the ray's. A stale or wrong
+ * hint can waste a ray or refuse a spawn, never allow a car the player can
+ * see.
  *
  * The counters (the fill burst's, next to its own in CarCtrl.cpp):
  *
@@ -32,6 +41,10 @@
  *	ms_nNearBubbleFadeRemovals
  *	ms_nNearBubbleHiddenCreations		the events outside the
  *	ms_nNearBubbleHiddenRemovals		catchable set the rule allowed
+ *	ms_nNearBubbleOccluderCreations		those of them the occluded hint
+ *	ms_nNearBubbleOccluderRemovals		selected (the ray allowed them)
+ *	ms_nNearBubbleRayCreations		those of them the close blind spot
+ *						allowed through the ray
  *	ms_nNearBubbleRefused			the events the rule stopped
  *	ms_nNearBubbleBypassed			the events the top-down camera's
  *						view allowed
@@ -63,6 +76,9 @@ uint32 CCarCtrl::ms_nNearBubbleFadeCreations;
 uint32 CCarCtrl::ms_nNearBubbleFadeRemovals;
 uint32 CCarCtrl::ms_nNearBubbleHiddenCreations;
 uint32 CCarCtrl::ms_nNearBubbleHiddenRemovals;
+uint32 CCarCtrl::ms_nNearBubbleOccluderCreations;
+uint32 CCarCtrl::ms_nNearBubbleOccluderRemovals;
+uint32 CCarCtrl::ms_nNearBubbleRayCreations;
 uint32 CCarCtrl::ms_nNearBubbleRefused;
 uint32 CCarCtrl::ms_nNearBubbleBypassed;
 uint32 CCarCtrl::ms_nNearBubbleRays;
@@ -88,15 +104,15 @@ NearBubbleViewIsBypassed(void)
 
 /* The active occluder set is built during the render, one frame after the
  * gates read it (COcclusion::ProcessBeforeRendering, Renderer.cpp, runs after
- * the car block of Game.cpp). An "occluded" answer counts only while the
- * camera still matches the view the set was built for; past the
- * NEAR_BUBBLE_OCCLUDER_* thresholds it is ignored and the other arms decide -
- * a refused spawn, not a pop the counters cannot see. */
+ * the car block of Game.cpp). The hint counts only while the camera still
+ * matches the view the set was built for (NEAR_BUBBLE_OCCLUDER_*); past them
+ * it is ignored, the other arms decide and no ray is wasted on another view's
+ * candidates. The hint never decides on its own: the ray does. */
 static bool
 NearBubbleOccluderSetIsCurrent(void)
 {
 	if (COcclusion::NumActiveOccluders == 0)
-		/* No set, no answer: IsPositionOccluded says false anyway. */
+		/* No set, no hint: IsPositionOccluded says false anyway. */
 		return true;
 	if ((TheCamera.GetPosition() - COcclusion::ms_vecProcessedCameraPos).Magnitude() > NEAR_BUBBLE_OCCLUDER_MAX_MOVE)
 		return false;
@@ -117,6 +133,7 @@ NearBubbleCandidateAt(const CVector &pos, const CVector &playerCentre, float rad
 	c.distToCamera = (pos - TheCamera.GetPosition()).Magnitude();
 	c.visibleRange = CurrentTrafficRings().visibleRange;
 	c.inFrustum = TheCamera.IsSphereVisible(pos, radius);
+	c.inFrustumMargin = TheCamera.IsSphereVisible(pos, radius + NEAR_BUBBLE_SOFT_MARGIN);
 	c.occluded = NearBubbleOccluderSetIsCurrent() && COcclusion::IsPositionOccluded(pos, radius);
 	c.fadeHides = FillBurstIsHidden();
 	c.bypassView = NearBubbleViewIsBypassed();
@@ -137,6 +154,43 @@ NearBubblePositionIsHiddenByBuilding(const CVector &pos)
 		true, false, false, false, false, true, true);
 }
 
+/* The one resolution of a candidate: the arm, the confirmation ray when the
+ * arm asks for one (the occluded hint and the close blind spot), and the final
+ * answer. `rayAllowed` is false for the paths that cannot afford a ray per
+ * candidate: the parked cars of the map (an empty generator retries every four
+ * frames, and the generators run before the traffic in the frame), where those
+ * two arms are refused outright. */
+static bool
+NearBubbleResolve(const SNearBubbleCandidate &c, const CVector &pos, bool rayAllowed, ENearBubbleArm *pArm)
+{
+	ENearBubbleArm arm = NearBubbleArmFor(c);
+	*pArm = arm;
+
+	switch (arm) {
+	case NEAR_BUBBLE_ARM_NONE:
+		return false;
+	case NEAR_BUBBLE_ARM_FADE:
+	case NEAR_BUBBLE_ARM_BYPASS:
+	case NEAR_BUBBLE_ARM_FADE_DISTANCE:
+	case NEAR_BUBBLE_ARM_SOFT:
+		return true;
+	case NEAR_BUBBLE_ARM_OCCLUDER:
+	case NEAR_BUBBLE_ARM_RAY:
+	default:
+		break;
+	}
+
+	/* The confirmation ray, from the frame's budget. A candidate that finds
+	 * the budget spent is refused: the placement loop of the caller tries
+	 * its next candidate, and the frame's work stays bounded. */
+	if (!rayAllowed || CCarCtrl::ms_nNearBubbleRaysLeft <= 0)
+		return false;
+	CCarCtrl::ms_nNearBubbleRaysLeft--;
+	CCarCtrl::ms_nNearBubbleRays++;
+	CCarCtrl::ms_nNearBubbleRaysTotal++;
+	return NearBubblePositionIsHiddenByBuilding(pos);
+}
+
 void
 CCarCtrl::NearBubbleBeginFrame(void)
 {
@@ -149,44 +203,26 @@ CCarCtrl::NearBubbleBeginFrame(void)
 	ms_fNearBubbleTarget = NearBubbleTarget((float)GetRandomCarTarget(), CurrentTrafficRings().carDespawn);
 }
 
-/* The creation gate: may a car appear at this position? `rayAllowed` is false
- * for the paths that cannot afford a ray per candidate: the parked cars of the
- * map (an empty generator retries every four frames, and the generators run
- * before the traffic in the frame), where a close blind spot is treated as
- * visible. */
+/* The creation gate: may a car appear at this position? */
 bool
 CCarCtrl::NearBubbleAllowsCreation(const CVector &pos, const CVector &playerCentre, float radius, bool rayAllowed)
 {
 	SNearBubbleCandidate c = NearBubbleCandidateAt(pos, playerCentre, radius);
-	ENearBubbleAnswer answer = NearBubbleAnswerFor(c);
+	ENearBubbleArm arm;
+	bool allowed = NearBubbleResolve(c, pos, rayAllowed, &arm);
 
-	if (answer == NEAR_BUBBLE_SEEK_LOS) {
-		/* The one expensive test, from the frame's budget. A candidate that
-		 * finds the budget spent is refused: the placement loop of the caller
-		 * tries its next candidate, and the frame's work stays bounded. */
-		if (rayAllowed && ms_nNearBubbleRaysLeft > 0) {
-			ms_nNearBubbleRaysLeft--;
-			ms_nNearBubbleRays++;
-			ms_nNearBubbleRaysTotal++;
-			if (NearBubblePositionIsHiddenByBuilding(pos))
-				answer = NEAR_BUBBLE_ALLOWED;
-			else
-				answer = NEAR_BUBBLE_REFUSED;
-		} else {
-			answer = NEAR_BUBBLE_REFUSED;
-		}
-	}
-
-	if (answer == NEAR_BUBBLE_REFUSED)
+	if (!allowed)
 		ms_nNearBubbleRefused++;
-	return answer != NEAR_BUBBLE_REFUSED;
+	return allowed;
 }
 
 /* The removal gate: a car may go only when the grace has passed, it is beyond
  * the removal threshold, and it is hidden. The threshold takes the ring's own
  * despawn (which is already the spawn band plus the reserve) and the bubble
- * plus its reserve, whichever is farther. A removal spends no ray: it is the
- * game's soft event, and the cheap arms of the ladder decide. */
+ * plus its reserve, whichever is farther. The occluded hint is confirmed by
+ * the same ray the creations use: a stale occluder cannot fade a car out in
+ * view. A removal that finds the ray budget spent waits; the car is hidden-ish
+ * and leaves a frame later. */
 bool
 CCarCtrl::NearBubbleAllowsRemoval(CVehicle *pVehicle, const CVector &playerCentre, float ringThreshold)
 {
@@ -207,23 +243,20 @@ CCarCtrl::NearBubbleAllowsRemoval(CVehicle *pVehicle, const CVector &playerCentr
 		}
 	}
 
-	ENearBubbleAnswer answer = NearBubbleAnswerFor(c);
-	/* The close blind spot is an allow for a removal: the ray is the creation
-	 * rule's budget, and a car behind the camera may leave (the game fades a
-	 * removal in view, and a removal the player can see is refused above). */
-	if (answer == NEAR_BUBBLE_SEEK_LOS)
-		answer = NEAR_BUBBLE_ALLOWED;
+	ENearBubbleArm arm;
+	bool allowed = NearBubbleResolve(c, pVehicle->GetBoundCentre(), true, &arm);
 
-	if (answer == NEAR_BUBBLE_REFUSED)
+	if (!allowed)
 		ms_nNearBubbleRefused++;
-	return answer != NEAR_BUBBLE_REFUSED;
+	return allowed;
 }
 
 /* The acceptance counters, read after a car of the traffic entered the world.
  * The catchable set of the rule decides the row: an event the player could
  * catch is a violation unless the fade covered it (the fill burst's
- * exemption), and everything else is the rule's own work. A path that bypasses
- * the gate shows up in the frustum row. */
+ * exemption), everything else is the rule's own work, and the hidden events
+ * subdivide by the arm that allowed them. A path that bypasses the gate shows
+ * up in the frustum row. */
 void
 CCarCtrl::NearBubbleCountCreation(const CVector &pos, float radius)
 {
@@ -237,6 +270,11 @@ CCarCtrl::NearBubbleCountCreation(const CVector &pos, float radius)
 			ms_nNearBubbleCreationsInFrustum++;
 	} else {
 		ms_nNearBubbleHiddenCreations++;
+		switch (NearBubbleArmFor(c)) {
+		case NEAR_BUBBLE_ARM_OCCLUDER:	ms_nNearBubbleOccluderCreations++; break;
+		case NEAR_BUBBLE_ARM_RAY:	ms_nNearBubbleRayCreations++; break;
+		default:			break;
+		}
 	}
 }
 
@@ -258,6 +296,10 @@ CCarCtrl::NearBubbleCountRemoval(const CVector &pos, float radius, bool wasInvis
 			ms_nNearBubbleHiddenRemovals++;
 	} else {
 		ms_nNearBubbleHiddenRemovals++;
+		switch (NearBubbleArmFor(c)) {
+		case NEAR_BUBBLE_ARM_OCCLUDER:	ms_nNearBubbleOccluderRemovals++; break;
+		default:			break;
+		}
 	}
 }
 

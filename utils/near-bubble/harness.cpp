@@ -4,29 +4,26 @@
  * This program reads src/control/NearBubble.h on its own (the header has no
  * engine include) and checks the rule, the bounds and the numbers:
  *
- *	the bubble and its reserve fit inside every traffic spawn band, over the
- *	whole control matrix of the ring table (the draw distance, the FOV
- *	factor and the weather far clip of utils/traffic-rings);
+ *	the bubble and its reserve fit inside every traffic spawn band, and the
+ *	soft distance covers the side band's placement slack, over the whole
+ *	control matrix of the ring table (utils/traffic-rings);
  *
- *	the ladder never allows an event the player could catch: for every
- *	qualitative case, and then for every combination of the fields of a
- *	candidate, the answer is refuted against the catchable predicate - the
- *	binding that keeps the two from drifting apart (the exhaustive sweep
- *	fails the moment they do);
+ *	the ladder never allows an event the player could catch: case by case,
+ *	and then over every combination of the fields of a candidate (the sweep
+ *	fails the moment the ladder and the catchable predicate drift apart);
  *
- *	the removal threshold leaves the bubble, the hysteresis holds, and the
- *	ring's own despawn never sits inside the removal distance;
+ *	the membership of the arms: the occluded hint and the close blind spot
+ *	are always sent to the confirmation ray, the soft arm is always off the
+ *	view cone by the margin, nothing behind the bubble is ever allowed;
  *
- *	the line-of-sight budget of a frame is one number, and a frame that
- *	spends it refuses the rest of its candidates;
+ *	the reveal of a soft-arm creation: the alpha ramp and the gate (mirrored
+ *	from Vehicle.h/Vehicle.cpp), the frames to opaque, and the angular size
+ *	of a car at the soft distance against the margin and the occluder window;
  *
- *	the fill target of the bubble follows the budget and the ring area;
- *
- *	the fill of a street with no occluders: the creation rate the rule
- *	leaves against the rate the traffic needs, at the stock ring and at the
- *	owner's settings. The strict reading (occluders, fog and rays only)
- *	leaves an open street with no creation site at all; the soft arm is the
- *	one that keeps it alive.
+ *	the per-frame ray budget, the fill targets, and the fill of a street
+ *	with no occluders against the rate the traffic needs, with the real mix
+ *	of the spawner's branches (the fast branch sends the side band a quarter
+ *	of its calls) and the lane-offset allowance of the soft distance.
  *
  * Build and run:
  *
@@ -52,16 +49,24 @@
 #define FILL_BURST_ATTEMPTS_PER_FRAME 25 /* PopulationBudget.h */
 #define DRAWDIST_DEFAULT_VALUE 1.2f	/* DrawDistance.h DRAWDIST_DEFAULT */
 
+/* The reveal numbers (Section 7), mirrored from Vehicle.h (VICE-127):
+ * VEHICLE_ALPHA_FADE_IN_STEP, VEHICLE_ALPHA_HIDDEN_STEP, the alpha's top, and
+ * the stock FOV whose half is the view cone's half-angle. */
+#define VEHICLE_ALPHA_FADE_IN_STEP 16	/* Vehicle.h */
+#define VEHICLE_ALPHA_HIDDEN_STEP 64	/* Vehicle.h */
+#define CLUMP_ALPHA_TOP 255		/* VisibilityPlugins.cpp */
+#define STOCK_FOV 70.0f			/* Camera.cpp */
+
 /* The model of an open street (Section 6): the average traffic speed (the AI
- * cruise speeds of the ring are about 7..13 m/s) and the share of the side
- * band's placements the lane offset pulls inside the soft distance. The
- * placements sit on the ring crossing (exactly the side band = the soft
- * distance); the lane offset moves them perpendicular to their road, so the
- * radial part of the offset is offset x cos(the road against the radius) and
- * the share under the soft distance is a layout number. The section prints the
- * rate for 0 %, 50 % and 90 %. */
+ * cruise speeds of the ring are about 7..13 m/s), the calls a frame at the
+ * stock ring and at the cap (RANDOM_CAR_ATTEMPTS_PER_FRAME x the ring scale),
+ * the side band's share of the calls (the fast-driving branch sends it a
+ * quarter, CarCtrl.cpp; the others a half), and the on-screen band's FOV. */
 #define MODEL_TRAFFIC_SPEED 10.0f
-#define MODEL_PLACEMENT_LANE_OFFSET ((4.0f - 1.0f + 0.5f) * 5.0f) /* CarCtrl.cpp, 17.5 m */
+#define MODEL_CALLS_STOCK 3
+#define MODEL_CALLS_CAP 6
+#define MODEL_SIDE_SHARE_FAST 0.25f
+#define MODEL_SIDE_SHARE_OTHER 0.5f
 
 static int g_failures = 0;
 
@@ -87,6 +92,7 @@ struct SCase
 	float distToCamera;	/* 3D */
 	float visibleRange;
 	bool inFrustum;
+	bool inFrustumMargin;
 	bool occluded;
 	bool fadeHides;
 	bool bypassView;
@@ -100,6 +106,7 @@ CandidateOf(const SCase &s)
 	c.distToCamera = s.distToCamera;
 	c.visibleRange = s.visibleRange;
 	c.inFrustum = s.inFrustum;
+	c.inFrustumMargin = s.inFrustumMargin;
 	c.occluded = s.occluded;
 	c.fadeHides = s.fadeHides;
 	c.bypassView = s.bypassView;
@@ -119,6 +126,18 @@ RingsAt(float drawDistance, float fovFactor, float farClip)
 	return ComputeTrafficRings(in);
 }
 
+/* The bearing a camera must turn by before a position at this distance enters
+ * the view cone, with the soft margin and the entity's own radius in front of
+ * it. */
+static float
+MarginBearingDegrees(float distToCamera)
+{
+	float s = (NEAR_BUBBLE_SOFT_MARGIN + NEAR_BUBBLE_ENTITY_RADIUS) / distToCamera;
+	if (s > 1.0f)
+		s = 1.0f;
+	return (float)(asin(s) * 180.0 / 3.14159265358979);
+}
+
 static void
 Section1Constants(void)
 {
@@ -127,26 +146,34 @@ Section1Constants(void)
 		(double)RING_CAR_SIDE_SPAWN, (double)RING_CAR_DESPAWN_RESERVE, (double)NEAR_BUBBLE_RADIUS);
 	printf("  the removal reserve:     %.1f m (the ring's own placement reserve)\n", (double)NEAR_BUBBLE_REMOVE_RESERVE);
 	printf("  the removal distance:    %.1f m (the bubble + its reserve)\n", (double)NEAR_BUBBLE_REMOVE_DISTANCE);
-	printf("  the soft distance:       %.1f m (the same gap, the arm that keeps an open street alive)\n",
-		(double)NEAR_BUBBLE_SOFT_DISTANCE);
+	printf("  the side placement slack: %.1f m (the widest lane offset of the shipped paths)\n",
+		(double)NEAR_BUBBLE_SIDE_PLACEMENT_SLACK);
+	printf("  the soft distance:       %.1f m (the side band less the slack)\n", (double)NEAR_BUBBLE_SOFT_DISTANCE);
+	printf("  the soft margin:         %.1f m (a radius margin on the frustum test)\n", (double)NEAR_BUBBLE_SOFT_MARGIN);
+	printf("  the margin as a bearing: about %.1f degrees at the soft distance\n", (double)MarginBearingDegrees(NEAR_BUBBLE_SOFT_DISTANCE));
 	printf("  the visibility radius:   %.1f m (a car's bounding sphere)\n", (double)NEAR_BUBBLE_ENTITY_RADIUS);
-	printf("  the ray budget:          %d rays a frame, each at most %.0f m long (the close band)\n",
+	printf("  the ray budget:          %d rays a frame, each at most %.0f m long\n",
 		NEAR_BUBBLE_LOS_RAYS_PER_FRAME, (double)NEAR_BUBBLE_LOS_RANGE);
 	printf("  the fresh-spawn grace:   %d ms\n", NEAR_BUBBLE_GRACE_MS);
-	printf("  the occluder trust:      %.0f m of camera movement, a direction cosine of %.3f,\n",
-		(double)NEAR_BUBBLE_OCCLUDER_MAX_MOVE, (double)NEAR_BUBBLE_OCCLUDER_MIN_DOT);
-	printf("                           %.0f degrees of FOV (the set is a frame old)\n", (double)NEAR_BUBBLE_OCCLUDER_MAX_FOV);
-	printf("\n  The bubble is the spawn band less the placement error the reserve holds:\n");
-	printf("  the side band places at %.0f m less up to the lane offset, so no placement of\n",
-		(double)RING_CAR_SIDE_SPAWN);
-	printf("  the band lands inside the bubble. The side band's ring crossing sits exactly on\n");
-	printf("  the soft distance (%.0f m) and the lane offset of %.1f m moves a placement\n",
-		(double)NEAR_BUBBLE_SOFT_DISTANCE, (double)MODEL_PLACEMENT_LANE_OFFSET);
-	printf("  perpendicular to its road, so a placement lands at %.0f m .. %.0f m from the\n",
-		(double)(NEAR_BUBBLE_SOFT_DISTANCE - MODEL_PLACEMENT_LANE_OFFSET),
-		(double)(NEAR_BUBBLE_SOFT_DISTANCE + MODEL_PLACEMENT_LANE_OFFSET));
-	printf("  player: the band crosses the soft distance, which is why the soft arm and the\n");
-	printf("  close ray share it (Section 6 models the share).\n\n");
+	printf("  the occluder window:     %.0f m of camera movement, a direction cosine of %.4f (%.1f deg),\n",
+		(double)NEAR_BUBBLE_OCCLUDER_MAX_MOVE, (double)NEAR_BUBBLE_OCCLUDER_MIN_DOT,
+		(double)(acos(NEAR_BUBBLE_OCCLUDER_MIN_DOT) * 180.0 / 3.14159265358979));
+	printf("                           %.0f degrees of FOV\n", (double)NEAR_BUBBLE_OCCLUDER_MAX_FOV);
+	printf("\n  The bubble is the spawn band less the placement error the reserve holds: a\n");
+	printf("  placement of the side band lands at %.1f m (the ring %0.f less up to the lane\n",
+		(double)(RING_CAR_SIDE_SPAWN - NEAR_BUBBLE_SIDE_PLACEMENT_SLACK), (double)RING_CAR_SIDE_SPAWN);
+	printf("  offset) or farther, and a car at the soft distance is revealed by a camera turn\n");
+	printf("  of %.1f degrees or more. The same car spans %.1f degrees (its %.0f m sphere),\n",
+		(double)MarginBearingDegrees(NEAR_BUBBLE_SOFT_DISTANCE),
+		(double)(2.0 * NEAR_BUBBLE_ENTITY_RADIUS / NEAR_BUBBLE_SOFT_DISTANCE * 180.0 / 3.14159265358979),
+		(double)NEAR_BUBBLE_ENTITY_RADIUS);
+	printf("  so the margin is four of its own sizes. The occluder window's whole stale error\n");
+	printf("  (a %.1f degree turn plus the %.1f degree parallax of a %.0f m frame at the soft\n",
+		(double)(acos(NEAR_BUBBLE_OCCLUDER_MIN_DOT) * 180.0 / 3.14159265358979),
+		(double)(NEAR_BUBBLE_OCCLUDER_MAX_MOVE / NEAR_BUBBLE_SOFT_DISTANCE * 180.0 / 3.14159265358979),
+		(double)NEAR_BUBBLE_OCCLUDER_MAX_MOVE);
+	printf("  distance) stays inside the car's own angular size, and the confirmation ray\n");
+	printf("  decides that arm anyway.\n\n");
 }
 
 /* The bubble must fit every band it reasons about, at every cell of the control
@@ -188,8 +215,8 @@ Section2Matrix(void)
 			Fail("a cell places the ring's despawn inside the removal distance");
 			failed++;
 		}
-		if (NEAR_BUBBLE_SOFT_DISTANCE > r.carSideSpawn) {
-			Fail("a cell places the side band inside the soft distance: the band would need the ray");
+		if (NEAR_BUBBLE_SOFT_DISTANCE + NEAR_BUBBLE_SIDE_PLACEMENT_SLACK > r.carSideSpawn) {
+			Fail("a cell places the side band so near that the soft distance misses its slack");
 			failed++;
 		}
 		if (NEAR_BUBBLE_REMOVE_DISTANCE <= NEAR_BUBBLE_RADIUS) {
@@ -204,7 +231,8 @@ Section2Matrix(void)
 	printf("  failures: %d\n", failed);
 	printf("  the tightest car side band over the matrix: %.1f m (the bubble asks %.1f + %.1f,\n",
 		(double)minSide, (double)NEAR_BUBBLE_RADIUS, (double)NEAR_BUBBLE_REMOVE_RESERVE);
-	printf("    the soft distance asks %.1f)\n", (double)NEAR_BUBBLE_SOFT_DISTANCE);
+	printf("    the soft distance asks %.1f + the slack %.1f)\n",
+		(double)NEAR_BUBBLE_SOFT_DISTANCE, (double)NEAR_BUBBLE_SIDE_PLACEMENT_SLACK);
 	printf("  the tightest generator near ring:         %.1f m\n", (double)minGen);
 	printf("  the tightest car despawn:                 %.1f m (the removal distance asks %.1f)\n",
 		(double)minDespawn, (double)NEAR_BUBBLE_REMOVE_DISTANCE);
@@ -220,58 +248,86 @@ Section2Matrix(void)
 static void
 Section3Ladder(void)
 {
-	const float inRange = 100.0f;		/* inside the fade */
-	const float outRange = 400.0f;		/* beyond the fade (the visible range is 360 at stock) */
-	const float visRange = 360.0f;
+	const float soft = NEAR_BUBBLE_SOFT_DISTANCE;
 	const SCase cases[] = {
-		/* name					player	camera	range	frustum	occl	fade	bypass	*/
-		{ "in the bubble",			 60.0f,	 60.0f,	visRange, true,		false,	false,	false	},
-		{ "in the bubble, a fade",		 60.0f,	 60.0f,	visRange, true,		false,	true,	false	},
-		{ "in the bubble, occluded",		 60.0f,	 60.0f,	visRange, false,	true,	false,	false	},
-		{ "in the bubble, top-down view",	 60.0f,	 60.0f,	visRange, true,		false,	false,	true	},
-		{ "in view, close, clear",		150.0f,	150.0f,	visRange, true,		false,	false,	false	},
-		{ "in view, close, a fade",		150.0f,	150.0f,	visRange, true,		false,	true,	false	},
-		{ "in view, close, occluded",		150.0f,	150.0f,	visRange, true,		true,	false,	false	},
-		{ "off the frustum, inside the soft distance", 150.0f, 100.0f, visRange, false, false, false, false },
-		{ "off the frustum, on the soft distance", 150.0f, 120.0f, visRange, false, false, false, false },
-		{ "off the frustum, the top-down view",	150.0f,	150.0f,	visRange, true,		false,	false,	true	},
-		{ "off the frustum, beyond the fade",	150.0f,	400.0f,	visRange, false,	false,	false,	false	},
-		{ "in view, beyond the fade",		150.0f,	400.0f,	visRange, true,		false,	false,	false	},
-		{ "off the frustum, beyond the ray",	150.0f,	350.0f,	1000.0f, false,	false,	false,	false	},
-		{ "a visible range of zero (boot, close)", 150.0f, 100.0f, 0.0f,	false,		false,	false,	false	},
+		/* name					player	camera	range	fr	margin	occl	fade	bypass	*/
+		{ "in the bubble",			 60.0f,	 60.0f,	360.0f,	true,	true,	false,	false,	false	},
+		{ "in the bubble, a fade",		 60.0f,	 60.0f,	360.0f,	true,	true,	false,	true,	false	},
+		{ "in the bubble, occluded",		 60.0f,	 60.0f,	360.0f,	false,	true,	true,	false,	false	},
+		{ "in the bubble, top-down view",	 60.0f,	 60.0f,	360.0f,	true,	true,	false,	false,	true	},
+		{ "in view, close, clear",		150.0f,	150.0f,	360.0f,	true,	true,	false,	false,	false	},
+		{ "in view, close, a fade",		150.0f,	150.0f,	360.0f,	true,	true,	false,	true,	false	},
+		{ "in view, close, occluded",		150.0f,	150.0f,	360.0f,	true,	true,	true,	false,	false	},
+		{ "off the frustum, inside the margin",	150.0f,	150.0f,	360.0f,	false,	true,	false,	false,	false	},
+		{ "off the frustum, the top-down view",	150.0f,	150.0f,	360.0f,	true,	true,	false,	false,	true	},
+		{ "off the frustum, beyond the fade",	150.0f,	400.0f,	360.0f,	false,	false,	false,	false,	false	},
+		{ "in view, beyond the fade",		150.0f,	400.0f,	360.0f,	true,	true,	false,	false,	false	},
+		{ "off the frustum, the close blind spot", 150.0f, 95.0f, 360.0f, false,	false,	false,	false,	false	},
+		{ "off the frustum, on the soft distance", 150.0f, 103.0f, 360.0f, false,	false,	false,	false,	false	},
+		{ "off the frustum, beyond the soft distance", 150.0f, 300.0f, 500.0f, false, false, false, false, false },
+		{ "a visible range of zero (boot, close)", 150.0f, 95.0f, 0.0f,	false,	false,	false,	false,	false	},
+		{ "a visible range of zero (boot, the soft distance)", 150.0f, 103.0f, 0.0f, false, false, false, false, false },
 	};
 	const int nCases = sizeof(cases) / sizeof(cases[0]);
 	const ENearBubbleAnswer expected[] = {
-		NEAR_BUBBLE_REFUSED,
-		NEAR_BUBBLE_REFUSED,
-		NEAR_BUBBLE_REFUSED,
-		NEAR_BUBBLE_REFUSED,
-		NEAR_BUBBLE_REFUSED,
-		NEAR_BUBBLE_ALLOWED,
-		NEAR_BUBBLE_ALLOWED,
-		NEAR_BUBBLE_SEEK_LOS,
-		NEAR_BUBBLE_ALLOWED,
-		NEAR_BUBBLE_ALLOWED,
-		NEAR_BUBBLE_ALLOWED,
-		NEAR_BUBBLE_ALLOWED,
-		NEAR_BUBBLE_ALLOWED,
-		NEAR_BUBBLE_SEEK_LOS,
+		NEAR_BUBBLE_REFUSED,		/* in the bubble */
+		NEAR_BUBBLE_REFUSED,		/* in the bubble, a fade */
+		NEAR_BUBBLE_REFUSED,		/* in the bubble, occluded */
+		NEAR_BUBBLE_REFUSED,		/* in the bubble, top-down */
+		NEAR_BUBBLE_REFUSED,		/* in view, close, clear */
+		NEAR_BUBBLE_ALLOWED,		/* in view, close, a fade */
+		NEAR_BUBBLE_SEEK_LOS,		/* in view, close, occluded */
+		NEAR_BUBBLE_REFUSED,		/* off the frustum, inside the margin */
+		NEAR_BUBBLE_ALLOWED,		/* off the frustum, top-down */
+		NEAR_BUBBLE_ALLOWED,		/* off the frustum, beyond the fade */
+		NEAR_BUBBLE_ALLOWED,		/* in view, beyond the fade */
+		NEAR_BUBBLE_SEEK_LOS,		/* off the frustum, the close blind spot */
+		NEAR_BUBBLE_ALLOWED,		/* off the frustum, on the soft distance */
+		NEAR_BUBBLE_ALLOWED,		/* off the frustum, beyond the soft distance */
+		NEAR_BUBBLE_SEEK_LOS,		/* boot, close */
+		NEAR_BUBBLE_ALLOWED,		/* boot, the soft distance */
+	};
+	const ENearBubbleArm expectedArm[] = {
+		NEAR_BUBBLE_ARM_NONE,
+		NEAR_BUBBLE_ARM_NONE,
+		NEAR_BUBBLE_ARM_NONE,
+		NEAR_BUBBLE_ARM_NONE,
+		NEAR_BUBBLE_ARM_NONE,
+		NEAR_BUBBLE_ARM_FADE,
+		NEAR_BUBBLE_ARM_OCCLUDER,
+		NEAR_BUBBLE_ARM_NONE,
+		NEAR_BUBBLE_ARM_BYPASS,
+		NEAR_BUBBLE_ARM_FADE_DISTANCE,
+		NEAR_BUBBLE_ARM_FADE_DISTANCE,
+		NEAR_BUBBLE_ARM_RAY,
+		NEAR_BUBBLE_ARM_SOFT,
+		NEAR_BUBBLE_ARM_SOFT,
+		NEAR_BUBBLE_ARM_RAY,
+		NEAR_BUBBLE_ARM_SOFT,
 	};
 
 	printf("== 3. the ladder, case by case\n\n");
-	printf("  %-44s %-12s %-12s %s\n", "case", "answer", "allowed?", "catchable?");
+	printf("  %-46s %-12s %-14s %s\n", "case", "answer", "arm", "catchable?");
 	for (int i = 0; i < nCases; i++) {
 		SNearBubbleCandidate c = CandidateOf(cases[i]);
 		ENearBubbleAnswer a = NearBubbleAnswerFor(c);
+		ENearBubbleArm arm = NearBubbleArmFor(c);
 		bool allowed = a != NEAR_BUBBLE_REFUSED;
 		bool catchable = NearBubblePositionIsCatchable(c);
 		/* The two exempt arms: the fade of a transition and the top-down
 		 * camera (which the counters read apart). */
 		bool exempt = cases[i].fadeHides || cases[i].bypassView;
-		printf("  %-44s %-12s %-12s %s\n", cases[i].name,
+		printf("  %-46s %-12s %-14s %s\n", cases[i].name,
 			a == NEAR_BUBBLE_REFUSED ? "refused" : a == NEAR_BUBBLE_ALLOWED ? "allowed" : "seek the ray",
-			allowed ? "yes" : "no", catchable ? "yes" : "no");
+			arm == NEAR_BUBBLE_ARM_NONE ? "none" :
+			arm == NEAR_BUBBLE_ARM_BYPASS ? "bypass" :
+			arm == NEAR_BUBBLE_ARM_OCCLUDER ? "occluded hint" :
+			arm == NEAR_BUBBLE_ARM_FADE_DISTANCE ? "beyond the fade" :
+			arm == NEAR_BUBBLE_ARM_SOFT ? "soft distance" :
+			arm == NEAR_BUBBLE_ARM_RAY ? "close blind spot" : "fade",
+			catchable ? "yes" : "no");
 		Check(a == expected[i], "the ladder answered against the case list");
+		Check(arm == expectedArm[i], "the ladder chose another arm than the case list");
 		/* The acceptance: an event the ladder allows (past the ray's own
 		 * blocked check) is never one the player could catch. */
 		if (allowed && !exempt)
@@ -279,13 +335,23 @@ Section3Ladder(void)
 		/* The completeness: a catchable event is refused. */
 		if (catchable && !exempt)
 			Check(!allowed, "the ladder did not refuse a catchable event");
+		/* The confirmation rule: the occluded hint and the close blind spot
+		 * never allow on their own. */
+		if (arm == NEAR_BUBBLE_ARM_OCCLUDER || arm == NEAR_BUBBLE_ARM_RAY)
+			Check(a == NEAR_BUBBLE_SEEK_LOS, "a hint arm answered on its own");
+		/* The margin: the soft arm is always off the view cone by it. */
+		if (arm == NEAR_BUBBLE_ARM_SOFT)
+			Check(!cases[i].inFrustumMargin, "the soft arm allowed a position inside the margin");
 	}
-	printf("\n  The blind spot behind the close ray:\n");
-	SNearBubbleCandidate blocked = CandidateOf(cases[7]);
-	printf("  %-44s %-12s %-12s %s\n", "a blocked ray (a building between)",
-		"allowed", "yes", NearBubblePositionIsCatchable(blocked) ? "yes" : "no");
-	Check(!NearBubblePositionIsCatchable(blocked),
-		"a blocked ray must be about a position the frustum does not hold");
+
+	printf("\n  The confirmation ray behind the two hint arms:\n");
+	SNearBubbleCandidate hint = CandidateOf(cases[6]);
+	printf("  %-46s %-12s %-14s %s\n", "an occluded hint, a blocked ray",
+		"allowed", "occluded hint", NearBubblePositionIsCatchable(hint) ? "yes" : "no");
+	printf("  %-46s %-12s %-14s %s\n", "an occluded hint, a clear ray",
+		"refused", "occluded hint", NearBubblePositionIsCatchable(hint) ? "yes" : "no");
+	Check(!NearBubblePositionIsCatchable(hint),
+		"the occluded hint must be about a position the catchable set does not hold");
 
 	printf("\n  Two arms are exempt and counted apart: the fade of a transition (the fill\n");
 	printf("  burst) and the top-down camera, whose view is not the player's. The bubble\n");
@@ -294,9 +360,9 @@ Section3Ladder(void)
 }
 
 /* The structural binding: the ladder is written against NearBubblePositionIs
- * Catchable, so the invariant must hold for *every* combination of the fields,
- * not only for the cases above. The sweep enumerates them and fails the moment
- * the two drift apart. */
+ * Catchable and near the arm function, so the invariant must hold for *every*
+ * combination of the fields, not only for the cases above. The sweep
+ * enumerates them and fails the moment the two drift apart. */
 static void
 Section3bExhaustive(void)
 {
@@ -306,11 +372,13 @@ Section3bExhaustive(void)
 	};
 	const float ranges[] = { 0.0f, 200.0f, 360.0f };
 	int combinations = 0, allowedOutside = 0, refusedCatchable = 0, violations = 0;
+	int armMismatch = 0, softInsideMargin = 0;
 
 	for (int dp = 0; dp < 2; dp++)
 	for (int dc = 0; dc < 3; dc++)
 	for (int vr = 0; vr < 3; vr++)
 	for (int inFrustum = 0; inFrustum < 2; inFrustum++)
+	for (int margin = 0; margin < 2; margin++)
 	for (int occluded = 0; occluded < 2; occluded++)
 	for (int fade = 0; fade < 2; fade++)
 	for (int bypass = 0; bypass < 2; bypass++) {
@@ -319,33 +387,46 @@ Section3bExhaustive(void)
 		c.distToCamera = distancesToCamera[dc];
 		c.visibleRange = ranges[vr];
 		c.inFrustum = inFrustum != 0;
+		c.inFrustumMargin = margin != 0;
 		c.occluded = occluded != 0;
 		c.fadeHides = fade != 0;
 		c.bypassView = bypass != 0;
 
 		ENearBubbleAnswer a = NearBubbleAnswerFor(c);
+		ENearBubbleArm arm = NearBubbleArmFor(c);
 		bool allowed = a != NEAR_BUBBLE_REFUSED;
 		bool catchable = NearBubblePositionIsCatchable(c);
 		bool exempt = c.fadeHides || c.bypassView;
 		combinations++;
 		if (allowed && !catchable)
 			allowedOutside++;
+		if (!allowed && catchable && !exempt)
+			refusedCatchable++;
 		if (allowed && catchable && !exempt) {
 			violations++;
 			Fail("the sweep found an allowed catchable event outside the exemptions");
 		}
-		if (!allowed && catchable && !exempt)
-			refusedCatchable++;
+		/* The answer must be the arm's: the two are one function, and the
+		 * sweep proves it for every combination. */
+		if ((arm == NEAR_BUBBLE_ARM_NONE) != (a == NEAR_BUBBLE_REFUSED))
+			armMismatch++;
+		if ((arm == NEAR_BUBBLE_ARM_OCCLUDER || arm == NEAR_BUBBLE_ARM_RAY) && a != NEAR_BUBBLE_SEEK_LOS)
+			armMismatch++;
+		if (arm == NEAR_BUBBLE_ARM_SOFT && c.inFrustumMargin)
+			softInsideMargin++;
 	}
 	printf("== 3b. the structural binding: every combination of the fields\n\n");
 	printf("  combinations: %d\n", combinations);
 	printf("  allowed and outside the catchable set (the rule's own work): %d\n", allowedOutside);
 	printf("  catchable and refused (the acceptance): %d\n", refusedCatchable);
 	printf("  allowed and catchable outside the fade and the bypass: %d (must be 0)\n", violations);
-	printf("\n  The ladder and the counters share the predicate NearBubblePositionIsCatchable,\n");
-	printf("  so no combination of the view can let a catchable event through unwatched, and\n");
-	printf("  every catchable one is refused. A future edit that drops an arm or moves a\n");
-	printf("  condition fails this sweep.\n\n");
+	printf("  answers that disagree with the arm: %d (must be 0)\n", armMismatch);
+	printf("  soft-arm answers inside the margin: %d (must be 0)\n", softInsideMargin);
+	printf("\n  The ladder and the counters share the predicate NearBubblePositionIsCatchable\n");
+	printf("  and the arm function, so no combination of the view can let a catchable event\n");
+	printf("  through unwatched, every catchable one is refused, and every hint goes to the\n");
+	printf("  confirmation ray. A future edit that drops an arm or moves a condition fails\n");
+	printf("  this sweep.\n\n");
 }
 
 /* The per-frame bound of the ray work: a frame spends at most the budget, and
@@ -356,13 +437,14 @@ Section4RayBudget(void)
 {
 	printf("== 4. the per-frame work of the rule\n\n");
 	printf("  the ray budget of a frame:            %d\n", NEAR_BUBBLE_LOS_RAYS_PER_FRAME);
-	printf("  the longest ray:                      %.0f m (the close band, %.0f sectors of %0.f m)\n",
+	printf("  the longest ray:                      %.0f m (the soft distance, %.0f sectors of %0.f m)\n",
 		(double)NEAR_BUBBLE_LOS_RANGE, (double)NEAR_BUBBLE_LOS_RANGE / 50.0f, 50.0);
 	int trickleCalls = RANDOM_CAR_ATTEMPTS_PER_FRAME * (int)RING_MAX_SCALE;
 	int trickleCandidates = trickleCalls * CAR_SPAWN_ATTEMPTS;
 	printf("  the trickle: %d car calls a frame x %d placements = %d candidates,\n",
 		trickleCalls, CAR_SPAWN_ATTEMPTS, trickleCandidates);
-	printf("               of which the close band spends at most %d rays\n", NEAR_BUBBLE_LOS_RAYS_PER_FRAME);
+	printf("               of which the hint arms and the close band spend at most %d rays\n",
+		NEAR_BUBBLE_LOS_RAYS_PER_FRAME);
 	printf("  a burst frame (the visible window): %d candidates, the same %d rays\n",
 		FILL_BURST_ATTEMPTS_PER_FRAME, NEAR_BUBBLE_LOS_RAYS_PER_FRAME);
 	printf("  a burst frame of the hidden window: the fade arm allows without a ray\n");
@@ -370,7 +452,9 @@ Section4RayBudget(void)
 	printf("  and the distance of the camera); no collision work.\n");
 	printf("  one ray: the buildings of the sectors the line crosses, to the first hit or\n");
 	printf("  to the end. The ray is the collision path's line walk and nothing else; the\n");
-	printf("  rest of the rule is a handful of floats.\n\n");
+	printf("  rest of the rule is a handful of floats. The occluded hints spend from the\n");
+	printf("  same budget, so the in-view hidden sites are capped by it: four a frame, far\n");
+	printf("  above the one car a second the ring replaces.\n\n");
 
 	/* A frame that spends its budget refusals the rest: the same loop the
 	 * engine runs, with the outcome of the ray as an input. */
@@ -385,7 +469,7 @@ Section4RayBudget(void)
 			refused++;
 		}
 	}
-	printf("  a simulated frame of %d close candidates with blocked rays:\n", trickleCandidates);
+	printf("  a simulated frame of %d hint candidates with blocked rays:\n", trickleCandidates);
 	printf("    rays spent %d (budget %d), allowed %d, refused for the budget %d\n",
 		spent, NEAR_BUBBLE_LOS_RAYS_PER_FRAME, allowed, refused);
 	Check(spent == NEAR_BUBBLE_LOS_RAYS_PER_FRAME, "a frame spent more rays than its budget");
@@ -428,76 +512,129 @@ Section5Target(void)
  * replaced; a street with no occluders has no arm at all under the strict
  * reading (the bands of the ring sit inside the visible range by the table's
  * own design), so the traffic drains. The soft arm is the creation site that
- * keeps it alive; the section prints the margin. */
+ * keeps it alive; the section prints the margin with the *real* mix of the
+ * spawner's branches: the fast-driving branch sends the side band a quarter of
+ * its calls (CarCtrl.cpp), the others a half. */
 static void
 Section6OpenStreetFill(void)
 {
-	/* The traffic the ring needs to replace every frame: the cars crossing the
-	 * despawn disc. The ring's cars leave at the traffic speed, so the need is
-	 * the target over the crossing time (2 x despawn / v), in frames. */
 	const float frame = 1.0f / 30.0f;
+	const float fovs[2] = { STOCK_FOV, 110.0f };
 	STrafficRings stock = RingsAt(DRAWDIST_DEFAULT_VALUE, 1.0f, 2000.0f);
 	STrafficRings top = RingsAt(16.0f, 70.0f / 110.0f, 2000.0f);
-	const int scales[2] = { 1, 2 };	/* the ring scale, rounded: 1.0 at stock, 2.0 at the cap */
 
 	printf("== 6. the fill of a street with no occluders (the owner's long roads)\n\n");
-	printf("  the model: the trickle's calls a frame (RANDOM_CAR_ATTEMPTS_PER_FRAME x the ring\n");
-	printf("  scale), %d placements a call, the side band and the on-screen band half each.\n", CAR_SPAWN_ATTEMPTS);
-	printf("  A candidate of the side band (off the frustum) passes at or beyond the soft\n");
-	printf("  distance (%.0f m); the share of the placements the lane offset pulls inside it\n",
+	printf("  the model: the trickle's calls a frame (%d at the stock ring, %d at the cap),\n",
+		MODEL_CALLS_STOCK, MODEL_CALLS_CAP);
+	printf("  %d placements a call, the side band and the on-screen band per the branch mix:\n", CAR_SPAWN_ATTEMPTS);
+	printf("  the fast-driving branch sends the side band a quarter of its calls, the others a\n");
+	printf("  half; the worst (the fast branch) is what the table uses. A candidate of the side\n");
+	printf("  band passes at or beyond the soft distance (%.0f m: the band less the lane\n",
 		(double)NEAR_BUBBLE_SOFT_DISTANCE);
-	printf("  is a layout number the model varies. A candidate of the on-screen band (in the\n");
-	printf("  frustum at the stock FOV) needs an occluder or the fog; on open ground it has\n");
-	printf("  neither. The need is the target over the crossing time of the disc\n");
-	printf("  (2 x despawn / %.0f m/s), in frames.\n\n", (double)MODEL_TRAFFIC_SPEED);
+	printf("  offset) and off the view cone by the margin (about %.1f degrees at it); a\n",
+		(double)MarginBearingDegrees(NEAR_BUBBLE_SOFT_DISTANCE));
+	printf("  candidate of the on-screen band (inside the frustum) needs an occluder and its\n");
+	printf("  confirmation ray; on open ground it has neither. The need is the target over the\n");
+	printf("  crossing time of the disc (2 x despawn / %.0f m/s), in frames.\n\n", (double)MODEL_TRAFFIC_SPEED);
 
-	struct { const char *name; float budget; float despawn; int scale; } settings[2] = {
-		{ "stock (1.2, FOV 70)", TrafficRingsMin(RING_CARS_PER_UNIT * 2.0f * stock.scale * stock.scale, (float)RING_MAX_RANDOM_CARS), stock.carDespawn, scales[0] },
-		{ "the owner's (16.0, FOV 110)", TrafficRingsMin(RING_CARS_PER_UNIT * 3.4f * top.scale * top.scale, (float)RING_MAX_RANDOM_CARS), top.carDespawn, scales[1] },
+	struct { const char *name; float budget; float despawn; int calls; float fov; } settings[2] = {
+		{ "stock (1.2, FOV 70)", TrafficRingsMin(RING_CARS_PER_UNIT * 2.0f * stock.scale * stock.scale, (float)RING_MAX_RANDOM_CARS), stock.carDespawn, MODEL_CALLS_STOCK, fovs[0] },
+		{ "the owner's (16.0, FOV 110)", TrafficRingsMin(RING_CARS_PER_UNIT * 3.4f * top.scale * top.scale, (float)RING_MAX_RANDOM_CARS), top.carDespawn, MODEL_CALLS_CAP, fovs[1] },
 	};
-	const float unders[3] = { 0.0f, 0.5f, 0.9f };
-	const int nUnder = 3;
+	const float slacks[3] = { 1.0f, 0.9f, 0.7f };
+	const int nSlack = 3;
 
 	for (int s = 0; s < 2; s++) {
 		float need = settings[s].budget * frame / (2.0f * settings[s].despawn / MODEL_TRAFFIC_SPEED);
+		/* The margin's share of the side band: the bearings of the band run
+		 * from the spawner's 45 degrees to 180, and the margin takes the
+		 * bearings inside the view cone's half (the FOV/2) plus itself. */
+		float bearing = MarginBearingDegrees(NEAR_BUBBLE_SOFT_DISTANCE);
+		float fovHalf = settings[s].fov / 2.0f;
+		/* A side-band candidate has a bearing of 45 degrees or more; the
+		 * margin takes the bearings the view cone (its half plus the
+		 * margin's own bearing) can reach. */
+		float edge = fovHalf + bearing;
+		if (edge < 45.0f)
+			edge = 45.0f;
+		float pMargin = (180.0f - edge) / (180.0f - 45.0f);
+		if (pMargin < 0.0f)
+			pMargin = 0.0f;
+
 		printf("  %s\n", settings[s].name);
 		printf("    target %.0f cars, despawn %.0f m -> the ring needs %.3f cars a frame\n",
 			(double)settings[s].budget, (double)settings[s].despawn, (double)need);
-		printf("    %-34s %10s %10s %10s\n", "the share of the side band inside the soft distance",
-			"0 %", "50 %", "90 %");
-		printf("    %-34s", "the strict reading (no soft arm)");
-		for (int u = 0; u < nUnder; u++)
-			printf(" %9.3f", 0.0);	/* no arm can pass on open ground */
-		printf("  <- drains: the strict rule has no site at all\n");
-		printf("    %-34s", "the rule with the soft arm");
-		for (int u = 0; u < nUnder; u++) {
-			/* the side band's share of the calls, the share of the
-			 * placements that pass, then the call's chance: one car a call
-			 * at the most */
-			float pSide = 1.0f - unders[u];	/* the placements at or beyond the soft distance */
-			float pCandidate = 0.5f * pSide;	/* half the calls are the side band */
-			float pCall = 1.0f - powf(1.0f - pCandidate, CAR_SPAWN_ATTEMPTS);
-			printf(" %9.3f", (double)(settings[s].scale * pCall));
+		printf("    the side band's share of the calls: %.2f (the fast branch), the margin\n",
+			(double)MODEL_SIDE_SHARE_FAST);
+		printf("    leaves %.3f of the band (the cone's half %.0f deg + the margin %.1f deg), the\n",
+			(double)pMargin, (double)fovHalf, (double)bearing);
+		printf("    share of the placements at or beyond the soft distance:\n");
+		printf("    %-34s", "the conservative rate");
+		for (int u = 0; u < nSlack; u++) {
+			float perPlacement = settings[s].calls * MODEL_SIDE_SHARE_FAST * pMargin * slacks[u];
+			printf(" %9.3f", (double)perPlacement);
 		}
-		printf("  <- the rate, cars a frame\n");
-		Check(need > 0.0f, "a zero need makes the model meaningless");
-		/* The margin at the pessimistic share (90 % of the side band inside
-		 * the soft distance): the strict rule is the drain, the soft arm
-		 * keeps the ring above its need with room to spare. */
-		float worst = 0.5f * (1.0f - unders[nUnder - 1]);
-		float worstRate = settings[s].scale * (1.0f - powf(1.0f - worst, CAR_SPAWN_ATTEMPTS));
-		printf("    the worst column against the need: %.3f / %.3f = %.1fx\n\n",
-			(double)worstRate, (double)need, (double)(worstRate / need));
-		if (worstRate < need * 2.0f)
-			Fail("the soft arm's worst case does not clear the ring's need with a margin");
+		printf("  (cars a frame, no placement aggregation)\n");
+		printf("    %-34s", "the rate with the call's placements");
+		for (int u = 0; u < nSlack; u++) {
+			float p = MODEL_SIDE_SHARE_FAST * pMargin * slacks[u];
+			float pCall = 1.0f - powf(1.0f - p, CAR_SPAWN_ATTEMPTS);
+			printf(" %9.3f", (double)(settings[s].calls * pCall));
+		}
+		printf("  (a call tries %d placements)\n", CAR_SPAWN_ATTEMPTS);
+
+		/* The fail line: the *conservative* rate (no aggregation) at the
+		 * pessimistic slack share must clear twice the need. */
+		float worst = settings[s].calls * MODEL_SIDE_SHARE_FAST * pMargin * slacks[nSlack - 1];
+		printf("    the worst column against the need: %.3f / %.3f = %.1fx (the conservative\n",
+			(double)worst, (double)need, (double)(worst / need));
+		printf("    rate at %.0f %% of the placements on the soft distance)\n", (double)(slacks[nSlack - 1] * 100.0f));
+		printf("    the fast branch's quarter, the other branches' half: the parked and slow\n");
+		printf("    cases double the side band's share, so the fast branch is the worst.\n\n");
+		if (worst < need * 2.0f)
+			Fail("the soft arm's worst case does not clear the ring's need twice");
 	}
 	printf("  The strict reading (occluders, fog and rays only) has no creation site on an\n");
 	printf("  open street: the ring's bands sit inside the visible range, so its traffic\n");
-	printf("  drains there. The soft arm (a placement behind the camera at or beyond the\n");
-	printf("  removal gap) fills the street, and even under the pessimistic layout (90 %% of\n");
-	printf("  the side band's placements pulled inside the soft distance and refused on open\n");
-	printf("  ground) the rate stays an order of magnitude above the need. The visible\n");
-	printf("  in-view creation counter stays 0 in every arm.\n\n");
+	printf("  drains there. The soft arm - the side band less the lane offset, off the view\n");
+	printf("  cone by the margin, revealed by the fade gate - fills the street, and even the\n");
+	printf("  conservative rate (no placement aggregation, the worst branch, only 70 %% of the\n");
+	printf("  placements on the soft distance) clears the need with room to spare. The in-view\n");
+	printf("  creation counter stays 0 in every arm.\n\n");
+}
+
+/* The reveal of a soft-arm creation (VICE-127): the alpha gate of
+ * CVehicle::UpdateClumpAlpha and the ramp's arithmetic. The harness cannot run
+ * the engine, so it holds the numbers and the promise: a car off the view cone
+ * holds alpha 0 until it is on screen, so the reveal is the fade; the burst's
+ * mass runs at the hidden step while the screen is covered. */
+static void
+Section7Reveal(void)
+{
+	printf("== 7. the reveal of a fresh car (the alpha gate)\n\n");
+	printf("  the normal ramp:        %d a frame -> %d frames to opaque\n",
+		VEHICLE_ALPHA_FADE_IN_STEP, (CLUMP_ALPHA_TOP + VEHICLE_ALPHA_FADE_IN_STEP - 1) / VEHICLE_ALPHA_FADE_IN_STEP);
+	printf("  the hidden ramp:        %d a frame -> %d frames to opaque (the fade covers the screen)\n",
+		VEHICLE_ALPHA_HIDDEN_STEP, (CLUMP_ALPHA_TOP + VEHICLE_ALPHA_HIDDEN_STEP - 1) / VEHICLE_ALPHA_HIDDEN_STEP);
+	printf("  the fade-out ramp:      untouched (the removal's own fade)\n");
+	printf("\n  A car created outside the view cone (the soft arm and every off-frustum site)\n");
+	printf("  holds alpha 0 until it is first on screen (CVehicle::UpdateClumpAlpha,\n");
+	printf("  GetIsOnScreen): a camera turn finds it forming over %d frames, never opaque.\n",
+		(CLUMP_ALPHA_TOP + VEHICLE_ALPHA_FADE_IN_STEP - 1) / VEHICLE_ALPHA_FADE_IN_STEP);
+	printf("  An in-view creation (the stock ring traffic, the VICE-126 burst, the script\n");
+	printf("  cars) is on screen at once and keeps the original ramp. The fill burst's mass\n");
+	printf("  runs at the hidden step while the fade covers it, so the street is opaque when\n");
+	printf("  the screen returns; the burst's cars that hold (the soft arm's) fade in only\n");
+	printf("  when first seen. Nothing culls or skips on alpha 0: only the removal's own\n");
+	printf("  fade-out waits for it (PossiblyRemoveVehicle), which is untouched.\n\n");
+	Check((CLUMP_ALPHA_TOP + VEHICLE_ALPHA_HIDDEN_STEP - 1) / VEHICLE_ALPHA_HIDDEN_STEP <=
+	      (CLUMP_ALPHA_TOP + VEHICLE_ALPHA_FADE_IN_STEP - 1) / VEHICLE_ALPHA_FADE_IN_STEP,
+		"the hidden ramp must need no more frames than the normal one");
+	Check(MarginBearingDegrees(NEAR_BUBBLE_SOFT_DISTANCE) > 10.0f,
+		"the soft margin must be a real camera turn");
+	Check(2.0 * NEAR_BUBBLE_ENTITY_RADIUS / NEAR_BUBBLE_SOFT_DISTANCE * 180.0 / 3.14159265358979 <
+	      MarginBearingDegrees(NEAR_BUBBLE_SOFT_DISTANCE),
+		"the margin must dominate the car's own angular size");
 }
 
 int
@@ -514,14 +651,16 @@ main(void)
 	Section4RayBudget();
 	Section5Target();
 	Section6OpenStreetFill();
+	Section7Reveal();
 
 	printf("== result\n\n");
 	if (g_failures == 0) {
-		printf("  every check passes. The bubble sits the reserve inside every traffic band at\n");
-		printf("  every cell of the control, the ladder allows no catchable event (the sweep\n");
-		printf("  holds the binding to the predicate), the frame's ray work is bounded by one\n");
-		printf("  number, the fill target follows the budget, and the soft arm keeps an open\n");
-		printf("  street above what its traffic needs.\n");
+		printf("  every check passes. The bubble sits the reserve inside every traffic band and\n");
+		printf("  the soft distance covers the side band's placement slack at every cell of the\n");
+		printf("  control, the ladder allows no catchable event and sends every hint to the\n");
+		printf("  confirmation ray (the sweep holds it), the frame's work is bounded by one\n");
+		printf("  number, the reveal is a fade, and the soft arm keeps an open street above what\n");
+		printf("  its traffic needs with the real mix of the spawner's branches.\n");
 		return 0;
 	}
 	printf("  %d check(s) failed.\n", g_failures);
