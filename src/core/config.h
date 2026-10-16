@@ -56,7 +56,10 @@ enum Config {
 	// Link list lengths
 	NUMALPHALIST = 20,
 	NUMBOATALPHALIST = 20,
-	NUMALPHAENTITYLIST = 200,
+	// The world scans insert at most one node per entity per frame, so the
+	// entity list (init as NUMALPHAENTITYLIST * 3 with ASPECT_RATIO_SCALE)
+	// has to cover NUMVISIBLEENTITIES + NUMINVISIBLEENTITIES = 4300 (VICE-134).
+	NUMALPHAENTITYLIST = 1500,
 	NUMALPHAUNTERWATERENTITYLIST = 30,
 	NUMCOLCACHELINKS = 50,
 	NUMREFERENCES = 65536,
