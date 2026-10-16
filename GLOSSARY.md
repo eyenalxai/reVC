@@ -125,9 +125,15 @@ how the budget is spent; it does not change the wheel list.
 ## Magazine weapon
 
 A weapon that fires instant hits and has a clip of two or more rounds. The
-player's shotgun, stubby shotgun and sniper rifle are magazine weapons; the
-rocket launcher stays one-shot. AI peds keep the per-shot cycle for these
-weapons. The active reload applies to magazine weapons only.
+definition covers every such weapon, the SPAS-12 included. The player's
+shotgun, stubby shotgun and sniper rifle are also magazine weapons; the
+rocket launcher stays one-shot. AI peds keep the per-shot cycle for the
+magazine weapons. The active reload applies to magazine weapons only.
+
+## Per-shot cycle
+
+The pump or bolt cycle an AI ped pays after each shot of a magazine weapon,
+so the AI does not use the magazines.
 
 ## Active reload
 

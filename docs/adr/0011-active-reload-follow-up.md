@@ -46,9 +46,10 @@ The owner asked for a second round (spec VICE-85) and gave the decisions on
 5. The shipped reload animations are wired. The shotgun animation group gets
    `WEAPON_pump` and the stubby's group (the `buddy` group) gets
    `buddy_fireRELOAD`, both as the reload slot; the crouch-reload slot gets an
-   entry too, or a ducking reload reads past the group array. The Sniper rifle
-   gets no reload animation and no reload flag; it reloads by timer only, like
-   the SPAS-12.
+   entry too, or a ducking reload reads past the group array. The SPAS-12
+   shares the `buddy` group, so it gains the same reload animation. The
+   Sniper rifle gets no reload animation and no reload flag; it reloads by
+   timer only.
 6. A perfect reload aborts the reload animation. A one-shot perfect signal in
    the ActiveReload module is set on a perfect judgment and cleared on start
    and reset. The player consumes it when the weapon state is
@@ -58,15 +59,16 @@ The owner asked for a second round (spec VICE-85) and gave the decisions on
    state, so the attack path cannot blend a fresh reload animation and
    re-block, and the association is never removed without the delete flag.
    Weapons with no reload animation are a no-op.
-7. The reload key works in a vehicle. The driving input map sets the reload
-   pad field, so the same window, the same timing bar and the same
-   manual-only rule apply in a car. When the radio shares the physical key,
-   the reload key wins, so a press of R in a car reloads and does not change
-   the station. The on-foot and in-vehicle paths share one input hook, so the
-   logic is not duplicated. The free clip refill in the drive-by callers
-   stops while the feature is on, and the timer write after a fire attempt
-   skips a weapon that is `WEAPONSTATE_RELOADING`. The timing bar keeps its
-   screen-center position; a car has no crosshair.
+7. The reload key works in a vehicle. The scope is cars, bikes and boats, the
+   driver only; passengers and fixed guns are out of scope. The driving
+   input map sets the reload pad field, so the same window, the same timing
+   bar and the same manual-only rule apply in a vehicle. When the radio
+   shares the physical key, the reload key wins, so a press of R in a vehicle
+   reloads and does not change the station. The on-foot and in-vehicle paths
+   share one input hook, so the logic is not duplicated. The free clip refill
+   in the drive-by callers stops while the feature is on, and the timer write
+   after a fire attempt skips a weapon that is `WEAPONSTATE_RELOADING`. The
+   timing bar keeps its screen-center position; a vehicle has no crosshair.
 8. The protagonist speaks on the judgment. A perfect reload plays
    `SOUND_PED_ON_FIRE` (the cocky shooting line) and a jam plays
    `SOUND_PED_ANNOYED_DRIVER` (the annoyed line), through `CPed::Say`, so the
@@ -76,9 +78,12 @@ The owner asked for a second round (spec VICE-85) and gave the decisions on
    rebalances health and damage later.
 
 This ADR supersedes the clip-1 exclusion and the drive-by exception in
-ADR 0010 (decision 7). The rest of ADR 0010 stands: the player-only state
-module, the manual-only rule, the window, the jam, the toggle and the AI
-exception.
+ADR 0010 (decision 7). The clip-1 exclusion ends only for the Shotgun, the
+Stubby shotgun and the Sniper rifle; the rocket launcher stays one-shot, and
+the Sniper rifle keeps no reload flag. The drive-by exception ends because
+the reload key works in a vehicle. The rest of ADR 0010 stands: the
+player-only state module, the manual-only rule, the window, the jam, the
+toggle and the AI exception.
 
 ## Alternatives considered
 
@@ -118,9 +123,11 @@ exception.
   cooldowns limit how often the lines play.
 - No damage value changes, so the owner's pending health and damage balance
   pass is not affected.
-- With the ActiveReload toggle off the game behaves as stock everywhere: the
-  automatic reload returns, and the vehicle path, the new animations and the
-  voice lines go inert.
+- With the ActiveReload toggle off the player's mechanics return to stock: the
+  automatic reload comes back, and there is no window, no jam, no timing bar,
+  no voice line and no vehicle manual reload. The weapon rework stays: the
+  magazine sizes, the reload flag and the reload animations apply with the
+  toggle on or off.
 - The feel needs the owner's play-test (there is no test suite). The shared
   input hook keeps the on-foot and in-vehicle behavior in one place, so a
   change of feel stays cheap.
