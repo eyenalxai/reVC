@@ -557,7 +557,7 @@ CMenuManager::CMenuManager()
 }
 
 #ifdef FIRST_PERSON
-int8
+int32
 CMenuManager::GetFirstPersonFOV(void)
 {
 	// The FOV setting is clamped where it is read

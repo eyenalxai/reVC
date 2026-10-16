@@ -595,7 +595,7 @@ struct MenuTrapezoid
 #ifdef FIRST_PERSON
 // First person view FOV, in degrees
 #define FIRST_PERSON_FOV_MIN 50
-#define FIRST_PERSON_FOV_MAX 90
+#define FIRST_PERSON_FOV_MAX 180
 #define FIRST_PERSON_SIGHTS_FOV_MULT 0.65f	// the sight view zooms in by this factor
 #define FIRST_PERSON_SIGHTS_FOV_MIN 30		// and never goes below this
 #define FIRST_PERSON_BODY_NEAR_CLIP 0.05f	// the player's own body parts sit close to the camera
@@ -652,7 +652,7 @@ public:
 #ifdef FIRST_PERSON
 	// Kept in the menu manager; CCamera::Init memsets the camera.
 	bool m_bFirstPersonView;
-	int8 m_nFirstPersonFOV;
+	uint8 m_nFirstPersonFOV;	// unsigned: the setting reaches 180
 #endif
 	int32 m_nPrefsVideoMode;
 	int32 m_nDisplayVideoMode;
@@ -771,7 +771,7 @@ public:
 	bool GetIsMenuActive() {return !!m_bMenuActive;}
 
 #ifdef FIRST_PERSON
-	int8 GetFirstPersonFOV(void);
+	int32 GetFirstPersonFOV(void);
 #endif
 
 #ifdef CUTSCENE_BORDERS_SWITCH

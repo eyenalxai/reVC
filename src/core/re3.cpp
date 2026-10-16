@@ -624,6 +624,9 @@ bool LoadINISettings()
 					cfg["FrontendOptions"].remove(option.m_CFO->save);
 				else if (option.m_Action == MENUACTION_CFO_SLIDER)
 					ReadIniIfExists(option.m_CFO->saveCat, option.m_CFO->save, (float*)option.m_CFO->value);
+				else if (option.m_Action == MENUACTION_CFO_DYNAMIC)
+					// dynamic options are unsigned: the first person FOV reaches 180
+					ReadIniIfExists(option.m_CFO->saveCat, option.m_CFO->save, (uint8*)option.m_CFO->value);
 				else
 					ReadIniIfExists(option.m_CFO->saveCat, option.m_CFO->save, (int8*)option.m_CFO->value);
 
@@ -733,6 +736,9 @@ void SaveINISettings()
 			if (option.m_Action < MENUACTION_NOTHING && option.m_CFO->save) {
 				if (option.m_Action == MENUACTION_CFO_SLIDER)
 					StoreIni(option.m_CFO->saveCat, option.m_CFO->save, *(float*)option.m_CFO->value);
+				else if (option.m_Action == MENUACTION_CFO_DYNAMIC)
+					// dynamic options are unsigned: the first person FOV reaches 180
+					StoreIni(option.m_CFO->saveCat, option.m_CFO->save, *(uint8*)option.m_CFO->value);
 				else
 					StoreIni(option.m_CFO->saveCat, option.m_CFO->save, *(int8*)option.m_CFO->value);
 			}

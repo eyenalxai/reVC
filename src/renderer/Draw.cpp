@@ -96,6 +96,10 @@ CDraw::ConvertFOV(float hfov)
 void
 CDraw::SetFOV(float fov)
 {
+	// The view window is tan(FOV/2), which is infinite at 180 degrees, so keep
+	// the rendered FOV just below the limit. The setting itself can read 180.
+	if(fov > 179.5f)
+		fov = 179.5f;
 #ifdef ASPECT_RATIO_SCALE
 	if (!CCutsceneMgr::IsRunning())
 		ms_fScaledFOV = ConvertFOV(fov);
