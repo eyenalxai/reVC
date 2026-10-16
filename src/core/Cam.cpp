@@ -1567,7 +1567,13 @@ CCam::Process_FollowPedWithMouse(const CVector &CameraTarget, float TargetOrient
 
 	GetVectorsReadyForRW();
 
-	if(((CPed*)CamTargetEntity)->CanStrafeOrMouseControl() && CDraw::FadeValue < 250 &&
+	// This block turns the ped to face the camera. The camera target is a
+	// vehicle while the player drives in first person, and the cast then
+	// wrote the ped rotation fields into the vehicle object at +0x46C and
+	// +0x470, which are the CAR_WHEEL_LM and CAR_WHEEL_LB slots of
+	// m_aCarNodes. The pre-render then crashed on the corrupted pointer.
+	if(CamTargetEntity->IsPed() &&
+	   ((CPed*)CamTargetEntity)->CanStrafeOrMouseControl() && CDraw::FadeValue < 250 &&
 	   (TheCamera.GetFadingDirection() != FADE_OUT || CDraw::FadeValue <= 100) &&
 	   !CPad::GetPad(0)->IsPlayerControlsDisabledBy(PLAYERCONTROL_PLAYERINFO)){
 		float Heading = Front.Heading();
