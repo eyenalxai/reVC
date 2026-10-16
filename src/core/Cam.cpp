@@ -2720,6 +2720,9 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 	static float DontLookThroughWorldFixer = 0.0f;
 	CVector TargetCoors;
 
+	// The FOV of the last frame: the scope starts where the view it takes over
+	// was, the way the stock sniper camera starts at the FOV it had
+	float previousFOV = FOV;
 	FOV = DefaultFOV;
 	TargetCoors = CameraTarget;
 	if(CamTargetEntity->m_rwObject == nil)
@@ -2775,18 +2778,21 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		RwV3d HeadPos;
 
 #ifdef FIRST_PERSON
-		// The first person view setting overrides the default FOV
-		if(TheCamera.FirstPersonViewEnabled())
-			FOV = FrontEndMenuManager.GetFirstPersonFOV();
-		// Aiming down the sights zooms in; the car ADS zooms the car view too.
+		// The first person view setting overrides the default FOV; aiming down
+		// the sights zooms in, the car ADS zooms the car view too, and the
+		// sniper and the laser scope keep the wheel zoom of the stock scope.
 		// The zoom is a view change in one frame, so it glides like the others.
 		bool carAds = firstPersonCarView && TheCamera.UsingCarAds();
-		static bool wasUsingSights = false;
+		bool usingScope = TheCamera.UsingFirstPersonScope();
 		bool usingSights = TheCamera.UsingFirstPersonSights() || carAds;
+		static bool wasUsingSights = false;
 		if(TheCamera.FirstPersonViewEnabled() && usingSights != wasUsingSights)
 			TheCamera.StartCameraHandover(CAMERA_SIGHTS_HANDOVER_TIME);
 		wasUsingSights = usingSights;
-		if(usingSights)
+		if(TheCamera.FirstPersonViewEnabled())
+			FOV = TheCamera.UpdateFirstPersonViewFOV(previousFOV, usingSights, usingScope);
+		else if(usingSights)
+			// The stock vehicle first person view keeps its own ADS zoom
 			FOV = TheCamera.GetFirstPersonSightsFOV();
 #endif
 

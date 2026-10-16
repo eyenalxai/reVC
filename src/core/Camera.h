@@ -38,6 +38,10 @@ const float DefaultFOV = 70.0f; // beta: 80.0f
 // The sight zoom of the first person view: entering or leaving the sights is
 // the same glide, only short.
 #define CAMERA_SIGHTS_HANDOVER_TIME	250	// milliseconds
+// The scope zoom of the first person view, the stock step and range of the
+// sniper camera
+#define FIRST_PERSON_SCOPE_ZOOM_STEP	10.0f
+#define FIRST_PERSON_SCOPE_FOV_MIN	15.0f
 #endif
 
 class CCam
@@ -376,6 +380,12 @@ public:
 	CVector m_vecPresentedSource;
 	CVector m_vecPresentedFront;
 	float m_fPresentedFOV;
+	// The scope zoom of the first person view: the wheel steps the target FOV
+	// and the camera eases the value the way the stock sniper camera does
+	bool m_bScopeZoomRunning;
+	float m_fScopeFOV;
+	float m_fScopeFOVTarget;
+	float m_fScopeFOVSpeed;
 #endif
 	bool m_bJustJumpedOutOf1stPersonBecauseOfTarget;
 	bool m_bIdleOn;
@@ -698,6 +708,23 @@ public:
 	// The car ADS: the aim button held while the camera serves the player's
 	// vehicle, the third person mouse camera or the first person car view
 	bool UsingCarAds(void);
+	// The weapon aim modes the first person player camera serves with its own
+	// view: the plain sights (the M16 camera mode serves the assault rifles and
+	// every other aiming weapon), the sniper scope (the sniper and the laser
+	// scope) and the rocket sight. The stock cameras of these modes are
+	// stationary and drive the view from the movement keys, so the first person
+	// view runs them on the player camera instead. The photo camera is not one
+	// of them: the photograph reads its mode.
+	static bool FirstPersonServesSightMode(int16 weaponMode);
+	// The scope of the sniper and the laser scope aiming through the first
+	// person player camera: the view zooms like the stock scope and the scope
+	// overlay draws, but the player keeps moving (VICE-137)
+	bool UsingFirstPersonScope(void);
+	// The FOV of the first person view this frame: the plain view FOV, the
+	// sight zoom, and the scope zoom, which keeps the stock wheel zoom and
+	// starts at the view the scope came from.
+	float UpdateFirstPersonViewFOV(float previousFOV, bool usingSights, bool usingScope);
+#endif
 	// The stock sight camera the current view stands in for. The first person
 	// player camera serves the aiming weapons, so while a weapon aims down its
 	// sights it answers with the sight camera mode of that weapon. The weapon
@@ -707,7 +734,6 @@ public:
 	// or MODE_NONE for no overlay. The HUD asks this, so the overlay follows
 	// the weapon the view aims with.
 	int16 GetSightOverlayMode(void);
-#endif
 
 	// Physical camera
 	void SetRwCamera(RwCamera *cam);

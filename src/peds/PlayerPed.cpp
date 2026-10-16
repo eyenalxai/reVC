@@ -1045,6 +1045,14 @@ CPlayerPed::ProcessAirborneWeapon(CPad *padUsed)
 	if (weapon->IsTypeMelee() || weapon->GetInfo()->IsFlagSet(WEAPONFLAG_THROW))
 		return;
 
+#ifdef FIRST_PERSON
+	// The aim keeps the weapon pose at the view in the air too: the airborne
+	// player does not run the weapon control, so nothing else updates it, and
+	// the pose then stays where it was when the jump started.
+	if (TheCamera.Using1stPersonView())
+		UpdateFirstPersonAim(padUsed);
+#endif
+
 	FireWeaponWhenHeld(padUsed);
 	weapon->Update(m_audioEntityId, this);
 }
@@ -1521,14 +1529,15 @@ CPlayerPed::ProcessPlayerWeapon(CPad *padUsed)
 					TheCamera.SetNewPlayerWeaponMode(CCam::MODE_M16_1STPERSON, 0, 0);
 
 #ifdef FIRST_PERSON
-				// The first person ADS with a normal weapon keeps the player
-				// moving: the M16 camera mode gives the zoom and the aim pose
+				// The first person sight keeps the player moving with every
+				// weapon: the player camera gives the zoom and the aim pose
 				// comes from UpdateFirstPersonAim, so the stationary sniper
-				// state is not needed. The sniper, the rocket launcher and the
-				// camera keep the stock stationary sight.
+				// state is not needed for the sniper, the laser scope and the
+				// rocket launcher either (VICE-136, VICE-137). The photo camera
+				// keeps the stock stationary viewfinder, which its own mode and
+				// the photograph need.
 				bool mobileAds = TheCamera.FirstPersonViewEnabled() &&
-				   weapon != WEAPONTYPE_ROCKETLAUNCHER && weapon != WEAPONTYPE_SNIPERRIFLE &&
-				   weapon != WEAPONTYPE_LASERSCOPE && weapon != WEAPONTYPE_CAMERA;
+				   weapon != WEAPONTYPE_CAMERA;
 				if(!mobileAds)
 #endif
 				{
@@ -1773,17 +1782,26 @@ CPlayerPed::IsMoveControllerInCharge(void)
 	return CanStrafeOrMouseControl();
 }
 
-// The sight of a normal weapon keeps the player moving: the M16 camera sight
-// gives the zoom and PlayerControlM16 runs the movement controller. The sniper,
-// the laser scope, the rocket launcher and the camera are stationary sights.
+// Whether the aiming weapon keeps the player moving. The first person view
+// serves every aiming weapon with the player camera and the mouse, so the
+// movement controller stays in charge in every movement state and WASD never
+// turns the view (VICE-137). The stock sight cameras (the setting off) keep the
+// stationary sniper, laser scope, rocket launcher and camera of the original
+// game; the photo camera keeps its stationary viewfinder in both views, because
+// the photograph reads the camera mode.
 bool
 CPlayerPed::CanMoveInWeaponSight(void)
 {
+	if (GetWeapon()->m_eWeaponType == WEAPONTYPE_CAMERA)
+		return false;
+#ifdef FIRST_PERSON
+	if (TheCamera.FirstPersonViewEnabled())
+		return true;
+#endif
 	switch (GetWeapon()->m_eWeaponType) {
 	case WEAPONTYPE_SNIPERRIFLE:
 	case WEAPONTYPE_LASERSCOPE:
 	case WEAPONTYPE_ROCKETLAUNCHER:
-	case WEAPONTYPE_CAMERA:
 		return false;
 	default:
 		return true;

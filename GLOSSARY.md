@@ -278,12 +278,20 @@ stock path and stays as it is.
 
 The view the shot leaves from and the weapon holds its pose at while the player
 aims down the sights. `CCamera::GetSightCameraMode` names it: the stock sight
-camera mode, or the first person player camera standing in for it. The rifle
-sight (the M16 camera mode) and the plain first person sights hold it through
-the first person player camera; the sniper scope and the rocket sight keep
-their own views. `CCamera::GetSightOverlayMode` names the overlay the HUD
-draws: the sniper scope and the rocket sight draw over the first person player
+camera mode, or the first person player camera standing in for it. The first
+person view serves every aiming weapon with the player camera, so the player
+keeps moving and WASD stays with the movement in every movement state
+(VICE-137). The photo camera keeps its stock stationary viewfinder, because the
+photograph reads its mode. `CCamera::GetSightOverlayMode` names the overlay the
+HUD draws: the sniper scope and the rocket sight draw theirs over the player
 camera, the plain sights need none because the raised weapon is the sight.
+
+## Scope zoom
+
+The zoom of the sniper and the laser scope in the sight view. The first person
+view keeps the wheel zoom and the range of the stock sniper camera and starts
+at the FOV of the view the scope takes over, so the scope looks and zooms like
+the scope it stands in for.
 
 ## Camera handover
 
