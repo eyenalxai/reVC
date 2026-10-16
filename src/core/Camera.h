@@ -690,6 +690,9 @@ public:
 	float Find3rdPersonQuickAimPitch(void);
 	bool Using1stPersonWeaponMode(void);
 	bool FirstPersonViewEnabled(void);
+	// The camera toggle: flip the persistent first person choice, the state the
+	// Display setting and the settings file use (VICE-139)
+	void ToggleFirstPersonView(void);
 	bool UsingFirstPersonSights(void);
 	float GetFirstPersonSightsFOV(void);
 	bool Using1stPersonView(void);

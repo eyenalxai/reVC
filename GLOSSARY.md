@@ -400,6 +400,15 @@ setting keeps the camera at the player's eyes, the mouse aims and WASD stays
 with the movement. The stock look-around view (the setting off) is a separate,
 stock path and stays as it is.
 
+## Camera toggle
+
+The `CAMERA_CHANGE_VIEW_ALL_SITUATIONS` action (Home by default) flips the
+first person view setting, on foot and in a vehicle. The choice is the state
+the Display setting and the settings file use, so it holds across entering and
+leaving a vehicle and a save remembers it (VICE-139). The view change glides
+through the camera handover. The stock ped zoom cycle the action used to run
+is gone.
+
 ## Sight view
 
 The view the shot leaves from and the weapon holds its pose at while the player

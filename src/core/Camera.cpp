@@ -766,6 +766,14 @@ CCamera::CamControl(void)
 		FindPlayerPed()->bIsVisible = true;
 	}
 
+	// The camera toggle: the action flips the first person choice on foot and
+	// in a vehicle, and the choice is the state the Display setting uses, so
+	// the settings file remembers it and entering or leaving a vehicle keeps it
+	// (VICE-139). The view change glides through the camera handover.
+	if(CPad::GetPad(0)->CameraViewToggleJustDown() && !CReplay::IsPlayingBack() &&
+	   m_bLookingAtPlayer && !m_WideScreenOn && !m_bFailedCullZoneTestPreviously)
+		ToggleFirstPersonView();
+
 	if(!CTimer::GetIsPaused() && !m_bIdleOn){
 		float CloseInPedHeightTarget = 0.0f;
 
@@ -988,41 +996,9 @@ CCamera::CamControl(void)
 
 		// Ped target
 		else if(pTargetEntity->IsPed()){
-			// Change user selected mode
-			if(CPad::GetPad(0)->CycleCameraModeUpJustDown() && !CReplay::IsPlayingBack() &&
-			   (m_bLookingAtPlayer || WhoIsInControlOfTheCamera == CAMCONTROL_OBBE) &&
-			   !m_WideScreenOn && !m_bFailedCullZoneTestPreviously && !m_bFirstPersonBeingUsed
-			   && !FirstPersonViewEnabled()
-			   ){
-#ifdef GTA_PC_CONTROLS
-				if(FrontEndMenuManager.m_ControlMethod == CONTROL_STANDARD){
-					if(PedZoomIndicator == CAM_ZOOM_3)
-						PedZoomIndicator = CAM_ZOOM_1;
-					else
-						PedZoomIndicator = CAM_ZOOM_3;
-				}else
-#endif
-					PedZoomIndicator--;
-			}
-			if(CPad::GetPad(0)->CycleCameraModeDownJustDown() && !CReplay::IsPlayingBack() &&
-			   (m_bLookingAtPlayer || WhoIsInControlOfTheCamera == CAMCONTROL_OBBE) &&
-			   !m_WideScreenOn && !m_bFailedCullZoneTestPreviously && !m_bFirstPersonBeingUsed
-			   && !FirstPersonViewEnabled()
-			   ){
-#ifdef GTA_PC_CONTROLS
-				if(FrontEndMenuManager.m_ControlMethod == CONTROL_STANDARD){
-					if(PedZoomIndicator == CAM_ZOOM_3)
-						PedZoomIndicator = CAM_ZOOM_1;
-					else
-						PedZoomIndicator = CAM_ZOOM_3;
-				}else
-#endif
-					PedZoomIndicator++;
-			}
-			// disabled top down and obbe's cam here
-			if(PedZoomIndicator < CAM_ZOOM_1) PedZoomIndicator = CAM_ZOOM_3;
-			else if(PedZoomIndicator > CAM_ZOOM_3) PedZoomIndicator = CAM_ZOOM_1;
-
+			// The stock ped zoom cycle is gone: the camera toggle (Home) owns
+			// the action now and switches the view, the zoom levels stay at
+			// the stock default (VICE-139)
 			ReqMode = CCam::MODE_FOLLOWPED;
 
 			// Check 1st person mode
@@ -1758,14 +1734,6 @@ CCamera::CamControl(void)
 		SetCameraDirectlyBehindForFollowPed_CamOnAString();
 	}
 
-	if(PrevMode != Cams[ActiveCam].Mode || switchedFromObbe ||
-	   Cams[ActiveCam].Mode == CCam::MODE_FOLLOWPED || Cams[ActiveCam].Mode == CCam::MODE_CAM_ON_A_STRING)
-		if(CPad::GetPad(0)->CycleCameraModeJustDown() &&
-		   !CReplay::IsPlayingBack() &&
-		   (m_bLookingAtPlayer || WhoIsInControlOfTheCamera == CAMCONTROL_OBBE) &&
-		   !m_WideScreenOn &&
-		   (WhoIsInControlOfTheCamera != CAMCONTROL_OBBE || bSwitchedToObbeCam))
-			DMAudio.PlayFrontEndSound(SOUND_HUD, 0);
 }
 
 // What a mess!
@@ -1859,10 +1827,13 @@ CCamera::GetVehicleCameraMode(void)
 }
 
 // Updates the first person view state for this frame and returns whether the
-// view is first person. The setting applies on foot and in a vehicle; the
-// stock look-around toggle only applies on foot. Side effects:
-// m_bFirstPersonBeingUsed, m_bFirstPersonViewWasOn, the last input time and
-// the camera bit of the pad's DisablePlayerControls.
+// view is first person. The setting applies on foot and in a vehicle, and the
+// camera toggle writes it (VICE-139), so the player's choice is one state for
+// both. The stock look-around toggle below is the classic camera's own,
+// temporary first person view: it cannot override the setting, and the mouse
+// control method never reaches it. Side effects: m_bFirstPersonBeingUsed,
+// m_bFirstPersonViewWasOn, the last input time and the camera bit of the pad's
+// DisablePlayerControls.
 bool
 CCamera::UpdateFirstPersonView(bool targetIsPed)
 {
@@ -4176,6 +4147,19 @@ CCamera::FirstPersonViewEnabled(void)
 {
 	// The first person view setting on the Display Setup page
 	return FrontEndMenuManager.m_bFirstPersonView;
+}
+
+// The camera toggle (the CAMERA_CHANGE_VIEW_ALL_SITUATIONS action, Home by
+// default): switch between the first person view and the third person follow
+// view. The choice is the same state the Display setting writes, so it holds
+// across entering and leaving a vehicle and the settings file remembers it
+// (VICE-139). The view change glides through the camera handover (VICE-135),
+// and the HUD sound is the feedback the stock camera cycle played.
+void
+CCamera::ToggleFirstPersonView(void)
+{
+	FrontEndMenuManager.m_bFirstPersonView = !FrontEndMenuManager.m_bFirstPersonView;
+	DMAudio.PlayFrontEndSound(SOUND_HUD, 0);
 }
 
 bool
