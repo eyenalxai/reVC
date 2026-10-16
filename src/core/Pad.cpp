@@ -672,7 +672,7 @@ CControllerState::CheckForInput(void)
 		|| !!Triangle || !!Cross || !!Circle || !!Square
 		|| !!Start || !!Select
 		|| !!LeftShoulder1 || !!LeftShoulder2 || !!RightShoulder1 || !!RightShoulder2
-		|| !!LeftShock || !!RightShock;
+		|| !!LeftShock || !!RightShock || !!Reload;
 }
 
 void
@@ -685,6 +685,7 @@ CControllerState::Clear(void)
 	Square = Triangle = Cross = Circle = 0;
 	LeftShock = RightShock = 0;
 	NetworkTalk = 0;
+	Reload = 0;
 }
 
 void CKeyboardState::Clear()
@@ -1041,6 +1042,7 @@ CControllerState CPad::ReconcileTwoControllersInput(CControllerState const &Stat
 	_RECONCILE_BUTTON(LeftShock);
 	_RECONCILE_BUTTON(RightShock);
 	_RECONCILE_BUTTON(NetworkTalk);
+	_RECONCILE_BUTTON(Reload);
 	_RECONCILE_AXIS(LeftStickX);
 	_RECONCILE_AXIS(LeftStickY);
 	_FIX_AXIS_DIR(LeftStickX);
@@ -3086,6 +3088,14 @@ bool CPad::JumpJustDown(void)
 		return false;
 
 	return !!(NewState.Square && !OldState.Square);
+}
+
+bool CPad::ReloadJustDown(void)
+{
+	if ( ArePlayerControlsDisabled() )
+		return false;
+
+	return !!(NewState.Reload && !OldState.Reload);
 }
 
 bool CPad::GetSprint(void)

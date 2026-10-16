@@ -109,6 +109,8 @@
 #define DRIFT_TOGGLE MENUACTION_CFO_SELECT, "FEC_DRF", { new CCFOSelect((int8*)&gDriftEnabled, "Drift", "Enabled", off_on, 2, false) }, 0, 0, MENUALIGN_CENTER,
 // Infinite sprint (see src/peds/PlayerPed.cpp)
 #define SPRINT_TOGGLE MENUACTION_CFO_SELECT, "FEC_ISP", { new CCFOSelect((int8*)&gInfiniteSprint, "Controller", "InfiniteSprint", off_on, 2, false) }, 0, 0, MENUALIGN_CENTER,
+// Active reload (see src/weapons/ActiveReload.h)
+#define ACTIVE_RELOAD_TOGGLE MENUACTION_CFO_SELECT, "FEC_ARL", { new CCFOSelect((int8*)&gActiveReloadEnabled, "Weapons", "ActiveReload", off_on, 2, false) }, 0, 0, MENUALIGN_CENTER,
 
 #ifdef GAMEPAD_MENU
 	#define SELECT_CONTROLLER_TYPE  MENUACTION_CFO_SELECT, "FEC_TYP", { new CCFOSelect((int8*)&FrontEndMenuManager.m_PrefsControllerType, "Controller", "Type", controllerTypes, ARRAY_SIZE(controllerTypes), false, ControllerTypeAfterChange) }, 0, 0, MENUALIGN_LEFT,
@@ -680,6 +682,7 @@ CMenuScreenCustom aScreens[] = {
 		MENUACTION_CHANGEMENU,	"FEC_MOU", {nil, SAVESLOT_NONE, MENUPAGE_MOUSE_CONTROLS}, 0, 0, MENUALIGN_CENTER,
 		DRIFT_TOGGLE
 		SPRINT_TOGGLE
+		ACTIVE_RELOAD_TOGGLE
 		MENUACTION_RESTOREDEF,	"FET_DEF", {nil, SAVESLOT_NONE, MENUPAGE_CONTROLLER_PC}, 320, 0, MENUALIGN_CENTER,
 		MENUACTION_GOBACK,		"FEDS_TB", {nil, SAVESLOT_NONE, 0}, 320, 0, MENUALIGN_CENTER,
    },
