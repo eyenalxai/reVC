@@ -1425,6 +1425,11 @@ CBoat::DoDriveByShootings(void)
 
 	weapon->Update(pDriver->m_audioEntityId, nil);
 
+	// The drive-by reload uses the same input as the on-foot path: the
+	// player starts a reload or judges the running one (VICE-90).
+	if (pDriver->IsPlayer())
+		((CPlayerPed*)pDriver)->ProcessActiveReloadInput(CPad::GetPad(0));
+
 	bool lookingLeft = false;
 	bool lookingRight = false;
 	if(TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_TOPDOWN ||
@@ -1458,13 +1463,16 @@ CBoat::DoDriveByShootings(void)
 		}
 
 		if (!anim || !anim->IsRunning()) {
-			if (CPad::GetPad(0)->GetCarGunFired() && CTimer::GetTimeInMilliseconds() > weapon->m_nTimer) {
-				weapon->FireFromCar(this, lookingLeft, true);
-				weapon->m_nTimer = CTimer::GetTimeInMilliseconds() + 70;
-			}
+			if (CPad::GetPad(0)->GetCarGunFired() && CTimer::GetTimeInMilliseconds() > weapon->m_nTimer)
+				weapon->FireFromCarWithCadence(this, lookingLeft, true);
 		}
 	}else{
-		weapon->Reload();
+		// The stock code refills the clip while the player does not aim.
+		// With the active reload on the clip is a magazine and refills only
+		// through the reload key (VICE-90); an AI driver and the toggle off
+		// keep the stock refill.
+		if (!gActiveReloadEnabled || !pDriver->IsPlayer())
+			weapon->Reload();
 		anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_STD_CAR_DRIVEBY_LEFT);
 		if(anim)
 			anim->blendDelta = -1000.0f;
