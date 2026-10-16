@@ -24,7 +24,14 @@ void CIniFile::LoadIniFile()
 		CarNumberMultiplier = Min(3.4f, Max(0.2f, CarNumberMultiplier));
 		CFileMgr::CloseFile(f);
 	}
-	CPopulation::MaxNumberOfPedsInUse = DEFAULT_MAX_NUMBER_OF_PEDS * PedNumberMultiplier;
+	ApplyPopulationCaps();
+}
+
+void CIniFile::ApplyPopulationCaps()
+{
+	// The ring area grows with the square of the spawn distance, so the budgets scale with it too.
+	CPopulation::MaxNumberOfPedsInUse = Min(DEFAULT_MAX_NUMBER_OF_PEDS * PedNumberMultiplier * SQR(SpawnDistanceMultiplier), (float)MAX_PEDS_IN_USE);
+	// The ring does not apply indoors.
 	CPopulation::MaxNumberOfPedsInUseInterior = DEFAULT_MAX_NUMBER_OF_PEDS_INTERIOR * PedNumberMultiplier;
-	CCarCtrl::MaxNumberOfCarsInUse = DEFAULT_MAX_NUMBER_OF_CARS * CarNumberMultiplier;
+	CCarCtrl::MaxNumberOfCarsInUse = Min(DEFAULT_MAX_NUMBER_OF_CARS * CarNumberMultiplier * SQR(SpawnDistanceMultiplier), (float)MAX_CARS_IN_USE);
 }

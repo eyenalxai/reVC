@@ -173,16 +173,10 @@ CCamera::Init(void)
 	m_fFOV_Wide_Screen = 0.0f;
 	m_bRestoreByJumpCut = false;
 #ifdef FIRST_PERSON
-	// First person view: a new drive starts in the stock vehicle first person camera
-	m_bLastTargetWasVehicle = false;
 	m_bFirstPersonViewWasOn = false;
-	if(FirstPersonViewEnabled())
-		CarZoomIndicator = CAM_ZOOM_1STPRS;
-	else
-		CarZoomIndicator = CAM_ZOOM_2;
-#else
-	CarZoomIndicator = CAM_ZOOM_2;
 #endif
+	// The car zoom levels only serve the script and RC car cameras
+	CarZoomIndicator = CAM_ZOOM_2;
 	PedZoomIndicator = CAM_ZOOM_2;
 	CarZoomValueSmooth = 0.0f;
 	m_fPedZoomValueSmooth = 0.0f;
@@ -718,7 +712,6 @@ CCamera::CamControl(void)
 	}
 
 	if(!CTimer::GetIsPaused() && !m_bIdleOn){
-		float CloseInCarHeightTarget = 0.0f;
 		float CloseInPedHeightTarget = 0.0f;
 
 		if(m_bTargetJustBeenOnTrain){
@@ -733,11 +726,6 @@ CCamera::CamControl(void)
 
 		// Vehicle target
 		if(pTargetEntity->IsVehicle()){
-#ifdef FIRST_PERSON
-			// First person view: a new vehicle starts in the stock first person camera
-			if(FirstPersonViewEnabled() && !m_bLastTargetWasVehicle) CarZoomIndicator = CAM_ZOOM_1STPRS;
-			m_bLastTargetWasVehicle = true;
-#endif
 #ifdef GTA_TRAIN
 			if(((CVehicle*)pTargetEntity)->IsTrain()){
 				if(!m_bTargetJustBeenOnTrain){
@@ -751,30 +739,9 @@ CCamera::CamControl(void)
 				if(((CVehicle*)pTargetEntity)->IsBoat() && pTargetEntity->GetModelIndex() != MI_SKIMMER)
 					boatTarget = true;
 
-				// Change user selected mode
-				if(CPad::GetPad(0)->CycleCameraModeUpJustDown() && !CReplay::IsPlayingBack() &&
-				   (m_bLookingAtPlayer || WhoIsInControlOfTheCamera == CAMCONTROL_OBBE) &&
-				   !m_WideScreenOn){
-					CarZoomIndicator--;
-					// disable topdown here
-					if(CarZoomIndicator == CAM_ZOOM_TOPDOWN)
-						CarZoomIndicator--;
-				}
-				if(CPad::GetPad(0)->CycleCameraModeDownJustDown() && !CReplay::IsPlayingBack() &&
-				   (m_bLookingAtPlayer || WhoIsInControlOfTheCamera == CAMCONTROL_OBBE) &&
-				   !m_WideScreenOn){
-					CarZoomIndicator++;
-					if(CarZoomIndicator == CAM_ZOOM_TOPDOWN)
-						CarZoomIndicator++;
-				}
-				if(!m_bFailedCullZoneTestPreviously){
-					if(CarZoomIndicator < CAM_ZOOM_1STPRS) CarZoomIndicator = CAM_ZOOM_CINEMATIC;
-					else if(CarZoomIndicator > CAM_ZOOM_CINEMATIC) CarZoomIndicator = CAM_ZOOM_1STPRS;
-				}
-
-				if(m_bFailedCullZoneTestPreviously)
-					if(CarZoomIndicator != CAM_ZOOM_1STPRS && CarZoomIndicator != CAM_ZOOM_TOPDOWN)
-						ReqMode = CCam::MODE_CAM_ON_A_STRING;
+				// Every vehicle the player drives uses the follow camera, the
+				// same as on foot. The garage below can still ask for MODE_FIXED.
+				ReqMode = CCam::MODE_FOLLOWPED;
 
 				int vehType = ((CVehicle*)pTargetEntity)->m_vehType;
 				if(((CVehicle*)pTargetEntity)->IsBoat() && pTargetEntity->GetModelIndex() == MI_SKIMMER)
@@ -895,7 +862,7 @@ CCamera::CamControl(void)
 								m_bJustCameOutOfGarage = true;
 								m_bPlayerIsInGarage = false;
 							}
-							ReqMode = CCam::MODE_CAM_ON_A_STRING;
+							ReqMode = CCam::MODE_FOLLOWPED;
 						}
 					}else{
 						if(m_bPlayerIsInGarage){
@@ -903,61 +870,26 @@ CCamera::CamControl(void)
 							m_bPlayerIsInGarage = false;
 						}
 						m_bGarageFixedCamPositionSet = false;
-						ReqMode = CCam::MODE_CAM_ON_A_STRING;
+						ReqMode = CCam::MODE_FOLLOWPED;
 					}
 					break;
 				}
-				case VEHICLE_TYPE_BOAT:
-					ReqMode = CCam::MODE_BEHINDBOAT;
-					break;
 				default: break;
 				}
 
+				// The game camera has no car zoom levels any more; the value
+				// below serves the script and RC car cameras, which keep the
+				// stock default distance unless a script sets the zoom.
 				int vehApp = ((CVehicle*)pTargetEntity)->GetVehicleAppearance();
 				int vehArrPos = 0;
 				GetArrPosForVehicleType(vehApp, vehArrPos);
-
-				// Car zoom value
-				if (CarZoomIndicator == CAM_ZOOM_1STPRS && !m_bPlayerIsInGarage) {
-					CarZoomValue = 0.0f;
-					ReqMode = CCam::MODE_1STPERSON;
-				}
 #ifdef FREE_CAM
-				else if (bFreeCam) {
-					if (CarZoomIndicator == CAM_ZOOM_1)
-						CarZoomValue = LCS_ZOOM_ONE_DISTANCE[vehArrPos];
-					else if (CarZoomIndicator == CAM_ZOOM_2)
-						CarZoomValue = LCS_ZOOM_TWO_DISTANCE[vehArrPos];
-					else if (CarZoomIndicator == CAM_ZOOM_3)
-						CarZoomValue = LCS_ZOOM_THREE_DISTANCE[vehArrPos];
-				}
+				if(bFreeCam)
+					CarZoomValue = LCS_ZOOM_TWO_DISTANCE[vehArrPos];
+				else
 #endif
-				else if (CarZoomIndicator == CAM_ZOOM_1)
-					CarZoomValue = ZOOM_ONE_DISTANCE[vehArrPos];
-				else if(CarZoomIndicator == CAM_ZOOM_2)
 					CarZoomValue = ZOOM_TWO_DISTANCE[vehArrPos];
-				else if(CarZoomIndicator == CAM_ZOOM_3)
-					CarZoomValue = ZOOM_THREE_DISTANCE[vehArrPos];
 
-				if(CarZoomIndicator == CAM_ZOOM_TOPDOWN && !m_bPlayerIsInGarage){
-					CarZoomValue = 1.0f;
-					ReqMode = CCam::MODE_TOPDOWN;
-				}
-
-				// Check if we have to go into first person
-				if(vehType == VEHICLE_TYPE_CAR && !m_bPlayerIsInGarage){
-					if(CCullZones::Cam1stPersonForPlayer() && 
-					   pTargetEntity->GetColModel()->boundingBox.GetSize().z >= 3.026f &&
-					   pToGarageWeAreInForHackAvoidFirstPerson == nil){
-						ReqMode = CCam::MODE_1STPERSON;
-						m_bInATunnelAndABigVehicle = true;
-					}
-				}
-				if(ReqMode == CCam::MODE_TOPDOWN &&
-				   (CCullZones::Cam1stPersonForPlayer() || CCullZones::CamNoRain() || CCullZones::PlayerNoRain()))
-					ReqMode = CCam::MODE_1STPERSON;
-
-				// Smooth zoom value - ugly code
 				if(m_bUseScriptZoomValueCar){
 					if(CarZoomValueSmooth < m_fCarZoomValueScript){
 						CarZoomValueSmooth += 0.12f * CTimer::GetTimeStep();
@@ -965,15 +897,6 @@ CCamera::CamControl(void)
 					}else{
 						CarZoomValueSmooth -= 0.12f * CTimer::GetTimeStep();
 						CarZoomValueSmooth = Max(CarZoomValueSmooth, m_fCarZoomValueScript);
-					}
-				}else if(m_bFailedCullZoneTestPreviously){
-					CloseInCarHeightTarget = 0.65f;
-					if(CarZoomValueSmooth < -0.65f){
-						CarZoomValueSmooth += 0.12f * CTimer::GetTimeStep();
-						CarZoomValueSmooth = Min(CarZoomValueSmooth, -0.65f);
-					}else{
-						CarZoomValueSmooth -= 0.12f * CTimer::GetTimeStep();
-						CarZoomValueSmooth = Max(CarZoomValueSmooth, -0.65f);
 					}
 				}else{
 					if(CarZoomValueSmooth < CarZoomValue){
@@ -985,7 +908,20 @@ CCamera::CamControl(void)
 					}
 				}
 
-				WellBufferMe(CloseInCarHeightTarget, &Cams[ActiveCam].m_fCloseInCarHeightOffset, &Cams[ActiveCam].m_fCloseInCarHeightOffsetSpeed, 0.1f, 0.25f, false);
+				// A big vehicle in a tunnel: the follow camera would sit in the
+				// tunnel roof, so use the first person camera, the same as on foot
+				if(vehType == VEHICLE_TYPE_CAR && !m_bPlayerIsInGarage){
+					if(CCullZones::Cam1stPersonForPlayer() && 
+					   pTargetEntity->GetColModel()->boundingBox.GetSize().z >= 3.026f &&
+					   pToGarageWeAreInForHackAvoidFirstPerson == nil){
+						ReqMode = CCam::MODE_1STPERSON;
+						m_bInATunnelAndABigVehicle = true;
+					}
+				}
+
+				// The first person view serves the vehicle too
+				if(!m_bPlayerIsInGarage && UpdateFirstPersonView(false))
+					ReqMode = CCam::MODE_1STPERSON;
 
 				// Fallen into water
 				if(Cams[ActiveCam].IsTargetInWater(Cams[ActiveCam].Source) && !boatTarget &&
@@ -997,9 +933,6 @@ CCamera::CamControl(void)
 
 		// Ped target
 		else if(pTargetEntity->IsPed()){
-#ifdef FIRST_PERSON
-			m_bLastTargetWasVehicle = false;
-#endif
 			// Change user selected mode
 			if(CPad::GetPad(0)->CycleCameraModeUpJustDown() && !CReplay::IsPlayingBack() &&
 			   (m_bLookingAtPlayer || WhoIsInControlOfTheCamera == CAMCONTROL_OBBE) &&
@@ -1042,63 +975,8 @@ CCamera::CamControl(void)
 			ReqMode = CCam::MODE_FOLLOWPED;
 
 			// Check 1st person mode
-			if((m_bLookingAtPlayer || m_bEnable1rstPersonCamCntrlsScript) && pTargetEntity->IsPed() &&
-			   (!m_WideScreenOn || m_bEnable1rstPersonCamCntrlsScript)
-#ifdef FREE_CAM
-			   && (!CCamera::bFreeCam || m_bEnable1rstPersonCamCntrlsScript)
-#endif
-			   ){
-#ifdef FIRST_PERSON
-				// The setting turned off: leave the first person view once
-				if(m_bFirstPersonViewWasOn && !FirstPersonViewEnabled())
-					m_bFirstPersonBeingUsed = false;
-				m_bFirstPersonViewWasOn = FirstPersonViewEnabled();
-				if(FirstPersonViewEnabled()){
-					// The setting keeps the camera in first person while the player is on foot
-					m_bFirstPersonBeingUsed = true;
-					m_uiFirstPersonCamLastInputTime = CTimer::GetTimeInMilliseconds();
-				}else
-#endif
-				if(!Cams[0].Using3rdPersonMouseCam()){
-					// See if we want to enter first person mode
-					if(CPad::GetPad(0)->LookAroundLeftRight() || CPad::GetPad(0)->LookAroundUpDown()){
-						m_uiFirstPersonCamLastInputTime = CTimer::GetTimeInMilliseconds();
-						m_bFirstPersonBeingUsed = true;
-					}
-					if(m_bFirstPersonBeingUsed){
-						// Or if we want to go back to 3rd person
-						if(CPad::GetPad(0)->GetPedWalkLeftRight() || CPad::GetPad(0)->GetPedWalkUpDown() ||
-						   CPad::GetPad(0)->GetSquare() || CPad::GetPad(0)->GetTriangle() ||
-						   CPad::GetPad(0)->GetCross() || CPad::GetPad(0)->GetCircle() ||
-						   CTimer::GetTimeInMilliseconds() - m_uiFirstPersonCamLastInputTime > 2850.0f){
-							m_bFirstPersonBeingUsed = false;
-						}else if(CPad::GetPad(0)->TargetJustDown()){
-							m_bFirstPersonBeingUsed = false;
-							m_bJustJumpedOutOf1stPersonBecauseOfTarget = true;
-						}
-					}
-				}else
-					m_bFirstPersonBeingUsed = false;
-			}else
-				m_bFirstPersonBeingUsed = false;
-
-			if((!FindPlayerPed()->IsPedInControl() || FindPlayerPed()->m_fMoveSpeed > 0.0f)
-#ifdef FIRST_PERSON
-			   && !FirstPersonViewEnabled()
-#endif
-			   )
-				m_bFirstPersonBeingUsed = false;
-			if(m_bFirstPersonBeingUsed){
+			if(UpdateFirstPersonView(true))
 				ReqMode = CCam::MODE_1STPERSON;
-#ifdef FIRST_PERSON
-				// The persistent first person view must not disable the player controls.
-				// Clearing also recovers a stale flag left by the stock look-around.
-				if(FirstPersonViewEnabled())
-					CPad::GetPad(0)->DisablePlayerControls &= ~PLAYERCONTROL_CAMERA;
-				else
-#endif
-				CPad::GetPad(0)->DisablePlayerControls |= PLAYERCONTROL_CAMERA;
-			}
 
 			// Zoom value
 			if(PedZoomIndicator == CAM_ZOOM_1)
@@ -1420,8 +1298,12 @@ CCamera::CamControl(void)
 		stopArrestCam = true;
 		beingArrested = false;
 	}
+	bool firstPersonCarView = false;
+#ifdef FIRST_PERSON
+	firstPersonCarView = InFirstPersonCarView();
+#endif
 	if(LastPedState != PED_ARRESTED && PLAYER->GetPedState() == PED_ARRESTED){
-		if(CarZoomIndicator != CAM_ZOOM_1STPRS || !pTargetEntity->IsVehicle())
+		if(!firstPersonCarView)
 			startArrestCam = true;
 	}else
 		startArrestCam = false;
@@ -1497,16 +1379,12 @@ CCamera::CamControl(void)
 	if(gbModelViewer)
 		ReqMode = CCam::MODE_MODELVIEW;
 
-	// Turn on Obbe's cam
+	// Turn on Obbe's cam. The vehicle cinematic camera is gone from the player
+	// path; only the on-foot one stays.
 	bool canUseObbeCam = true;
-	if(pTargetEntity){
-		if(pTargetEntity->IsVehicle()){
-			if(CarZoomIndicator == CAM_ZOOM_CINEMATIC)
-				m_bObbeCinematicCarCamOn = true;
-		}else{
-			if(PedZoomIndicator == CAM_ZOOM_CINEMATIC)
-				m_bObbeCinematicPedCamOn = true;
-		}
+	if(pTargetEntity && !pTargetEntity->IsVehicle()){
+		if(PedZoomIndicator == CAM_ZOOM_CINEMATIC)
+			m_bObbeCinematicPedCamOn = true;
 	}
 	if(m_bTargetJustBeenOnTrain ||
 	   ReqMode == CCam::MODE_SYPHON || ReqMode == CCam::MODE_SYPHON_CRIM_IN_FRONT || ReqMode == CCam::MODE_SPECIAL_FIXED_FOR_SYPHON ||
@@ -1821,6 +1699,10 @@ CCamera::CamControl(void)
 	// The first person view shows the player's own body: legs, hands and weapon
 	if(Using1stPersonView())
 		FindPlayerPed()->bIsVisible = true;
+	else if(InFirstPersonCarView())
+		// The stock car first person view (a big vehicle in a tunnel) hides
+		// the body, like the stock camera did
+		FindPlayerPed()->bIsVisible = false;
 #endif
 
 	bool switchedFromObbe = false;
@@ -1897,7 +1779,7 @@ CCamera::UpdateTargetEntity(void)
 		}
 
 		if(PLAYER->GetPedState() == PED_ENTER_CAR && !cantOpen){
-			if(!enteringCar && CarZoomIndicator != CAM_ZOOM_1STPRS){
+			if(!enteringCar){
 				pTargetEntity = PLAYER->m_pMyVehicle;
 				if(PLAYER->m_pMyVehicle == nil)
 					pTargetEntity = PLAYER;
@@ -1905,7 +1787,7 @@ CCamera::UpdateTargetEntity(void)
 		}
 
 		if((PLAYER->GetPedState() == PED_CARJACK || PLAYER->GetPedState() == PED_OPEN_DOOR) && !cantOpen){
-			if(!enteringCar && CarZoomIndicator != CAM_ZOOM_1STPRS)
+			if(!enteringCar)
 				pTargetEntity = PLAYER->m_pMyVehicle;
 			if(PLAYER->m_pMyVehicle == nil)
 				pTargetEntity = PLAYER;
@@ -1915,9 +1797,94 @@ CCamera::UpdateTargetEntity(void)
 			pTargetEntity = FindPlayerPed();
 		if(PLAYER->GetPedState() == PED_DRAG_FROM_CAR)
 			pTargetEntity = FindPlayerPed();
-		if(pTargetEntity->IsVehicle() && CarZoomIndicator == CAM_ZOOM_1STPRS && FindPlayerPed()->GetPedState() == PED_ARRESTED)
+#ifdef FIRST_PERSON
+		if(pTargetEntity->IsVehicle() && InFirstPersonCarView() && FindPlayerPed()->GetPedState() == PED_ARRESTED)
 			pTargetEntity = FindPlayerPed();
+#endif
 	}
+}
+
+// The mode the game camera uses in a vehicle: the follow camera, or the first
+// person view when the setting is on. The same pair serves on foot.
+int16
+CCamera::GetVehicleCameraMode(void)
+{
+#ifdef FIRST_PERSON
+	if(FirstPersonViewEnabled())
+		return CCam::MODE_1STPERSON;
+#endif
+	return CCam::MODE_FOLLOWPED;
+}
+
+// Updates the first person view state for this frame and returns whether the
+// view is first person. The setting applies on foot and in a vehicle; the
+// stock look-around toggle only applies on foot. Side effects:
+// m_bFirstPersonBeingUsed, m_bFirstPersonViewWasOn, the last input time and
+// the camera bit of the pad's DisablePlayerControls.
+bool
+CCamera::UpdateFirstPersonView(bool targetIsPed)
+{
+	if((m_bLookingAtPlayer || m_bEnable1rstPersonCamCntrlsScript) &&
+	   (!m_WideScreenOn || m_bEnable1rstPersonCamCntrlsScript)
+#ifdef FREE_CAM
+	   && (!CCamera::bFreeCam || m_bEnable1rstPersonCamCntrlsScript)
+#endif
+	   ){
+#ifdef FIRST_PERSON
+		// The setting turned off: leave the first person view once
+		if(m_bFirstPersonViewWasOn && !FirstPersonViewEnabled())
+			m_bFirstPersonBeingUsed = false;
+		m_bFirstPersonViewWasOn = FirstPersonViewEnabled();
+		if(FirstPersonViewEnabled()){
+			// The setting keeps the camera in first person
+			m_bFirstPersonBeingUsed = true;
+			m_uiFirstPersonCamLastInputTime = CTimer::GetTimeInMilliseconds();
+		}else
+#endif
+		if(targetIsPed && !Cams[0].Using3rdPersonMouseCam()){
+			// See if we want to enter first person mode. In a vehicle the
+			// look-around keys turn the camera, as in the stock game.
+			if(CPad::GetPad(0)->LookAroundLeftRight() || CPad::GetPad(0)->LookAroundUpDown()){
+				m_uiFirstPersonCamLastInputTime = CTimer::GetTimeInMilliseconds();
+				m_bFirstPersonBeingUsed = true;
+			}
+			if(m_bFirstPersonBeingUsed){
+				// Or if we want to go back to 3rd person
+				if(CPad::GetPad(0)->GetPedWalkLeftRight() || CPad::GetPad(0)->GetPedWalkUpDown() ||
+				   CPad::GetPad(0)->GetSquare() || CPad::GetPad(0)->GetTriangle() ||
+				   CPad::GetPad(0)->GetCross() || CPad::GetPad(0)->GetCircle() ||
+				   CTimer::GetTimeInMilliseconds() - m_uiFirstPersonCamLastInputTime > 2850.0f){
+					m_bFirstPersonBeingUsed = false;
+				}else if(CPad::GetPad(0)->TargetJustDown()){
+					m_bFirstPersonBeingUsed = false;
+					m_bJustJumpedOutOf1stPersonBecauseOfTarget = true;
+				}
+			}
+		}else
+			m_bFirstPersonBeingUsed = false;
+	}else
+		m_bFirstPersonBeingUsed = false;
+
+	if(targetIsPed &&
+	   (!FindPlayerPed()->IsPedInControl() || FindPlayerPed()->m_fMoveSpeed > 0.0f)
+#ifdef FIRST_PERSON
+	   && !FirstPersonViewEnabled()
+#endif
+	   )
+		m_bFirstPersonBeingUsed = false;
+
+	if(!m_bFirstPersonBeingUsed)
+		return false;
+
+#ifdef FIRST_PERSON
+	// The persistent first person view must not disable the player controls.
+	// Clearing also recovers a stale flag left by the stock look-around.
+	if(FirstPersonViewEnabled())
+		CPad::GetPad(0)->DisablePlayerControls &= ~PLAYERCONTROL_CAMERA;
+	else
+#endif
+		CPad::GetPad(0)->DisablePlayerControls |= PLAYERCONTROL_CAMERA;
+	return true;
 }
 
 const float SOUND_DIST = 20.0f;
@@ -2217,7 +2184,7 @@ CCamera::Restore(void)
 	WhoIsInControlOfTheCamera = CAMCONTROL_GAME;
 
 	if(FindPlayerVehicle()){
-		m_iModeToGoTo = CCam::MODE_CAM_ON_A_STRING;
+		m_iModeToGoTo = GetVehicleCameraMode();
 		pTargetEntity = FindPlayerVehicle();
 	}else{
 		m_iModeToGoTo = CCam::MODE_FOLLOWPED;
@@ -2227,7 +2194,7 @@ CCamera::Restore(void)
 	if(PLAYER->GetPedState() == PED_ENTER_CAR ||
 	   PLAYER->GetPedState() == PED_CARJACK ||
 	   PLAYER->GetPedState() == PED_OPEN_DOOR){
-		m_iModeToGoTo = CCam::MODE_CAM_ON_A_STRING;
+		m_iModeToGoTo = GetVehicleCameraMode();
 		pTargetEntity = PLAYER->m_pSeekTarget;
 	}
 	if(PLAYER->GetPedState() == PED_EXIT_CAR){
@@ -2262,7 +2229,7 @@ CCamera::RestoreWithJumpCut(void)
 	m_bAllow1rstPersonWeaponsCamera = false;
 
 	if(FindPlayerVehicle()){
-		m_iModeToGoTo = CCam::MODE_CAM_ON_A_STRING;
+		m_iModeToGoTo = GetVehicleCameraMode();
 		pTargetEntity = FindPlayerVehicle();
 	}else{
 		m_iModeToGoTo = CCam::MODE_FOLLOWPED;
@@ -2272,7 +2239,7 @@ CCamera::RestoreWithJumpCut(void)
 	if(PLAYER->GetPedState() == PED_ENTER_CAR ||
 	   PLAYER->GetPedState() == PED_CARJACK ||
 	   PLAYER->GetPedState() == PED_OPEN_DOOR){
-		m_iModeToGoTo = CCam::MODE_CAM_ON_A_STRING;
+		m_iModeToGoTo = GetVehicleCameraMode();
 		pTargetEntity = PLAYER->m_pSeekTarget;
 	}
 	if(PLAYER->GetPedState() == PED_EXIT_CAR){
@@ -2403,7 +2370,9 @@ CCamera::StartTransition(int16 newMode)
 		}
 		if(m_bTargetJustCameOffTrain)
 			m_bCamDirectlyInFront = true;
-		if(Cams[ActiveCam].Mode != CCam::MODE_CAM_ON_A_STRING)
+		// The rest is the step out of the car transition and needs a ped target;
+		// the follow camera serves a vehicle target too (VICE-71).
+		if(Cams[ActiveCam].Mode != CCam::MODE_CAM_ON_A_STRING || !pTargetEntity->IsPed())
 			break;
 		m_bUseTransitionBeta = true;
 		vehicleVertical = false;
@@ -4114,6 +4083,15 @@ CCamera::UsingThirdPersonAds(void)
 {
 	// Third person aim down the sights on the plain mouse camera
 	return Cams[ActiveCam].Using3rdPersonMouseCam() && Cams[ActiveCam].m_fAdsAmount > 0.5f;
+}
+
+bool
+CCamera::InFirstPersonCarView(void)
+{
+	// The first person camera serves the vehicle too: the player's own vehicle
+	// is the camera target while the player drives.
+	return Cams[ActiveCam].Mode == CCam::MODE_1STPERSON &&
+		pTargetEntity && pTargetEntity->IsVehicle();
 }
 #endif
 

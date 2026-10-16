@@ -1754,6 +1754,9 @@ Subjektive Kamera
 [FEC_FOV]
 Sichtfeld
 
+[FEC_CCD]
+Fahrzeugkamera-Abstand
+
 [FEC_LL]
 Nach links sehen
 

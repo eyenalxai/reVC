@@ -571,7 +571,8 @@ CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScree
 
 	// Yeah, float
 	float maxPossiblePedsForArea = (zoneInfo.pedDensity + zoneInfo.carDensity) * playerInfo->m_fRoadDensity * PedDensityMultiplier
-		* (CDarkel::FrenzyOnGoing() ? 1.f : CIniFile::PedNumberMultiplier) * missionAndWeatherMult * PED_AREA_DENSITY_SCALE;
+		* (CDarkel::FrenzyOnGoing() ? 1.f : CIniFile::PedNumberMultiplier) * missionAndWeatherMult * PED_AREA_DENSITY_SCALE
+		* SQR(CIniFile::SpawnDistanceMultiplier);
 	// Car and law-enforcer drivers count in ms_nTotalPeds: add them back so the on-foot
 	// budget does not shrink with the car count.
 	maxPossiblePedsForArea += CCarCtrl::NumRandomCars + CCarCtrl::NumLawEnforcerCars;

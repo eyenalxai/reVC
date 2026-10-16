@@ -1736,6 +1736,9 @@ Vue subjective
 [FEC_FOV]
 Champ de vision
 
+[FEC_CCD]
+Distance caméra véhicule
+
 [FEC_LL]
 Rergarder à gauche
 

@@ -119,7 +119,8 @@ uint32 aCarsToKeepTime[MAX_CARS_TO_KEEP];
 float
 CCarCtrl::GetRandomCarTarget()
 {
-	return Min(RANDOM_CARS_PER_INI_UNIT * CarDensityMultiplier * CIniFile::CarNumberMultiplier, (float)MAX_RANDOM_CARS);
+	// The ring area grows with the square of the spawn distance, so the target scales with it too.
+	return Min(RANDOM_CARS_PER_INI_UNIT * CarDensityMultiplier * CIniFile::CarNumberMultiplier * SQR(CIniFile::SpawnDistanceMultiplier), (float)MAX_RANDOM_CARS);
 }
 
 void
