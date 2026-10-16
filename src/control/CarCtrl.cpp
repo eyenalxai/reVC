@@ -28,6 +28,7 @@
 #include "RoadBlocks.h"
 #include "Timer.h"
 #include "TrafficLights.h"
+#include "TrafficRings.h"
 #include "Streaming.h"
 #include "VisibilityPlugins.h"
 #include "Vehicle.h"
@@ -82,14 +83,6 @@
 #define DISTANCE_BETWEEN_CAR_AND_DEAD_PED (6.0f)
 #define PROBABILITY_OF_PASSENGER_IN_VEHICLE (0.125f)
 
-// The spawn distance slider (reVC.ini [Display] SpawnDistance) scales the car
-// spawn and despawn ranges; 1.0 is the stock value.
-#define ONSCREEN_DESPAWN_RANGE (280.0f * CIniFile::SpawnDistanceMultiplier)
-#define MINIMAL_DISTANCE_TO_SPAWN_ONSCREEN (220.0f * CIniFile::SpawnDistanceMultiplier)
-#define REQUEST_ONSCREEN_DISTANCE ((ONSCREEN_DESPAWN_RANGE + MINIMAL_DISTANCE_TO_SPAWN_ONSCREEN) / 2)
-#define OFFSCREEN_DESPAWN_RANGE (120.0f * CIniFile::SpawnDistanceMultiplier)
-#define EXTENDED_RANGE_DESPAWN_MULTIPLIER (1.5f)
-
 bool CCarCtrl::bMadDriversCheat;
 int CCarCtrl::NumLawEnforcerCars;
 int CCarCtrl::NumAmbulancesOnDuty;
@@ -119,21 +112,23 @@ uint32 aCarsToKeepTime[MAX_CARS_TO_KEEP];
 float
 CCarCtrl::GetRandomCarTarget()
 {
-	// The ring area grows with the square of the spawn distance, so the target scales with it too.
-	return Min(RANDOM_CARS_PER_INI_UNIT * CarDensityMultiplier * CIniFile::CarNumberMultiplier * SQR(CIniFile::SpawnDistanceMultiplier), (float)MAX_RANDOM_CARS);
+	// The ring area grows with the square of the ring scale, so the target scales with it too.
+	return Min(RANDOM_CARS_PER_INI_UNIT * CarDensityMultiplier * CIniFile::CarNumberMultiplier * SQR(CurrentTrafficRings().scale), (float)MAX_RANDOM_CARS);
 }
 
 void
 CCarCtrl::GenerateRandomCars()
 {
+	/* One table read per frame: the rate that fills the ring follows the ring
+	 * scale, exactly as the count target does. */
+	const STrafficRings rings = CurrentTrafficRings();
 	if (CCutsceneMgr::IsRunning()) {
 		CountDownToCarsAtStart = 2;
 		return;
 	}
 	if (NumRandomCars < MAX_RANDOM_CARS){
 		if (CountDownToCarsAtStart == 0) {
-			// The ring fills from the target and the lifetime, so the rate follows the spawn distance.
-			for (int i = 0; i < RANDOM_CAR_ATTEMPTS_PER_FRAME * CIniFile::SpawnDistanceMultiplier; i++)
+			for (int i = 0; i < RANDOM_CAR_ATTEMPTS_PER_FRAME * rings.scale; i++)
 				GenerateOneRandomCar();
 		} else if (--CountDownToCarsAtStart == 0) {
 			for (int i = 0; i < 100; i++)
@@ -160,6 +155,9 @@ CCarCtrl::GenerateOneRandomCar()
 	pPlayer->m_nTrafficMultiplier = trafficDensity;
 	if (NumRandomCars >= GetRandomCarTarget())
 		return;
+	/* One table read per call: the spawn rings, the birth culls and the
+	 * camera rule of this call all come from it. */
+	const STrafficRings rings = CurrentTrafficRings();
 	if (NumFiretrucksOnDuty + NumAmbulancesOnDuty + NumParkedCars + NumMissionCars + NumLawEnforcerCars + NumRandomCars >= MaxNumberOfCarsInUse)
 		return;
 	CWanted* pWanted = pPlayer->m_pPed->m_pWanted;
@@ -199,7 +197,7 @@ CCarCtrl::GenerateOneRandomCar()
 		angleLimit = -1.0f;
 		bTopDownCamera = true;
 		invertAngleLimitTest = true;
-		preferredDistance = OFFSCREEN_DESPAWN_RANGE + 15.0f;
+		preferredDistance = rings.carSideSpawn + 15.0f;
 		/* BUG: testForCollision not initialized in original game. */
 		testForCollision = false;
 	}else if (!pPlayerVehicle){
@@ -213,14 +211,14 @@ CCarCtrl::GenerateOneRandomCar()
 			/* Forward to his current direction (camera direction). */
 			angleLimit = 0.707f; /* 45 degrees */
 			invertAngleLimitTest = true;
-			preferredDistance = REQUEST_ONSCREEN_DISTANCE * TheCamera.GenerationDistMultiplier;
+			preferredDistance = rings.carOnScreenSpawnMax;
 			break;
 		case 1:
 			/* Spawn a vehicle close to player to his side. */
 			/* Kinda not within camera angle. */
 			angleLimit = 0.707f; /* 45 degrees */
 			invertAngleLimitTest = false;
-			preferredDistance = OFFSCREEN_DESPAWN_RANGE;
+			preferredDistance = rings.carSideSpawn;
 			break;
 		}
 	}else if (fPlayerVehicleSpeed > 0.4f){ /* 72 km/h */
@@ -235,21 +233,21 @@ CCarCtrl::GenerateOneRandomCar()
 			/* Spawn a vehicle in a very narrow gap in front of a player */
 			angleLimit = 0.85f; /* approx 30 degrees */
 			invertAngleLimitTest = true;
-			preferredDistance = REQUEST_ONSCREEN_DISTANCE * TheCamera.GenerationDistMultiplier;
+			preferredDistance = rings.carOnScreenSpawnMax;
 			break;
 		case 2:
 			/* Spawn a vehicle relatively far away from player. */
 			/* Forward to his current direction (camera direction). */
 			angleLimit = 0.707f; /* 45 degrees */
 			invertAngleLimitTest = true;
-			preferredDistance = REQUEST_ONSCREEN_DISTANCE * TheCamera.GenerationDistMultiplier;
+			preferredDistance = rings.carOnScreenSpawnMax;
 			break;
 		case 3:
 			/* Spawn a vehicle close to player to his side. */
 			/* Kinda not within camera angle. */
 			angleLimit = 0.707f; /* 45 degrees */
 			invertAngleLimitTest = false;
-			preferredDistance = OFFSCREEN_DESPAWN_RANGE;
+			preferredDistance = rings.carSideSpawn;
 			break;
 		}
 	}else if (fPlayerVehicleSpeed > 0.1f){ /* 18 km/h */
@@ -263,14 +261,14 @@ CCarCtrl::GenerateOneRandomCar()
 			/* Spawn a vehicle in a very narrow gap in front of a player */
 			angleLimit = 0.85f; /* approx 30 degrees */
 			invertAngleLimitTest = true;
-			preferredDistance = REQUEST_ONSCREEN_DISTANCE * TheCamera.GenerationDistMultiplier;
+			preferredDistance = rings.carOnScreenSpawnMax;
 			break;
 		case 1:
 			/* Spawn a vehicle relatively far away from player. */
 			/* Forward to his current direction (camera direction). */
 			angleLimit = 0.707f; /* 45 degrees */
 			invertAngleLimitTest = true;
-			preferredDistance = REQUEST_ONSCREEN_DISTANCE * TheCamera.GenerationDistMultiplier;
+			preferredDistance = rings.carOnScreenSpawnMax;
 			break;
 		case 2:
 		case 3:
@@ -278,7 +276,7 @@ CCarCtrl::GenerateOneRandomCar()
 			/* Kinda not within camera angle. */
 			angleLimit = 0.707f; /* 45 degrees */
 			invertAngleLimitTest = false;
-			preferredDistance = OFFSCREEN_DESPAWN_RANGE;
+			preferredDistance = rings.carSideSpawn;
 			break;
 		}
 	}else{
@@ -293,14 +291,14 @@ CCarCtrl::GenerateOneRandomCar()
 			/* Forward to his current direction (camera direction). */
 			angleLimit = 0.707f; /* 45 degrees */
 			invertAngleLimitTest = true;
-			preferredDistance = REQUEST_ONSCREEN_DISTANCE * TheCamera.GenerationDistMultiplier;
+			preferredDistance = rings.carOnScreenSpawnMax;
 			break;
 		case 1:
 			/* Spawn a vehicle close to player to his side. */
 			/* Kinda not within camera angle. */
 			angleLimit = 0.707f; /* 45 degrees */
 			invertAngleLimitTest = false;
-			preferredDistance = OFFSCREEN_DESPAWN_RANGE;
+			preferredDistance = rings.carSideSpawn;
 			break;
 		}
 	}
@@ -351,6 +349,9 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 	CPathNode* pCurNode = &ThePaths.m_pathNodes[placement.node1];
 	CPathNode* pNextNode = &ThePaths.m_pathNodes[placement.node2];
 	bool bBoatGenerated = pCurNode->bWaterPath;
+	/* The birth culls below read the table of this call, exactly like the call
+	 * that asked for the placement. */
+	const STrafficRings rings = CurrentTrafficRings();
 	if ((CGeneral::GetRandomNumber() & 0xF) > Min(pCurNode->spawnRate, pNextNode->spawnRate))
 		return false;
 	if (bBoatGenerated && (pCurNode->bOnlySmallBoats || pNextNode->bOnlySmallBoats) && BoatWithTallMast(carModel))
@@ -632,19 +633,26 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 		break;
 	}
 	CVisibilityPlugins::SetClumpAlpha(pVehicle->GetClump(), 0);
+	/* The birth cull. A fresh spawn must never be culled here, whatever the
+	 * view state, the slider or the weather: the spawn ring plus the reserve of
+	 * the table is the despawn threshold itself (see TrafficRings.h). The
+	 * off-screen branch uses the same threshold as the on-screen one, because
+	 * the lifetime cull (PossiblyRemoveVehicle) does: a car that is off screen
+	 * now can come into view a frame later, and one ring serves both requests.
+	 * The on-screen band keeps its own lower edge and the camera rule. */
 	if (!pVehicle->GetIsOnScreen()){
-		if ((vecTargetPos - pVehicle->GetPosition()).Magnitude2D() > OFFSCREEN_DESPAWN_RANGE * (pVehicle->bExtendedRange ? EXTENDED_RANGE_DESPAWN_MULTIPLIER : 1.0f)) {
+		if ((vecTargetPos - pVehicle->GetPosition()).Magnitude2D() > rings.carDespawn * (pVehicle->bExtendedRange ? rings.extendedRangeFactor : 1.0f)) {
 			/* Too far away cars that are not visible aren't needed. */
 			delete pVehicle;
 			return false;
 		}
 	}else{
-		if ((vecTargetPos - pVehicle->GetPosition()).Magnitude2D() > TheCamera.GenerationDistMultiplier * (pVehicle->bExtendedRange ? EXTENDED_RANGE_DESPAWN_MULTIPLIER : 1.0f) * ONSCREEN_DESPAWN_RANGE ||
-			(vecTargetPos - pVehicle->GetPosition()).Magnitude2D() < TheCamera.GenerationDistMultiplier * MINIMAL_DISTANCE_TO_SPAWN_ONSCREEN) {
+		if ((vecTargetPos - pVehicle->GetPosition()).Magnitude2D() > rings.carDespawn * (pVehicle->bExtendedRange ? rings.extendedRangeFactor : 1.0f) ||
+			(vecTargetPos - pVehicle->GetPosition()).Magnitude2D() < rings.carOnScreenSpawnMin) {
 			delete pVehicle;
 			return false;
 		}
-		if ((TheCamera.GetPosition() - pVehicle->GetPosition()).Magnitude2D() < 82.5f * TheCamera.GenerationDistMultiplier || bTopDownCamera) {
+		if ((TheCamera.GetPosition() - pVehicle->GetPosition()).Magnitude2D() < rings.carCameraMin || bTopDownCamera) {
 			delete pVehicle;
 			return false;
 		}
@@ -1019,8 +1027,18 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 			return;
 		}
 		float distanceToPlayer = (pVehicle->GetPosition() - vecPlayerPos).Magnitude2D();
-		float threshold = OFFSCREEN_DESPAWN_RANGE;
-#ifndef EXTENDED_OFFSCREEN_DESPAWN_RANGE
+		/* The one despawn threshold of the table: the on-screen spawn ring plus
+		 * its reserve. The extended range of a boat or a set piece multiplies
+		 * the whole threshold, so its own ring (1.5 times the car ring) keeps
+		 * the same reserve. */
+		const STrafficRings rings = CurrentTrafficRings();
+		float threshold = rings.carOffScreenDespawn;
+#ifdef EXTENDED_OFFSCREEN_DESPAWN_RANGE
+		/* One cull range for both view states: a car out of sight is removed at
+		 * the same distance as one in view, so a car never disappears right
+		 * before it comes into view. */
+		threshold = rings.carDespawn;
+#else
 		if (bOnScreenAtEntry ||
 			TheCamera.Cams[TheCamera.ActiveCam].LookingLeft ||
 			TheCamera.Cams[TheCamera.ActiveCam].LookingRight ||
@@ -1033,16 +1051,14 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 			pVehicle->bIsCarParkVehicle ||
 			CTimer::GetTimeInMilliseconds() < pVehicle->m_nSetPieceExtendedRangeTime
 			)
-#endif
 		{
-			threshold = ONSCREEN_DESPAWN_RANGE * TheCamera.GenerationDistMultiplier;
+			threshold = rings.carDespawn;
 		}
-#ifndef EXTENDED_OFFSCREEN_DESPAWN_RANGE
 		if (TheCamera.GetForward().z < -0.9f)
-			threshold = 70.0f;
+			threshold = rings.carTopDownDespawn;
 #endif
 		if (pVehicle->bExtendedRange)
-			threshold *= EXTENDED_RANGE_DESPAWN_MULTIPLIER;
+			threshold *= rings.extendedRangeFactor;
 		if (distanceToPlayer > threshold && !bInsideHideOutGarageAtEntry){
 			if (bOnScreenAtEntry){
 				pVehicle->bFadeOut = true;
@@ -3287,9 +3303,12 @@ bool CCarCtrl::GenerateOneEmergencyServicesCar(uint32 mi, CVector vecPos)
 	CVector spawnPos;
 	int curNode, nextNode;
 	float posBetweenNodes;
+	/* An emergency spawn is neither random nor scripted; it aims at the
+	 * on-screen ring, from the one table. */
+	const STrafficRings rings = CurrentTrafficRings();
 	while (!created && attempts < 5){
 		if (ThePaths.GenerateCarCreationCoors(pPlayerPos.x, pPlayerPos.y, 0.707f, 0.707f,
-			REQUEST_ONSCREEN_DISTANCE, -1.0f, true, &spawnPos, &curNode, &nextNode, &posBetweenNodes, false)){
+			rings.carOnScreenSpawnMax, -1.0f, true, &spawnPos, &curNode, &nextNode, &posBetweenNodes, false)){
 			int16 colliding[2];
 			if (!ThePaths.GetNode(curNode)->bWaterPath) {
 				CWorld::FindObjectsKindaColliding(spawnPos, 10.0f, true, colliding, 2, nil, false, true, true, false, false);

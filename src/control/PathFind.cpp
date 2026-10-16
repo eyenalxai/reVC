@@ -6,8 +6,8 @@
 #include "Vehicle.h"
 #include "World.h"
 #include "Lines.h"	// for debug
-#include "IniFile.h"
 #include "PathFind.h"
+#include "TrafficRings.h"
 
 bool gbShowPedPaths;
 bool gbShowCarPaths;
@@ -1484,6 +1484,10 @@ CPathFind::CollectCarCreationCoors(float x, float y, float dirX, float dirY, flo
 		return 0;
 
 	float maxDist = Max(spawnDist + 70.0f, spawnDist * 1.7f);
+	/* A water path node is bracketed against the boat ring (the water factor of
+	 * the table, over the ring the caller asked for). The scan margin above
+	 * (1.7) covers that factor with room to spare. */
+	float waterDist = spawnDist * RING_BOAT_SPAWN_FACTOR;
 
 	for(int32 node1 = 0; node1 < m_numCarPathNodes; node1++){
 		if(m_pathNodes[node1].bDisabled && !ignoreDisabled)
@@ -1491,13 +1495,13 @@ CPathFind::CollectCarCreationCoors(float x, float y, float dirX, float dirY, flo
 		float dist1 = Distance2D(m_pathNodes[node1].GetPosition(), x, y);
 		if(dist1 >= maxDist)
 			continue;
-		float d1 = m_pathNodes[node1].bWaterPath ? (dist1 - spawnDist * 1.5f) : (dist1 - spawnDist);
+		float d1 = m_pathNodes[node1].bWaterPath ? (dist1 - waterDist) : (dist1 - spawnDist);
 		for(int32 j = 0; j < m_pathNodes[node1].numLinks; j++){
 			int32 node2 = ConnectedNode(m_pathNodes[node1].firstLink + j);
 			if(m_pathNodes[node2].bDisabled && !ignoreDisabled)
 				continue;
 			float dist2 = Distance2D(m_pathNodes[node2].GetPosition(), x, y);
-			float d2 = m_pathNodes[node2].bWaterPath ? (dist2 - spawnDist * 1.5f) : (dist2 - spawnDist);
+			float d2 = m_pathNodes[node2].bWaterPath ? (dist2 - waterDist) : (dist2 - spawnDist);
 			if(d1*d2 >= 0.0f)
 				continue;
 			// nodes are on different sides of spawn distance
@@ -1802,14 +1806,14 @@ CPathFind::TestCoorsCloseness(CVector target, uint8 type, CVector start)
 	else
 		DoPathSearch(type, start, -1, target, nil, &DummyResult2, 0, nil, &dist, 50.0f, -1);
 #ifdef FIX_BUGS
-	// dist has GenerationDistMultiplier and SpawnDistanceMultiplier as factors, so our reference
-	// dist should have them too. CCarCtrl::GenerateOneRandomCar requests car spawns up to
-	// REQUEST_ONSCREEN_DISTANCE (250 m at 1.0) away; the spawn distance slider moves that
-	// distance out, so the cap follows the spawn distance. A road route can be about 1.6x the
-	// straight line, so 400 m per unit accepts such spawns with margin.
+	// dist follows the ring scale, so the reference dist must carry it too.
+	// CCarCtrl::GenerateOneRandomCar requests car spawns up to the on-screen
+	// ring (250 m at stock) away; the ring scale moves that distance out, so the
+	// cap follows the scale. A road route can be about 1.6x the straight line,
+	// so 400 m per unit accepts such spawns with margin.
 	// An unreachable spawn point leaves dist at its maximum, so the test still rejects it.
 	if(type == PATH_CAR)
-		return dist < 400.0f*TheCamera.GenerationDistMultiplier*CIniFile::SpawnDistanceMultiplier;
+		return dist < 400.0f * CurrentTrafficRings().scale;
 	else
 		return dist < 100.0f*TheCamera.GenerationDistMultiplier;
 #else

@@ -31,6 +31,7 @@
 #include "CdStream.h"
 #include "Radar.h"
 #include "Stats.h"
+#include "IniFile.h"
 #include "Messages.h"
 #include "FileLoader.h"
 #include "User.h"
@@ -750,6 +751,9 @@ CMenuManager::CheckSliderMovement(int value)
 			m_PrefsLOD -= DRAWDIST_RANGE / MENUSLIDER_LOGICAL_BARS;
 		m_PrefsLOD = Clamp(m_PrefsLOD, DRAWDIST_MIN, DRAWDIST_MAX);
 		CRenderer::ms_lodDistScale = m_PrefsLOD;
+		// The draw distance is the range of the traffic ring (TrafficRings.h),
+		// so the population caps follow it in the same frame.
+		CIniFile::ApplyPopulationCaps();
 		break;
 
 	// I wonder the idea behind clamping those max to 65

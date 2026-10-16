@@ -28,14 +28,11 @@
 #include "Streaming.h"
 #include "Clock.h"
 #include "WaterLevel.h"
+#include "TrafficRings.h"
 
-// The spawn distance slider (reVC.ini [Display] SpawnDistance) scales the creation
-// ring and the removal distances; 1.0 is the stock value.
-#define MIN_CREATION_DIST		(100.0f * CIniFile::SpawnDistanceMultiplier) // on-screen creation ring 100..130 m at 1.0; not for off-screen peds at start of the game (look at the GeneratePedsAtStartOfGame)
-#define CREATION_RANGE			(30.0f * CIniFile::SpawnDistanceMultiplier) // added over the MIN_CREATION_DIST, so the on-screen ring ends at 130 m at 1.0.
+// The pedestrian ring comes from the one table (TrafficRings.h): the creation
+// ring, the off-screen band and the removal distances scale with it.
 #define OFFSCREEN_CREATION_MULT	0.5f
-#define PED_REMOVE_DIST			(MIN_CREATION_DIST + CREATION_RANGE + 1.0f)
-#define PED_REMOVE_DIST_SPECIAL	(MIN_CREATION_DIST + CREATION_RANGE + 15.0f) // for peds with bCullExtraFarAway flag
 #define PED_AREA_DENSITY_SCALE	3.0f // scale the zone density budget for dense on-foot crowds
 #define PED_ATTEMPTS_PER_FRAME	3 // spawn attempts per frame
 
@@ -381,12 +378,13 @@ CPopulation::Update(bool addPeds)
 			ms_nTotalPeds -= ms_nTotalCarPassengerPeds;
 			if (!CCutsceneMgr::IsRunning() && addPeds) {
 				float pcdm = PedCreationDistMultiplier();
-				// The ring fills from the target and the lifetime, so the rate follows the spawn distance.
-				for (int i = 0; i < PED_ATTEMPTS_PER_FRAME * CIniFile::SpawnDistanceMultiplier; i++) {
-					AddToPopulation(pcdm * (MIN_CREATION_DIST * TheCamera.GenerationDistMultiplier),
-						pcdm * ((MIN_CREATION_DIST + CREATION_RANGE) * TheCamera.GenerationDistMultiplier),
-						pcdm * (MIN_CREATION_DIST + CREATION_RANGE) * OFFSCREEN_CREATION_MULT - CREATION_RANGE,
-						pcdm * (MIN_CREATION_DIST + CREATION_RANGE) * OFFSCREEN_CREATION_MULT);
+				const STrafficRings rings = CurrentTrafficRings();
+				// The ring fills from the target and the lifetime, so the rate follows the ring scale.
+				for (int i = 0; i < PED_ATTEMPTS_PER_FRAME * rings.scale; i++) {
+					AddToPopulation(pcdm * rings.pedCreateMin,
+						pcdm * rings.pedCreateMax,
+						pcdm * rings.pedOffScreenMin,
+						pcdm * rings.pedOffScreenMax);
 				}
 			}
 		}
@@ -406,8 +404,9 @@ CPopulation::GeneratePedsAtStartOfGame()
 		ms_nTotalPeds -= ms_nTotalCarPassengerPeds;
 
 		// Off-screen min dist is 10.0f only for start of the game (naturally)
-		AddToPopulation(MIN_CREATION_DIST, PedCreationDistMultiplier() * (MIN_CREATION_DIST + CREATION_RANGE),
-			10.0f, PedCreationDistMultiplier() * (MIN_CREATION_DIST + CREATION_RANGE));
+		const STrafficRings rings = CurrentTrafficRings();
+		AddToPopulation(rings.pedCreateMin, PedCreationDistMultiplier() * rings.pedCreateMax,
+			10.0f, PedCreationDistMultiplier() * rings.pedCreateMax);
 	}
 }
 
@@ -539,6 +538,9 @@ CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScree
 	bool forceAddingCop = false;
 	CPlayerInfo *playerInfo = &CWorld::Players[CWorld::PlayerInFocus];
 	CVector playerCentreOfWorld = FindPlayerCentreOfWorld(CWorld::PlayerInFocus);
+	/* The cop placement and the per-area budget read the ring table, the same
+	 * one the caller built its distances from. */
+	const STrafficRings rings = CurrentTrafficRings();
 	CTheZones::GetZoneInfoForTimeOfDay(&playerCentreOfWorld, &zoneInfo);
 	CWanted *wantedInfo = playerInfo->m_pPed->m_pWanted;
 
@@ -554,8 +556,8 @@ CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScree
 				|| CCarCtrl::NumFiretrucksOnDuty + CCarCtrl::NumAmbulancesOnDuty + CCarCtrl::NumParkedCars
 				+ CCarCtrl::NumMissionCars + CCarCtrl::NumLawEnforcerCars + CCarCtrl::NumRandomCars >= CCarCtrl::MaxNumberOfCarsInUse) || forceAddingCop)) {
 			addCop = true;
-			minDist = PedCreationDistMultiplier() * MIN_CREATION_DIST;
-			maxDist = PedCreationDistMultiplier() * (MIN_CREATION_DIST + CREATION_RANGE);
+			minDist = PedCreationDistMultiplier() * rings.pedCreateMin;
+			maxDist = PedCreationDistMultiplier() * rings.pedCreateMax;
 		}
 	}
 	float missionAndWeatherMult = -0.8f * Sqrt(CWeather::Rain) + 1.0f;
@@ -573,7 +575,7 @@ CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScree
 	// Yeah, float
 	float maxPossiblePedsForArea = (zoneInfo.pedDensity + zoneInfo.carDensity) * playerInfo->m_fRoadDensity * PedDensityMultiplier
 		* (CDarkel::FrenzyOnGoing() ? 1.f : CIniFile::PedNumberMultiplier) * missionAndWeatherMult * PED_AREA_DENSITY_SCALE
-		* SQR(CIniFile::SpawnDistanceMultiplier);
+		* SQR(rings.scale);
 	// Car and law-enforcer drivers count in ms_nTotalPeds: add them back so the on-foot
 	// budget does not shrink with the car count.
 	maxPossiblePedsForArea += CCarCtrl::NumRandomCars + CCarCtrl::NumLawEnforcerCars;
@@ -720,7 +722,7 @@ CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScree
 			}
 			bool distIsOk = true;
 			if (TheCamera.IsSphereVisible(generatedCoors, 2.0f)) {
-				if (PedCreationDistMultiplier() * MIN_CREATION_DIST > (generatedCoors - playerCentreOfWorld).Magnitude2D())
+				if (PedCreationDistMultiplier() * rings.pedCreateMin > (generatedCoors - playerCentreOfWorld).Magnitude2D())
 					distIsOk = false;
 			}
 
@@ -1092,6 +1094,8 @@ CPopulation::ManagePopulation(void)
 	// The multiplier only follows the player's vehicle speed and nothing in the
 	// loop below writes the player's vehicle, so one read covers the whole scan.
 	float pedCreationDistMultiplier = PedCreationDistMultiplier();
+	// The removal ring comes from the one table, like the creation ring above.
+	const STrafficRings rings = CurrentTrafficRings();
 #ifndef SQUEEZE_PERFORMANCE
 	for (int poolIndex = pedPoolSize-1; poolIndex >= 0; poolIndex--) {
 #else
@@ -1118,12 +1122,12 @@ CPopulation::ManagePopulation(void)
 			else if (ped->bDeadPedInFrontOfCar && ped->m_vehicleInAccident)
 				dist = 0.0f;
 
-			if (pedCreationDistMultiplier * (PED_REMOVE_DIST_SPECIAL * TheCamera.GenerationDistMultiplier) < dist ||
-				(!ped->bCullExtraFarAway && pedCreationDistMultiplier * PED_REMOVE_DIST * TheCamera.GenerationDistMultiplier < dist)) {
+			if (pedCreationDistMultiplier * rings.pedRemoveSpecial < dist ||
+				(!ped->bCullExtraFarAway && pedCreationDistMultiplier * rings.pedRemove < dist)) {
 				pedIsFarAway = true;
 			}
 #ifndef EXTENDED_OFFSCREEN_DESPAWN_RANGE
-			else if (pedCreationDistMultiplier * (MIN_CREATION_DIST + CREATION_RANGE) * OFFSCREEN_CREATION_MULT < dist) {
+			else if (pedCreationDistMultiplier * rings.pedCreateMax * OFFSCREEN_CREATION_MULT < dist) {
 				if (CTimer::GetTimeInMilliseconds() > ped->m_nExtendedRangeTimer && !ped->GetIsOnScreen()) {
 					if (TheCamera.Cams[TheCamera.ActiveCam].Mode != CCam::MODE_SNIPER
 						&& TheCamera.Cams[TheCamera.ActiveCam].Mode != CCam::MODE_SNIPER_RUNABOUT
@@ -1179,7 +1183,7 @@ CPopulation::ManagePopulation(void)
 CPed* 
 CPopulation::AddDeadPedInFrontOfCar(const CVector& pos, CVehicle* pCulprit)
 {
-	if (TheCamera.IsSphereVisible(pos, 2.0f) && MIN_CREATION_DIST * PedCreationDistMultiplier() > (pos - FindPlayerPed()->GetPosition()).Magnitude2D()) {
+	if (TheCamera.IsSphereVisible(pos, 2.0f) && CurrentTrafficRings().pedCreateMin * PedCreationDistMultiplier() > (pos - FindPlayerPed()->GetPosition()).Magnitude2D()) {
 			return nil;
 	}
 
@@ -1455,7 +1459,7 @@ CPopulation::PlaceGangMembersInFormation(ePedType pedType, int pedAmount, CVecto
 {
 	CPed *createdPeds[5];
 
-	if (!TheCamera.IsSphereVisible(coors, 3.0f) || MIN_CREATION_DIST * PedCreationDistMultiplier() <= (coors - FindPlayerPed()->GetPosition()).Magnitude2D()) {
+	if (!TheCamera.IsSphereVisible(coors, 3.0f) || CurrentTrafficRings().pedCreateMin * PedCreationDistMultiplier() <= (coors - FindPlayerPed()->GetPosition()).Magnitude2D()) {
 		if (CPedPlacement::IsPositionClearForPed(coors, 3.0f, -1, nil)) {
 			bool leaderFoundGround;
 			float leaderGroundZ = CWorld::FindGroundZFor3DCoord(coors.x, coors.y, coors.z, &leaderFoundGround) + 1.0f;
@@ -1534,7 +1538,7 @@ CPopulation::PlaceGangMembersInCircle(ePedType pedType, int pedAmount, CVector c
 	float circleR = Sqrt(0.5f / (1.0f - Cos(circleSector)));
 
 	if (!TheCamera.IsSphereVisible(coors, circleR) ||
-		MIN_CREATION_DIST * PedCreationDistMultiplier() <= (coors - FindPlayerPed()->GetPosition()).Magnitude2D()) {
+		CurrentTrafficRings().pedCreateMin * PedCreationDistMultiplier() <= (coors - FindPlayerPed()->GetPosition()).Magnitude2D()) {
 
 		if (CPedPlacement::IsPositionClearForPed(coors, circleR, -1, nil)) {
 			int pedIdx = 0;
@@ -1644,7 +1648,7 @@ CPopulation::PlaceCouple(ePedType manType, int32 manModel, ePedType womanType, i
 	if (manType != PEDTYPE_CIVMALE || womanType != PEDTYPE_CIVFEMALE)
 		return;
 
-	if (!TheCamera.IsSphereVisible(coors, 1.5f) || MIN_CREATION_DIST * PedCreationDistMultiplier() <= (coors - FindPlayerPed()->GetPosition()).Magnitude2D()) {
+	if (!TheCamera.IsSphereVisible(coors, 1.5f) || CurrentTrafficRings().pedCreateMin * PedCreationDistMultiplier() <= (coors - FindPlayerPed()->GetPosition()).Magnitude2D()) {
 		if (CPedPlacement::IsPositionClearForPed(coors, CModelInfo::GetColModel(manModel)->boundingSphere.radius, -1, nil)) {
 			bool manFoundGround;
 			float manGroundZ = CWorld::FindGroundZFor3DCoord(coors.x, coors.y, coors.z, &manFoundGround) + 1.0f;
@@ -1725,7 +1729,7 @@ CPopulation::PlaceMallPedsAsStationaryGroup(CVector const& coors, int32 group)
 	float circleR = Sqrt(0.5f / (1.0f - Cos(circleSector)));
 
 	if (!TheCamera.IsSphereVisible(coors, circleR) ||
-		MIN_CREATION_DIST * PedCreationDistMultiplier() <= (coors - FindPlayerPed()->GetPosition()).Magnitude2D()) {
+		CurrentTrafficRings().pedCreateMin * PedCreationDistMultiplier() <= (coors - FindPlayerPed()->GetPosition()).Magnitude2D()) {
 
 		if (CPedPlacement::IsPositionClearForPed(coors, circleR, -1, nil)) {
 			int pedIdx = 0;

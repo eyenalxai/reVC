@@ -899,6 +899,12 @@ void CGame::Process(void)
 		CRopes::Update();
 		CTimeCycle::Update();
 
+		// The population caps follow the ring, and the ring follows the weather
+		// far clip (TrafficRings.h). The time cycle of this frame just landed,
+		// so refresh them here, once a frame: a cap that lags the ring starves
+		// the streets at maximum settings.
+		CIniFile::ApplyPopulationCaps();
+
 		// The drift feedback is stepped once a frame here: after the physics
 		// step wrote the drift state, and before the camera below reads the
 		// strength (see DriftFeedback.h and ADR 0012). IsDriftCar keeps the

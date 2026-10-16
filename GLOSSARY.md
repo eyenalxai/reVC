@@ -210,7 +210,37 @@ where they come from.
 The distance from the player where the game creates and removes cars and
 pedestrians. The Display settings slider `SpawnDistance` scales it. The base is
 a ring around the player: pedestrians are created at 100-130 m and removed at
-131/145 m, cars spawn between 120 m and 250 m and despawn at 280 m.
+131/145 m, cars spawn between 120 m and 250 m and despawn at 280 m. The slider
+feeds the ring scale; VICE-125 moves the control to the draw distance.
+
+## Traffic ring
+
+One spawn or despawn radius of the traffic: the car side band, the car on-screen
+band, the car despawn, the camera minimum, the top-down bubble, the generator
+ring or the pedestrian band. The stock radii and the rules that build them live
+in `src/control/TrafficRings.h`; `CurrentTrafficRings()` returns the values of
+the frame.
+
+## Visible range
+
+The distance the traffic ring may reach: the smaller of the LOD distance and
+the weather far clip of the camera. The LOD distance is 300 times the LOD
+multiplier (the draw distance times the FOV factor); the far clip is weather
+data (SUNNY 2000 m, FOGGY 150 m).
+
+## Ring scale
+
+The one number that scales the traffic ring table: the spawn distance times the
+FOV factor, capped so the on-screen car ring stays inside the visible range.
+1.0 at the stock settings (spawn distance 1.0, FOV 70).
+
+## Despawn reserve
+
+The 30 m between a spawn ring and the threshold that removes a car: the stock
+step from the on-screen ring (250 m) to the despawn (280 m) and down to the
+inner edge (220 m). It holds the vehicle half length, the lane offset and the
+curve placement of a fresh spawn, so a fresh spawn is never removed on the
+frame it is created.
 
 ## Density
 
