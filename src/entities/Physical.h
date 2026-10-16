@@ -11,6 +11,12 @@ enum {
 
 #define GRAVITY (0.008f)
 
+// A soft hit costs a car about one tenth of the speed it would lose and one
+// tenth of the damage: HIT_OBJECT_SPEED_PENALTY scales the response,
+// HIT_OBJECT_DAMAGE_PENALTY the recorded collision impulse.
+#define HIT_OBJECT_SPEED_PENALTY (0.1f)
+#define HIT_OBJECT_DAMAGE_PENALTY (0.1f)
+
 class CTreadable;
 
 class CPhysical : public CEntity
@@ -87,6 +93,13 @@ public:
 	bool GetHasCollidedWith(CEntity *ent);
 	void RemoveRefsToEntity(CEntity *ent);
 	static void PlacePhysicalRelativeToOtherPhysical(CPhysical *other, CPhysical *phys, CVector localPos);
+
+	// Objects, pedestrians and vegetation buildings are soft for a car: it
+	// barely slows hitting them and barely takes damage. Buildings, vehicles
+	// and every other pair keep the vanilla response.
+	static bool IsSoftHitEntity(CEntity *entity);
+	// One tenth of the damage for a soft hit, the full damage for anything else.
+	static float SoftHitDamageScale(CEntity *entity);
 
 	// get speed of point p relative to entity center
 	CVector GetSpeed(const CVector &r);
