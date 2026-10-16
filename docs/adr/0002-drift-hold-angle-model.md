@@ -17,7 +17,10 @@ an angle but is not arcade enough, and the map's narrow roads and straight
    (20 degrees) and steering integrates it (90 degrees per second, in drift
    units, clamped to -5..45). No input holds the angle; a hard counter flick
    unwinds it past zero and ends the drift. This is the torque-balancing model
-   of the Criterion GDC 2018 talk (~21:00).
+   of the Criterion GDC 2018 talk (~21:00). (ADR 0008: the flick still ends
+   the drift, but with the handbrake held the next frame starts a new drift in
+   the other direction — a drift flip. To end a drift, release the
+   handbrake.)
 2. The entry gate is 10 percent of the top speed and the blend-out floor is
    5 percent. Below the gate, handbrake and steering make a handbrake turn: a
    hard rear grip cut with a fixed yaw kick (45 degrees per second) and no

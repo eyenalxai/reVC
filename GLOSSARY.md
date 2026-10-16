@@ -92,6 +92,15 @@ thread owns the file. It changes nothing in the physics.
 The stack of drift boosts. A clean drift that ends while a boost is still
 running adds its tier on top of the level the boost is at.
 
+## Drift flip
+
+A drift that starts from the recovery when the handbrake stays held through a
+counter-steer. The flick ends the old drift and grants its boost, and the next
+frame the new drift starts in the other direction with the full rear grip cut,
+so the counter-steer of the first corner becomes the entry of the second. The
+same entry is a chain when the handbrake was released and pressed again; the
+entry bites at once in both cases. To end a drift, release the handbrake.
+
 ## Friction circle
 
 The existing model in `CVehicle::ProcessWheel`: one grip budget per wheel,
