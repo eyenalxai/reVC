@@ -24,14 +24,17 @@ struct CColModel
 	CompressedVector *vertices;
 	CColTriangle *triangles;
 	CColTrianglePlane *trianglePlanes;
+	CColTriangleBasis *triangleBasis;	// optional, see VICE-121
+	CColTriangleAccelNode *triangleAccel;
+	int32 numTriangleAccelNodes;
+	bool triangleAccelDisabled;	// the broad phase cannot be built, use the full scan
 
 	CColModel(void);
 	~CColModel(void);
 	void RemoveCollisionVolumes(void);
 	void CalculateTrianglePlanes(void);
+	void CalculateTriangleAccel(void);
 	void RemoveTrianglePlanes(void);
-	CLink<CColModel*> *GetLinkPtr(void);
-	void SetLinkPtr(CLink<CColModel*>*);
 	void GetTrianglePoint(CVector &v, int i) const;
 
 	void *operator new(size_t) throw();

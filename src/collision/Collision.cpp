@@ -69,12 +69,14 @@ GetVUresult(CVuVector &point, CVuVector &normal, float &dist)
 #endif
 
 eLevelName CCollision::ms_collisionInMemory;
-CLinkList<CColModel*> CCollision::ms_colModelCache;
+int32 CCollision::ms_numCachedTriangles;
+int32 CCollision::ms_numCachedBytes;
 
 void
 CCollision::Init(void)
 {
-	ms_colModelCache.Init(NUMCOLCACHELINKS);
+	ms_numCachedTriangles = 0;
+	ms_numCachedBytes = 0;
 	ms_collisionInMemory = LEVEL_GENERIC;
 	CColStore::Initialise();
 }
@@ -82,7 +84,6 @@ CCollision::Init(void)
 void
 CCollision::Shutdown(void)
 {
-	ms_colModelCache.Shutdown();
 	CColStore::Shutdown();
 }
 
@@ -413,48 +414,41 @@ CCollision::TestLineSphere(const CColLine &line, const CColSphere &sph)
 	return f >= 0.0f && f <= 1.0f;
 }
 
-bool
-CCollision::TestSphereTriangle(const CColSphere &sphere,
-	const CompressedVector *verts, const CColTriangle &tri, const CColTrianglePlane &plane)
+#ifndef VU_COLLISION
+// The cached basis holds the same values the code below used to compute by
+// itself, so when it is there it is read, and otherwise it is computed into
+// localBasis (which is what the code did before the cache). cachedBasis is a
+// template parameter so both ways compile to what they did before instead of
+// carrying the other one along.
+template<bool cachedBasis>
+static bool
+TestSphereTriangleImpl(const CColSphere &sphere,
+	const CompressedVector *verts, const CColTriangle &tri, const CColTrianglePlane &plane,
+	const CColTriangleBasis *basis)
 {
-#ifdef VU_COLLISION
-	// not used in favour of optimized loops
-	VuTriangle vutri;
-	verts[tri.a].Unpack(vutri.v0);
-	verts[tri.b].Unpack(vutri.v1);
-	verts[tri.c].Unpack(vutri.v2);
-	plane.Unpack(vutri.plane);
-
-	SphereToTriangleCollisionCompressed(*(CVuVector*)&sphere, vutri);
-
-	if(GetVUresult())
-		return true;
-	return false;
-#else
-	// If sphere and plane don't intersect, no collision
+	// If sphere and plane don't intersect, no collision. This cheap rejection
+	// comes before the basis so the fallback computes the same things the
+	// base did, in the same order.
 	float planedist = plane.CalcPoint(sphere.center);
 	if(Abs(planedist) > sphere.radius)
 		return false;
+
+	CColTriangleBasis localBasis;
+	if(!cachedBasis){
+		localBasis.Set(verts, tri, plane);
+		basis = &localBasis;
+	}
 
 	const CVector &va = verts[tri.a].Get();
 	const CVector &vb = verts[tri.b].Get();
 	const CVector &vc = verts[tri.c].Get();
 
-	// calculate two orthogonal basis vectors for the triangle
-	CVector vec2 = vb - va;
-	float len = vec2.Magnitude();
-	vec2 = vec2 * (1.0f/len);
-	CVector normal;
-	plane.GetNormal(normal);
-	CVector vec1 = CrossProduct(vec2, normal);
-
 	// We know A has local coordinate [0,0] and B has [0,len].
 	// Now calculate coordinates on triangle for these two vectors:
-	CVector vac = vc - va;
 	CVector vas = sphere.center - va;
-	CVector2D b(0.0f, len);
-	CVector2D c(DotProduct(vec1, vac), DotProduct(vec2, vac));
-	CVector2D s(DotProduct(vec1, vas), DotProduct(vec2, vas));
+	CVector2D b(0.0f, basis->len);
+	CVector2D c = basis->c;
+	CVector2D s(DotProduct(basis->vec1, vas), DotProduct(basis->vec2, vas));
 
 	// The three triangle lines partition the space into 6 sectors,
 	// find out in which the center lies.
@@ -477,9 +471,9 @@ CCollision::TestSphereTriangle(const CColSphere &sphere,
 	case 2:
 		// closest to an edge
 		// looks like original game as DistToLine manually inlined
-		if(!insideAB) dist = DistToLine(&va, &vb, &sphere.center);
-		else if(!insideAC) dist = DistToLine(&va, &vc, &sphere.center);
-		else if(!insideBC) dist = DistToLine(&vb, &vc, &sphere.center);
+		if(!insideAB) dist = CCollision::DistToLine(&va, &vb, &sphere.center);
+		else if(!insideAC) dist = CCollision::DistToLine(&va, &vc, &sphere.center);
+		else if(!insideBC) dist = CCollision::DistToLine(&vb, &vc, &sphere.center);
 		else assert(0);
 		break;
 	case 3:
@@ -491,6 +485,31 @@ CCollision::TestSphereTriangle(const CColSphere &sphere,
 	}
 
 	return dist < sphere.radius;
+}
+#endif
+
+bool
+CCollision::TestSphereTriangle(const CColSphere &sphere,
+	const CompressedVector *verts, const CColTriangle &tri, const CColTrianglePlane &plane,
+	const CColTriangleBasis *basis)
+{
+#ifdef VU_COLLISION
+	// not used in favour of optimized loops
+	VuTriangle vutri;
+	verts[tri.a].Unpack(vutri.v0);
+	verts[tri.b].Unpack(vutri.v1);
+	verts[tri.c].Unpack(vutri.v2);
+	plane.Unpack(vutri.plane);
+
+	SphereToTriangleCollisionCompressed(*(CVuVector*)&sphere, vutri);
+
+	if(GetVUresult())
+		return true;
+	return false;
+#else
+	if(basis)
+		return TestSphereTriangleImpl<true>(sphere, verts, tri, plane, basis);
+	return TestSphereTriangleImpl<false>(sphere, verts, tri, plane, basis);
 #endif
 }
 
@@ -1217,10 +1236,97 @@ CCollision::ProcessLineTriangle(const CColLine &line,
 #endif
 }
 
+#ifndef VU_COLLISION
+template<bool cachedBasis>
+static bool
+ProcessSphereTriangleImpl(const CColSphere &sphere,
+	const CompressedVector *verts, const CColTriangle &tri, const CColTrianglePlane &plane,
+	CColPoint &point, float &mindistsq, const CColTriangleBasis *basis)
+{
+	// If sphere and plane don't intersect, no collision. This cheap rejection
+	// comes before the basis so the fallback computes the same things the
+	// base did, in the same order.
+	float planedist = plane.CalcPoint(sphere.center);
+	float distsq = planedist*planedist;
+	if(Abs(planedist) > sphere.radius || distsq > mindistsq)
+		return false;
+
+	CColTriangleBasis localBasis;
+	if(!cachedBasis){
+		localBasis.Set(verts, tri, plane);
+		basis = &localBasis;
+	}
+
+	const CVector &va = verts[tri.a].Get();
+	const CVector &vb = verts[tri.b].Get();
+	const CVector &vc = verts[tri.c].Get();
+
+	// We know A has local coordinate [0,0] and B has [0,len].
+	// Now calculate coordinates on triangle for these two vectors:
+	CVector normal;
+	plane.GetNormal(normal);
+	CVector vas = sphere.center - va;
+	CVector2D b(0.0f, basis->len);
+	CVector2D c = basis->c;
+	CVector2D s(DotProduct(basis->vec1, vas), DotProduct(basis->vec2, vas));
+
+	// The three triangle lines partition the space into 6 sectors,
+	// find out in which the center lies.
+	int insideAB = CrossProduct2D(s, b) >= 0.0f;
+	int insideAC = CrossProduct2D(c, s) >= 0.0f;
+	int insideBC = CrossProduct2D(s-b, c-b) >= 0.0f;
+
+	int testcase = insideAB + insideAC + insideBC;
+	float dist = 0.0f;
+	CVector p;
+	switch(testcase){
+	case 0:
+		return false;	// shouldn't happen
+	case 1:
+		// closest to a vertex
+		if(insideAB) p = vc;
+		else if(insideAC) p = vb;
+		else if(insideBC) p = va;
+		else assert(0);
+		dist = (sphere.center - p).Magnitude();
+		break;
+	case 2:
+		// closest to an edge
+		// looks like original game as DistToLine manually inlined
+		if(!insideAB) dist = CCollision::DistToLine(&va, &vb, &sphere.center, p);
+		else if(!insideAC) dist = CCollision::DistToLine(&va, &vc, &sphere.center, p);
+		else if(!insideBC) dist = CCollision::DistToLine(&vb, &vc, &sphere.center, p);
+		else assert(0);
+		break;
+	case 3:
+		// center is in triangle
+		dist = Abs(planedist);
+		p = sphere.center - normal*planedist;
+		break;
+	default:
+		assert(0);
+	}
+
+	if(dist >= sphere.radius || dist*dist >= mindistsq)
+		return false;
+
+	point.point = p;
+	point.normal = sphere.center - p;
+	point.normal.Normalise();
+	point.surfaceA = sphere.surface;
+	point.pieceA = sphere.piece;
+	point.surfaceB = tri.surface;
+	point.pieceB = 0;
+	point.depth = sphere.radius - dist;
+	mindistsq = dist*dist;
+	return true;
+}
+#endif
+
 bool
 CCollision::ProcessSphereTriangle(const CColSphere &sphere,
 	const CompressedVector *verts, const CColTriangle &tri, const CColTrianglePlane &plane,
-	CColPoint &point, float &mindistsq)
+	CColPoint &point, float &mindistsq, const CColTriangleBasis *basis)
 {
 #ifdef VU_COLLISION
 	// not used in favour of optimized loops
@@ -1246,84 +1352,9 @@ CCollision::ProcessSphereTriangle(const CColSphere &sphere,
 	}
 	return false;
 #else
-	// If sphere and plane don't intersect, no collision
-	float planedist = plane.CalcPoint(sphere.center);
-	float distsq = planedist*planedist;
-	if(Abs(planedist) > sphere.radius || distsq > mindistsq)
-		return false;
-
-	const CVector &va = verts[tri.a].Get();
-	const CVector &vb = verts[tri.b].Get();
-	const CVector &vc = verts[tri.c].Get();
-
-	// calculate two orthogonal basis vectors for the triangle
-	CVector normal;
-	plane.GetNormal(normal);
-	CVector vec2 = vb - va;
-	float len = vec2.Magnitude();
-	vec2 = vec2 * (1.0f/len);
-	CVector vec1 = CrossProduct(vec2, normal);
-
-	// We know A has local coordinate [0,0] and B has [0,len].
-	// Now calculate coordinates on triangle for these two vectors:
-	CVector vac = vc - va;
-	CVector vas = sphere.center - va;
-	CVector2D b(0.0f, len);
-	CVector2D c(DotProduct(vec1, vac), DotProduct(vec2, vac));
-	CVector2D s(DotProduct(vec1, vas), DotProduct(vec2, vas));
-
-	// The three triangle lines partition the space into 6 sectors,
-	// find out in which the center lies.
-	int insideAB = CrossProduct2D(s, b) >= 0.0f;
-	int insideAC = CrossProduct2D(c, s) >= 0.0f;
-	int insideBC = CrossProduct2D(s-b, c-b) >= 0.0f;
-
-	int testcase = insideAB + insideAC + insideBC;
-	float dist = 0.0f;
-	CVector p;
-	switch(testcase){
-	case 0:
-		return false;	// shouldn't happen
-	case 1:
-		// closest to a vertex
-		if(insideAB) p = vc;
-		else if(insideAC) p = vb;
-		else if(insideBC) p = va;
-		else assert(0);
-		dist = (sphere.center - p).Magnitude();
-		break;
-	case 2:
-		// closest to an edge
-		// looks like original game as DistToLine manually inlined
-		if(!insideAB) dist = DistToLine(&va, &vb, &sphere.center, p);
-		else if(!insideAC) dist = DistToLine(&va, &vc, &sphere.center, p);
-		else if(!insideBC) dist = DistToLine(&vb, &vc, &sphere.center, p);
-		else assert(0);
-		break;
-	case 3:
-		// center is in triangle
-		dist = Abs(planedist);
-		p = sphere.center - normal*planedist;
-		break;
-	default:
-		assert(0);
-	}
-
-	if(dist >= sphere.radius || dist*dist >= mindistsq)
-		return false;
-
-	point.point = p;
-	point.normal = sphere.center - p;
-	point.normal.Normalise();
-#ifndef VU_COLLISION
-	point.surfaceA = sphere.surface;
-	point.pieceA = sphere.piece;
-	point.surfaceB = tri.surface;
-	point.pieceB = 0;
-#endif
-	point.depth = sphere.radius - dist;
-	mindistsq = dist*dist;
-	return true;
+	if(basis)
+		return ProcessSphereTriangleImpl<true>(sphere, verts, tri, plane, point, mindistsq, basis);
+	return ProcessSphereTriangleImpl<false>(sphere, verts, tri, plane, point, mindistsq, basis);
 #endif
 }
 
@@ -1639,6 +1670,89 @@ enum {
 	MAXNUMLINES = 16,
 	MAXNUMTRIS = 600
 };
+
+#ifndef VU_COLLISION
+// Conservative dilation for the triangle broad phase, see VICE-121.
+// TestSphereTriangle computes its answer in float, so a node bound must be
+// dilated by an estimate of the worst rounding error of that computation or a
+// sphere at the exact boundary could lose a triangle. The error of the
+// squared distance grows with L^2 (the rounding of the products, where L is
+// the length scale of the node) and L*P (the rounding of the coordinates that
+// make up the differences, where P is the coordinate scale of the query).
+// The reported distance is the square root of that, compared against roughly
+// the radius, hence the division. Both terms are deliberately well above the
+// worst case.
+static const float TRI_ACCEL_SLACK_BASE = 1.0e-2f;
+static const float TRI_ACCEL_SLACK_REL = 1.0e-6f;
+static const int32 TRI_ACCEL_STACK_SIZE = 128;
+
+static float
+TriangleAccelSlack(const CColTriangleAccelNode &node, const CColSphere &sphere)
+{
+	float cmax = Abs(sphere.center.x);
+	if(Abs(sphere.center.y) > cmax) cmax = Abs(sphere.center.y);
+	if(Abs(sphere.center.z) > cmax) cmax = Abs(sphere.center.z);
+	float nmax = Abs(node.min[0]);
+	if(Abs(node.min[1]) > nmax) nmax = Abs(node.min[1]);
+	if(Abs(node.min[2]) > nmax) nmax = Abs(node.min[2]);
+	if(Abs(node.max[0]) > nmax) nmax = Abs(node.max[0]);
+	if(Abs(node.max[1]) > nmax) nmax = Abs(node.max[1]);
+	if(Abs(node.max[2]) > nmax) nmax = Abs(node.max[2]);
+
+	float len = node.maxEdge + sphere.radius + TRI_ACCEL_SLACK_BASE;
+	float radius = Max(sphere.radius, 1.0e-3f);
+	return TRI_ACCEL_SLACK_BASE + TRI_ACCEL_SLACK_REL*(len*len + len*(cmax + nmax))/radius;
+}
+
+// The accelerated version of the ascending scan over model's triangles: it
+// appends exactly the triangles TestSphereTriangle would accept, in the same
+// ascending index order, but skips the subtrees the dilated sphere cannot
+// reach.
+static int32
+CollectSphereTriangles(const CColSphere &sphere, CColModel &model, int32 *indices)
+{
+	int32 num = 0;
+	int i;
+
+	if(model.triangleAccel == nil){
+		for(i = 0; i < model.numTriangles; i++)
+			if(CCollision::TestSphereTriangle(sphere, model.vertices, model.triangles[i], model.trianglePlanes[i],
+					model.triangleBasis ? &model.triangleBasis[i] : nil))
+				indices[num++] = i;
+		return num;
+	}
+
+	int32 stack[TRI_ACCEL_STACK_SIZE];
+	int32 sp = 0;
+	stack[sp++] = 0;
+	while(sp > 0){
+		const CColTriangleAccelNode &node = model.triangleAccel[stack[--sp]];
+
+		float slack = TriangleAccelSlack(node, sphere);
+		float r = sphere.radius + slack;
+		float dx = Max(node.min[0] - sphere.center.x, 0.0f);
+		dx = Max(dx, sphere.center.x - node.max[0]);
+		float dy = Max(node.min[1] - sphere.center.y, 0.0f);
+		dy = Max(dy, sphere.center.y - node.max[1]);
+		float dz = Max(node.min[2] - sphere.center.z, 0.0f);
+		dz = Max(dz, sphere.center.z - node.max[2]);
+		if(dx*dx + dy*dy + dz*dz > r*r)
+			continue;
+
+		if(node.count == 0){
+			assert(sp + 2 <= TRI_ACCEL_STACK_SIZE);
+			stack[sp++] = node.child + 1;
+			stack[sp++] = node.child;
+		}else{
+			for(i = node.child; i < node.child + node.count; i++)
+				if(CCollision::TestSphereTriangle(sphere, model.vertices, model.triangles[i], model.trianglePlanes[i],
+						model.triangleBasis ? &model.triangleBasis[i] : nil))
+					indices[num++] = i;
+		}
+	}
+	return num;
+}
+#endif
 
 #ifdef VU_COLLISION
 #ifdef GTA_PS2
@@ -2030,9 +2144,8 @@ CCollision::ProcessColModels(const CMatrix &matrixA, CColModel &modelA,
 		if(TestSphereBox(bsphereAB, modelB.boxes[i]))
 			aBoxIndicesB[numBoxesB++] = i;
 	CalculateTrianglePlanes(&modelB);
-	for(i = 0; i < modelB.numTriangles; i++)
-		if(TestSphereTriangle(bsphereAB, modelB.vertices, modelB.triangles[i], modelB.trianglePlanes[i]))
-			aTriangleIndicesB[numTrianglesB++] = i;
+	modelB.CalculateTriangleAccel();
+	numTrianglesB = CollectSphereTriangles(bsphereAB, modelB, aTriangleIndicesB);
 	assert(numSpheresB <= MAXNUMSPHERES);
 	assert(numBoxesB <= MAXNUMBOXES);
 	assert(numTrianglesB <= MAXNUMTRIS);
@@ -2064,7 +2177,8 @@ CCollision::ProcessColModels(const CMatrix &matrixA, CColModel &modelA,
 				modelB.vertices,
 				modelB.triangles[aTriangleIndicesB[j]],
 				modelB.trianglePlanes[aTriangleIndicesB[j]],
-				spherepoints[numCollisions], coldist);
+				spherepoints[numCollisions], coldist,
+				modelB.triangleBasis ? &modelB.triangleBasis[aTriangleIndicesB[j]] : nil);
 
 		if(hasCollided)
 			numCollisions++;
@@ -2147,6 +2261,9 @@ CCollision::DistToLine(const CVector *l0, const CVector *l1, const CVector *poin
 	return (*point - closest).Magnitude();
 }
 
+// The planes (and the basis, if it fits the cap) are built once and belong
+// to the model until its geometry goes away. The old 50-entry LRU freed and
+// rebuilt them whenever that many other models were used, see VICE-121.
 void
 CCollision::CalculateTrianglePlanes(CColModel *model)
 {
@@ -2154,37 +2271,8 @@ CCollision::CalculateTrianglePlanes(CColModel *model)
 	if(model->numTriangles == 0)
 		return;
 
-	CLink<CColModel*> *lptr;
-	if(model->trianglePlanes){
-		// re-insert at front so it's not removed again soon
-		lptr = model->GetLinkPtr();
-		lptr->Remove();
-		ms_colModelCache.head.Insert(lptr);
-	}else{
-		lptr = ms_colModelCache.Insert(model);
-		if(lptr == nil){
-			// make room if we have to, remove last in list
-			lptr = ms_colModelCache.tail.prev;
-			assert(lptr);
-			assert(lptr->item);
-			lptr->item->RemoveTrianglePlanes();
-			ms_colModelCache.Remove(lptr);
-			// now this cannot fail
-			lptr = ms_colModelCache.Insert(model);
-			assert(lptr);
-		}
+	if(model->trianglePlanes == nil)
 		model->CalculateTrianglePlanes();
-		model->SetLinkPtr(lptr);
-	}
-}
-
-void
-CCollision::RemoveTrianglePlanes(CColModel *model)
-{
-	if(model->trianglePlanes){
-		ms_colModelCache.Remove(model->GetLinkPtr());
-		model->RemoveTrianglePlanes();
-	}
 }
 
 void
