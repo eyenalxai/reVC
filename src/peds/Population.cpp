@@ -10,6 +10,7 @@
 #include "Gangs.h"
 #include "ModelIndices.h"
 #include "Zones.h"
+#include "PathFind.h"
 #include "CivilianPed.h"
 #include "EmergencyPed.h"
 #include "Replay.h"
@@ -34,6 +35,26 @@
 // ring, the off-screen band and the removal distances scale with it.
 #define PED_AREA_DENSITY_SCALE	3.0f // scale the zone density budget for dense on-foot crowds
 #define PED_ATTEMPTS_PER_FRAME	3 // spawn attempts per frame
+
+// The off-network spawns (VICE-122). A bounded fraction of the pedestrian
+// spawns skips the node path and takes a free position in the creation ring,
+// and the existing wander state walks the pedestrian to the closest ped node
+// from there. A node is ground a pedestrian can stand on; a free position needs
+// the checks below, and the walk to the network needs a bound and a backstop.
+// The constants are the one place the fraction and the checks are tuned.
+#define PED_OFF_NETWORK_FRACTION	0.15f	// the fraction of the spawns that tries a free position
+#define PED_OFF_NETWORK_ATTEMPTS	5	// free positions tried for one spawn
+#define PED_OFF_NETWORK_LEVEL_MARGIN	3.0f	// the ground-to-position tolerance the node path itself allows
+#define PED_OFF_NETWORK_ROOF_CAST	50.0f	// the roof cast starts this far above the position
+#define PED_OFF_NETWORK_ROOF_MARGIN	1.5f	// a surface this far above the ground is a roof
+#define PED_OFF_NETWORK_WATER_DEPTH	0.7f	// the ground this far under the water surface is water
+#define PED_OFF_NETWORK_NODE_RANGE	150.0f	// the closest ped node may not be farther: the walk bound
+#define PED_OFF_NETWORK_NODE_LEVEL	5.0f	// and it may not sit on another level: the ground is a roof
+#define PED_OFF_NETWORK_JOIN_DISTANCE	8.0f	// a stray this near a node has reached the network
+#define PED_OFF_NETWORK_PROGRESS	0.25f	// metres of approach that count for the stray
+#define PED_OFF_NETWORK_STALL_TIME	20000	// ms of walking without progress before the stray cull
+#define PED_OFF_NETWORK_SLOTS		32	// the bounded stray table
+#define PED_OFF_NETWORK_CHECKS_PER_FRAME 2	// stray entries checked per frame
 
 PedGroup CPopulation::ms_pPedGroups[NUMPEDGROUPS];
 bool CPopulation::ms_bGivePedsWeapons;
@@ -69,6 +90,147 @@ uint32 gLastSelectedCivilianIndex;
 CEntity *gSunbatheObstacles[2];
 CEntity *gCoupleObstacles[3];
 
+uint32 CPopulation::ms_nOffNetworkSpawns;
+uint32 CPopulation::ms_nOffNetworkStuck;
+uint32 CPopulation::ms_nOffNetworkDrowned;
+
+/* The strays: the off-network pedestrians that have not reached the network yet
+ * (VICE-122). The table is bounded and the frame checks a fixed number of
+ * entries, so the cost of the cull does not follow the crowd. The references
+ * keep the entries valid when a pedestrian dies. */
+struct COffNetworkStray
+{
+	CPed *ped;		// nil when the slot is free or the pedestrian is gone
+	CPathNode *node;	// the node the last check measured against
+	float fNodeDist;	// the distance to that node at the last check
+	uint32 nSpawnTime;	// the spawn, so the oldest watch can be given up
+	uint32 nStallTime;	// ms the pedestrian walked without coming closer
+	uint32 nLastCheckTime;	// the time of the last check, for the stall time
+};
+
+static COffNetworkStray aOffNetworkStrays[PED_OFF_NETWORK_SLOTS];
+static int32 nOffNetworkStrayCursor;
+
+// Stop watching a stray: free the entry and its reference.
+static void
+UntrackOffNetworkStray(COffNetworkStray *stray)
+{
+	if (stray->ped)
+		stray->ped->CleanUpOldReference((CEntity**)&stray->ped);
+	stray->ped = nil;
+	stray->node = nil;
+}
+
+// Watch a pedestrian that spawned off the network until it reaches a node.
+// Bounded: when the table is full the oldest watch is given up.
+static void
+TrackOffNetworkPed(CPed *ped)
+{
+	if (ped == nil)
+		return;
+	COffNetworkStray *stray = &aOffNetworkStrays[0];
+	for (int32 i = 0; i < PED_OFF_NETWORK_SLOTS; i++) {
+		if (aOffNetworkStrays[i].ped == nil) {
+			stray = &aOffNetworkStrays[i];
+			break;
+		}
+		if (aOffNetworkStrays[i].nSpawnTime < stray->nSpawnTime)
+			stray = &aOffNetworkStrays[i];
+	}
+	if (stray->ped)
+		stray->ped->CleanUpOldReference((CEntity**)&stray->ped);
+
+	uint32 now = CTimer::GetTimeInMilliseconds();
+	stray->ped = ped;
+	stray->node = nil;
+	stray->fNodeDist = 0.0f;
+	stray->nSpawnTime = now;
+	stray->nStallTime = 0;
+	stray->nLastCheckTime = now;
+	ped->RegisterReference((CEntity**)&stray->ped);
+}
+
+// Remove a stray out of sight. A pedestrian in view stays: the cull never takes
+// one away in front of the player. True when the pedestrian is gone.
+static bool
+CullOffNetworkStray(COffNetworkStray *stray)
+{
+	if (TheCamera.IsSphereVisible(stray->ped->GetPosition(), 3.0f))
+		return false;
+	CPed *ped = stray->ped;
+	UntrackOffNetworkStray(stray);
+	CPopulation::RemovePed(ped);
+	return true;
+}
+
+// The stray cull (VICE-122). A stray that waits on purpose (a traffic light, a
+// chat, a hit wall) is not stuck; only a pedestrian that tries to get to the
+// network and never comes closer is. A stray in the water is a bad placement
+// and the counter carries it.
+static void
+ProcessOffNetworkStrays(void)
+{
+	uint32 now = CTimer::GetTimeInMilliseconds();
+
+	for (int32 check = 0; check < PED_OFF_NETWORK_CHECKS_PER_FRAME; check++) {
+		nOffNetworkStrayCursor = (nOffNetworkStrayCursor + 1) % PED_OFF_NETWORK_SLOTS;
+		COffNetworkStray *stray = &aOffNetworkStrays[nOffNetworkStrayCursor];
+		CPed *ped = stray->ped;
+		if (ped == nil)
+			continue;
+
+		// A pedestrian a script claimed, a driver, or a dead one is not a stray.
+		if (!ped->CanBeDeleted() || ped->bInVehicle || ped->DyingOrDead()) {
+			UntrackOffNetworkStray(stray);
+			continue;
+		}
+
+		CVector pos = ped->GetPosition();
+
+		// The wander state walked the pedestrian to its first node: a normal
+		// pedestrian from here on.
+		if (ped->m_pLastPathNode && Distance2D(ped->m_pLastPathNode->GetPosition(), pos) <= PED_OFF_NETWORK_JOIN_DISTANCE) {
+			UntrackOffNetworkStray(stray);
+			continue;
+		}
+
+		// The pedestrian reached the water: a bad placement. Count it once,
+		// remove it out of sight, and leave the rest to the drowning.
+		float waterLevel;
+		if (CWaterLevel::GetWaterLevel(pos, &waterLevel, true) && waterLevel > pos.z + PED_OFF_NETWORK_WATER_DEPTH) {
+			CPopulation::ms_nOffNetworkDrowned++;
+			CullOffNetworkStray(stray);
+			UntrackOffNetworkStray(stray);
+			continue;
+		}
+
+		// The stall clock runs while the stray walks towards the network. It
+		// stands while the pedestrian waits (a traffic light, a chat, a hit
+		// wall), and while it stands still, which is what a pedestrian does
+		// between two walks. A stray with no node to head for is left alone:
+		// it stands where it is, and the slot is reused.
+		CPathNode *node = ped->m_pNextPathNode ? ped->m_pNextPathNode : ped->m_pLastPathNode;
+		bool moving = ped->m_nMoveState == PEDMOVE_WALK || ped->m_nMoveState == PEDMOVE_JOG
+			|| ped->m_nMoveState == PEDMOVE_RUN || ped->m_nMoveState == PEDMOVE_SPRINT;
+		if (!moving || node == nil || ped->m_nWaitState != WAITSTATE_FALSE) {
+			stray->nLastCheckTime = now;
+			continue;
+		}
+
+		float dist = Distance2D(node->GetPosition(), pos);
+		if (node != stray->node || dist < stray->fNodeDist - PED_OFF_NETWORK_PROGRESS) {
+			stray->node = node;
+			stray->fNodeDist = dist;
+			stray->nStallTime = 0;
+		}
+
+		stray->nStallTime += now - stray->nLastCheckTime;
+		stray->nLastCheckTime = now;
+		if (stray->nStallTime > PED_OFF_NETWORK_STALL_TIME && CullOffNetworkStray(stray))
+			CPopulation::ms_nOffNetworkStuck++;
+	}
+}
+
 void
 CPopulation::Initialise()
 {
@@ -96,6 +258,14 @@ CPopulation::Initialise()
 	ms_nTotalMissionPeds = 0;
 	m_CountDownToPedsAtStart = 2;
 	bZoneChangeHasHappened = false; // III leftover
+
+	// The strays and their counters start empty (VICE-122). The pointers are
+	// only dropped here: the strays belong to the game that ends with this call.
+	memset(aOffNetworkStrays, 0, sizeof(aOffNetworkStrays));
+	nOffNetworkStrayCursor = 0;
+	ms_nOffNetworkSpawns = 0;
+	ms_nOffNetworkStuck = 0;
+	ms_nOffNetworkDrowned = 0;
 
 	m_AllRandomPedsThisType = -1;
 	PedDensityMultiplier = 1.0f;
@@ -364,6 +534,9 @@ CPopulation::Update(bool addPeds)
 		ManagePopulation();
 		RemovePedsIfThePoolGetsFull();
 		MoveCarsAndPedsOutOfAbandonedZones();
+		// The strays wait out a cutscene: the camera there is not the game view.
+		if (!CCutsceneMgr::IsRunning())
+			ProcessOffNetworkStrays();
 		if (m_CountDownToPedsAtStart != 0) {
 			if (--m_CountDownToPedsAtStart == 0)
 				GeneratePedsAtStartOfGame();
@@ -524,6 +697,67 @@ CPopulation::AddPed(ePedType pedType, uint32 miOrCopType, CVector const &coors, 
 	}
 }
 
+/* A free position for a pedestrian spawn (VICE-122): a random point in the
+ * creation ring, then the checks the node path does not need, because a node is
+ * ground a pedestrian can stand on. The wander state walks the pedestrian to
+ * the closest node from here, so the position must sit on the pedestrian level,
+ * outside the water and clear of other pedestrians, and the network must be
+ * within the walk bound and on the same level: a node far below the position
+ * means the position is a roof. */
+static bool
+FindFreePedCreationCoors(const CVector &centre, float minDist, float maxDist, float minDistOffScreen, float maxDistOffScreen, CVector *pPosition)
+{
+	bool found;
+	for (int attempt = 0; attempt < PED_OFF_NETWORK_ATTEMPTS; attempt++) {
+		// The bands of GeneratePedCreationCoors: a position in view takes the
+		// creation ring, one out of view takes the off-screen band.
+		float angle = CGeneral::GetRandomNumberInRange(0.0f, TWOPI);
+		float dist = CGeneral::GetRandomNumberInRange(minDistOffScreen, maxDist);
+		CVector pos(centre.x + dist * Sin(angle), centre.y + dist * Cos(angle), centre.z);
+		bool visible = TheCamera.IsSphereVisible(pos, 2.0f);
+		if (visible && !(minDist < dist && dist < maxDist))
+			continue;
+		if (!visible && !(minDistOffScreen < dist && dist < maxDistOffScreen))
+			continue;
+
+		// The ground. The cast starts on the level itself, so anything above
+		// the level is missed and the position lands at or below it.
+		float groundZ = CWorld::FindGroundZFor3DCoord(pos.x, pos.y, pos.z, &found);
+		if (!found)
+			continue;
+		if (Abs(groundZ - pos.z) > PED_OFF_NETWORK_LEVEL_MARGIN)
+			continue;
+		pos.z = groundZ;
+
+		// The roof: the top surface over the position must be the ground
+		// itself. A surface above it is a roof or a canopy.
+		float roofZ = CWorld::FindGroundZFor3DCoord(pos.x, pos.y, pos.z + PED_OFF_NETWORK_ROOF_CAST, &found);
+		if (!found || roofZ > pos.z + PED_OFF_NETWORK_ROOF_MARGIN)
+			continue;
+
+		// The water: the ground must stand above the water surface.
+		float waterLevel;
+		if (CWaterLevel::GetWaterLevel(pos, &waterLevel, true) && waterLevel > pos.z + PED_OFF_NETWORK_WATER_DEPTH)
+			continue;
+
+		// The spot must be free for a pedestrian.
+		if (!CPedPlacement::IsPositionClearForPed(pos))
+			continue;
+
+		// The network: the walk to it is bounded, and it must be on the level of
+		// the ground, or the ground is a roof above the network.
+		int32 node = ThePaths.FindNodeClosestToCoors(pos, PATH_PED, PED_OFF_NETWORK_NODE_RANGE);
+		if (node < 0)
+			continue;
+		if (Abs(ThePaths.m_pathNodes[node].GetPosition().z - pos.z) > PED_OFF_NETWORK_NODE_LEVEL)
+			continue;
+
+		*pPosition = pos;
+		return true;
+	}
+	return false;
+}
+
 void
 CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScreen, float maxDistOffScreen)
 {
@@ -636,18 +870,28 @@ CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScree
 		CVector generatedCoors;
 		int node1, node2;
 		float randomPos;
-		bool foundCoors = !!ThePaths.GeneratePedCreationCoors(playerCentreOfWorld.x, playerCentreOfWorld.y, minDist, maxDist, minDistOffScreen, maxDistOffScreen,
-			&generatedCoors, &node1, &node2, &randomPos, nil);
+		/* Off the network (VICE-122): a bounded fraction of the spawns takes a
+		 * free position in the creation ring instead of a node pair. On-network
+		 * spawning is untouched: the fraction is small and a free position that
+		 * fails a check falls back to the node path below. */
+		bool offNetwork = false;
+		if (!CGame::IsInInterior() && CGeneral::GetRandomNumberInRange(0.0f, 1.0f) < PED_OFF_NETWORK_FRACTION)
+			offNetwork = FindFreePedCreationCoors(playerCentreOfWorld, minDist, maxDist, minDistOffScreen, maxDistOffScreen, &generatedCoors);
 
-		if (!foundCoors)
-			return;
+		if (!offNetwork) {
+			bool foundCoors = !!ThePaths.GeneratePedCreationCoors(playerCentreOfWorld.x, playerCentreOfWorld.y, minDist, maxDist, minDistOffScreen, maxDistOffScreen,
+				&generatedCoors, &node1, &node2, &randomPos, nil);
 
-		uint8 nodeSpawnRate = Min(ThePaths.m_pathNodes[node1].spawnRate, ThePaths.m_pathNodes[node2].spawnRate);
-		int randomRate = CGeneral::GetRandomNumber() & 0xF;
-		if (randomRate > nodeSpawnRate)
-			return;
+			if (!foundCoors)
+				return;
 
-		CPathFind::TakeWidthIntoAccountForCoors(&ThePaths.m_pathNodes[node1], &ThePaths.m_pathNodes[node2], CGeneral::GetRandomNumber(), &generatedCoors.x, &generatedCoors.y);
+			uint8 nodeSpawnRate = Min(ThePaths.m_pathNodes[node1].spawnRate, ThePaths.m_pathNodes[node2].spawnRate);
+			int randomRate = CGeneral::GetRandomNumber() & 0xF;
+			if (randomRate > nodeSpawnRate)
+				return;
+
+			CPathFind::TakeWidthIntoAccountForCoors(&ThePaths.m_pathNodes[node1], &ThePaths.m_pathNodes[node2], CGeneral::GetRandomNumber(), &generatedCoors.x, &generatedCoors.y);
+		}
 		if (CGame::currArea == AREA_MALL && (pedTypeToAdd == PEDTYPE_CIVMALE || pedTypeToAdd == PEDTYPE_CIVFEMALE || pedTypeToAdd == PEDTYPE_CRIMINAL) &&
 			CGeneral::GetRandomNumberInRange(0.f, 1.f) > 0.5f) {
 
@@ -746,6 +990,12 @@ CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScree
 			if (!distIsOk || !surfaceIsOk)
 				break;
 			CPed *newPed = AddPed((ePedType)pedTypeToAdd, modelToAdd, generatedCoors);
+			if (offNetwork) {
+				// The ped is off the node network: watch it until the wander
+				// state brings it to a node, and count it (VICE-122).
+				ms_nOffNetworkSpawns++;
+				TrackOffNetworkPed(newPed);
+			}
 			if (forceAddingCop && newPed->m_nPedType == PEDTYPE_COP)
 				((CCopPed*)newPed)->m_bThrowsSpikeTrap = true;
 
