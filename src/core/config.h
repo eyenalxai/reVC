@@ -37,7 +37,10 @@ enum Config {
 	NUMBUILDINGS = 7000,
 	NUMTREADABLES = 1,
 	NUMOBJECTS = 460,
-	NUMDUMMIES = 2340,
+	// The dummy pool holds the map's dummy objects (2336 in the shipped map)
+	// plus every far CObject that is converted; the object pool can add
+	// NUMOBJECTS to that demand (VICE-134).
+	NUMDUMMIES = 2800,
 	NUMAUDIOSCRIPTOBJECTS = 192,
 	NUMCOLMODELS = 4400,
 	NUMCUTSCENEOBJECTS = 50,	// not a pool in VC
