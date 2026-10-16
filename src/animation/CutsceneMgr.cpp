@@ -4,6 +4,7 @@
 #include "CutsceneMgr.h"
 #include "Directory.h"
 #include "Camera.h"
+#include "Game.h"
 #include "Streaming.h"
 #include "FileMgr.h"
 #include "main.h"
@@ -491,6 +492,12 @@ CCutsceneMgr::DeleteCutsceneData(void)
 		}
 		NumberOfSavedWeapons = 0;
 	}
+
+	/* The cutscene is over and the player has the world back: the population
+	 * and the traffic fill at once (VICE-126). The fill waits out the
+	 * streaming itself, so it is armed here even when the biggest cutscene
+	 * removed the world and the models are still coming back. */
+	CGame::ArmFillBursts();
 
 	CTimer::Resume();
 }

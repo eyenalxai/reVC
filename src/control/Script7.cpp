@@ -133,7 +133,9 @@ int8 CRunningScript::ProcessCommands1200To1299(int32 command)
 	}
 	case COMMAND_SET_AREA_VISIBLE:
 		CollectParameters(&m_nIp, 1);
-		CGame::currArea = ScriptParams[0];
+		/* The one writer of the area: an exit from an interior arms the fill
+		 * burst of the population and the traffic (VICE-126). */
+		CGame::SetCurrArea(ScriptParams[0]);
 		CStreaming::RemoveBuildingsNotInArea(ScriptParams[0]); 
 		return 0;
 	case COMMAND_SET_CUTSCENE_ANIM_TO_LOOP:

@@ -29,6 +29,7 @@
 #include "Timer.h"
 #include "TrafficLights.h"
 #include "TrafficRings.h"
+#include "FillBurst.h"
 #include "Streaming.h"
 #include "VisibilityPlugins.h"
 #include "Vehicle.h"
@@ -104,6 +105,13 @@ int32 CCarCtrl::LoadedCarsArray[TOTAL_CUSTOM_CLASSES][MAX_CAR_MODELS_IN_ARRAY];
 CVehicle* apCarsToKeep[MAX_CARS_TO_KEEP];
 uint32 aCarsToKeepTime[MAX_CARS_TO_KEEP];
 
+/* The fill burst (VICE-126): the state of the window and the counters the live
+ * rig reads (utils/caps-audit/live-counters.py). */
+SFillBurst CCarCtrl::ms_FillBurst;
+uint32 CCarCtrl::ms_nFillBurstAttempts;
+uint32 CCarCtrl::ms_nFillBurstPlaced;
+float CCarCtrl::ms_fFillBurstTarget;
+
 float
 CCarCtrl::GetRandomCarTarget()
 {
@@ -127,10 +135,10 @@ CCarCtrl::GenerateRandomCars()
 	/* One table read per frame: the rate that fills the ring follows the ring
 	 * scale, exactly as the count target does. */
 	const STrafficRings rings = CurrentTrafficRings();
-	if (CCutsceneMgr::IsRunning()) {
-		CountDownToCarsAtStart = 2;
+	/* The fill waits out a cutscene here, and the burst arms at the end of one
+	 * (CCutsceneMgr::DeleteCutsceneData, VICE-126). */
+	if (CCutsceneMgr::IsRunning())
 		return;
-	}
 	/* A car brings a driver and can bring passengers, both of them pedestrians
 	 * of the same pool as the crowd (the emergency services of the frame
 	 * included). When the pool is down to its reserve, no car is created: the
@@ -140,18 +148,93 @@ CCarCtrl::GenerateRandomCars()
 	if (CPools::GetPedPool()->GetNoOfFreeSpaces() < PED_POOL_RESERVE)
 		return;
 	if (NumRandomCars < MAX_RANDOM_CARS){
-		if (CountDownToCarsAtStart == 0) {
+		if (CountDownToCarsAtStart != 0) {
+			// The countdown lets the world settle after boot and after a
+			// restart; its end arms the fill burst (VICE-126).
+			if (--CountDownToCarsAtStart == 0)
+				ArmFillBurst();
+		} else if (FillBurstIsRunning(&ms_FillBurst)) {
+			SpendFillBurstFrame();
+		} else {
 			for (int i = 0; i < RANDOM_CAR_ATTEMPTS_PER_FRAME * rings.scale; i++)
 				GenerateOneRandomCar();
-		} else if (--CountDownToCarsAtStart == 0) {
-			for (int i = 0; i < 100; i++)
-				GenerateOneRandomCar();
-			CTheCarGenerators::GenerateEvenIfPlayerIsCloseCounter = 20;
 		}
 	}
 	/* Approximately once per 4 seconds. */
 	if ((CTimer::GetTimeInMilliseconds() & 0xFFFFF000) != (CTimer::GetPreviousTimeInMilliseconds() & 0xFFFFF000))
 		GenerateEmergencyServicesCar();
+}
+
+/* Arm the car fill burst (VICE-126): a transition has happened and the traffic
+ * may fill at once. The parked cars come with it: the timer of every generator
+ * is bypassed for 20 frames (the shipped start-of-game burst did the same), so
+ * the curb fills with the street. The generator ring of the table stays: a
+ * parked car still appears only in its band, a few hundred metres out. */
+void
+CCarCtrl::ArmFillBurst(void)
+{
+	FillBurstArm(&ms_FillBurst);
+	ms_nFillBurstAttempts = 0;
+	ms_nFillBurstPlaced = 0;
+	ms_fFillBurstTarget = 0.0f;
+	CTheCarGenerators::GenerateEvenIfPlayerIsCloseCounter = 20;
+}
+
+/* The streaming gate of the car burst (VICE-126): a random car call chooses
+ * from the loaded class arrays and gives up when every rating array is empty
+ * (ChooseModel, ChooseCarModel), so a burst that runs before the streaming has
+ * a car model spends its window for nothing. True while at least one rating
+ * array holds a model. */
+static bool
+CarModelsAreResident(void)
+{
+	for (int i = 0; i < CCarCtrl::TOTAL_CUSTOM_CLASSES; i++)
+		if (CCarCtrl::NumOfLoadedCarsOfRating[i] > 0)
+			return true;
+	return false;
+}
+
+/* One frame of the car fill burst (VICE-126). The attempts come from the burst
+ * table: the whole budget while the screen hides the fill, the small one while
+ * the player can see it. A car placement runs the collision queries of the
+ * frame (VICE-121), so the budget is the work bound of the burst. */
+void
+CCarCtrl::SpendFillBurstFrame(void)
+{
+	/* The stop line: the random car target of the ring, the line
+	 * GenerateOneRandomCar stops at, and the car budget behind it. A burst never
+	 * runs past its target. */
+	ms_fFillBurstTarget = GetRandomCarTarget();
+	if (FillBurstTargetReached((float)NumRandomCars, ms_fFillBurstTarget) ||
+		NumCarsInUse() >= MaxNumberOfCarsInUse) {
+		FillBurstDisarm(&ms_FillBurst);
+		return;
+	}
+	/* The streaming: the frame waits for a car model instead of spending the
+	 * window on attempts that cannot choose one. */
+	if (!CarModelsAreResident()) {
+		FillBurstSpendFrame(&ms_FillBurst, false, false);
+		return;
+	}
+
+	int attempts = FillBurstAttempts(&ms_FillBurst, FillBurstIsHidden());
+	int32 placed = 0;
+	for (int i = 0; i < attempts; i++) {
+		/* The pool is re-read inside the loop: a car brings its crew (a driver
+		 * and up to three passengers), so a frame that finds the pool down to
+		 * its reserve stops here (PopulationBudget.h, PED_POOL_RESERVE). */
+		if (i % FILL_BURST_POOL_CHECK_ATTEMPTS == 0 &&
+			CPools::GetPedPool()->GetNoOfFreeSpaces() < PED_POOL_RESERVE)
+			break;
+		int32 before = NumRandomCars;
+		GenerateOneRandomCar();
+		if (NumRandomCars > before)
+			placed++;
+	}
+
+	ms_nFillBurstAttempts += attempts;
+	ms_nFillBurstPlaced += placed;
+	FillBurstSpendFrame(&ms_FillBurst, true, placed > 0);
 }
 
 void

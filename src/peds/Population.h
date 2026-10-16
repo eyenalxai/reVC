@@ -3,6 +3,7 @@
 
 #include "Game.h"
 #include "PedType.h"
+#include "FillBurst.h"
 
 class CPed;
 class CVehicle;
@@ -54,6 +55,14 @@ public:
 	static uint32 ms_nOffNetworkStuck;
 	static uint32 ms_nOffNetworkDrowned;
 
+	/* The fill burst (VICE-126): the window of the pedestrian fill and the
+	 * counters of the burst in flight. The counters are live for the measurement
+	 * rig (utils/caps-audit/live-counters.py). */
+	static SFillBurst ms_FillBurst;
+	static uint32 ms_nFillBurstAttempts;
+	static uint32 ms_nFillBurstPlaced;
+	static float ms_fFillBurstTarget;
+
 	static void Initialise();
 	static void Update(bool);
 	static void LoadPedGroups();
@@ -66,7 +75,7 @@ public:
 	static void ChooseCivilianCoupleOccupations(int32, int32&, int32&);
 	static int32 ChoosePolicePedOccupation();
 	static int32 ChooseGangOccupation(int);
-	static void GeneratePedsAtStartOfGame();
+	static void ArmFillBurst(void);
 	static float PedCreationDistMultiplier();
 	static CPed *AddPed(ePedType pedType, uint32 mi, CVector const &coors, int32 modifier = 0);
 	static void AddToPopulation(float, float, float, float);
