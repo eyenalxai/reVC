@@ -1565,6 +1565,51 @@ CPed::WorkOutHeadingForMovingFirstPerson(float offset)
 	return CGeneral::LimitRadianAngle(offset + angle);
 }
 
+// The speed of the surface the ped stands on (a car or a boat). The ped's own
+// velocity is m_vecMoveSpeed minus this.
+CVector2D
+CPed::GetSurfaceSpeed(void)
+{
+	if (m_pCurrentPhysSurface == nil)
+		return CVector2D(0.0f, 0.0f);
+	return m_pCurrentPhysSurface->GetSpeed(m_vecOffsetFromPhysSurface);
+}
+
+// A turning surface carries the ped around with it
+void
+CPed::CarryWithSurfaceTurn(void)
+{
+	if (m_pCurrentPhysSurface && bIsStanding) {
+		m_fRotationCur += m_pCurrentPhysSurface->m_vecTurnSpeed.z * CTimer::GetTimeStep();
+		m_fRotationDest += m_pCurrentPhysSurface->m_vecTurnSpeed.z * CTimer::GetTimeStep();
+	}
+}
+
+#define STEEP_SLOPE_REACTION		0.02f		// the push along the damage normal
+#define STEEP_SLOPE_GROUND_SPEED	(-0.001f)	// keeps the ped grounded
+
+// A steep slope pushes the ped off instead of taking the input: the velocity
+// gets the reaction force along the damage normal, with the part that points
+// into the slope removed.
+void
+CPed::PushOffSteepSlope(CVector2D &velocity)
+{
+	if (m_vecDamageNormal.x == 0.0f && m_vecDamageNormal.y == 0.0f)
+		return;
+
+	CVector2D reactionForce(m_vecDamageNormal.x, m_vecDamageNormal.y);
+	reactionForce.Normalise();
+
+	velocity += STEEP_SLOPE_REACTION * reactionForce;
+
+	float intoSlope = DotProduct2D(reactionForce, velocity);
+	// they're in same direction
+	if (intoSlope < 0.0f)
+		velocity -= intoSlope * reactionForce;
+
+	m_vecMoveSpeed.z = STEEP_SLOPE_GROUND_SPEED;
+}
+
 void
 CPed::UpdatePosition(void)
 {
@@ -1597,26 +1642,16 @@ CPed::UpdatePosition(void)
 			velocityOfSurface = slideMult * offsetToSurface * CTimer::GetTimeStep() + (surfaceTurnVelocity + surfaceMoveVelocity);
 			m_vecMoveSpeed.z = slideMult * offsetToSurface.z * CTimer::GetTimeStep() + (surfaceTurnVelocity.z + surfaceMoveVelocity.z);
 		} else {
-			velocityOfSurface = m_pCurrentPhysSurface->GetSpeed(m_vecOffsetFromPhysSurface);
+			velocityOfSurface = GetSurfaceSpeed();
 		}
 		// Reminder: m_moved is displacement from walking/running.
 		velocityChange = m_moved + velocityOfSurface - m_vecMoveSpeed;
-		m_fRotationCur += m_pCurrentPhysSurface->m_vecTurnSpeed.z * CTimer::GetTimeStep();
-		m_fRotationDest += m_pCurrentPhysSurface->m_vecTurnSpeed.z * CTimer::GetTimeStep();
+		CarryWithSurfaceTurn();
 	} else if (m_nSurfaceTouched == SURFACE_STEEP_CLIFF && (m_vecDamageNormal.x != 0.0f || m_vecDamageNormal.y != 0.0f)) {
-		// Ped got damaged by steep slope
-		m_vecMoveSpeed = CVector(0.0f, 0.0f, -0.001f);
-		// some kind of
-		CVector2D reactionForce = m_vecDamageNormal;
-		reactionForce.Normalise();
-
-		velocityChange = 0.02f * reactionForce + m_moved;
-
-		float reactionAndVelocityDotProd = DotProduct2D(reactionForce, velocityChange);
-		// they're in same direction
-		if (reactionAndVelocityDotProd < 0.0f) {
-			velocityChange -= reactionAndVelocityDotProd * reactionForce;
-		}
+		// Ped got damaged by steep slope: the reaction replaces the velocity
+		m_vecMoveSpeed = CVector(0.0f, 0.0f, 0.0f);
+		velocityChange = m_moved;
+		PushOffSteepSlope(velocityChange);
 	} else {
 		velocityChange = m_moved - m_vecMoveSpeed;
 	}
@@ -9291,21 +9326,11 @@ CPed::FinishLaunchCB(CAnimBlendAssociation *animAssoc, void *arg)
 		ped->ApplyMoveForce(0.0f, 0.0f, 4.5f);
 
 	// The player's horizontal momentum carries through the jump: the movement
-	// controller owns it (CPlayerPed::UpdatePlayerMovement)
+	// controller owns it (CPlayerPed::UpdatePlayerMovement). The animation still
+	// sets the horizontal speed of every other ped.
 	if (!ped->IsPlayer() && (sq(velocityFromAnim) > ped->m_vecMoveSpeed.MagnitudeSqr2D() || ped->m_pCurrentPhysSurface)) {
-
-#ifdef FREE_CAM
-		if (TheCamera.Cams[0].Using3rdPersonMouseCam() && !CCamera::bFreeCam) {
-#else
-		if (TheCamera.Cams[0].Using3rdPersonMouseCam()) {
-#endif
-			float fpsAngle = ped->WorkOutHeadingForMovingFirstPerson(ped->m_fRotationCur);
-			ped->m_vecMoveSpeed.x = -velocityFromAnim * Sin(fpsAngle);
-			ped->m_vecMoveSpeed.y = velocityFromAnim * Cos(fpsAngle);
-		} else {
-			ped->m_vecMoveSpeed.x = -velocityFromAnim * Sin(ped->m_fRotationCur);
-			ped->m_vecMoveSpeed.y = velocityFromAnim * Cos(ped->m_fRotationCur);
-		}
+		ped->m_vecMoveSpeed.x = -velocityFromAnim * Sin(ped->m_fRotationCur);
+		ped->m_vecMoveSpeed.y = velocityFromAnim * Cos(ped->m_fRotationCur);
 
 		if (ped->m_pCurrentPhysSurface) {
 			ped->m_vecMoveSpeed.x += ped->m_pCurrentPhysSurface->m_vecMoveSpeed.x;

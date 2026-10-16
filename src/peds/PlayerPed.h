@@ -51,7 +51,7 @@ public:
 	float m_fWalkAngle; //angle between heading and walking direction
 	float m_fFPSMoveHeading;
 	float m_fMoveHeading; // world heading of the controller's movement direction
-	uint8 m_nMovementState; // ePlayerMovementState
+	ePlayerMovementState m_nMovementState;
 	RpAtomic* m_pMinigunTopAtomic; //atomic for the spinning part of the minigun model
 	float m_fGunSpinSpeed; // for minigun
 	float m_fGunSpinAngle;
@@ -90,6 +90,7 @@ public:
 	void UseSprintEnergy(void);
 	void UpdatePlayerMovement(CPad *padUsed, bool bCanSprint);
 	bool IsMoveControllerInCharge(void);
+	bool CanMoveInWeaponSight(void);
 	float GetTargetMoveSpeed(bool bCanSprint) const;
 	float GetMoveAnimReferenceSpeed(void);
 	class CPlayerInfo *GetPlayerInfoForThisPlayerPed();

@@ -45,6 +45,19 @@
 #define PLAYER_RUN_SPEED		(6.439f / 50.0f)
 #define PLAYER_SPRINT_SPEED		(14.668f / 50.0f)
 
+// The m_fMoveSpeed blend (SetRealMoveAnim): the walk animation alone below the
+// split, the walk/run blend up to the run-only value, the run alone above it.
+#define PLAYER_WALK_RUN_SPLIT		1.0f
+#define PLAYER_RUN_ONLY			2.0f
+
+// The animation playback follows the real speed between these bounds; the clamp
+// keeps a large mismatch from looking wrong
+#define PLAYER_ANIM_SPEED_MIN		0.4f
+#define PLAYER_ANIM_SPEED_MAX		2.0f
+
+// DoWeaponSmoothSpray returns this when no smooth spray runs
+#define PLAYER_NO_SMOOTH_SPRAY		(-1.0f)
+
 // One row per ePlayerMovementState. The slide state will add its own row: a
 // low friction and a high turn rate.
 struct tPlayerMovementState
@@ -63,10 +76,10 @@ static const tPlayerMovementState playerMovementStates[PLAYERMOVE_NUMSTATES] = {
 static float
 MoveSpeedToReferenceSpeed(float moveSpeed)
 {
-	if (moveSpeed < 1.0f)
+	if (moveSpeed < PLAYER_WALK_RUN_SPLIT)
 		return PLAYER_WALK_SPEED;
-	if (moveSpeed < 2.0f)
-		return PLAYER_WALK_SPEED + (moveSpeed - 1.0f) * (PLAYER_RUN_SPEED - PLAYER_WALK_SPEED);
+	if (moveSpeed < PLAYER_RUN_ONLY)
+		return PLAYER_WALK_SPEED + (moveSpeed - PLAYER_WALK_RUN_SPLIT) * (PLAYER_RUN_SPEED - PLAYER_WALK_SPEED);
 	return PLAYER_RUN_SPEED;
 }
 
@@ -609,10 +622,8 @@ CPlayerPed::SetRealMoveAnim(void)
 	if (!m_bAdrenalineActive && bIsStanding) {
 		float referenceSpeed = GetMoveAnimReferenceSpeed();
 		if (referenceSpeed > 0.0f) {
-			CVector2D realVelocity = CVector2D(m_vecMoveSpeed);
-			if (m_pCurrentPhysSurface)
-				realVelocity -= CVector2D(m_pCurrentPhysSurface->GetSpeed(m_vecOffsetFromPhysSurface));
-			animSpeed = Clamp(realVelocity.Magnitude() / referenceSpeed, 0.4f, 2.0f);
+			CVector2D realVelocity = CVector2D(m_vecMoveSpeed) - GetSurfaceSpeed();
+			animSpeed = Clamp(realVelocity.Magnitude() / referenceSpeed, PLAYER_ANIM_SPEED_MIN, PLAYER_ANIM_SPEED_MAX);
 		}
 	}
 	if (m_bAdrenalineActive) {
@@ -671,12 +682,12 @@ CPlayerPed::DoWeaponSmoothSpray(void)
 				if (GetFireAnimGround(weaponInfo, false) && RpAnimBlendClumpGetAssociation(GetClump(), GetFireAnimGround(weaponInfo, false)))
 					return PI / 176.f;
 				else
-					return -1.0f;
+					return PLAYER_NO_SMOOTH_SPRAY;
 
 			case WEAPONTYPE_CHAINSAW:
 				if (GetMeleeStartAnim(weaponInfo) && RpAnimBlendClumpGetAssociation(GetClump(), GetMeleeStartAnim(weaponInfo))) {
 #ifdef FREE_CAM
-					if (TheCamera.Cams[0].Using3rdPersonMouseCam()) return -1.0f;
+					if (TheCamera.Cams[0].Using3rdPersonMouseCam()) return PLAYER_NO_SMOOTH_SPRAY;
 #endif
 					return PI / 128.0f;
 				}
@@ -704,12 +715,12 @@ CPlayerPed::DoWeaponSmoothSpray(void)
 			case WEAPONTYPE_HELICANNON:
 				return PI / 176.f;
 			default:
-				return -1.0f;
+				return PLAYER_NO_SMOOTH_SPRAY;
 		}
 	} else if (bIsDucking)
 		return PI / 112.f;
 	else
-		return -1.0f;
+		return PLAYER_NO_SMOOTH_SPRAY;
 }
 
 void
@@ -971,14 +982,14 @@ CPlayerPed::PlayerControlM16(CPad *padUsed)
 		bCrouchWhenShooting = false;
 	}
 
-#ifdef FIRST_PERSON
-	if (TheCamera.Using1stPersonView() && !m_attachedTo) {
-		// Aiming down the sights: the player keeps moving at the sight speed.
-		// Never sprints, and keeps the weapon aim state.
+	// The sight keeps the player moving: the M16 camera sight runs the movement
+	// controller (the controller checks the weapon itself, so the stationary
+	// sights of the sniper, the rocket launcher and the camera stay put and
+	// keep their stock behaviour). Never sprints, and keeps the weapon aim state.
+	if (IsMoveControllerInCharge()) {
 		UpdatePlayerMovement(padUsed, false);
 		SetRealMoveAnim();
 	}
-#endif
 
 	if (!padUsed->GetTarget() && !m_attachedTo) {
 		RestorePreviousState();
@@ -1682,21 +1693,28 @@ CPlayerPed::IsMoveControllerInCharge(void)
 			return false;
 
 		// The sight camera modes route the input to the weapon controls
-		if (TheCamera.Using1stPersonWeaponMode()) {
-			// The sniper and the laser scope are stationary
-			if (GetWeapon()->m_eWeaponType == WEAPONTYPE_SNIPERRIFLE ||
-			    GetWeapon()->m_eWeaponType == WEAPONTYPE_LASERSCOPE)
-				return false;
-#ifdef FIRST_PERSON
-			// The first person sight view keeps the player moving
-			return TheCamera.Using1stPersonView();
-#else
-			return false;
-#endif
-		}
+		if (TheCamera.Using1stPersonWeaponMode())
+			return CanMoveInWeaponSight();
 	}
 
 	return CanStrafeOrMouseControl();
+}
+
+// The sight of a normal weapon keeps the player moving: the M16 camera sight
+// gives the zoom and PlayerControlM16 runs the movement controller. The sniper,
+// the laser scope, the rocket launcher and the camera are stationary sights.
+bool
+CPlayerPed::CanMoveInWeaponSight(void)
+{
+	switch (GetWeapon()->m_eWeaponType) {
+	case WEAPONTYPE_SNIPERRIFLE:
+	case WEAPONTYPE_LASERSCOPE:
+	case WEAPONTYPE_ROCKETLAUNCHER:
+	case WEAPONTYPE_CAMERA:
+		return false;
+	default:
+		return true;
+	}
 }
 
 // The speed the current animation state moves the ped at, in engine units. The
@@ -1794,15 +1812,8 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed, bool bCanSprint)
 	const tPlayerMovementState &state = playerMovementStates[m_nMovementState];
 
 	// The ped's own velocity is the velocity without the surface it stands on
-	CVector2D surfaceSpeed;
-	if (m_pCurrentPhysSurface) {
-		surfaceSpeed = m_pCurrentPhysSurface->GetSpeed(m_vecOffsetFromPhysSurface);
-		if (bIsStanding) {
-			// A turning surface carries the ped around with it
-			m_fRotationCur += m_pCurrentPhysSurface->m_vecTurnSpeed.z * CTimer::GetTimeStep();
-			m_fRotationDest += m_pCurrentPhysSurface->m_vecTurnSpeed.z * CTimer::GetTimeStep();
-		}
-	}
+	CVector2D surfaceSpeed = GetSurfaceSpeed();
+	CarryWithSurfaceTurn();
 	CVector2D velocity = CVector2D(m_vecMoveSpeed) - surfaceSpeed;
 
 	float dt = CTimer::GetTimeStepInSeconds();
@@ -1828,13 +1839,7 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed, bool bCanSprint)
 		}
 	} else if (m_nSurfaceTouched == SURFACE_STEEP_CLIFF && (m_vecDamageNormal.x != 0.0f || m_vecDamageNormal.y != 0.0f)) {
 		// A steep slope pushes the ped off instead of taking the input
-		CVector2D reactionForce(m_vecDamageNormal.x, m_vecDamageNormal.y);
-		reactionForce.Normalise();
-		velocity += 0.02f * reactionForce;
-		float intoSlope = DotProduct2D(reactionForce, velocity);
-		if (intoSlope < 0.0f)
-			velocity -= intoSlope * reactionForce;
-		m_vecMoveSpeed.z = -0.001f;
+		PushOffSteepSlope(velocity);
 	} else if (bMoving) {
 		// The direction follows the input at the ground turn rate, so the legs
 		// stay with the movement; the speed follows the target at the
@@ -2117,8 +2122,15 @@ CPlayerPed::ProcessControl(void)
 		case PED_ANSWER_MOBILE:
 			if (!RpAnimBlendClumpGetFirstAssociation(GetClump(), ASSOC_BLOCK) && !m_attachedTo) {
 				if (TheCamera.Using1stPersonWeaponMode()) {
-					if (padUsed)
-						PlayerControlSniper(padUsed);
+					if (padUsed) {
+						// The M16 camera sight with a normal weapon keeps the
+						// player moving; the sniper, the laser scope, the rocket
+						// launcher and the camera keep the stationary sight.
+						if (CanMoveInWeaponSight())
+							PlayerControlM16(padUsed);
+						else
+							PlayerControlSniper(padUsed);
+					}
 
 				} else if ((TheCamera.Cams[0].Using3rdPersonMouseCam()
 #ifdef FIRST_PERSON
@@ -2169,6 +2181,9 @@ CPlayerPed::ProcessControl(void)
 			}
 			break;
 		case PED_SNIPER_MODE:
+			// The sniper and the laser scope are stationary; the other sights
+			// keep the M16 control (a normal weapon moves, the rocket launcher
+			// and the camera do not)
 			if (GetWeapon()->m_eWeaponType == WEAPONTYPE_SNIPERRIFLE || GetWeapon()->m_eWeaponType == WEAPONTYPE_LASERSCOPE) {
 				if (padUsed)
 					PlayerControlSniper(padUsed);
