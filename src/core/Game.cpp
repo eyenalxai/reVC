@@ -935,6 +935,13 @@ void CGame::Process(void)
 			CRoadBlocks::GenerateRoadBlocks();
 			CCarCtrl::RemoveDistantCars();
 			CCarCtrl::RemoveCarsIfThePoolGetsFull();
+			/* The far traffic layer (VICE-128) runs last in the car block:
+			 * the near spawner and the culls have had their say about the
+			 * pool, the frame's bubble budget and the near fill, and the
+			 * layer fills the band between the near traffic and the fog with
+			 * its own cheap cars, promotes what the player has come near and
+			 * takes over what the cull has just handed it. */
+			CFarTraffic::Process();
 			POP_MEMID();
 		}
 	}

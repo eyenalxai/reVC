@@ -6,10 +6,12 @@
 /* The car budgets: RANDOM_CARS_PER_INI_UNIT, MAX_RANDOM_CARS, MAX_CARS_IN_USE,
  * the parked target and the fill rate (VICE-123). The fill burst of the traffic
  * lives in FillBurst.h (VICE-126); the near bubble of the spawns and the culls
- * lives in NearBubble.h (VICE-127). */
+ * lives in NearBubble.h (VICE-127); the far traffic layer lives in
+ * FarTraffic.h (VICE-128). */
 #include "PopulationBudget.h"
 #include "FillBurst.h"
 #include "NearBubble.h"
+#include "FarTraffic.h"
 
 #define GAME_SPEED_TO_METERS_PER_SECOND 50.0f
 #define METERS_PER_SECOND_TO_GAME_SPEED (1.0f / GAME_SPEED_TO_METERS_PER_SECOND)
@@ -80,7 +82,7 @@ public:
 	static void GenerateOneRandomCar(void);
 	static void ArmFillBurst(bool withParkedCars);
 	static void SpendFillBurstFrame(void);
-	static bool CreateCarFromPlacement(const CCarCreationPlacement& placement, int carClass, int carModel, const CVector& vecTargetPos, const CVector2D& vecPlayerSpeed, bool testForCollision, bool bTopDownCamera);
+	static bool CreateCarFromPlacement(const CCarCreationPlacement& placement, int carClass, int carModel, const CVector& vecTargetPos, const CVector2D& vecPlayerSpeed, bool testForCollision, bool bTopDownCamera, bool bFarTraffic = false, CVehicle **ppCreated = nil);
 	static void GenerateEmergencyServicesCar(void);
 	static int32 ChooseModel(CZoneInfo*, int*);
 	static int32 ChoosePoliceCarModel(void);
@@ -93,6 +95,13 @@ public:
 	static void SlowCarOnRailsDownForTrafficAndLights(CVehicle*);
 	static bool PickNextNodeAccordingStrategy(CVehicle*);
 	static void DragCarToPoint(CVehicle*, CVector*);
+	/* The pose of a car on the rail of its two path links: the lane-including
+	 * positions, the curve between them and the car's place on it. Shared by
+	 * the on-rails simple car (which drags the car onto the pose with the
+	 * ground cast) and by the far layer (which writes the pose from the
+	 * path's own height; VICE-128). `pPosition` and `pDirection` are the
+	 * curve point and its tangent. */
+	static void ComputeCarOnRailPose(CVehicle *pVehicle, CVector *pPosition, CVector *pDirection);
 	static float FindMaximumSpeedForThisCarInTraffic(CVehicle*);
 	static void SlowCarDownForCarsSectorList(CPtrList&, CVehicle*, float, float, float, float, float*, float);
 	static void SlowCarDownForPedsSectorList(CPtrList&, CVehicle*, float, float, float, float, float*, float);
@@ -139,10 +148,12 @@ public:
 
 	/* The near bubble (VICE-127): the gates of the spawns and the culls, and
 	 * the counters the acceptance reads (NearBubble.h, NearBubble.cpp). The
-	 * frame begins them once, from GenerateRandomCars. */
+	 * frame begins them once, from GenerateRandomCars. `rayAllowed` false (the
+	 * far layer's option, VICE-128) refuses the two arms that would confirm
+	 * with a line-of-sight ray instead of spending one. */
 	static void NearBubbleBeginFrame(void);
 	static bool NearBubbleAllowsCreation(const CVector &pos, const CVector &playerCentre, float radius, bool rayAllowed);
-	static bool NearBubbleAllowsRemoval(CVehicle *pVehicle, const CVector &playerCentre, float ringThreshold);
+	static bool NearBubbleAllowsRemoval(CVehicle *pVehicle, const CVector &playerCentre, float ringThreshold, bool rayAllowed = true);
 	static void NearBubbleCountCreation(const CVector &pos, float radius);
 	static void NearBubbleCountRemoval(const CVector &pos, float radius, bool wasInvisible);
 	static void NearBubbleCountOtherCreation(const CVector &pos, float radius);

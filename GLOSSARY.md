@@ -421,6 +421,57 @@ create (the scripts, the set pieces, the road blocks, the car parks, the
 garages, the cheats) are `ms_nNearBubbleOtherFill`; the orchestrator compares
 the sum of the two against the target while driving and during a camera turn.
 
+## Far traffic layer
+
+The cheap traffic of the band between the near traffic and the fog (VICE-128).
+A far car is a real vehicle of the pool in a far state: rendered by the ordinary
+vehicle path (its streamed model, the LOD, the clump alpha reveal), but static
+and away from the moving entity list, with collision off and its audio entity
+inactive, so `CWorld::Process` and the collision path never touch it and the
+near AI never brakes for it. The layer moves its own cars along the path nodes
+with the same curve arithmetic the on-rails simple car uses, on a stagger of a
+third of the layer a frame (about 10 Hz), and it asks the near bubble's rule for
+every creation and removal (a car the player can see goes by the in-view band's
+fade-out, VICE-146). The rules live in `src/control/FarTraffic.h`, the engine
+side in `FarTraffic.cpp`, and ADR 0026 holds the decisions.
+
+## Far band
+
+The annulus a frame's far layer fills, from the one ring table (VICE-128): the
+inner edge is the near traffic's despawn (`rings.carDespawn`) and the outer edge
+the visible range (`rings.visibleRange`, min(LOD distance, weather far clip)).
+The band is open only while it has width (`FAR_TRAFFIC_MIN_BAND`, 160 m); its
+count cap follows the band's area up to `FAR_TRAFFIC_MAX` (64), and the cars
+outside the car budget keep the rest of the vehicle pool's margin. The creation
+sites are the fog (a car forming out of the haze ahead) and the rear half of the
+camera (the traffic the player passed); a placement of the fog site's own
+segment that lands inside the fade is allowed by the in-view band (VICE-146,
+the car's own reveal covers it), and a car the player can see goes by the same
+band's fade-out.
+
+## Promotion
+
+The switch of a far car into a full traffic car when it reaches the far band's
+inner edge (VICE-128): the car becomes a `RANDOM_VEHICLE` again (so it counts in
+the car budget), gets its driver (`CVehicle::SetUpDriver`), collision, the moving
+entity list and its audio. The car's own facts - the matrix, the model, the
+colours, the status, the clump and its alpha - are unchanged, and the driver
+rides the car's own reveal (`CVehicle::bDriverWaitsForReveal`), so a switch of an
+unseen car cannot show a driver before its car. When the ped pool is short of its
+reserve the car is made real anyway inside the player's reach, without a driver
+(the reach's seal, `FAR_TRAFFIC_SAFETY_PROMOTE`): a far car is a shell the
+player can drive through, which is not allowed where the player can be.
+
+## Hand-over (demotion)
+
+The switch of a leaving traffic car into a far car instead of the deletion the
+near cull would make (VICE-128). The cull has already decided the car is outside
+the near bubble, past its fresh-spawn grace and hidden; the layer flags its
+occupants away, takes its class out of the car budget and applies the far state,
+so the player watches a car recede into the fog instead of blinking out. The
+hand-over starts `FAR_TRAFFIC_ADOPT_HYSTERESIS` (40 m) past the despawn and
+refuses when the band is closed or the layer is at its cap.
+
 ## Pool
 
 The fixed storage for the entities and their list nodes: pedestrians, vehicles,

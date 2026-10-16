@@ -21,6 +21,14 @@ enum {
 	MISSION_VEHICLE = 2,
 	PARKED_VEHICLE = 3,
 	PERMANENT_VEHICLE = 4,
+	/* The far traffic layer (VICE-128): a car the player sees but nothing
+	 * simulates. It holds a pool slot and is rendered normally, but it is
+	 * outside the car budget (UpdateCarCount ignores it), it is static and it
+	 * does not collide; a promotion turns it into a RANDOM_VEHICLE and its
+	 * driver, and a hand-over turns a leaving traffic car back. The value is
+	 * never written to a save (no far car is a mission car, and only mission
+	 * cars are saved; CPools::IsVehicleSaved). */
+	FAR_TRAFFIC_VEHICLE = 5,
 };
 
 /* A bike or a boat that was drawn may not be removed for this long: the
@@ -273,6 +281,7 @@ public:
 	uint8 bCreatedAsPoliceVehicle : 1;// True if this guy was created as a police vehicle (enforcer, policecar, miamivice car etc)
 	uint8 bRestingOnPhysical : 1; // Dont go static cause car is sitting on a physical object that might get removed
 	uint8 bParking : 1;
+	uint8 bDriverWaitsForReveal : 1; // The far layer promoted this car while it held its invisible frame: its driver is drawn only when the car itself is opaque (VICE-128)
 	uint8 bCanPark : 1;
 #if (!defined GTA_PS2 || defined FIX_BUGS)
 	uint8 m_bombType : 3;
