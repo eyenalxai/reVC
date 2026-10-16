@@ -37,6 +37,19 @@ int16 DebugCamMode;
 extern float fRangePlayerRadius;
 extern float fCloseNearClipLimit;
 
+// Turn the ped the camera follows towards the given heading. The camera target
+// is a vehicle in the first person view while the player drives, and the ped
+// rotation fields then landed on the CAR_WHEEL_LM and CAR_WHEEL_LB slots of
+// the vehicle's m_aCarNodes. The pre-render crashed on the corrupted pointer.
+static void
+TurnTargetPed(float heading)
+{
+	if(TheCamera.pTargetEntity && TheCamera.pTargetEntity->IsPed()){
+		((CPed*)TheCamera.pTargetEntity)->m_fRotationCur = heading;
+		((CPed*)TheCamera.pTargetEntity)->m_fRotationDest = heading;
+	}
+}
+
 #ifdef FREE_CAM
 bool CCamera::bFreeCam = false;
 int nPreviousMode = -1;
@@ -1577,8 +1590,7 @@ CCam::Process_FollowPedWithMouse(const CVector &CameraTarget, float TargetOrient
 	   (TheCamera.GetFadingDirection() != FADE_OUT || CDraw::FadeValue <= 100) &&
 	   !CPad::GetPad(0)->IsPlayerControlsDisabledBy(PLAYERCONTROL_PLAYERINFO)){
 		float Heading = Front.Heading();
-		((CPed*)TheCamera.pTargetEntity)->m_fRotationCur = Heading;
-		((CPed*)TheCamera.pTargetEntity)->m_fRotationDest = Heading;
+		TurnTargetPed(Heading);
 		TheCamera.pTargetEntity->SetHeading(Heading);
 		TheCamera.pTargetEntity->GetMatrix().UpdateRW();
 	}
@@ -2359,8 +2371,7 @@ CCam::Process_Rocket(const CVector &CameraTarget, float, float, float)
 
 	GetVectorsReadyForRW();
 	float Rotation = CGeneral::GetATanOfXY(Front.x, Front.y) - HALFPI;
-	((CPed*)TheCamera.pTargetEntity)->m_fRotationCur = Rotation;
-	((CPed*)TheCamera.pTargetEntity)->m_fRotationDest = Rotation;
+	TurnTargetPed(Rotation);
 }
 
 float fDuckingBackOffset = 0.5f;
@@ -2505,8 +2516,7 @@ CCam::Process_M16_1stPerson(const CVector &CameraTarget, float, float, float)
 		RwCameraSetNearClipPlane(Scene.camera, 0.4f);
 
 		float Rotation = CGeneral::GetATanOfXY(Front.x, Front.y) - HALFPI;
-		((CPed*)TheCamera.pTargetEntity)->m_fRotationCur = Rotation;
-		((CPed*)TheCamera.pTargetEntity)->m_fRotationDest = Rotation;
+		TurnTargetPed(Rotation);
 	}else{
 		CamTargetEntity->GetMatrix().UpdateRW();
 		CamTargetEntity->UpdateRwFrame();
@@ -2578,8 +2588,7 @@ CCam::Process_M16_1stPerson(const CVector &CameraTarget, float, float, float)
 
 		GetVectorsReadyForRW();
 		float Rotation = CGeneral::GetATanOfXY(Front.x, Front.y) - HALFPI;
-		((CPed*)TheCamera.pTargetEntity)->m_fRotationCur = Rotation;
-		((CPed*)TheCamera.pTargetEntity)->m_fRotationDest = Rotation;
+		TurnTargetPed(Rotation);
 	}
 }
 
@@ -2739,8 +2748,7 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 
 		GetVectorsReadyForRW();
 		float Rotation = CGeneral::GetATanOfXY(Front.x, Front.y) - HALFPI;
-		((CPed*)TheCamera.pTargetEntity)->m_fRotationCur = Rotation;
-		((CPed*)TheCamera.pTargetEntity)->m_fRotationDest = Rotation;
+		TurnTargetPed(Rotation);
 	}else{
 		assert(CamTargetEntity->IsVehicle());
 
@@ -2975,8 +2983,7 @@ CCam::Process_1rstPersonPedOnPC(const CVector&, float TargetOrientation, float, 
 		GetVectorsReadyForRW();
 
 		float Heading = Front.Heading();
-		((CPed*)TheCamera.pTargetEntity)->m_fRotationCur = Heading;
-		((CPed*)TheCamera.pTargetEntity)->m_fRotationDest = Heading;
+		TurnTargetPed(Heading);
 		TheCamera.pTargetEntity->SetHeading(Heading);
 		TheCamera.pTargetEntity->GetMatrix().UpdateRW();
 
@@ -3171,8 +3178,7 @@ CCam::Process_Sniper(const CVector &CameraTarget, float TargetOrientation, float
 
 	GetVectorsReadyForRW();
 	float Rotation = CGeneral::GetATanOfXY(Front.x, Front.y) - HALFPI;
-	((CPed*)TheCamera.pTargetEntity)->m_fRotationCur = Rotation;
-	((CPed*)TheCamera.pTargetEntity)->m_fRotationDest = Rotation;
+	TurnTargetPed(Rotation);
 }
 
 float INIT_SYPHON_GROUND_DIST = 2.419f;
@@ -3911,8 +3917,7 @@ CCam::Process_Fixed(const CVector &CameraTarget, float, float, float)
 		CPed *player = FindPlayerPed();
 		if(player && player->CanStrafeOrMouseControl()){
 			float Heading = Front.Heading();
-			((CPed*)TheCamera.pTargetEntity)->m_fRotationCur = Heading;
-			((CPed*)TheCamera.pTargetEntity)->m_fRotationDest = Heading;
+			TurnTargetPed(Heading);
 			TheCamera.pTargetEntity->SetHeading(Heading);
 			TheCamera.pTargetEntity->GetMatrix().UpdateRW();
 		}
