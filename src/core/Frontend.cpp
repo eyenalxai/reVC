@@ -1684,6 +1684,113 @@ CMenuManager::DrawStandardMenus(bool activeScreen)
 #endif
 }
 
+// One line of a controller setup screen. The text is the GXT key of the action
+// column; the two action columns hold the e_ControllerAction of that column, or
+// -1 when the row has no action there. The vehicle column of row 24 holds -2:
+// it shows the combo text instead of a binding.
+struct tControllerSetupRow
+{
+	const char *text;
+	int pedAction;
+	int vehicleAction;
+};
+
+// The vehicle column of row 0 binds the vehicle fire key when the option is on,
+// and the ped fire key otherwise.
+#ifdef BIND_VEHICLE_FIREWEAPON
+static const int controllerSetupVehicleFire = VEHICLE_FIREWEAPON;
+#else
+static const int controllerSetupVehicleFire = PED_FIREWEAPON;
+#endif
+
+// The rows of the setup screen, one table line per row, in screen order. A new
+// row is one line here: the row count, the labels and both action columns come
+// from the same table. STANDARD keeps 28 rows and CLASSIC 33; row 27 is FEC_RLD
+// for STANDARD and FEC_LUD for CLASSIC.
+static const tControllerSetupRow controllerSetupRowsStandard[] = {
+	{ "FEC_FIR", PED_FIREWEAPON,                     controllerSetupVehicleFire },
+	{ "FEC_NWE", PED_CYCLE_WEAPON_RIGHT,             -1 },
+	{ "FEC_PWE", PED_CYCLE_WEAPON_LEFT,              -1 },
+	{ "FEC_FOR", GO_FORWARD,                         VEHICLE_ACCELERATE },
+	{ "FEC_BAC", GO_BACK,                            VEHICLE_BRAKE },
+	{ "FEC_LEF", GO_LEFT,                            GO_LEFT },
+	{ "FEC_RIG", GO_RIGHT,                           GO_RIGHT },
+	{ "FEC_ZIN", PED_SNIPER_ZOOM_IN,                 -1 },
+	{ "FEC_ZOT", PED_SNIPER_ZOOM_OUT,                -1 },
+	{ "FEC_EEX", VEHICLE_ENTER_EXIT,                 VEHICLE_ENTER_EXIT },
+	{ "FEC_RAD", -1,                                 VEHICLE_CHANGE_RADIO_STATION },
+	{ "FEC_HRN", -1,                                 VEHICLE_HORN },
+	{ "FEC_SUB", -1,                                 TOGGLE_SUBMISSIONS },
+	{ "FEC_CMR", CAMERA_CHANGE_VIEW_ALL_SITUATIONS,  CAMERA_CHANGE_VIEW_ALL_SITUATIONS },
+	{ "FEC_JMP", PED_JUMPING,                        -1 },
+	{ "FEC_SPN", PED_SPRINT,                         -1 },
+	{ "FEC_HND", -1,                                 VEHICLE_HANDBRAKE },
+	{ "FEC_TAR", PED_LOCK_TARGET,                    -1 },
+	{ "FEC_CRO", PED_DUCK,                           -1 },
+	{ "FEC_ANS", PED_ANSWER_PHONE,                   -1 },
+	{ "FEC_TFL", -1,                                 VEHICLE_TURRETLEFT },
+	{ "FEC_TFR", -1,                                 VEHICLE_TURRETRIGHT },
+	{ "FEC_TFU", -1,                                 VEHICLE_TURRETUP },
+	{ "FEC_TFD", -1,                                 VEHICLE_TURRETDOWN },
+	{ "FEC_LBA", PED_LOOKBEHIND,                     -2 },
+	{ "FEC_LOL", -1,                                 VEHICLE_LOOKLEFT },
+	{ "FEC_LOR", -1,                                 VEHICLE_LOOKRIGHT },
+	{ "FEC_RLD", PED_RELOAD,                         -1 },
+};
+
+static const tControllerSetupRow controllerSetupRowsClassic[] = {
+	{ "FEC_FIR", PED_FIREWEAPON,                     controllerSetupVehicleFire },
+	{ "FEC_NWE", PED_CYCLE_WEAPON_RIGHT,             -1 },
+	{ "FEC_PWE", PED_CYCLE_WEAPON_LEFT,              -1 },
+	{ "FEC_FOR", GO_FORWARD,                         VEHICLE_ACCELERATE },
+	{ "FEC_BAC", GO_BACK,                            VEHICLE_BRAKE },
+	{ "FEC_LEF", GO_LEFT,                            GO_LEFT },
+	{ "FEC_RIG", GO_RIGHT,                           GO_RIGHT },
+	{ "FEC_ZIN", PED_SNIPER_ZOOM_IN,                 -1 },
+	{ "FEC_ZOT", PED_SNIPER_ZOOM_OUT,                -1 },
+	{ "FEC_EEX", VEHICLE_ENTER_EXIT,                 VEHICLE_ENTER_EXIT },
+	{ "FEC_RAD", -1,                                 VEHICLE_CHANGE_RADIO_STATION },
+	{ "FEC_HRN", -1,                                 VEHICLE_HORN },
+	{ "FEC_SUB", -1,                                 TOGGLE_SUBMISSIONS },
+	{ "FEC_CMR", CAMERA_CHANGE_VIEW_ALL_SITUATIONS,  CAMERA_CHANGE_VIEW_ALL_SITUATIONS },
+	{ "FEC_JMP", PED_JUMPING,                        -1 },
+	{ "FEC_SPN", PED_SPRINT,                         -1 },
+	{ "FEC_HND", -1,                                 VEHICLE_HANDBRAKE },
+	{ "FEC_TAR", PED_LOCK_TARGET,                    -1 },
+	{ "FEC_CRO", PED_DUCK,                           -1 },
+	{ "FEC_ANS", PED_ANSWER_PHONE,                   -1 },
+	{ "FEC_TFL", -1,                                 VEHICLE_TURRETLEFT },
+	{ "FEC_TFR", -1,                                 VEHICLE_TURRETRIGHT },
+	{ "FEC_TFU", -1,                                 VEHICLE_TURRETUP },
+	{ "FEC_TFD", -1,                                 VEHICLE_TURRETDOWN },
+	{ "FEC_LBA", PED_LOOKBEHIND,                     -2 },
+	{ "FEC_LOL", PED_1RST_PERSON_LOOK_LEFT,          VEHICLE_LOOKLEFT },
+	{ "FEC_LOR", PED_1RST_PERSON_LOOK_RIGHT,         VEHICLE_LOOKRIGHT },
+	{ "FEC_LUD", PED_1RST_PERSON_LOOK_UP,            -1 },
+	{ "FEC_LDU", PED_1RST_PERSON_LOOK_DOWN,          -1 },
+	{ "FEC_NTR", PED_CYCLE_TARGET_LEFT,              -1 },
+	{ "FEC_PTT", PED_CYCLE_TARGET_RIGHT,             -1 },
+	{ "FEC_CEN", PED_CENTER_CAMERA_BEHIND_PLAYER,    -1 },
+	{ "FEC_RLD", PED_RELOAD,                         -1 },
+};
+
+// The rows of one control method and their count.
+struct tControllerSetup
+{
+	const tControllerSetupRow *rows;
+	int numRows;
+};
+
+static const tControllerSetup controllerSetupStandard = { controllerSetupRowsStandard, ARRAY_SIZE(controllerSetupRowsStandard) };
+static const tControllerSetup controllerSetupClassic = { controllerSetupRowsClassic, ARRAY_SIZE(controllerSetupRowsClassic) };
+
+// The rows of a control method. Any other value keeps the STANDARD rows, as
+// the label array did before.
+static const tControllerSetup *GetControllerSetup(int8 method)
+{
+	return method == CONTROL_CLASSIC ? &controllerSetupClassic : &controllerSetupStandard;
+}
+
 int
 CMenuManager::GetNumOptionsCntrlConfigScreens(void)
 {
@@ -1700,10 +1807,10 @@ CMenuManager::GetNumOptionsCntrlConfigScreens(void)
 		case MENUPAGE_KEYBOARD_CONTROLS:
 			switch (m_ControlMethod) {
 				case CONTROL_STANDARD:
-					number = 28;
+					number = controllerSetupStandard.numRows;
 					break;
 				case CONTROL_CLASSIC:
-					number = 33;
+					number = controllerSetupClassic.numRows;
 					break;
 			}
 			break;
@@ -1716,6 +1823,7 @@ CMenuManager::DrawControllerBound(int32 yStart, int32 xStart, int32 unused, int8
 {
 	int controllerAction = PED_FIREWEAPON;
 	// GetStartOptionsCntrlConfigScreens();
+	const tControllerSetup *setup = GetControllerSetup(m_ControlMethod);
 	int numOptions = GetNumOptionsCntrlConfigScreens();
 	int nextY = MENU_Y(yStart);
 	int bindingMargin = MENU_X(3.0f);
@@ -1737,185 +1845,10 @@ CMenuManager::DrawControllerBound(int32 yStart, int32 xStart, int32 unused, int8
 		int contSetOrder = SETORDER_1;
 		CFont::SetColor(CRGBA(255, 255, 255, FadeIn(255)));
 
-		if (column == CONTSETUP_PED_COLUMN) {
-			switch (optionIdx) {
-				case 0:
-					controllerAction = PED_FIREWEAPON;
-					break;
-				case 1:
-					controllerAction = PED_CYCLE_WEAPON_RIGHT;
-					break;
-				case 2:
-					controllerAction = PED_CYCLE_WEAPON_LEFT;
-					break;
-				case 3:
-					controllerAction = GO_FORWARD;
-					break;
-				case 4:
-					controllerAction = GO_BACK;
-					break;
-				case 5:
-					controllerAction = GO_LEFT;
-					break;
-				case 6:
-					controllerAction = GO_RIGHT;
-					break;
-				case 7:
-					controllerAction = PED_SNIPER_ZOOM_IN;
-					break;
-				case 8:
-					controllerAction = PED_SNIPER_ZOOM_OUT;
-					break;
-				case 9:
-					controllerAction = VEHICLE_ENTER_EXIT;
-					break;
-				case 10:
-				case 11:
-				case 12:
-				case 16:
-				case 20:
-				case 21:
-				case 22:
-				case 23:
-					controllerAction = -1;
-					break;
-				case 13:
-					controllerAction = CAMERA_CHANGE_VIEW_ALL_SITUATIONS;
-					break;
-				case 14:
-					controllerAction = PED_JUMPING;
-					break;
-				case 15:
-					controllerAction = PED_SPRINT;
-					break;
-				case 17:
-					controllerAction = PED_LOCK_TARGET;
-					break;
-				case 18:
-					controllerAction = PED_DUCK;
-					break;
-				case 19:
-					controllerAction = PED_ANSWER_PHONE;
-					break;
-				case 24:
-					controllerAction = PED_LOOKBEHIND;
-					break;
-				case 25:
-					if (m_ControlMethod == CONTROL_STANDARD)
-						controllerAction = -1;
-					else
-						controllerAction = PED_1RST_PERSON_LOOK_LEFT;
-					break;
-				case 26:
-					if (m_ControlMethod == CONTROL_STANDARD)
-						controllerAction = -1;
-					else
-						controllerAction = PED_1RST_PERSON_LOOK_RIGHT;
-					break;
-				case 27:
-					if (m_ControlMethod == CONTROL_STANDARD)
-						controllerAction = PED_RELOAD;
-					else
-						controllerAction = PED_1RST_PERSON_LOOK_UP;
-					break;
-				case 28:
-					controllerAction = PED_1RST_PERSON_LOOK_DOWN;
-					break;
-				case 29:
-					controllerAction = PED_CYCLE_TARGET_LEFT;
-					break;
-				case 30:
-					controllerAction = PED_CYCLE_TARGET_RIGHT;
-					break;
-				case 31:
-					controllerAction = PED_CENTER_CAMERA_BEHIND_PLAYER;
-					break;
-				case 32:
-					controllerAction = PED_RELOAD;
-					break;
-				default:
-					break;
-			}
-		} else if (column == CONTSETUP_VEHICLE_COLUMN) {
-			switch (optionIdx) {
-				case 0:
-#ifdef BIND_VEHICLE_FIREWEAPON
- 					controllerAction = VEHICLE_FIREWEAPON;
-#else
- 					controllerAction = PED_FIREWEAPON;
-#endif
-					break;
-				case 1:
-				case 2:
-				case 7:
-				case 8:
-				case 14:
-				case 15:
-				case 17:
-				case 18:
-				case 19:
-				case 27:
-				case 28:
-				case 29:
-				case 30:
-				case 31:
-					controllerAction = -1;
-					break;
-				case 3:
-					controllerAction = VEHICLE_ACCELERATE;
-					break;
-				case 4:
-					controllerAction = VEHICLE_BRAKE;
-					break;
-				case 5:
-					controllerAction = GO_LEFT;
-					break;
-				case 6:
-					controllerAction = GO_RIGHT;
-					break;
-				case 9:
-					controllerAction = VEHICLE_ENTER_EXIT;
-					break;
-				case 10:
-					controllerAction = VEHICLE_CHANGE_RADIO_STATION;
-					break;
-				case 11:
-					controllerAction = VEHICLE_HORN;
-					break;
-				case 12:
-					controllerAction = TOGGLE_SUBMISSIONS;
-					break;
-				case 13:
-					controllerAction = CAMERA_CHANGE_VIEW_ALL_SITUATIONS;
-					break;
-				case 16:
-					controllerAction = VEHICLE_HANDBRAKE;
-					break;
-				case 20:
-					controllerAction = VEHICLE_TURRETLEFT;
-					break;
-				case 21:
-					controllerAction = VEHICLE_TURRETRIGHT;
-					break;
-				case 22:
-					controllerAction = VEHICLE_TURRETUP;
-					break;
-				case 23:
-					controllerAction = VEHICLE_TURRETDOWN;
-					break;
-				case 24:
-					controllerAction = -2;
-					break;
-				case 25:
-					controllerAction = VEHICLE_LOOKLEFT;
-					break;
-				case 26:
-					controllerAction = VEHICLE_LOOKRIGHT;
-					break;
-				default:
-					break;
-			}
-		}
+		if (column == CONTSETUP_PED_COLUMN)
+			controllerAction = setup->rows[optionIdx].pedAction;
+		else if (column == CONTSETUP_VEHICLE_COLUMN)
+			controllerAction = setup->rows[optionIdx].vehicleAction;
 
 		// Highlight selected column(and make its text black)
 		if (m_nSelectedListRow == optionIdx) {
@@ -2132,52 +2065,7 @@ CMenuManager::DrawControllerSetupScreen()
 	else if (m_ControlMethod == CONTROL_CLASSIC)
 		CFont::PrintString(SCREEN_STRETCH_FROM_RIGHT(MENUHEADER_POS_X), SCREEN_SCALE_Y(MENUHEADER_POS_Y), TheText.Get("FET_CTI"));
 
-	wchar *actionTexts[33];
-	actionTexts[0] = TheText.Get("FEC_FIR");
-	actionTexts[1] = TheText.Get("FEC_NWE");
-	actionTexts[2] = TheText.Get("FEC_PWE");
-	actionTexts[3] = TheText.Get("FEC_FOR");
-	actionTexts[4] = TheText.Get("FEC_BAC");
-	actionTexts[5] = TheText.Get("FEC_LEF");
-	actionTexts[6] = TheText.Get("FEC_RIG");
-	actionTexts[7] = TheText.Get("FEC_ZIN");
-	actionTexts[8] = TheText.Get("FEC_ZOT");
-	actionTexts[9] = TheText.Get("FEC_EEX");
-	actionTexts[10] = TheText.Get("FEC_RAD");
-	actionTexts[11] = TheText.Get("FEC_HRN");
-	actionTexts[12] = TheText.Get("FEC_SUB");
-	actionTexts[13] = TheText.Get("FEC_CMR");
-	actionTexts[14] = TheText.Get("FEC_JMP");
-	actionTexts[15] = TheText.Get("FEC_SPN");
-	actionTexts[16] = TheText.Get("FEC_HND");
-	actionTexts[17] = TheText.Get("FEC_TAR");
-	actionTexts[18] = TheText.Get("FEC_CRO");
-	actionTexts[19] = TheText.Get("FEC_ANS");
-	if (m_ControlMethod == CONTROL_CLASSIC) {
-		actionTexts[20] = TheText.Get("FEC_TFL");
-		actionTexts[21] = TheText.Get("FEC_TFR");
-		actionTexts[22] = TheText.Get("FEC_TFU");
-		actionTexts[23] = TheText.Get("FEC_TFD");
-		actionTexts[24] = TheText.Get("FEC_LBA");
-		actionTexts[25] = TheText.Get("FEC_LOL");
-		actionTexts[26] = TheText.Get("FEC_LOR");
-		actionTexts[27] = TheText.Get("FEC_LUD");
-		actionTexts[28] = TheText.Get("FEC_LDU");
-		actionTexts[29] = TheText.Get("FEC_NTR");
-		actionTexts[30] = TheText.Get("FEC_PTT");
-		actionTexts[31] = TheText.Get("FEC_CEN");
-		actionTexts[32] = TheText.Get("FEC_RLD");
-	} else {
-		actionTexts[20] = TheText.Get("FEC_TFL");
-		actionTexts[21] = TheText.Get("FEC_TFR");
-		actionTexts[22] = TheText.Get("FEC_TFU");
-		actionTexts[23] = TheText.Get("FEC_TFD");
-		actionTexts[24] = TheText.Get("FEC_LBA");
-		actionTexts[25] = TheText.Get("FEC_LOL");
-		actionTexts[26] = TheText.Get("FEC_LOR");
-		actionTexts[27] = TheText.Get("FEC_RLD");
-		actionTexts[28] = nil;
-	}
+	const tControllerSetup *setup = GetControllerSetup(m_ControlMethod);
 
 	// Blue panel background
 	CSprite2d::DrawRect(CRect(MENU_X_LEFT_ALIGNED(CONTSETUP_LIST_LEFT), MENU_Y(CONTSETUP_LIST_TOP),
@@ -2207,8 +2095,8 @@ CMenuManager::DrawControllerSetupScreen()
 		yStart = CONTSETUP_LIST_TOP + 21;
 
 	float optionYBottom = yStart + rowHeight;
-	for (int i = 0; i < ARRAY_SIZE(actionTexts); ++i) {
-		wchar *actionText = actionTexts[i];
+	for (int i = 0; i < setup->numRows; ++i) {
+		wchar *actionText = TheText.Get(setup->rows[i].text);
 		if (!actionText)
 			break;
 
@@ -3248,11 +3136,7 @@ CMenuManager::SaveSettings()
 {
 #ifndef LOAD_INI_SETTINGS
 	static char RubbishString[48] = "stuffmorestuffevenmorestuff                 etc";
-#ifdef BIND_VEHICLE_FIREWEAPON
-	static int SomeVersion = 5;
-#else
-	static int SomeVersion = 4;
-#endif
+	static int SomeVersion = CONTROLS_VERSION;
 
 	CFileMgr::SetDirMyDocuments();
 
@@ -3809,8 +3693,8 @@ CMenuManager::ExportStats()
 				fprintf(txtFile, "%s\n\n", statValue);
 		}
 		fprintf(txtFile, "-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n");
+		fclose(txtFile);
 	}
-	fclose(txtFile);
 	FILE *htmlFile = fopen("stats.html", "w");
 	if (htmlFile) {
 		int statLines = CStats::ConstructStatLine(99999);
@@ -3883,8 +3767,8 @@ CMenuManager::ExportStats()
 		fprintf(htmlFile, "<td><font color=\"#000000\" size=\"2\" face=\"Arial, Helvetica, sans-serif\">&nbsp;<a href=\"http://www.rocks"
 			"tarnorth.com\">rockstarnorth.com</a></font></td></tr>\n");
 		fprintf(htmlFile, "</table>\n</body>\n");
+		fclose(htmlFile);
 	}
-	fclose(htmlFile);
 	CFileMgr::SetDir("");
 }
 
@@ -4077,8 +3961,9 @@ CMenuManager::ProcessList(bool &optionSelected, bool &goBack)
 		m_nTotalListRow = m_nSkinsTotal;
 	}
 	if (m_nCurrScreen == MENUPAGE_KEYBOARD_CONTROLS) {
-		// GetNumOptionsCntrlConfigScreens would have been a better choice
-		m_nTotalListRow = m_ControlMethod == CONTROL_CLASSIC ? 33 : 28;
+		// An unknown control method keeps the STANDARD row count, as the count
+		// read here always did.
+		m_nTotalListRow = m_ControlMethod == CONTROL_CLASSIC ? controllerSetupClassic.numRows : controllerSetupStandard.numRows;
 		if (m_nSelectedListRow > m_nTotalListRow)
 			m_nSelectedListRow = m_nTotalListRow - 1;
 	}

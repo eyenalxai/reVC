@@ -645,6 +645,11 @@ bool LoadINISettings()
 			}
 		}
 	}
+#ifdef GAMEPAD_MENU
+	// The controller type of the menu indexes controllerTypesPaths
+	// (Frontend.cpp); a stale value must not sit outside the list.
+	ClampControllerType();
+#endif
 #endif
 
 	// Fetched in above block, but needs evaluation
