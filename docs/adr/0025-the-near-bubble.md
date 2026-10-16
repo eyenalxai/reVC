@@ -308,3 +308,92 @@ frame later.
   `utils/caps-audit/live-counters.py` before and after the camera turns, at the
   stock and the owner's settings, and compares `ms_nNearBubbleFill` plus
   `ms_nNearBubbleOtherFill` with `ms_fNearBubbleTarget`.
+
+## Amendment: the in-view band returns (2026-10-16, VICE-146)
+
+The first live session after the merge proved the rule above had overshot.
+Measured at `fc218652` while the owner played (draw distance 16, first-person
+FOV 110, densities 3.4, sunny):
+
+- `NumRandomCars` sat at 103..177 against `GetRandomCarTarget()` 408, stable
+  across reads (the pre-merge range was 149..201: the fix's target was never
+  reached live).
+- The near bubble's `refused` counter ran 2,089 -> 87,170 over minutes, about
+  800 refusals a second, while the creations ran about 1.5 a second; the fill
+  burst's last window spent 2,825 attempts for 4 placements.
+- `visibleRange = min(lodDistance, farClip) = min(4800, ~1985)` at these
+  settings, so the "beyond the fade/fog" arm never fires inside the ring.
+- Three of the four spawn cases aim the candidate inside the view cone (the
+  front bands at +-31/+-45 degrees, `CarCtrl.cpp:319-420`). At FOV 110 the
+  frustum covers them, so the near bubble refused them (in the frustum, not
+  occluded, inside the visible range). Only the side band and the occluded
+  spots remained - far too few for the 408-car target.
+- The pedestrian fill burst disarmed at boot with 0 attempts: the boot area
+  target is 0 before the zone and the ring are live, and the stop line (0 is
+  at 90 % of 0) ended the run before it could fill.
+
+What the live acceptance did hold: the frustum counters stayed 0, the pool
+valve stayed 0, the frame read 74 fps (twice) at the owner's settings, and the
+collision profile's top symbol fell to 5.85 % (it was 12..21 %).
+
+### The corrected rule
+
+The stock game always had an on-screen band: a fresh car ahead of the view at
+or beyond `rings.carOnScreenSpawnMin` (220 m stock, 440 m at the owner's
+settings), the line the spawner's on-screen branch aims past
+(`carOnScreenSpawnMax`) and the birth cull holds a fresh on-screen car at. The
+car's own reveal covers it - the alpha of a fresh car starts at 0 and ramps up
+from the first render (`CVehicle::UpdateClumpAlpha`, point 2) - and the band
+sits far inside the fog. The near bubble forbade that band, and with it every
+legal site of the spawner's front calls on an open street.
+
+The band is restored as the **last** arm of the same one-function ladder, after
+the screen fade:
+
+- **In the frustum, beyond the bubble: allowed when `distToCamera >=
+  rings.carOnScreenSpawnMin`.** The arm is reached only for a catchable
+  position that the screen fade does not already cover. The strict bubble (the
+  90 m disc) and every other arm are unchanged: occluded + confirmation ray,
+  beyond the fade/fog, off the frustum by the margin (soft arm or a blocked
+  ray), and the screen fade (the fill burst).
+- **The removal side reads the same arm** (the ladder is one function): a car
+  in the in-view band may be despawned as the stock game did, with the fade-out
+  the removal path already had; under the band minimum the removal rule is
+  unchanged.
+- **The counters read the zones apart, with names that carry the meaning.**
+  The acceptance pair was renamed from the frustum counters to
+  `ms_nNearBubbleCatchableCreations` / `ms_nNearBubbleCatchableRemovals`: they
+  now mean the catchable zone - in the frustum nearer than the band minimum -
+  and must stay 0. `ms_nNearBubbleBandCreations` / `ms_nNearBubbleBandRemovals`
+  count the in-view band's events and rise as the traffic fills (a creation is
+  covered by the car's own reveal, a removal by the fade-out of the despawn).
+  The scripted cars' in-view row was renamed with them
+  (`ms_nNearBubbleOtherCreationsInView`; it keeps the wider catchable set, the
+  band included, and informs without failing). The rig prints the zones and the
+  PASS line reads the catchable pair.
+- **The boot burst waits for its target.** The pedestrian and the car burst no
+  longer burn their window on a zero target at boot (the zone, the ring and
+  the budget line are not live yet): a frame with `target <= 0` waits in the
+  same bounded way the streaming wait uses - it does not spend the window and
+  counts against the give-up bound - and the burst runs the moment the area is
+  known. The burst counters gain the since-boot totals
+  (`ms_nFillBurstTotalAttempts` / `ms_nFillBurstTotalPlaced`, the boot burst
+  readable after a later arming reset the window rows) and the end reasons
+  (`ms_nFillBurstEndedLine`, `ms_nFillBurstEndedBudget` - the car burst's full
+  budget line, apart from the target's, the pedestrian frame having no budget
+  line of its own - `EndedStalls` and `EndedWindow`).
+
+The harness (`utils/near-bubble`) gained the band in its case table (in the
+frustum at `bandMin - 1` refused, at `bandMin` allowed, the fade still first),
+in the exhaustive sweep (the camera distances straddle the band minimum) and in
+the open-street model (the on-screen band is a second creation site next to the
+soft arm; the conservative rate of the worst branch is ~51x the ring's need at
+stock and ~31x at the owner's, where the soft arm alone gave 14.1x and 7.0x).
+`utils/burst-fill` gained the boot-wait case and the end-reason checks.
+
+### Expected live numbers
+
+`NumRandomCars` climbs toward the 408 target within about two minutes at the
+owner's settings; the catchable-zone counters stay 0; the band counters rise;
+the burst's since-boot totals and end reasons are readable after an interior
+exit or a cutscene end reset the window rows.
