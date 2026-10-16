@@ -26,11 +26,21 @@ extern bool gbDontRenderVehicles;
 class CVehicle;
 class CPtrList;
 
-// unused
-struct BlockedRange
+enum eScanStream
 {
-	float a, b;	// unknown
-	BlockedRange *prev, *next;
+	SCAN_STREAM_NONE,	// do not request models
+	SCAN_STREAM_VISIBILITY,	// request the models the visibility check found
+	SCAN_STREAM_FRUSTUM,	// request every model in the frustum that needs streaming
+};
+
+// What a sector scan does with the entities it finds.
+// The four sector scans differ only in these flags.
+struct SectorScanFlags
+{
+	eScanStream stream;
+	bool bGlassOffscreen;	// an invisible glass entity counts as offscreen
+	bool bMarkPriority;	// a request of a model that is not loaded sets the loading priority
+	bool bRequestLimit;	// a set loading priority holds requests back once the queue is full
 };
 
 class CRenderer
@@ -49,11 +59,6 @@ class CRenderer
 
 	static CVUVECTOR ms_vecCameraPosition;
 	static CVehicle *m_pFirstPersonVehicle;
-
-	// unused
-	static BlockedRange aBlockedRanges[16];
-	static BlockedRange *pFullBlockedRanges;
-	static BlockedRange *pEmptyBlockedRanges;
 public:
 	static float ms_lodDistScale;
 	static bool m_loadingPriority;
@@ -85,6 +90,7 @@ public:
 	static void ScanSectorList_Priority(CPtrList *lists);
 	static void ScanSectorList_Subway(CPtrList *lists);
 	static void ScanSectorList_RequestModels(CPtrList *lists);
+	static void ScanSectorList_WithFlags(CPtrList *lists, const SectorScanFlags &flags);
 
 	static void SortBIGBuildings(void);
 	static void SortBIGBuildingsForSectorList(CPtrList *list);
@@ -99,6 +105,7 @@ public:
 	static void RenderPeds(void);
 	static void RenderVehicles(void);	// also renders peds in LCS
 	static void RenderOneBuilding(CEntity *ent, float camdist = 0.0f);
+	static void RenderBuildings(bool roads);
 	static void RenderWorld(int pass);	// like cWorldStream::Render(int)
 	static void RenderTransparentWater(void);	// keep-out polys and transparent water
 #endif

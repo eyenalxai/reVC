@@ -1594,10 +1594,8 @@ Idle(void *arg)
 		CWaterLevel::PreCalcWaterGeometry();
 #endif
 #ifdef NEW_RENDERER
-		if(gbNewRenderer){
-			CWorld::AdvanceCurrentScanCode();	// don't think this is even necessary
+		if(gbNewRenderer)
 			CRenderer::ClearForFrame();
-		}
 #endif
 		CRenderer::ConstructRenderList();
 		tbEndTimer("CnstrRenderList");
