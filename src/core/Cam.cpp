@@ -2970,7 +2970,10 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		CamPos.x = 0.0f;
 		CamPos.y += 0.08f;
 		CamPos.z += 0.62f;
-		FOV = 60.0f;
+		// The vehicle first person view reads the same setting FOV as the view
+		// on foot, so the Display slider drives both (VICE-144). The stock seat
+		// camera (the view setting off) keeps its own value.
+		FOV = TheCamera.FirstPersonViewEnabled() ? (float)FrontEndMenuManager.GetFirstPersonFOV() : 60.0f;
 		Source = Multiply3x3(*matrix, CamPos);
 		Source += CamTargetEntity->GetPosition();
 		if(((CVehicle*)CamTargetEntity)->IsBoat())
