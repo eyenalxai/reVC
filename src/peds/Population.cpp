@@ -962,6 +962,11 @@ void
 CPopulation::ConvertToDummyObject(CObject *obj)
 {
 	CDummyObject *dummy = new CDummyObject(obj);
+	// The dummy pool holds the whole map's dummies plus every object that is
+	// far enough to be one, so it can be full. The object then stays real and
+	// the scan tries the conversion again later (VICE-134).
+	if (!dummy)
+		return;
 
 	dummy->GetMatrix() = obj->m_objectMatrix;
 	dummy->GetMatrix().UpdateRW();
