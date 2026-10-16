@@ -698,6 +698,9 @@ CRenderer::SetupEntityVisibility(CEntity *ent)
 				   TheCamera.m_bInATunnelAndABigVehicle ||
 				   direction == LOOKING_BEHIND && veh->pHandling->Flags & HANDLING_UNKNOWN){
 					ent->bNoBrightHeadLights = true;
+					// VICE-58: the first person camera sits at the player's eyes,
+					// so the car must be drawn or the interior is missing.
+					m_pFirstPersonVehicle = veh;
 					return VIS_OFFSCREEN;
 				}
 
