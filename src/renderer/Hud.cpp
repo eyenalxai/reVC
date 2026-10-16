@@ -331,6 +331,12 @@ DrawSights(CPlayerPed *playerPed, eWeaponType WeaponType, int32 Mode, bool DrawC
 	} else {
 		if (Mode == CCam::MODE_M16_1STPERSON ||
 		    Mode == CCam::MODE_M16_1STPERSON_RUNABOUT ||
+#ifdef FIRST_PERSON
+		    // The plain first person view draws this crosshair too; the
+		    // caller raises the flag only while aiming (the on-foot sights
+		    // or the car ADS)
+		    Mode == CCam::MODE_1STPERSON ||
+#endif
 		    Mode == CCam::MODE_HELICANNON_1STPERSON) {
 			rect.left = (SCREEN_WIDTH / 2) - SCREEN_SCALE_X(32.0f);
 			rect.top = (SCREEN_HEIGHT / 2) - SCREEN_SCALE_Y(32.0f);
@@ -438,10 +444,15 @@ DrawCrosshairAndSights(CPlayerPed *playerPed, eWeaponType WeaponType, int32 Mode
 		}
 	}
 
-	// The car ADS shows the crosshair in the first person car view too; the
-	// third person view draws it at the camera crosshair position above
-	if (TheCamera.UsingCarAds() && Mode == CCam::MODE_1STPERSON)
+#ifdef FIRST_PERSON
+	// The plain first person view draws the crosshair while the player aims:
+	// the on-foot sights - the sight predicate the shot ray and the sight FOV
+	// already use - and the car ADS. The third person view draws the crosshair
+	// at the camera crosshair position above.
+	if (Mode == CCam::MODE_1STPERSON &&
+	    (TheCamera.UsingFirstPersonSights() || TheCamera.UsingCarAds()))
 		DrawCrossHairPC = 1;
+#endif
 
 	if (DrawCrossHair || DrawCrossHairPC) {
 		RwRenderStateSet(rwRENDERSTATETEXTUREFILTER, (void *)rwFILTERLINEAR);
