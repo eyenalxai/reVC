@@ -269,6 +269,8 @@ CVisibilityPlugins::RenderWheelAtomicCB(RpAtomic *atomic)
 	mi = GetAtomicModelInfo(atomic);
 	len = Sqrt(DistToCameraSq);
 	lodatm = mi->GetAtomicFromDistance(len * TheCamera.LODDistMultiplier / VEHICLE_LODDIST_MULTIPLIER);
+	if(lodatm == nil && mi->m_numAtomics > 0)
+		lodatm = mi->m_atomics[mi->m_numAtomics - 1];
 	if(lodatm){
 		if(RpAtomicGetGeometry(lodatm) != RpAtomicGetGeometry(atomic))
 			RpAtomicSetGeometry(atomic, RpAtomicGetGeometry(lodatm), rpATOMICSAMEBOUNDINGSPHERE);
