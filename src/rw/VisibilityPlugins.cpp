@@ -63,7 +63,12 @@ CVisibilityPlugins::Initialise(void)
 	m_alphaUnderwaterEntityList.tail.item.sort = 100000000.0f;
 
 #ifdef NEW_RENDERER
-	m_alphaBuildingList.Init(NUMALPHAENTITYLIST);
+	// The building list takes only buildings that are mid-fade or drawLast
+	// while the new renderer runs; a fully faded building is drawn directly and
+	// never enters the list. The shipped map has 3132 drawLast building
+	// instances (mostly vegetation), so size the list like the visible building
+	// array (VICE-134).
+	m_alphaBuildingList.Init(NUMVISIBLEENTITIES);
 	m_alphaBuildingList.head.item.sort = 0.0f;
 	m_alphaBuildingList.tail.item.sort = 100000000.0f;
 #endif
@@ -103,8 +108,17 @@ CVisibilityPlugins::InsertEntityIntoSortedList(CEntity *e, float dist)
 	item.entity = e;
 	item.sort = dist;
 #ifdef NEW_RENDERER
-	if(gbNewRenderer && e->IsBuilding())
-		return !!m_alphaBuildingList.InsertSorted(item);
+	if(gbNewRenderer && e->IsBuilding()){
+		bool inserted = !!m_alphaBuildingList.InsertSorted(item);
+		// A full building list makes a fading building skip a frame, so say it
+		// once instead of dropping the node without a word (VICE-134).
+		static bool buildingListFullWarned = false;
+		if(!inserted && !buildingListFullWarned){
+			buildingListFullWarned = true;
+			printf("Ran out of space in alpha building list\n");
+		}
+		return inserted;
+	}
 #endif
 	if(e->bUnderwater && m_alphaUnderwaterEntityList.InsertSorted(item))
 		return true;
