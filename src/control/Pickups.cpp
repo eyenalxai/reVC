@@ -388,7 +388,7 @@ CPickup::Update(CPlayerPed *player, CVehicle *vehicle, int playerId)
 									// active reload on the clip waits for the reload
 									// key instead of refilling (VICE-74).
 									ExtractAmmoFromPickup(player);
-									if (FindPlayerPed()->GetWeapon(slot).RefillsClipAutomatically(player))
+									if (CWeapon::UsesStockClipRefill(player))
 										FindPlayerPed()->GetWeapon(slot).Reload();
 								}
 							}

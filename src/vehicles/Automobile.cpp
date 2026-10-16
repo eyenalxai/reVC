@@ -3961,7 +3961,7 @@ CAutomobile::DoDriveByShootings(void)
 		// With the active reload on the clip is a magazine and refills only
 		// through the reload key (VICE-90); an AI driver and the toggle off
 		// keep the stock refill.
-		if (weapon->RefillsClipAutomatically(pDriver))
+		if (CWeapon::UsesStockClipRefill(pDriver))
 			weapon->Reload();
 		anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), leftAnim);
 		if(anim)
