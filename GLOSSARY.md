@@ -149,3 +149,37 @@ the weapon's reload time once, so the reload takes about 1.5 times as long.
 A word that the player types during play to change the world. The game
 compares the newest typed characters against an obfuscated word list in
 `CPad::AddToPCCheatString`. A hit runs the cheat effect.
+
+## Population
+
+The cars and pedestrians the game keeps around the player: how many exist and
+where they come from.
+
+## Spawn distance
+
+The distance from the player where the game creates and removes cars and
+pedestrians. The Display settings slider `SpawnDistance` scales it. The base is
+a ring around the player: pedestrians are created at 100-130 m and removed at
+131/145 m, cars spawn between 120 m and 250 m and despawn at 280 m.
+
+## Density
+
+How many cars and pedestrians the game keeps for an area. The Ped Density and
+Car Density settings scale it.
+
+## Population budget
+
+The number of pedestrians an area keeps. It comes from the zone density, the
+road density and the density settings, and it grows with the square of the
+spawn distance, because the ring area does. The game stops adding pedestrians
+when the budget is reached.
+
+## Cap
+
+The hard top for a budget or a count: pedestrians, cars in use, random cars.
+The caps stay below the pools.
+
+## Pool
+
+The fixed storage for the entities and their list nodes: pedestrians, vehicles,
+audio entities. A pool never grows; the caps keep the counts below it.
