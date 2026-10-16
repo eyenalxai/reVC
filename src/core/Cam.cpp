@@ -2791,6 +2791,9 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 			CVector Fwd = matrix->GetForward();
 			Fwd.Normalise();
 			Source = Head + fVehicle1stPersonOffsetFwd*Fwd;
+			// The interior and the player's own body sit close to the camera,
+			// so the near plane must be close too, like the on-foot view.
+			RwCameraSetNearClipPlane(Scene.camera, FIRST_PERSON_BODY_NEAR_CLIP);
 		}else
 #endif
 		if(((CVehicle*)CamTargetEntity)->IsBoat())
