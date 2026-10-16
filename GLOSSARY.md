@@ -256,3 +256,11 @@ the per-frame size does not grow with the whole world.
 
 The most entities (`MAX_REPLAY_ENTITIES`, 500) one replay frame records. It
 keeps the worst case frame well inside one replay block.
+
+## Wheel pose
+
+The frame transform of one car wheel in `CAutomobile::PreRender`: the spin, the
+hover tilt or the road tilt, and the wheel scale. One row of `aWheelPoses` drives
+it, so the rear, mid, tank and front wheels share one pass. A row keeps its own
+hover splash order: the two random arguments are drawn in the order the row lists
+them, and swapping a pair would shift the global random stream.
