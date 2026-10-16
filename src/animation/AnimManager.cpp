@@ -620,10 +620,21 @@ char const* aColtAnimations[] = {
 char const* aShotgunAnimations[] = {
 	"shotgun_fire",
 	"shotgun_crouchfire",
+	// The reload slots (VICE-86). The group array must reach past the
+	// crouch-reload slot: the association lookup indexes the array by the
+	// animation id without a check, so a ducking reload reads out of bounds
+	// otherwise. The shotgun ships no crouch pump, so the crouch slot
+	// repeats the pump.
+	"WEAPON_pump",
+	"WEAPON_pump",
 };
 char const* aBuddyAnimations[] = {
 	"buddy_fire",
 	"buddy_crouchfire",
+	// The reload slots (VICE-86), same shape as the shotgun group: the
+	// stubby's shipped reload animation fills both slots.
+	"buddy_fireRELOAD",
+	"buddy_fireRELOAD",
 };
 char const* aTecAnimations[] = {
 	"TEC_fire",

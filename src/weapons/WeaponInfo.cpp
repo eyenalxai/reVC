@@ -105,6 +105,49 @@ CWeaponInfo::GetWeaponInfo(eWeaponType weaponType)
 	return &aWeaponInfo[weaponType];
 }
 
+// The magazine follow-up of the active reload (spec VICE-85). weapon.dat is
+// not in the repository, so the new values ship as this table, applied after
+// the parse. With the ActiveReload feature off the table does not run and
+// the shipped weapon.dat behavior stays untouched.
+struct ActiveReloadWeaponData
+{
+	eWeaponType type;
+	int32 ammoInClip;
+	int32 firingRate;	// 0 keeps the parsed rate
+	int32 flags;		// flags to add, 0 keeps the parsed flags
+};
+
+static const ActiveReloadWeaponData aActiveReloadWeaponData[] = {
+	{ WEAPONTYPE_SHOTGUN, 7, 0, WEAPONFLAG_RELOAD },
+	{ WEAPONTYPE_STUBBY_SHOTGUN, 6, 0, WEAPONFLAG_RELOAD },
+	// The sniper reloads by timer only: it has no reload animation and no
+	// reload flag, and a magazine must not make the rifle semi-automatic,
+	// so it gets a bolt cycle instead of the 90 ms the parse recomputed
+	// from the animation loop.
+	{ WEAPONTYPE_SNIPERRIFLE, 5, 700, 0 },
+};
+
+void
+CWeaponInfo::ApplyActiveReloadWeaponData(void)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(aActiveReloadWeaponData); i++) {
+		CWeaponInfo *info = &aWeaponInfo[aActiveReloadWeaponData[i].type];
+		info->m_nAmountofAmmunition = aActiveReloadWeaponData[i].ammoInClip;
+		if (aActiveReloadWeaponData[i].firingRate != 0)
+			info->m_nFiringRate = aActiveReloadWeaponData[i].firingRate;
+		info->m_Flags |= aActiveReloadWeaponData[i].flags;
+	}
+}
+
+bool
+CWeaponInfo::IsActiveReloadMagazine(eWeaponType weaponType)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(aActiveReloadWeaponData); i++)
+		if (aActiveReloadWeaponData[i].type == weaponType)
+			return true;
+	return false;
+}
+
 void
 CWeaponInfo::Initialise(void)
 {
@@ -134,6 +177,10 @@ CWeaponInfo::Initialise(void)
 	}
 	debug("Loading weapon data...\n");
 	LoadWeaponData();
+	// The ini is read before the game starts, so the follow-up data follows
+	// the toggle: off means the stock one-round weapons.
+	if (gActiveReloadEnabled)
+		ApplyActiveReloadWeaponData();
 	debug("CWeaponInfo ready\n");
 }
 
