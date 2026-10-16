@@ -115,7 +115,7 @@ float CHud::PagerXOffset;
 int16 CHud::PagerTimer;
 int16 CHud::PagerOn;
 
-wchar *prevChaseString;
+static wchar *prevChaseString;
 
 uint32 CHud::m_WantedFadeTimer;
 uint32 CHud::m_WantedState;
@@ -268,6 +268,148 @@ DrawActiveReloadBar(void)
 	}
 }
 
+static void
+DrawLaserDot(CPlayerPed *playerPed, eWeaponType WeaponType)
+{
+	CVector dotPos;
+	float size = 25.0f;
+	if (WeaponType == WEAPONTYPE_LASERSCOPE && playerPed->GetWeapon()->LaserScopeDot(&dotPos, &size)) {
+		RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
+		RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
+		RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
+		RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
+#ifdef FIX_BUGS
+		RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
+#else
+		RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVDESTALPHA);
+#endif
+		RwRenderStateSet(rwRENDERSTATETEXTURERASTER, RwTextureGetRaster(gpLaserDotTex));
+#ifdef FIX_BUGS
+		int intensity = CGeneral::GetRandomNumberInRange(0, 37);
+#else
+		int intensity = CGeneral::GetRandomNumberInRange(0, 35);
+#endif
+		CSprite::RenderOneXLUSprite(dotPos.x, dotPos.y, dotPos.z,
+			SCREEN_SCALE_X(size), SCREEN_SCALE_Y(size), intensity - 36, 0, 0, intensity - 36, 1.0f, 127);
+
+		RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)FALSE);
+	}
+}
+
+static bool
+DrawSights(CPlayerPed *playerPed, eWeaponType WeaponType, int32 Mode, bool DrawCrossHairPC)
+{
+	bool CrossHairHidesHud = false;
+
+	float fStep = Sin((CTimer::GetTimeInMilliseconds() & 1023)/1024.0f * 6.28f);
+	float fMultBright = CHud::SpriteBrightness * 0.03f * (0.25f * fStep + 0.75f);
+	CRect rect;
+	if (DrawCrossHairPC && TheCamera.Cams[TheCamera.ActiveCam].Using3rdPersonMouseCam()) {
+		float f3rdX = SCREEN_WIDTH * TheCamera.m_f3rdPersonCHairMultX;
+		float f3rdY = SCREEN_HEIGHT * TheCamera.m_f3rdPersonCHairMultY;
+#ifdef ASPECT_RATIO_SCALE
+		f3rdY -= SCREEN_SCALE_Y(2.0f);
+#endif
+		if (playerPed && (WeaponType == WEAPONTYPE_M4 || WeaponType == WEAPONTYPE_RUGER || WeaponType == WEAPONTYPE_M60)) {
+			rect.left = f3rdX - SCREEN_SCALE_X(32.0f * 0.6f);
+			rect.top = f3rdY - SCREEN_SCALE_Y(32.0f  * 0.6f);
+			rect.right = f3rdX + SCREEN_SCALE_X(32.0f * 0.6f);
+			rect.bottom = f3rdY + SCREEN_SCALE_Y(32.0f  * 0.6f);
+
+			CHud::Sprites[HUD_SITEM16].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
+				0.0f, 0.0f,  1.0f, 0.0f,  0.0f, 1.0f,  1.0f, 1.0f);
+		}
+		else {
+			rect.left = f3rdX - SCREEN_SCALE_X(32.0f * 0.4f);
+			rect.top = f3rdY - SCREEN_SCALE_Y(32.0f  * 0.4f);
+			rect.right = f3rdX + SCREEN_SCALE_X(32.0f * 0.4f);
+			rect.bottom = f3rdY + SCREEN_SCALE_Y(32.0f  * 0.4f);
+
+			CHud::Sprites[HUD_SITEM16].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
+				0.0f, 0.0f,  1.0f, 0.0f,  0.0f, 1.0f,  1.0f, 1.0f);
+		}
+	} else {
+		if (Mode == CCam::MODE_M16_1STPERSON ||
+		    Mode == CCam::MODE_M16_1STPERSON_RUNABOUT ||
+		    Mode == CCam::MODE_HELICANNON_1STPERSON) {
+			rect.left = (SCREEN_WIDTH / 2) - SCREEN_SCALE_X(32.0f);
+			rect.top = (SCREEN_HEIGHT / 2) - SCREEN_SCALE_Y(32.0f);
+			rect.right = (SCREEN_WIDTH / 2) + SCREEN_SCALE_X(32.0f);
+			rect.bottom = (SCREEN_HEIGHT / 2) + SCREEN_SCALE_Y(32.0f);
+			CHud::Sprites[HUD_SITEM16].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
+				0.0f, 0.0f,  1.0f, 0.0f,  0.0f, 1.0f,  1.0f, 1.0f);
+		}
+		else if (Mode == CCam::MODE_1STPERSON_RUNABOUT) {
+			rect.left = (SCREEN_WIDTH / 2) - SCREEN_SCALE_X(32.0f * 0.7f);
+			rect.top = (SCREEN_HEIGHT / 2) - SCREEN_SCALE_Y(32.0f * 0.7f);
+			rect.right = (SCREEN_WIDTH / 2) + SCREEN_SCALE_X(32.0f * 0.7f);
+			rect.bottom = (SCREEN_HEIGHT / 2) + SCREEN_SCALE_Y(32.0f * 0.7f);
+
+			CHud::Sprites[HUD_SITEM16].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
+				0.0f, 0.0f,  1.0f, 0.0f,  0.0f, 1.0f,  1.0f, 1.0f);
+		}
+		else if (Mode == CCam::MODE_ROCKETLAUNCHER || Mode == CCam::MODE_ROCKETLAUNCHER_RUNABOUT) {
+			RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void *)TRUE);
+			RwRenderStateSet(rwRENDERSTATESRCBLEND, (void *)rwBLENDONE);
+			RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void *)rwBLENDONE);
+			RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
+			RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
+			RwRenderStateSet(rwRENDERSTATETEXTURERASTER, RwTextureGetRaster(gpRocketSightTex));
+
+			CSprite::RenderOneXLUSprite(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, 1.0f, SCREEN_SCALE_X(40.0f), SCREEN_SCALE_Y(40.0f), (100.0f * fMultBright), (200.0f * fMultBright), (100.0f * fMultBright), 255, 1.0f, 255);
+			RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)FALSE);
+			RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)TRUE);
+		}
+		else {
+			int sprite = HUD_SITESNIPER;
+			float xOffset = SCREEN_SCALE_X(210.0f);
+			float yOffset = SCREEN_SCALE_Y(210.0f);
+
+			if (WeaponType == WEAPONTYPE_LASERSCOPE)
+			  sprite = HUD_SITELASER;
+
+			if (WeaponType == WEAPONTYPE_CAMERA) {
+				sprite = HUD_VIEWFINDER;
+				CrossHairHidesHud = true;
+				xOffset = SCREEN_SCALE_X(256.0f);
+				yOffset = SCREEN_SCALE_Y(192.0f);
+			}
+
+			rect.left = SCREEN_WIDTH/2 - xOffset;
+			rect.top = SCREEN_HEIGHT/2 - yOffset;
+			rect.right = SCREEN_WIDTH/2;
+			rect.bottom = SCREEN_HEIGHT/2;
+			CHud::Sprites[sprite].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
+				0.01f, 0.01f,  1.0f, 0.0f,  0.01f, 1.0f,  1.0f, 1.0f);
+
+			rect.left = SCREEN_WIDTH/2;
+			rect.top = SCREEN_HEIGHT/2 - yOffset;
+			rect.right = SCREEN_WIDTH/2 + xOffset;
+			rect.bottom = SCREEN_HEIGHT/2;
+			CHud::Sprites[sprite].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
+				0.99f, 0.0f,  0.01f, 0.01f,  0.99f, 1.0f,  0.01f, 1.0f);
+
+			rect.left = SCREEN_WIDTH/2 - xOffset;
+			rect.top = SCREEN_HEIGHT/2;
+			rect.right = SCREEN_WIDTH/2;
+			rect.bottom = SCREEN_HEIGHT/2 + yOffset;
+			CHud::Sprites[sprite].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
+				0.01f, 0.99f,  1.0f, 0.99f,  0.01f, 0.01f,  1.0f, 0.01f);
+
+			rect.left = SCREEN_WIDTH/2;
+			rect.top = SCREEN_HEIGHT/2;
+			rect.right = SCREEN_WIDTH/2 + xOffset;
+			rect.bottom = SCREEN_HEIGHT/2 + yOffset;
+			CHud::Sprites[sprite].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
+				0.99f, 0.99f,  0.01f, 0.99f,  0.99f, 0.01f,  0.01f, 0.01f);
+
+			DrawLaserDot(playerPed, WeaponType);
+		}
+	}
+
+	return CrossHairHidesHud;
+}
+
 static bool
 DrawCrosshairAndSights(CPlayerPed *playerPed, eWeaponType WeaponType, int32 Mode)
 {
@@ -303,133 +445,8 @@ DrawCrosshairAndSights(CPlayerPed *playerPed, eWeaponType WeaponType, int32 Mode
 
 		RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
 
-		float fStep = Sin((CTimer::GetTimeInMilliseconds() & 1023)/1024.0f * 6.28f);
-		float fMultBright = CHud::SpriteBrightness * 0.03f * (0.25f * fStep + 0.75f);
-		CRect rect;
-		if (DrawCrossHairPC && TheCamera.Cams[TheCamera.ActiveCam].Using3rdPersonMouseCam()) {
-			float f3rdX = SCREEN_WIDTH * TheCamera.m_f3rdPersonCHairMultX;
-			float f3rdY = SCREEN_HEIGHT * TheCamera.m_f3rdPersonCHairMultY;
-#ifdef ASPECT_RATIO_SCALE
-			f3rdY -= SCREEN_SCALE_Y(2.0f);
-#endif
-			if (playerPed && (WeaponType == WEAPONTYPE_M4 || WeaponType == WEAPONTYPE_RUGER || WeaponType == WEAPONTYPE_M60)) {
-				rect.left = f3rdX - SCREEN_SCALE_X(32.0f * 0.6f);
-				rect.top = f3rdY - SCREEN_SCALE_Y(32.0f  * 0.6f);
-				rect.right = f3rdX + SCREEN_SCALE_X(32.0f * 0.6f);
-				rect.bottom = f3rdY + SCREEN_SCALE_Y(32.0f  * 0.6f);
+		CrossHairHidesHud = DrawSights(playerPed, WeaponType, Mode, DrawCrossHairPC);
 
-				CHud::Sprites[HUD_SITEM16].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
-					0.0f, 0.0f,  1.0f, 0.0f,  0.0f, 1.0f,  1.0f, 1.0f);
-			}
-			else {
-				rect.left = f3rdX - SCREEN_SCALE_X(32.0f * 0.4f);
-				rect.top = f3rdY - SCREEN_SCALE_Y(32.0f  * 0.4f);
-				rect.right = f3rdX + SCREEN_SCALE_X(32.0f * 0.4f);
-				rect.bottom = f3rdY + SCREEN_SCALE_Y(32.0f  * 0.4f);
-
-				CHud::Sprites[HUD_SITEM16].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
-					0.0f, 0.0f,  1.0f, 0.0f,  0.0f, 1.0f,  1.0f, 1.0f);
-			}
-		} else {
-			if (Mode == CCam::MODE_M16_1STPERSON ||
-			    Mode == CCam::MODE_M16_1STPERSON_RUNABOUT ||
-			    Mode == CCam::MODE_HELICANNON_1STPERSON) {
-				rect.left = (SCREEN_WIDTH / 2) - SCREEN_SCALE_X(32.0f);
-				rect.top = (SCREEN_HEIGHT / 2) - SCREEN_SCALE_Y(32.0f);
-				rect.right = (SCREEN_WIDTH / 2) + SCREEN_SCALE_X(32.0f);
-				rect.bottom = (SCREEN_HEIGHT / 2) + SCREEN_SCALE_Y(32.0f);
-				CHud::Sprites[HUD_SITEM16].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
-					0.0f, 0.0f,  1.0f, 0.0f,  0.0f, 1.0f,  1.0f, 1.0f);
-			}
-			else if (Mode == CCam::MODE_1STPERSON_RUNABOUT) {
-				rect.left = (SCREEN_WIDTH / 2) - SCREEN_SCALE_X(32.0f * 0.7f);
-				rect.top = (SCREEN_HEIGHT / 2) - SCREEN_SCALE_Y(32.0f * 0.7f);
-				rect.right = (SCREEN_WIDTH / 2) + SCREEN_SCALE_X(32.0f * 0.7f);
-				rect.bottom = (SCREEN_HEIGHT / 2) + SCREEN_SCALE_Y(32.0f * 0.7f);
-
-				CHud::Sprites[HUD_SITEM16].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
-					0.0f, 0.0f,  1.0f, 0.0f,  0.0f, 1.0f,  1.0f, 1.0f);
-			}
-			else if (Mode == CCam::MODE_ROCKETLAUNCHER || Mode == CCam::MODE_ROCKETLAUNCHER_RUNABOUT) {
-				RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void *)TRUE);
-				RwRenderStateSet(rwRENDERSTATESRCBLEND, (void *)rwBLENDONE);
-				RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void *)rwBLENDONE);
-				RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
-				RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
-				RwRenderStateSet(rwRENDERSTATETEXTURERASTER, RwTextureGetRaster(gpRocketSightTex));
-
-				CSprite::RenderOneXLUSprite(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, 1.0f, SCREEN_SCALE_X(40.0f), SCREEN_SCALE_Y(40.0f), (100.0f * fMultBright), (200.0f * fMultBright), (100.0f * fMultBright), 255, 1.0f, 255);
-				RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)FALSE);
-				RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)TRUE);
-			}
-			else {
-				int sprite = HUD_SITESNIPER;
-				float xOffset = SCREEN_SCALE_X(210.0f);
-				float yOffset = SCREEN_SCALE_Y(210.0f);
-
-				if (FindPlayerPed()->GetWeapon()->m_eWeaponType == WEAPONTYPE_LASERSCOPE)
-				  sprite = HUD_SITELASER;
-
-				if (FindPlayerPed()->GetWeapon()->m_eWeaponType == WEAPONTYPE_CAMERA) {
-					sprite = HUD_VIEWFINDER;
-					CrossHairHidesHud = true;
-					xOffset = SCREEN_SCALE_X(256.0f);
-					yOffset = SCREEN_SCALE_Y(192.0f);
-				}
-
-				rect.left = SCREEN_WIDTH/2 - xOffset;
-				rect.top = SCREEN_HEIGHT/2 - yOffset;
-				rect.right = SCREEN_WIDTH/2;
-				rect.bottom = SCREEN_HEIGHT/2;
-				CHud::Sprites[sprite].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
-					0.01f, 0.01f,  1.0f, 0.0f,  0.01f, 1.0f,  1.0f, 1.0f);
-
-				rect.left = SCREEN_WIDTH/2;
-				rect.top = SCREEN_HEIGHT/2 - yOffset;
-				rect.right = SCREEN_WIDTH/2 + xOffset;
-				rect.bottom = SCREEN_HEIGHT/2;
-				CHud::Sprites[sprite].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
-					0.99f, 0.0f,  0.01f, 0.01f,  0.99f, 1.0f,  0.01f, 1.0f);
-
-				rect.left = SCREEN_WIDTH/2 - xOffset;
-				rect.top = SCREEN_HEIGHT/2;
-				rect.right = SCREEN_WIDTH/2;
-				rect.bottom = SCREEN_HEIGHT/2 + yOffset;
-				CHud::Sprites[sprite].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
-					0.01f, 0.99f,  1.0f, 0.99f,  0.01f, 0.01f,  1.0f, 0.01f);
-
-				rect.left = SCREEN_WIDTH/2;
-				rect.top = SCREEN_HEIGHT/2;
-				rect.right = SCREEN_WIDTH/2 + xOffset;
-				rect.bottom = SCREEN_HEIGHT/2 + yOffset;
-				CHud::Sprites[sprite].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
-					0.99f, 0.99f,  0.01f, 0.99f,  0.99f, 0.01f,  0.01f, 0.01f);
-
-				CVector dotPos;
-				float size = 25.0f;
-				if (FindPlayerPed()->GetWeapon()->m_eWeaponType == WEAPONTYPE_LASERSCOPE && FindPlayerPed()->GetWeapon()->LaserScopeDot(&dotPos, &size)) {
-					RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
-					RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)TRUE);
-					RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
-					RwRenderStateSet(rwRENDERSTATESRCBLEND, (void*)rwBLENDSRCALPHA);
-#ifdef FIX_BUGS
-					RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVSRCALPHA);
-#else
-					RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void*)rwBLENDINVDESTALPHA);
-#endif
-					RwRenderStateSet(rwRENDERSTATETEXTURERASTER, RwTextureGetRaster(gpLaserDotTex));
-#ifdef FIX_BUGS
-					int intensity = CGeneral::GetRandomNumberInRange(0, 37);
-#else
-					int intensity = CGeneral::GetRandomNumberInRange(0, 35);
-#endif
-					CSprite::RenderOneXLUSprite(dotPos.x, dotPos.y, dotPos.z,
-						SCREEN_SCALE_X(size), SCREEN_SCALE_Y(size), intensity - 36, 0, 0, intensity - 36, 1.0f, 127);
-
-					RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)FALSE);
-				}
-			}
-		}
 		RwRenderStateSet(rwRENDERSTATESRCBLEND, (void *)rwBLENDSRCALPHA);
 		RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void *)rwBLENDINVSRCALPHA);
 		RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)TRUE);
@@ -444,7 +461,7 @@ DrawCrosshairAndSights(CPlayerPed *playerPed, eWeaponType WeaponType, int32 Mode
 		DrawMoneyCounter
 	*/
 static void
-DrawMoneyCounter()
+DrawMoneyCounter(void)
 {
 	wchar sPrint[16];
 	char sTemp[16];
@@ -634,7 +651,7 @@ DrawArmour(CPlayerPed *playerPed)
 		DrawHealth
 	*/
 static void
-DrawHealth(CPlayerPed *playerPed)
+DrawHealthAndArmour(CPlayerPed *playerPed)
 {
 	wchar sPrint[16];
 	wchar sPrintIcon[16];
@@ -743,7 +760,7 @@ DrawWantedLevel(CPlayerPed *playerPed)
 }
 
 static void
-DrawChaseStat()
+DrawChaseStat(void)
 {
 	static int32 nMediaLevelCounter = 0;
 	if (CStats::ShowChaseStatOnScreen != 0) {
@@ -797,7 +814,7 @@ DrawChaseStat()
 		DrawZoneName
 	*/
 static void
-DrawZoneName()
+DrawZoneName(void)
 {
 	if (CHud::m_pZoneName) {
 
@@ -903,7 +920,7 @@ DrawZoneName()
 		DrawVehicleName
 	*/
 static void
-DrawVehicleName()
+DrawVehicleName(void)
 {
 	if (CHud::m_VehicleName) {
 		float fVehicleAlpha = 0.0f;
@@ -1010,7 +1027,7 @@ DrawVehicleName()
 		DrawClock
 	*/
 static void
-DrawClock()
+DrawClock(void)
 {
 	wchar sPrint[16];
 	char sTemp[16];
@@ -1041,7 +1058,7 @@ DrawClock()
 		DrawOnScreenTimer
 	*/
 static void
-DrawOnScreenTimer()
+DrawOnScreenTimer(void)
 {
 	wchar sTimer[16];
 
@@ -1159,7 +1176,7 @@ DrawOnScreenTimer()
 		DrawRadar
 	*/
 static void
-DrawRadar()
+DrawRadar(void)
 {
 	if (FrontEndMenuManager.m_PrefsRadarMode != 2 &&
 		!CHud::m_HideRadar && (CHud::m_ItemToFlash == ITEM_RADAR && FRAMECOUNTER & 8 || CHud::m_ItemToFlash != ITEM_RADAR)) {
@@ -1189,7 +1206,7 @@ DrawRadar()
 		Draw3dMarkers
 	*/
 static void
-Draw3dMarkers()
+Draw3dMarkers(void)
 {
 	if (CHud::m_Wants_To_Draw_3dMarkers && !TheCamera.m_WideScreenOn && !CHud::m_BigMessage[0][0] && !CHud::m_BigMessage[2][0]) {
 		CRadar::Draw3dMarkers();
@@ -1200,7 +1217,7 @@ Draw3dMarkers()
 		DrawScriptText
 	*/
 static void
-DrawScriptText()
+DrawScriptText(void)
 {
 	for (int i = 0; i < ARRAY_SIZE(CTheScripts::IntroTextLines); i++) {
 		if (CTheScripts::IntroTextLines[i].m_Text[0] && CTheScripts::IntroTextLines[i].m_bTextBeforeFade) {
@@ -1277,7 +1294,7 @@ DrawScriptText()
 		DrawSubtitles
 	*/
 static void
-DrawSubtitles()
+DrawSubtitles(void)
 {
 	if (CHud::m_Message[0] && !CHud::m_BigMessage[2][0]) {
 		if (CHud::m_VehicleState != 0)
@@ -1335,7 +1352,7 @@ DrawSubtitles()
 		HelpMessage
 	*/
 static void
-DrawHelpMessage()
+DrawHelpMessage(void)
 {
 	if (CHud::m_HelpMessage[0]) {
 		if (!CMessages::WideStringCompare(CHud::m_HelpMessage, CHud::m_LastHelpMessage, HELP_MSG_LENGTH)) {
@@ -1451,7 +1468,7 @@ DrawHelpMessage()
 
 	// MissionCompleteFailedText
 static void
-DrawMissionCompleteFailedText()
+DrawMissionCompleteFailedText(void)
 {
 	if (CHud::m_BigMessage[0][0]) {
 		if (CHud::BigMessageInUse[0] != 0.0f) {
@@ -1510,7 +1527,7 @@ DrawMissionCompleteFailedText()
 
 	// WastedBustedText
 static void
-DrawWastedBustedText()
+DrawWastedBustedText(void)
 {
 	if (CHud::m_BigMessage[2][0]) {
 		if (CHud::BigMessageInUse[2] != 0.0f) {
@@ -1581,7 +1598,7 @@ void CHud::Draw()
 
 		DrawMoneyCounter();
 		DrawAmmo(playerPed, WeaponType);
-		DrawHealth(playerPed);
+		DrawHealthAndArmour(playerPed);
 		DrawWantedLevel(playerPed);
 		DrawChaseStat();
 		DrawZoneName();
