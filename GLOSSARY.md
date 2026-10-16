@@ -124,22 +124,22 @@ how the budget is spent; it does not change the wheel list.
 
 ## Magazine weapon
 
-A weapon with a clip of two or more rounds that fires instant hits. The active
-reload applies to magazine weapons only.
+A weapon that fires instant hits and has a clip of two or more rounds. The
+active reload applies to magazine weapons only.
 
 ## Active reload
 
 The timed reload of a magazine weapon. The player starts it with the reload
 key; a press inside the reload window finishes the reload fast, and a press
-before the window jams it. The player's reload is manual only: the clip never
-refills by itself.
+before the window jams it. With the feature on, the player's reload is manual
+only: the clip never refills by itself.
 
 ## Reload window
 
-The part of the active reload between 55% and 80% of the base reload time, when
-a press gives the fast reload.
+The part of the active reload between 55% and 80% of the weapon's reload time,
+counted from the start of the reload, when a press gives the fast reload.
 
 ## Reload jam
 
 The longer reload after a press before the reload window. The press adds half
-the base reload time once, so the reload becomes about 1.5 times the base time.
+the weapon's reload time once, so the reload takes about 1.5 times as long.
