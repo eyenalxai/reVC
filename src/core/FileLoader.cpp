@@ -739,6 +739,8 @@ CFileLoader::LoadObject(const char *line)
 
 	mi = CModelInfo::AddSimpleModel(id);
 	mi->SetModelName(model);
+	if(IsVegetationModelName(model))
+		mi->m_isVegetation = true;
 	mi->SetNumAtomics(numObjs);
 	mi->SetLodDistances(dist);
 	SetModelInfoFlags(mi, flags);
@@ -787,6 +789,8 @@ CFileLoader::LoadTimeObject(const char *line)
 
 	mi = CModelInfo::AddTimeModel(id);
 	mi->SetModelName(model);
+	if(IsVegetationModelName(model))
+		mi->m_isVegetation = true;
 	mi->SetNumAtomics(numObjs);
 	mi->SetLodDistances(dist);
 	SetModelInfoFlags(mi, flags);

@@ -588,6 +588,38 @@ IsTreeModel(int16 id)
 		IsPalmTreeModel(id);
 }
 
+// Case-insensitive substring test for model names.
+inline bool
+NameContainsNoCase(const char *name, const char *part)
+{
+	size_t len = strlen(part);
+	for(const char *p = name; *p; p++)
+		if(strncasecmp(p, part, len) == 0)
+			return true;
+	return false;
+}
+
+// Vegetation: the name mentions a palm or a tree, but is not a LOD, shadow or
+// reflection of one. The object loaders set CSimpleModelInfo::m_isVegetation
+// with this test.
+inline bool
+IsVegetationModelName(const char *name)
+{
+	return (NameContainsNoCase(name, "palm") || NameContainsNoCase(name, "tree")) &&
+	       !NameContainsNoCase(name, "lod") &&
+	       !NameContainsNoCase(name, "shad") &&
+	       !NameContainsNoCase(name, "reflect");
+}
+
+// Reads the flag the object loaders set. Vegetation placed as a building
+// breaks when a vehicle hits it.
+inline bool
+IsVegetationModel(int16 id)
+{
+	CSimpleModelInfo *mi = (CSimpleModelInfo*)CModelInfo::GetModelInfo(id);
+	return mi && mi->m_isVegetation;
+}
+
 inline bool
 IsPolicePedModel(int16 id)
 {

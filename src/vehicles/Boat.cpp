@@ -226,7 +226,11 @@ CBoat::ProcessControl(void)
 	default: break;
 	}
 
-	float collisionDamage = pHandling->fCollisionDamageMultiplier * m_fDamageImpulse;
+	float damageImpulse = m_fDamageImpulse;
+	// A prop, a pedestrian or a smashed tree barely damages the boat.
+	if(IsSoftHitEntity(m_pDamageEntity))
+		damageImpulse *= HIT_OBJECT_DAMAGE_PENALTY;
+	float collisionDamage = pHandling->fCollisionDamageMultiplier * damageImpulse;
 #ifdef FIX_BUGS
 	if(GetStatus() == STATUS_PLAYER && CStats::GetPercentageProgress() >= 100.0f)
 		collisionDamage *= 0.5f;

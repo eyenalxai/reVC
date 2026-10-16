@@ -4132,6 +4132,10 @@ CAutomobile::VehicleDamage(float impulse, uint16 damagedPiece)
 		impulse = m_fDamageImpulse;
 		damagedPiece = m_nDamagePieceType;
 		damageMultiplier = 1.0f;
+		// A prop, a pedestrian or a smashed tree barely damages the car.
+		// Weapon damage arrives with an impulse of its own and stays vanilla.
+		if(IsSoftHitEntity(m_pDamageEntity))
+			impulse *= HIT_OBJECT_DAMAGE_PENALTY;
 	}
 
 	if(GetStatus() == STATUS_PLAYER && CStats::GetPercentageProgress() >= 100.0f)

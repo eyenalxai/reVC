@@ -2090,6 +2090,9 @@ void
 CBike::VehicleDamage(void)
 {
 	float impulse = m_fDamageImpulse;
+	// A prop, a pedestrian or a smashed tree barely damages the bike.
+	if(IsSoftHitEntity(m_pDamageEntity))
+		impulse *= HIT_OBJECT_DAMAGE_PENALTY;
 	float colSpeed = 800.0f*impulse/m_fMass;
 	if(GetStatus() == STATUS_PLAYER)
 		colSpeed *= 0.65f;

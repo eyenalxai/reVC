@@ -11,6 +11,11 @@ enum {
 
 #define GRAVITY (0.008f)
 
+// The owner asked for a soft response to props and pedestrians: a car keeps
+// about nine tenths of its speed and takes about one tenth of the damage.
+#define HIT_OBJECT_SPEED_PENALTY (0.1f)
+#define HIT_OBJECT_DAMAGE_PENALTY (0.1f)
+
 class CTreadable;
 
 class CPhysical : public CEntity
@@ -87,6 +92,11 @@ public:
 	bool GetHasCollidedWith(CEntity *ent);
 	void RemoveRefsToEntity(CEntity *ent);
 	static void PlacePhysicalRelativeToOtherPhysical(CPhysical *other, CPhysical *phys, CVector localPos);
+
+	// Objects, pedestrians and vegetation buildings are soft for a car: it
+	// barely slows hitting them and barely takes damage. Buildings, vehicles
+	// and every other pair keep the vanilla response.
+	static bool IsSoftHitEntity(CEntity *entity);
 
 	// get speed of point p relative to entity center
 	CVector GetSpeed(const CVector &r);
