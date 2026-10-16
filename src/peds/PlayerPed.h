@@ -105,6 +105,7 @@ public:
 	void PlayerControlM16(CPad*);
 	void PlayerControlFighter(CPad*);
 	void ProcessWeaponSwitch(CPad*);
+	void ProcessActiveReload(CPad*);
 	void MakeObjectTargettable(int32);
 	void PlayerControl1stPersonRunAround(CPad *padUsed);
 	void EvaluateNeighbouringTarget(CEntity*, CEntity**, float*, float, float, bool, bool);

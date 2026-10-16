@@ -1736,6 +1736,9 @@ Vue subjective
 [FEC_FOV]
 Champ de vision
 
+[FEC_CCD]
+Distance caméra véhicule
+
 [FEC_LL]
 Rergarder à gauche
 
@@ -7379,6 +7382,12 @@ DRIFT HANDLING
 
 [FEC_ISP]
 INFINITE SPRINT
+
+[FEC_ARL]
+Active Reload
+
+[FEC_RLD]
+Reload
 
 [FEC_NLK]
 VERR NUM
@@ -14729,6 +14738,9 @@ PED DENSITY
 
 [FEM_CAR]
 CAR DENSITY
+
+[FEM_SPN]
+SPAWN DIST
 
 [DUMMY]
 THIS LABEL NEEDS TO BE HERE !!!

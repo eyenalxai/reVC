@@ -63,11 +63,15 @@
 
 #ifdef FIRST_PERSON
 	#define FIRST_PERSON_TOGGLES \
-		MENUACTION_CFO_SELECT, "FEC_FPC", { new CCFOSelect((int8*)&FrontEndMenuManager.m_bFirstPersonView, "Display", "FirstPersonView", off_on, 2, false, FirstPersonViewAfterChange) }, 0, 0, MENUALIGN_LEFT, \
+		MENUACTION_CFO_SELECT, "FEC_FPC", { new CCFOSelect((int8*)&FrontEndMenuManager.m_bFirstPersonView, "Display", "FirstPersonView", off_on, 2, false) }, 0, 0, MENUALIGN_LEFT, \
 		MENUACTION_CFO_DYNAMIC, "FEC_FOV", { new CCFODynamic((int8*)&FrontEndMenuManager.m_nFirstPersonFOV, "Display", "FirstPersonFOV", FirstPersonFOVDraw, FirstPersonFOVPress) }, 0, 0, MENUALIGN_LEFT,
 #else
 	#define FIRST_PERSON_TOGGLES
 #endif
+
+// The follow camera distance in a vehicle (see CCam::Process_FollowPed)
+#define CAR_CAMERA_DISTANCE_OPTION \
+	MENUACTION_CFO_DYNAMIC, "FEC_CCD", { new CCFODynamic((int8*)&FrontEndMenuManager.m_nCarCameraDistance, "Display", "CarCameraDistance", CarCameraDistanceDraw, CarCameraDistancePress) }, 0, 0, MENUALIGN_LEFT,
 
 #ifdef PS2_ALPHA_TEST
 	#define DUALPASS_SELECTOR MENUACTION_CFO_SELECT, "FEM_2PR", { new CCFOSelect((int8*)&gPS2alphaTest, "Graphics", "PS2AlphaTest", off_on, 2, false) }, 0, 0, MENUALIGN_LEFT,
@@ -78,9 +82,11 @@
 #ifdef PED_CAR_DENSITY_SLIDERS
 	// The step is (max - min) / 16. Tops chosen so the defaults land on a step:
 	// ped (3.4 - 0.2) / 16 = 0.2, so 1.0f is reachable; car (3.4 - 0.2) / 16 = 0.2, so 2.0f is reachable.
+	// spawn distance (4.0 - 1.0) / 16 = 0.1875, so 1.0f is reachable.
 	#define DENSITY_SLIDERS \
 		MENUACTION_CFO_SLIDER, "FEM_PED", { new CCFOSlider(&CIniFile::PedNumberMultiplier, "Display", "PedDensity", 0.2f, 3.4f, PedDensityChange) }, 0, 0, MENUALIGN_LEFT, \
-		MENUACTION_CFO_SLIDER, "FEM_CAR", { new CCFOSlider(&CIniFile::CarNumberMultiplier, "Display", "CarDensity", 0.2f, 3.4f, CarDensityChange) }, 0, 0, MENUALIGN_LEFT, 
+		MENUACTION_CFO_SLIDER, "FEM_CAR", { new CCFOSlider(&CIniFile::CarNumberMultiplier, "Display", "CarDensity", 0.2f, 3.4f, CarDensityChange) }, 0, 0, MENUALIGN_LEFT, \
+		MENUACTION_CFO_SLIDER, "FEM_SPN", { new CCFOSlider(&CIniFile::SpawnDistanceMultiplier, "Display", "SpawnDistance", 1.0f, 4.0f) }, 0, 0, MENUALIGN_LEFT,
 #else
 	#define DENSITY_SLIDERS 
 #endif
@@ -109,6 +115,8 @@
 #define DRIFT_TOGGLE MENUACTION_CFO_SELECT, "FEC_DRF", { new CCFOSelect((int8*)&gDriftEnabled, "Drift", "Enabled", off_on, 2, false) }, 0, 0, MENUALIGN_CENTER,
 // Infinite sprint (see src/peds/PlayerPed.cpp)
 #define SPRINT_TOGGLE MENUACTION_CFO_SELECT, "FEC_ISP", { new CCFOSelect((int8*)&gInfiniteSprint, "Controller", "InfiniteSprint", off_on, 2, false) }, 0, 0, MENUALIGN_CENTER,
+// Active reload (see src/weapons/ActiveReload.h)
+#define ACTIVE_RELOAD_TOGGLE MENUACTION_CFO_SELECT, "FEC_ARL", { new CCFOSelect((int8*)&gActiveReloadEnabled, "Weapons", "ActiveReload", off_on, 2, false) }, 0, 0, MENUALIGN_CENTER,
 
 #ifdef GAMEPAD_MENU
 	#define SELECT_CONTROLLER_TYPE  MENUACTION_CFO_SELECT, "FEC_TYP", { new CCFOSelect((int8*)&FrontEndMenuManager.m_PrefsControllerType, "Controller", "Type", controllerTypes, ARRAY_SIZE(controllerTypes), false, ControllerTypeAfterChange) }, 0, 0, MENUALIGN_LEFT,
@@ -164,6 +172,8 @@ void RestoreDefDisplay(int8 action) {
 	#endif
 	#ifdef PED_CAR_DENSITY_SLIDERS
 		CIniFile::LoadIniFile();
+		// The spawn distance has no gta3.ini key, so reset it to the stock value here
+		CIniFile::SpawnDistanceMultiplier = 1.0f;
 	#endif
 	#ifdef GRAPHICS_MENU_OPTIONS // otherwise Frontend will handle those
 		FrontEndMenuManager.m_PrefsBrightness = 256;
@@ -294,13 +304,6 @@ wchar* MultiSamplingDraw(bool *disabled, bool userHovering) {
 #endif
 
 #ifdef FIRST_PERSON
-void FirstPersonViewAfterChange(int8 before, int8 after) {
-	if (after)
-		TheCamera.CarZoomIndicator = CAM_ZOOM_1STPRS;
-	else if (TheCamera.CarZoomIndicator == CAM_ZOOM_1STPRS)
-		TheCamera.CarZoomIndicator = CAM_ZOOM_2;
-}
-
 wchar* FirstPersonFOVDraw(bool *disabled, bool userHovering) {
 	static wchar unicodeTemp[16];
 	sprintf(gString, "%i", FrontEndMenuManager.m_nFirstPersonFOV);
@@ -322,6 +325,27 @@ void FirstPersonFOVPress(int8 action) {
 	FrontEndMenuManager.SaveSettings();
 }
 #endif
+
+wchar* CarCameraDistanceDraw(bool *disabled, bool userHovering) {
+	static wchar unicodeTemp[16];
+	sprintf(gString, "%i", FrontEndMenuManager.GetCarCameraDistance());
+	AsciiToUnicode(gString, unicodeTemp);
+	return unicodeTemp;
+}
+
+void CarCameraDistancePress(int8 action) {
+	// The stored value is unsigned, so step from the clamped value: a step
+	// below the minimum would wrap around to a large number.
+	int32 distance = FrontEndMenuManager.GetCarCameraDistance();
+	if (action == FEOPTION_ACTION_LEFT)
+		distance--;
+	else if (action == FEOPTION_ACTION_RIGHT)
+		distance++;
+	else
+		return;
+	FrontEndMenuManager.m_nCarCameraDistance = Clamp(distance, CAR_CAMERA_DISTANCE_MIN, CAR_CAMERA_DISTANCE_MAX);
+	FrontEndMenuManager.SaveSettings();
+}
 
 #ifdef IMPROVED_VIDEOMODE
 const char* screenModes[] = { "FED_FLS", "FED_WND" };
@@ -497,6 +521,7 @@ CMenuScreenCustom aScreens[] = {
 		POSTFX_SELECTORS
 		// re3.cpp inserts here pipeline selectors if neo/neo.txd exists and EXTENDED_PIPELINES defined
 		FIRST_PERSON_TOGGLES
+		CAR_CAMERA_DISTANCE_OPTION
 		MENUACTION_RESTOREDEF,	"FET_DEF", {nil, SAVESLOT_NONE, MENUPAGE_DISPLAY_SETTINGS}, 320, 0, MENUALIGN_CENTER,
 		MENUACTION_GOBACK,		"FEDS_TB", {nil, SAVESLOT_NONE, MENUPAGE_NONE}, 320, 0, MENUALIGN_CENTER,
 	},
@@ -512,6 +537,7 @@ CMenuScreenCustom aScreens[] = {
 		MENUACTION_HUD,			"FED_HUD", { nil, SAVESLOT_NONE, MENUPAGE_DISPLAY_SETTINGS }, 0, 0, MENUALIGN_LEFT,
 		MENUACTION_SUBTITLES,	"FED_SUB", { nil, SAVESLOT_NONE, MENUPAGE_DISPLAY_SETTINGS }, 0, 0, MENUALIGN_LEFT,
 		FIRST_PERSON_TOGGLES
+		CAR_CAMERA_DISTANCE_OPTION
 		MENUACTION_CFO_DYNAMIC,	"FET_DEF", { new CCFODynamic(nil, nil, nil, nil, RestoreDefDisplay) }, 320, 0, MENUALIGN_CENTER,
 		MENUACTION_GOBACK,		"FEDS_TB", { nil, SAVESLOT_NONE, MENUPAGE_NONE}, 320, 0, MENUALIGN_CENTER,
 	},
@@ -680,6 +706,7 @@ CMenuScreenCustom aScreens[] = {
 		MENUACTION_CHANGEMENU,	"FEC_MOU", {nil, SAVESLOT_NONE, MENUPAGE_MOUSE_CONTROLS}, 0, 0, MENUALIGN_CENTER,
 		DRIFT_TOGGLE
 		SPRINT_TOGGLE
+		ACTIVE_RELOAD_TOGGLE
 		MENUACTION_RESTOREDEF,	"FET_DEF", {nil, SAVESLOT_NONE, MENUPAGE_CONTROLLER_PC}, 320, 0, MENUALIGN_CENTER,
 		MENUACTION_GOBACK,		"FEDS_TB", {nil, SAVESLOT_NONE, 0}, 320, 0, MENUALIGN_CENTER,
    },

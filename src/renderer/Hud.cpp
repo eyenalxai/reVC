@@ -1,5 +1,6 @@
 #include "common.h"
 
+#include "ActiveReload.h"
 #include "Camera.h"
 #include "DMAudio.h"
 #include "Clock.h"
@@ -63,6 +64,8 @@ CRGBA WASTEDBUSTED_COLOR(0, 207, 133, 255);
 CRGBA ODDJOB_COLOR(0, 207, 133, 255);
 CRGBA ODDJOB2_COLOR(97, 194, 247, 255);
 CRGBA MISSIONTITLE_COLOR(220, 172, 2, 255);
+CRGBA ACTIVERELOAD_PERFECT_COLOR(255, 255, 255, 255);
+CRGBA ACTIVERELOAD_JAM_COLOR(207, 0, 0, 255);
 
 wchar CHud::m_HelpMessage[HELP_MSG_LENGTH];
 wchar CHud::m_LastHelpMessage[HELP_MSG_LENGTH];
@@ -215,6 +218,55 @@ RwTexture *gpRocketSightTex;
 RwTexture *gpLaserSightTex;
 RwTexture *gpLaserDotTex;
 RwTexture *gpViewFinderTex;
+
+// How long the result flash of the active reload bar stays after the
+// judgment, ms.
+#define ACTIVE_RELOAD_RESULT_FLASH_MS	200
+
+// The timing bar of the active reload: a slim track under the crosshair with
+// the window zone brighter and a needle at the progress. The result flashes
+// white after a perfect reload and red after a jam. A perfect reload ends
+// almost at once, so the flash keys on the result age alone, not on the bar
+// being visible.
+static void
+DrawActiveReloadBar(void)
+{
+	ActiveReloadBar bar = ActiveReload::GetBarState();
+
+	bool flash = bar.result != ACTIVE_RELOAD_NONE && bar.resultAge < ACTIVE_RELOAD_RESULT_FLASH_MS;
+	if (!bar.visible && !flash)
+		return;
+
+	const float width = SCREEN_SCALE_X(120.0f);
+	const float height = SCREEN_SCALE_Y(6.0f);
+	const float left = SCREEN_WIDTH/2 - width/2;
+	const float right = left + width;
+	const float top = SCREEN_HEIGHT/2 + SCREEN_SCALE_Y(40.0f);
+	const float bottom = top + height;
+
+	if (bar.visible) {
+		// The wanted level drawing stores its fade alpha into the palette
+		// colors, so take their RGB with a fresh opaque alpha.
+		CRGBA track(NOTWANTED_COLOR.r, NOTWANTED_COLOR.g, NOTWANTED_COLOR.b, 255);
+		CSprite2d::DrawRect(CRect(left, top, right, bottom), track);
+
+		// window zone
+		CRGBA zone(WANTED_COLOR.r, WANTED_COLOR.g, WANTED_COLOR.b, 255);
+		CSprite2d::DrawRect(CRect(left + width*bar.windowStart, top, left + width*bar.windowEnd, bottom), zone);
+
+		// needle
+		const float needle = left + width*bar.progress;
+		CSprite2d::DrawRect(CRect(needle - SCREEN_SCALE_X(1.0f), top, needle + SCREEN_SCALE_X(1.0f), bottom), ACTIVERELOAD_PERFECT_COLOR);
+	}
+
+	if (flash) {
+		CRGBA color = bar.result == ACTIVE_RELOAD_PERFECT ? ACTIVERELOAD_PERFECT_COLOR : ACTIVERELOAD_JAM_COLOR;
+		color.a = (uint8)((ACTIVE_RELOAD_RESULT_FLASH_MS - bar.resultAge)*255/ACTIVE_RELOAD_RESULT_FLASH_MS);
+		RwRenderStateSet(rwRENDERSTATESRCBLEND, (void *)rwBLENDSRCALPHA);
+		RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void *)rwBLENDINVSRCALPHA);
+		CSprite2d::DrawRect(CRect(left, top, right, bottom), color);
+	}
+}
 
 void CHud::Draw()
 {
@@ -400,6 +452,8 @@ void CHud::Draw()
 		else {
 			SpriteBrightness = 0;
 		}
+
+		DrawActiveReloadBar();
 
 		if (CrossHairHidesHud)
 			return;

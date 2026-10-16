@@ -687,6 +687,9 @@ public:
 	bool OurPedCanSeeThisOne(CEntity *target, bool shootablesDoBlock = false);
 	void Avoid(void);
 	void Attack(void);
+	// reloadAnimAssoc: the association the caller already holds, or nil to
+	// look it up. Returns true when the caller must not continue the attack.
+	bool TryStartReloadAnimation(CAnimBlendAssociation *reloadAnimAssoc = nil);
 	void ClearAimFlag(void);
 	void ClearLookFlag(void);
 	void RestorePreviousState(void);

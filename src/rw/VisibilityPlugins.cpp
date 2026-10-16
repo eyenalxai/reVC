@@ -138,7 +138,10 @@ CVisibilityPlugins::InsertAtomicIntoBoatSortedList(RpAtomic *a, float dist)
 
 // can't increase this yet unfortunately...
 // probably have to fix fading for this so material alpha isn't overwritten
-#define VEHICLE_LODDIST_MULTIPLIER (TheCamera.GenerationDistMultiplier)
+// The vehicle LOD distances are tuned at the old maximum of the draw distance
+// slider (4.0). They scale with the slider now, which goes up to 16.0.
+#define VEHICLE_LODDIST_REFERENCE 4.0f
+#define VEHICLE_LODDIST_MULTIPLIER (TheCamera.LODDistMultiplier / VEHICLE_LODDIST_REFERENCE)
 
 void
 CVisibilityPlugins::SetRenderWareCamera(RwCamera *camera)

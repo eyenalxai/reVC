@@ -1526,6 +1526,9 @@ Visuale in prima persona
 [FEC_FOV]
 Campo visivo
 
+[FEC_CCD]
+Distanza telecamera auto
+
 [FEC_LL]
 Guarda a sinistra
 
@@ -7385,6 +7388,12 @@ DRIFT HANDLING
 
 [FEC_ISP]
 INFINITE SPRINT
+
+[FEC_ARL]
+Active Reload
+
+[FEC_RLD]
+Reload
 
 [FEC_NLK]
 BLOC NUM
@@ -14738,6 +14747,9 @@ PED DENSITY
 
 [FEM_CAR]
 CAR DENSITY
+
+[FEM_SPN]
+SPAWN DIST
 
 [DUMMY]
 THIS LABEL NEEDS TO BE HERE !!!

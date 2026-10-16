@@ -60,6 +60,12 @@ const CRGBA SCROLLBAR_COLOR = LABEL_COLOR;
 #define SCROLLBAR_MAX_HEIGHT 263.0f // not in end result
 #define SCROLLABLE_PAGES
 
+// Draw distance slider. The maximum is four times the old maximum (4.0). The
+// value 4.0 keeps the old distances; 16.0 gives four times the old distances.
+#define DRAWDIST_MIN 0.925f
+#define DRAWDIST_MAX 16.0f
+#define DRAWDIST_RANGE (DRAWDIST_MAX - DRAWDIST_MIN)
+
 #define hasNativeList(screen) (screen == MENUPAGE_SKIN_SELECT || screen == MENUPAGE_KEYBOARD_CONTROLS)
 
 #ifdef SCROLLABLE_PAGES
@@ -508,6 +514,7 @@ CMenuManager::CMenuManager()
 	m_bFirstPersonView = false;
 	m_nFirstPersonFOV = 70;
 #endif
+	m_nCarCameraDistance = CAR_CAMERA_DISTANCE_DEFAULT;
 #ifdef PC_PLAYER_CONTROLS
 	CCamera::m_bUseMouse3rdPerson = true;
 #else
@@ -564,6 +571,13 @@ CMenuManager::GetFirstPersonFOV(void)
 	return Clamp(m_nFirstPersonFOV, FIRST_PERSON_FOV_MIN, FIRST_PERSON_FOV_MAX);
 }
 #endif
+
+int32
+CMenuManager::GetCarCameraDistance(void)
+{
+	// The distance setting is clamped where it is read
+	return Clamp(m_nCarCameraDistance, CAR_CAMERA_DISTANCE_MIN, CAR_CAMERA_DISTANCE_MAX);
+}
 
 void
 CMenuManager::SetFrontEndRenderStates(void)
@@ -731,10 +745,10 @@ CMenuManager::CheckSliderMovement(int value)
 		break;
 	case MENUACTION_DRAWDIST:
 		if(value > 0)
-			m_PrefsLOD += ((4.0f - 0.925f) / MENUSLIDER_LOGICAL_BARS);
+			m_PrefsLOD += DRAWDIST_RANGE / MENUSLIDER_LOGICAL_BARS;
 		else
-			m_PrefsLOD -= ((4.0f - 0.925f) / MENUSLIDER_LOGICAL_BARS);
-		m_PrefsLOD = Clamp(m_PrefsLOD, 0.925f, 4.0f);
+			m_PrefsLOD -= DRAWDIST_RANGE / MENUSLIDER_LOGICAL_BARS;
+		m_PrefsLOD = Clamp(m_PrefsLOD, DRAWDIST_MIN, DRAWDIST_MAX);
 		CRenderer::ms_lodDistScale = m_PrefsLOD;
 		break;
 
@@ -1564,7 +1578,7 @@ CMenuManager::DrawStandardMenus(bool activeScreen)
 							ProcessSlider(m_PrefsBrightness / 384.0f, SLIDER_Y(70.0f), HOVEROPTION_INCREASE_BRIGHTNESS, HOVEROPTION_DECREASE_BRIGHTNESS, SCREEN_WIDTH, true);
 							break;
 						case MENUACTION_DRAWDIST:
-							ProcessSlider((m_PrefsLOD - 0.925f) / 3.075f, SLIDER_Y(99.0f), HOVEROPTION_INCREASE_DRAWDIST, HOVEROPTION_DECREASE_DRAWDIST, SCREEN_WIDTH, true);
+							ProcessSlider((m_PrefsLOD - DRAWDIST_MIN) / DRAWDIST_RANGE, SLIDER_Y(99.0f), HOVEROPTION_INCREASE_DRAWDIST, HOVEROPTION_DECREASE_DRAWDIST, SCREEN_WIDTH, true);
 							break;
 						case MENUACTION_MUSICVOLUME:
 							if(m_nPrefsAudio3DProviderIndex != NO_AUDIO_PROVIDER)
@@ -1686,10 +1700,10 @@ CMenuManager::GetNumOptionsCntrlConfigScreens(void)
 		case MENUPAGE_KEYBOARD_CONTROLS:
 			switch (m_ControlMethod) {
 				case CONTROL_STANDARD:
-					number = 27;
+					number = 28;
 					break;
 				case CONTROL_CLASSIC:
-					number = 32;
+					number = 33;
 					break;
 			}
 			break;
@@ -1799,7 +1813,10 @@ CMenuManager::DrawControllerBound(int32 yStart, int32 xStart, int32 unused, int8
 						controllerAction = PED_1RST_PERSON_LOOK_RIGHT;
 					break;
 				case 27:
-					controllerAction = PED_1RST_PERSON_LOOK_UP;
+					if (m_ControlMethod == CONTROL_STANDARD)
+						controllerAction = PED_RELOAD;
+					else
+						controllerAction = PED_1RST_PERSON_LOOK_UP;
 					break;
 				case 28:
 					controllerAction = PED_1RST_PERSON_LOOK_DOWN;
@@ -1812,6 +1829,9 @@ CMenuManager::DrawControllerBound(int32 yStart, int32 xStart, int32 unused, int8
 					break;
 				case 31:
 					controllerAction = PED_CENTER_CAMERA_BEHIND_PLAYER;
+					break;
+				case 32:
+					controllerAction = PED_RELOAD;
 					break;
 				default:
 					break;
@@ -2146,7 +2166,7 @@ CMenuManager::DrawControllerSetupScreen()
 		actionTexts[29] = TheText.Get("FEC_NTR");
 		actionTexts[30] = TheText.Get("FEC_PTT");
 		actionTexts[31] = TheText.Get("FEC_CEN");
-		actionTexts[32] = nil;
+		actionTexts[32] = TheText.Get("FEC_RLD");
 	} else {
 		actionTexts[20] = TheText.Get("FEC_TFL");
 		actionTexts[21] = TheText.Get("FEC_TFR");
@@ -2155,7 +2175,8 @@ CMenuManager::DrawControllerSetupScreen()
 		actionTexts[24] = TheText.Get("FEC_LBA");
 		actionTexts[25] = TheText.Get("FEC_LOL");
 		actionTexts[26] = TheText.Get("FEC_LOR");
-		actionTexts[27] = nil;
+		actionTexts[27] = TheText.Get("FEC_RLD");
+		actionTexts[28] = nil;
 	}
 
 	// Blue panel background
@@ -3183,7 +3204,7 @@ CMenuManager::LoadSettings()
 #ifdef LEGACY_MENU_OPTIONS
 	m_PrefsVsync = m_PrefsVsyncDisp;
 #endif
-	m_PrefsLOD = Clamp(m_PrefsLOD, 0.925f, 4.0f);
+	m_PrefsLOD = Clamp(m_PrefsLOD, DRAWDIST_MIN, DRAWDIST_MAX);
 	CRenderer::ms_lodDistScale = m_PrefsLOD;
 
 	if (m_nPrefsAudio3DProviderIndex == NO_AUDIO_PROVIDER)
@@ -3228,9 +3249,9 @@ CMenuManager::SaveSettings()
 #ifndef LOAD_INI_SETTINGS
 	static char RubbishString[48] = "stuffmorestuffevenmorestuff                 etc";
 #ifdef BIND_VEHICLE_FIREWEAPON
-	static int SomeVersion = 4;
+	static int SomeVersion = 5;
 #else
-	static int SomeVersion = 3;
+	static int SomeVersion = 4;
 #endif
 
 	CFileMgr::SetDirMyDocuments();
@@ -4060,7 +4081,7 @@ CMenuManager::ProcessList(bool &optionSelected, bool &goBack)
 	}
 	if (m_nCurrScreen == MENUPAGE_KEYBOARD_CONTROLS) {
 		// GetNumOptionsCntrlConfigScreens would have been a better choice
-		m_nTotalListRow = m_ControlMethod == CONTROL_CLASSIC ? 32 : 27;
+		m_nTotalListRow = m_ControlMethod == CONTROL_CLASSIC ? 33 : 28;
 		if (m_nSelectedListRow > m_nTotalListRow)
 			m_nSelectedListRow = m_nTotalListRow - 1;
 	}

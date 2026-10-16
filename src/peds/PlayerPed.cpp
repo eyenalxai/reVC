@@ -9,6 +9,7 @@
 #include "Pad.h"
 #include "Camera.h"
 #include "WeaponEffects.h"
+#include "ActiveReload.h"
 #include "ModelIndices.h"
 #include "World.h"
 #include "RpAnimBlend.h"
@@ -316,7 +317,10 @@ CPlayerPed::MakeChangesForNewWeapon(eWeaponType weapon)
 	SetCurrentWeapon(weapon);
 	m_nSelectedWepSlot = m_currentWeapon;
 
-	GetWeapon()->m_nAmmoInClip = Min(GetWeapon()->m_nAmmoTotal, CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->m_nAmountofAmmunition);
+	// The stock weapon switch fills the clip. With the active reload on the
+	// player reloads by hand, so the clip keeps its rounds (VICE-74).
+	if (!gActiveReloadEnabled)
+		GetWeapon()->m_nAmmoInClip = Min(GetWeapon()->m_nAmmoTotal, CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->m_nAmountofAmmunition);
 
 	if (CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_CANAIM))
 		ClearWeaponTarget();
@@ -917,6 +921,33 @@ switchDetectDone:
 			MakeChangesForNewWeapon(m_nSelectedWepSlot);
 		}
 	}
+}
+
+// The active reload of the player: the reload key starts a reload, a later
+// press judges the timing window, and an idle player plays the reload
+// animation. The timing itself lives in src/weapons/ActiveReload.
+void
+CPlayerPed::ProcessActiveReload(CPad *padUsed)
+{
+	CWeapon *weapon = GetWeapon();
+
+	if (padUsed->ReloadJustDown()) {
+		if (ActiveReload::InProgress())
+			ActiveReload::Judge(weapon);
+		else if (weapon->CanReload())
+			weapon->StartReload(this);
+	}
+
+	// Attack() starts the animation for the player who reloads in a fight;
+	// this covers the player who reloads while standing still. The claim keeps
+	// a long jam from starting the animation a second time. With the fast
+	// reload flag the stock code skips the animation completely, and the
+	// helper's side effects must not run every frame, so no per-frame attempt
+	// is made then.
+	if (weapon->m_eWeaponState == WEAPONSTATE_RELOADING
+		&& !CWorld::Players[CWorld::PlayerInFocus].m_bFastReload
+		&& ActiveReload::ClaimReloadAnimation())
+		TryStartReloadAnimation();
 }
 
 #ifdef FIRST_PERSON
@@ -2242,6 +2273,7 @@ CPlayerPed::ProcessControl(void)
 	}
 	if (padUsed && IsPedShootable() && m_nPedState != PED_ANSWER_MOBILE && m_nLastPedState != PED_ANSWER_MOBILE) {
 		ProcessWeaponSwitch(padUsed);
+		ProcessActiveReload(padUsed);
 		GetWeapon()->Update(m_audioEntityId, this);
 	}
 	ProcessAnimGroups();

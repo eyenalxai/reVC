@@ -1474,6 +1474,9 @@ Cámara en primera persona
 [FEC_FOV]
 Campo de visión
 
+[FEC_CCD]
+Distancia cámara coche
+
 [FEC_LL]
 Mirar a la izquierda
 
@@ -7176,6 +7179,12 @@ DRIFT HANDLING
 
 [FEC_ISP]
 INFINITE SPRINT
+
+[FEC_ARL]
+Active Reload
+
+[FEC_RLD]
+Reload
 
 [FEC_NLK]
 BLOQ NUM
@@ -14424,6 +14433,9 @@ PED DENSITY
 
 [FEM_CAR]
 CAR DENSITY
+
+[FEM_SPN]
+SPAWN DIST
 
 { end of file }
 [DUMMY]
