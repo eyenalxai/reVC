@@ -1375,10 +1375,23 @@ CPlayerPed::ProcessPlayerWeapon(CPad *padUsed)
 				else
 					TheCamera.SetNewPlayerWeaponMode(CCam::MODE_M16_1STPERSON, 0, 0);
 
-				m_fMoveSpeed = 0.0f;
-				CAnimManager::BlendAnimation(GetClump(), ASSOCGRP_STD, ANIM_STD_IDLE, 1000.0f);
-				SetPedState(PED_SNIPER_MODE);
-				return;
+#ifdef FIRST_PERSON
+				// The first person ADS with a normal weapon keeps the player
+				// moving: the M16 camera mode gives the zoom and the aim pose
+				// comes from UpdateFirstPersonAim, so the stationary sniper
+				// state is not needed. The sniper, the rocket launcher and the
+				// camera keep the stock stationary sight.
+				bool mobileAds = TheCamera.FirstPersonViewEnabled() &&
+				   weapon != WEAPONTYPE_ROCKETLAUNCHER && weapon != WEAPONTYPE_SNIPERRIFLE &&
+				   weapon != WEAPONTYPE_LASERSCOPE && weapon != WEAPONTYPE_CAMERA;
+				if(!mobileAds)
+#endif
+				{
+					m_fMoveSpeed = 0.0f;
+					CAnimManager::BlendAnimation(GetClump(), ASSOCGRP_STD, ANIM_STD_IDLE, 1000.0f);
+					SetPedState(PED_SNIPER_MODE);
+					return;
+				}
 			}
 			if (!TheCamera.Using1stPersonWeaponMode())
 				if (weapon == WEAPONTYPE_ROCKETLAUNCHER || weapon == WEAPONTYPE_SNIPERRIFLE || weapon == WEAPONTYPE_LASERSCOPE || weapon == WEAPONTYPE_CAMERA)
