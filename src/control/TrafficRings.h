@@ -11,15 +11,24 @@
  * The one range control is the draw distance (VICE-125). The ring request is
  * the LOD distance over its stock value:
  *
- *	scale = min(lodDistance / RING_LOD_REFERENCE, visibleCap)
+ *	scale = min(lodDistance / RING_LOD_REFERENCE, visibleCap, RING_MAX_SCALE)
  *
  * The LOD distance is 300 times the LOD multiplier, and the multiplier is the
  * FOV factor times the draw distance (Camera.cpp), so the slider that draws the
- * world farther also pushes the ring out, and the stock draw distance gives the
- * stock ring. The cap is the visible range: min(the LOD distance, the weather
- * far clip), one reserve short, so a ring never sits past what the player can
- * see. A ring that aims past it only wastes spawns: the weather hides the car
- * or the world, and the birth cull deletes it on the frame it is created.
+ * world farther also pushes the ring out, up to RING_MAX_SCALE (VICE-145): the
+ * budgets are a fixed number of cars and pedestrians, so a ring that follows
+ * the draw distance all the way spreads them into a thin far shell and the near
+ * streets empty. At the cap the front band is 500 m, a few hundred metres.
+ * The visible cap is the visible range, min(the LOD distance, the weather far
+ * clip), one reserve short, so a ring never sits past what the player can see.
+ * A ring that aims past it only wastes spawns: the weather hides the car or the
+ * world, and the birth cull deletes it on the frame it is created.
+ *
+ * Invisibility: with the local cap the spawn ring sits far inside the far clip,
+ * so the far clip is not what hides a spawn. The off-screen band is created out
+ * of view, and the on-screen band is the original game's own arrangement, at a
+ * few hundred metres, where the fog and the fade distance of the world around
+ * the car do the hiding. The stricter blind-spot creation is VICE-127's work.
  *
  * The cap has a floor under it: the stock ring at the live FOV factor. The cap
  * stops growth, it never pulls a radius below the radius the game always had:
@@ -71,10 +80,18 @@ static inline float TrafficRingsMax(float a, float b) { return a > b ? a : b; }
 #define RING_CAR_CAMERA_MIN		82.5f	/* a fresh on-screen spawn this close to the camera is deleted */
 #define RING_MAX_FOV_FACTOR		2.2f	/* the camera caps the FOV factor here (Camera.cpp) */
 
+/* The cap of the ring scale (VICE-145). The ring stays local: the budgets are a
+ * fixed number of cars and pedestrians, so a ring that follows a 2 km draw
+ * distance spreads them into a thin far shell and the near streets empty. At
+ * the cap the front band is RING_CAR_ONSCREEN_SPAWN_MAX x RING_MAX_SCALE = 500 m,
+ * a few hundred metres, and the target of the density sliders keeps a dense
+ * street there. The draw distance still drives the ring up to this cap. */
+#define RING_MAX_SCALE			2.0f
+
 /* The LOD distance of the stock ring: the LOD distance base times the draw
  * distance the game ships with (DrawDistance.h; the renderer starts at it).
  * The ring request is the live LOD distance over this, so the default draw
- * distance gives the stock ring and a higher one grows it. */
+ * distance gives the stock ring and a higher one grows it up to the cap. */
 #define RING_LOD_REFERENCE		(LOD_DISTANCE_BASE * DRAWDIST_DEFAULT)
 
 /* The boat. A water path node sits off the car path, so the water ring is 1.5
@@ -116,6 +133,10 @@ static_assert(RING_CAR_ONSCREEN_SPAWN_MIN < RING_CAR_ONSCREEN_SPAWN_MAX, "the on
  * at its cap: the band's inner edge is 220 m or more at every scale (the floor
  * keeps the scale at the FOV factor), and the rule stops at 82.5 x 2.2. */
 static_assert(RING_CAR_CAMERA_MIN * RING_MAX_FOV_FACTOR < RING_CAR_ONSCREEN_SPAWN_MIN, "the camera rule must sit inside the on-screen band at the FOV cap");
+/* VICE-145: the capped ring must stay local, a few hundred metres. */
+static_assert(RING_MAX_SCALE >= 1.0f, "the cap must leave the stock ring room");
+static_assert(RING_CAR_ONSCREEN_SPAWN_MAX * RING_MAX_SCALE <= 600.0f, "the capped on-screen ring must stay local");
+static_assert(RING_PED_CREATE_MAX * RING_MAX_SCALE <= 600.0f, "the capped ped ring must stay local");
 /* The generator rings and the car despawn share the scale now, so the stock
  * numbers alone carry their invariant. */
 static_assert(RING_GENERATOR_FAR < RING_CAR_DESPAWN, "the generator ring must stay inside the car despawn");
@@ -180,21 +201,24 @@ ComputeTrafficRings(const STrafficRingInput &in)
 	 * family asks without the FOV factor. */
 	float requested = in.lodDistance / RING_LOD_REFERENCE;
 	float requestedSide = requested / in.fovFactor;
-	/* The caps: the largest spawn radius stays the reserve inside the visible
-	 * range. The cap never pulls a radius below the stock radius at the live
-	 * FOV factor; it only stops growth. A range of zero is not known yet (the
-	 * boot path), and there is nothing to fit: the requested rings stand. */
-	float scaleCap = requested;
-	float sideCap = requestedSide;
+	/* The caps: the visible range (the largest spawn radius stays the reserve
+	 * inside it) and the local cap of VICE-145, so the fixed budgets keep a
+	 * dense street instead of spreading over a kilometre-wide shell. The visible
+	 * cap never pulls a radius below the stock radius at the live FOV factor; it
+	 * only stops growth, and the local cap is the last word over both. A range
+	 * of zero is not known yet (the boot path), and there is nothing to fit: the
+	 * requested rings stand. */
+	float scaleCap = TrafficRingsMin(requested, RING_MAX_SCALE);
+	float sideCap = TrafficRingsMin(requestedSide, RING_MAX_SCALE);
 	if (r.visibleRange > 0.0f) {
 		float visibleCap = (r.visibleRange - RING_CAR_DESPAWN_RESERVE) / RING_CAR_ONSCREEN_SPAWN_MAX;
 		/* The floor of the on-screen family is the FOV factor, the floor of the
 		 * off-screen family is the stock band itself. */
-		scaleCap = TrafficRingsMax(visibleCap, in.fovFactor);
-		sideCap = TrafficRingsMax(visibleCap / in.fovFactor, 1.0f);
+		scaleCap = TrafficRingsMin(TrafficRingsMax(visibleCap, in.fovFactor), RING_MAX_SCALE);
+		sideCap = TrafficRingsMin(TrafficRingsMax(visibleCap / in.fovFactor, 1.0f), RING_MAX_SCALE);
 	}
-	r.scale = TrafficRingsMax(TrafficRingsMin(requested, scaleCap), in.fovFactor);
-	r.sideScale = TrafficRingsMax(TrafficRingsMin(requestedSide, sideCap), 1.0f);
+	r.scale = TrafficRingsMin(TrafficRingsMax(TrafficRingsMin(requested, scaleCap), in.fovFactor), RING_MAX_SCALE);
+	r.sideScale = TrafficRingsMin(TrafficRingsMax(TrafficRingsMin(requestedSide, sideCap), 1.0f), RING_MAX_SCALE);
 
 	/* The car. The reserve is the same distance at every scale: it holds the
 	 * placement error of a fresh spawn, and that does not shrink with the ring.

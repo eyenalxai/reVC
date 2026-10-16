@@ -43,10 +43,15 @@ TrafficRingsInvariant(const STrafficRings &r, float fovFactor, const char **pWha
 		return *pWhat = "the on-screen ring aims past the visible range and the floor", false;
 	if (r.carDespawn < r.carSideSpawn)
 		return *pWhat = "the cull is inside the side ring", false;
-	/* The floor of the two scales: the stock radius at the live FOV factor, and
-	 * the stock off-screen band. */
-	if (r.scale < fovFactor || r.sideScale < 1.0f)
+	/* The floor of the two scales: the stock radius at the live FOV factor (as
+	 * far as the local cap leaves it, VICE-145), and the stock off-screen band. */
+	if (r.scale < TrafficRingsMin(fovFactor, RING_MAX_SCALE) || r.sideScale < TrafficRingsMin(1.0f, RING_MAX_SCALE))
 		return *pWhat = "a scale is below its floor", false;
+	/* VICE-145: the ring stays local, whatever the draw distance. */
+	if (r.scale > RING_MAX_SCALE || r.sideScale > RING_MAX_SCALE)
+		return *pWhat = "a scale passed the local cap", false;
+	if (r.carOnScreenSpawnMax > RING_CAR_ONSCREEN_SPAWN_MAX * RING_MAX_SCALE + 0.05f)
+		return *pWhat = "the on-screen ring did not stay local", false;
 
 	/* The boat ring is the water factor over the car ring, and the extended
 	 * range factor multiplies the whole threshold, so the reserve scales with

@@ -2,7 +2,8 @@
 
 Date: 2026-10-16
 Status: Accepted
-Relates to: VICE-125 (the implementation), ADR 0013 (the ring table)
+Relates to: VICE-125 (the implementation), VICE-145 (the local cap), ADR 0013
+(the ring table)
 
 ## Context
 
@@ -20,6 +21,8 @@ change the ring). The owner asked for one control (ask 4).
    the stock draw distance gives the stock ring. The LOD distance carries the
    FOV factor (Camera.cpp), so the ring keeps following it, and the visible cap
    keeps the ring inside min(LOD distance, far clip) with its floor.
+   The ring is also capped locally: `RING_MAX_SCALE` = 2, so the front band
+   stays at most 500 m (VICE-145, below).
 2. The separate spawn distance slider goes. The display menu keeps the draw
    distance, the ped density and the car density.
 3. The old key still loads and maps. A file that raised the spawn distance and
@@ -50,10 +53,50 @@ change the ring). The owner asked for one control (ask 4).
    the draw distance now clamps the value at load; it was unbounded, and a stale
    file could put it anywhere before the menu clamped it.
 6. The generator ring follows the one control too (230 m and 345 m times the
-   scale): the parked cars appear with the world the slider draws. It stays
-   under the despawn of the cars it makes at every scale (the static asserts and
-   the harness carry that), so a parked car is never removed at its own door.
+   scale, so [440, 460) m at the cap): the parked cars appear with the world the
+   slider draws, and locally (VICE-145). It stays under the despawn of the cars
+   it makes at every scale (the static asserts and the harness carry that), so a
+   parked car is never removed at its own door.
 7. The population caps follow the ring scale, exactly as VICE-120 left them.
+
+## VICE-145: the local cap, after the ring followed the draw distance all the way
+
+The first cut of point 1 let the ring follow the draw distance up to the visible
+range. At the owner's settings (draw distance 16, first person FOV 110, sunny)
+that made the scale 7.9, the front band 1970 m and the despawn 2206 m. The
+budgets are a fixed number of entities (`MAX_RANDOM_CARS` 1700, the ped cap
+5500), so the same cars spread over a 15.3 km^2 shell: the measured 1700-car
+target was never even reached (the counter sat at 171-200) and the near streets
+emptied, the exact opposite of the design point. The cap keeps the ring local:
+
+- `RING_MAX_SCALE` = 2 caps both scales, after the visible cap and its floor.
+  The draw distance still drives the ring up to the cap (the scale reaches 2 at
+  a draw distance of 2.4 at FOV 70); past that the world grows and the ring does
+  not. Stock settings are unchanged (the scale is 1 there).
+- The budgets and the rates follow the capped scale, so the target of the
+  density sliders fills a 500 m ring instead of a 2 km one. At the owner's
+  settings the target is 408 cars in a 0.99 km^2 ring: 414 cars/km^2, one car
+  per ~10 m of street if the streets take 6% of the ground (the estimate is the
+  harness's, labelled as one). The state the owner liked (the spawn distance
+  slider at 4.0 on 494888ff) had a 636 m ring with 246-341 cars: the cap keeps
+  the same density on a smaller ring, and `MAX_RANDOM_CARS` no longer binds.
+- The invariant is untouched: the cap only lowers the scale, and every rule of
+  the table (the reserve, the camera rule, the generator, the ped band) holds at
+  every scale from the floor to the cap (the harness checks the whole matrix).
+- Invisibility. With the cap the ring sits far inside the far clip (560 m of
+  despawn against 2000 m of clear-weather clip, 1440 m of margin), so the far
+  clip no longer hides a spawn. The off-screen band is created out of view, and
+  the on-screen band is the original game's own arrangement, a few hundred
+  metres out, where the fog and the fade distance of the world around the car do
+  the hiding. The stricter blind-spot creation is VICE-127's work.
+- The parked cars (the measured `NumParkedCars` 0). The generator ring follows
+  the one control too (point 6), so the uncapped scale moved its band from
+  [126, 146) m (494888ff, 230 x the FOV factor) to [1792, 1812) m: the player
+  never enters a band 1.8 km away, so the generator never created a car. They
+  were not removed: the lifetime cull of that state sat at 2206 m, above the
+  band, so a car created there would have survived. The cap puts the band at
+  [440, 460) m, a local band the player crosses while driving, and the parked
+  cars come back.
 
 ## What VICE-120 had already done (no work here)
 
@@ -65,7 +108,9 @@ change the ring). The owner asked for one control (ask 4).
 
 ## Consequences
 
-- One user-visible control for the range.
+- One user-visible control for the range, with a local ring: the draw distance
+  moves the ring between the stock ring and the cap, and beyond the cap it moves
+  the world only.
 - The ring of a lowered draw distance floors at the stock ring: the stock
   numbers are the pop-in distance the game's own band carries, so the lower part
   of the slider moves the world only.
