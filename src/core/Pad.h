@@ -248,6 +248,8 @@ public:
 	bool HornJustDown(void);
 	bool GetCarGunFired(void);
 	bool CarGunJustDown(void);
+	// The car ADS aim: the driving mapper sets it from the mouse aim button
+	bool GetCarAim(void);
 	int16 GetHandBrake(void);
 	int16 GetBrake(void);
 	bool GetExitVehicle(void);

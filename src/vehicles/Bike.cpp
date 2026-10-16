@@ -2039,8 +2039,22 @@ CBike::DoDriveByShootings(void)
 			lookingRight = true;
 	}
 
-	if(lookingLeft || lookingRight || CPad::GetPad(0)->GetCarGunFired()){
-		if(lookingLeft){
+	// The car ADS: the aim button aims freely with the camera instead of the
+	// look keys. The free aim shot has no animation of its own, so the drive-by
+	// arm stands in.
+	bool aiming = false;
+#ifdef FIRST_PERSON
+	aiming = TheCamera.UsingCarAds();
+#endif
+
+	if(lookingLeft || lookingRight || aiming || CPad::GetPad(0)->GetCarGunFired()){
+		if(aiming){
+			// the forward arm goes when the free aim takes over
+			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_FORWARD);
+			if(anim)
+				anim->blendDelta = -1000.0f;
+			anim = UpdateDriveByAimAnim(m_bikeAnimType, ANIM_BIKE_DRIVEBY_LHS, ANIM_BIKE_DRIVEBY_RHS);
+		}else if(lookingLeft){
 			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_RHS);
 			if(anim)
 				anim->blendDelta = -1000.0f;
@@ -2072,16 +2086,18 @@ CBike::DoDriveByShootings(void)
 				anim = CAnimManager::AddAnimation(pDriver->GetClump(), m_bikeAnimType, ANIM_BIKE_DRIVEBY_FORWARD);
 		}
 
-		if (!anim || !anim->IsRunning()) {
+		// The free aim fires at once: the drive-by arm is only a stand-in and
+		// the first person car view does not show it
+		if (aiming || !anim || !anim->IsRunning()) {
 			if (CPad::GetPad(0)->GetCarGunFired() && CTimer::GetTimeInMilliseconds() > weapon->m_nTimer)
-				weapon->FireFromCarWithCadence(this, lookingLeft, lookingRight);
+				weapon->FireFromCarWithCadence(this, lookingLeft, lookingRight, aiming);
 		}
 	}else{
 		// The stock code refills the clip while the player does not aim.
 		// With the active reload on the clip is a magazine and refills only
 		// through the reload key (VICE-90); an AI driver and the toggle off
 		// keep the stock refill.
-		if (!gActiveReloadEnabled || !pDriver->IsPlayer())
+		if (CWeapon::UsesStockClipRefill(pDriver))
 			weapon->Reload();
 		anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_LHS);
 		if(anim)

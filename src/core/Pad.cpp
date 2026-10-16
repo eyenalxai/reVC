@@ -1637,10 +1637,29 @@ bool CPad::CarGunJustDown(void)
 	return false;
 }
 
+// The car ADS aim: the mouse aim button in the driving state, so the right
+// mouse aims freely while the player drives (VICE-110)
+bool CPad::GetCarAim(void)
+{
+	if ( ArePlayerControlsDisabled() )
+		return false;
+
+	return !!NewState.DPadUp;
+}
+
 int16 CPad::GetHandBrake(void)
 {
 	if ( ArePlayerControlsDisabled() )
 		return 0;
+
+	// The car ADS owns the aim input: while the player aims, the handbrake is
+	// ignored, so a stale ini that still maps the handbrake to the aim button
+	// cannot brake the car (VICE-110). The handbrake keys set only the
+	// handbrake field, so they keep working.
+#ifdef FIRST_PERSON
+	if ( TheCamera.UsingCarAds() )
+		return 0;
+#endif
 
 	switch (CURMODE)
 	{

@@ -4728,7 +4728,7 @@ CPed::GiveWeapon(eWeaponType weaponType, uint32 ammo, bool unused)
 		// The player with the active reload on reloads by hand, so the
 		// pickup's ammo goes to the reserve and the clip keeps its rounds.
 		// AI peds and the toggle off keep the stock refill (VICE-74).
-		if (!IsPlayer() || !gActiveReloadEnabled)
+		if (CWeapon::UsesStockClipRefill(this))
 			GetWeapon(slot).Reload();
 		if (GetWeapon(slot).m_eWeaponState == WEAPONSTATE_OUT_OF_AMMO && GetWeapon(slot).m_nAmmoTotal > 0)
 			GetWeapon(slot).m_eWeaponState = WEAPONSTATE_READY;
@@ -4867,6 +4867,19 @@ CPed::ReplaceWeaponWhenExitingVehicle(void)
 	}
 }
 
+// Maps the head bone to zero, so the head is gone from the picture: the
+// first person camera sits inside it and a shot-off head is not drawn. The
+// animation hierarchy rebuilds the bone.
+void
+CPed::CollapseHeadBone(void)
+{
+	RpHAnimHierarchy *hier = GetAnimHierarchyFromSkinClump(GetClump());
+	int32 idx = RpHAnimIDGetIndex(hier, ConvertPedNode2BoneTag(PED_HEAD));
+	RwMatrix *head = &RpHAnimHierarchyGetMatrixArray(hier)[idx];
+	RwV3d zero = { 0.0f, 0.0f, 0.0f };
+	RwMatrixScale(head, &zero, rwCOMBINEPRECONCAT);
+}
+
 void
 CPed::PreRender(void)
 {
@@ -4880,13 +4893,8 @@ CPed::PreRender(void)
 #ifdef FIRST_PERSON
 	// First person: the camera sits inside the head, so collapse the head bone.
 	// The animation hierarchy rebuilds the head when the view ends.
-	if (IsPlayer() && TheCamera.Using1stPersonView()) {
-		RpHAnimHierarchy* hier = GetAnimHierarchyFromSkinClump(GetClump());
-		int32 idx = RpHAnimIDGetIndex(hier, ConvertPedNode2BoneTag(PED_HEAD));
-		RwMatrix* head = &RpHAnimHierarchyGetMatrixArray(hier)[idx];
-		RwV3d zero = { 0.0f, 0.0f, 0.0f };
-		RwMatrixScale(head, &zero, rwCOMBINEPRECONCAT);
-	}
+	if (IsPlayer() && TheCamera.Using1stPersonView())
+		CollapseHeadBone();
 #endif
 
 	bool bIsWindModifierTurnedOn = false;
@@ -4960,14 +4968,9 @@ CPed::PreRender(void)
 		RwMatrixScale(upperArmR, &scale, rwCOMBINEPRECONCAT);
 	}
 
-	if (bBodyPartJustCameOff && m_bodyPartBleeding == PED_HEAD) {
+	if (bBodyPartJustCameOff && m_bodyPartBleeding == PED_HEAD)
 		// scale head to 0 if shot off
-		RpHAnimHierarchy* hier = GetAnimHierarchyFromSkinClump(GetClump());
-		int32 idx = RpHAnimIDGetIndex(hier, ConvertPedNode2BoneTag(PED_HEAD));
-		RwMatrix* head = &RpHAnimHierarchyGetMatrixArray(hier)[idx];
-		RwV3d zero = { 0.0f, 0.0f, 0.0f };
-		RwMatrixScale(head, &zero, rwCOMBINEPRECONCAT);
-	}
+		CollapseHeadBone();
 
 	if (IsPlayer() && gfTommyFatness != 1.0f) {
 		RpHAnimHierarchy* hier = GetAnimHierarchyFromSkinClump(GetClump());

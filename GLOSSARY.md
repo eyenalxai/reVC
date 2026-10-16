@@ -267,6 +267,13 @@ A vehicle collision with an object, a pedestrian, or a vegetation building. The
 vehicle's speed loss and collision damage from a soft hit are one tenth of the
 original values.
 
+## Car ADS
+
+Aiming from the driver's seat with the mouse aim button: the follow camera
+pulls in and the free aim fires along the camera instead of the stock sideways
+drive-by. Only the drive-by vehicles (car, bike, boat) and the drive-by weapon
+take it, and the bullets ignore the player's own car.
+
 ## Replay block
 
 One of the eight fixed buffers of `REPLAYBUFFERSIZE` (100000) bytes that hold
@@ -291,3 +298,4 @@ hover tilt or the road tilt, and the wheel scale. One row of `aWheelPoses` drive
 it, so the rear, mid, Dodo, tank and front wheels share one pass. A row keeps its
 own hover splash order: the two random arguments are drawn in the order the row
 lists them, and swapping a pair would shift the global random stream.
+>>>>>>> origin/miami

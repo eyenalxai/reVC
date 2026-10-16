@@ -40,12 +40,15 @@ public:
 	void Shutdown();
 	
 	bool Fire          (CEntity *shooter, CVector *fireSource);
-	bool FireFromCar   (CVehicle *shooter, bool left, bool right);
+	// Fires the drive-by; aiming fires the free aim along the camera instead,
+	// and left/right only apply to the drive-by
+	bool FireFromCar   (CVehicle *shooter, bool left, bool right, bool aiming);
 	// The drive-by fire of the vehicle callers: fires and then sets the
 	// 70 ms drive-by cadence only when a shot left the barrel. A failed
 	// attempt, an empty clip or a started reload leaves the timer alone,
-	// so the call can never shorten a running reload (VICE-90).
-	void FireFromCarWithCadence(CVehicle *shooter, bool left, bool right);
+	// so the call can never shorten a running reload (VICE-90). The aiming
+	// flag fires the free aim along the camera instead (VICE-110).
+	void FireFromCarWithCadence(CVehicle *shooter, bool left, bool right, bool aiming);
 	bool FireMelee     (CEntity *shooter, CVector &fireSource);
 	bool FireInstantHit(CEntity *shooter, CVector *fireSource);
 	
@@ -64,6 +67,13 @@ public:
 	bool TakePhotograph       (CEntity *shooter);
 	bool FireM16_1stPerson    (CEntity *shooter);
 	bool FireInstantHitFromCar(CVehicle *shooter, bool left, bool right);
+#ifdef FIRST_PERSON
+	// The free aim from a car: the target comes from the camera and there is no
+	// auto aim
+	bool FireInstantHitFromCarFreeAim(CVehicle *shooter);
+#endif
+	// The shot from a car after the source and the target are known
+	bool FireFromCarAt        (CVehicle *shooter, CVector &source, CVector &target);
 	
 	static void DoDoomAiming       (CEntity *shooter, CVector *source,   CVector *target);
 	static void DoTankDoomAiming   (CEntity *shooter, CEntity *driver,   CVector *source, CVector *target);
@@ -76,6 +86,13 @@ public:
 	// weapon, the player and the ActiveReload feature on. AI peds and the
 	// toggle off keep the stock automatic reload.
 	bool UsesManualReload(CEntity *shooter);
+	// True while the weapon uses the stock clip refill for this ped: the
+	// weapon switch, a weapon give and a pickup fill the clip by themselves,
+	// and an AI ped always refills. The player's manual reload (ADR 0010)
+	// turns the player's magazine refill off. The rule reads IsPlayer(), not
+	// FindPlayerPed() like UsesManualReload, so every player ped keeps the
+	// stock path. The toggle is read before the ped; both operands are pure.
+	static bool UsesStockClipRefill(CPed *ped);
 	// True while the player's reload key can start a reload: a magazine
 	// weapon, a clip that is not full, ammo in the reserve and a state that
 	// takes a reload.

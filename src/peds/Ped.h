@@ -665,6 +665,10 @@ public:
 	void Teleport(CVector);
 	void PreRender(void);
 	void Render(void);
+	// Maps the head bone to zero, so the head is gone from the picture: the
+	// first person camera sits inside it and a shot-off head is not drawn.
+	// The animation hierarchy rebuilds the bone.
+	void CollapseHeadBone(void);
 	bool SetupLighting(void);
 	void RemoveLighting(bool);
 	void FlagToDestroyWhenNextProcessed(void);

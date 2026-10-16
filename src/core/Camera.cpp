@@ -4093,6 +4093,43 @@ CCamera::InFirstPersonCarView(void)
 	return Cams[ActiveCam].Mode == CCam::MODE_1STPERSON &&
 		pTargetEntity && pTargetEntity->IsVehicle();
 }
+
+bool
+CCamera::UsingCarAds(void)
+{
+	// The car ADS: the aim button held while the camera serves the player's
+	// vehicle. Third person aims along the mouse follow camera, the first
+	// person car view along its own camera. Only the drive-by vehicles take
+	// the aim, the drive-by belongs to the driver, and only the drive-by
+	// weapon aims, so the camera and the handbrake follow the same rule as
+	// the fire.
+	if(!CPad::GetPad(0)->GetCarAim())
+		return false;
+
+	CVehicle *vehicle = FindPlayerVehicle();
+	if(vehicle == nil || vehicle->pDriver != FindPlayerPed())
+		return false;
+	if(!vehicle->IsCar() && !vehicle->IsBike() && !vehicle->IsBoat())
+		return false;
+	// The Hunter and the Sea Sparrow fire their guns with the handbrake
+	// button, so they keep their controls: they are cars by class but
+	// helicopters by handling.
+	if(vehicle->IsRealHeli() || vehicle->IsRealPlane())
+		return false;
+
+	CPlayerPed *player = FindPlayerPed();
+	CPlayerInfo *playerInfo = player->GetPlayerInfoForThisPlayerPed();
+	if(playerInfo && !playerInfo->m_bDriveByAllowed)
+		return false;
+	if(CWeaponInfo::GetWeaponInfo(player->GetWeapon()->m_eWeaponType)->m_nWeaponSlot != WEAPONSLOT_SUBMACHINEGUN)
+		return false;
+
+	if(InFirstPersonCarView())
+		return pTargetEntity == (CEntity*)vehicle;
+
+	return Cams[ActiveCam].Using3rdPersonMouseCam() &&
+	       Cams[ActiveCam].CamTargetEntity == (CEntity*)vehicle;
+}
 #endif
 
 
