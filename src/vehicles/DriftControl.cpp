@@ -25,9 +25,9 @@
 #define DRIFT_ANGLE_MIN		(-5.0f)	// hold angle floor; the drift ends past zero
 #define DRIFT_SLIP_CAP		60.0f	// slip angle past which the align assist pulls
 #define DRIFT_YAW_GAIN		4.0f	// angle error to yaw rate, 1/s
-#define DRIFT_YAW_MAX		1.5f	// maximum yaw rate, rad/s
-#define DRIFT_YAW_ACCEL		6.0f	// yaw rate ramp, rad/s^2
-#define DRIFT_CURVE_RATE	60.0f	// curve rate at full angle, degrees/s
+#define DRIFT_YAW_MAX		2.6f	// maximum yaw rate, rad/s
+#define DRIFT_YAW_ACCEL		12.0f	// yaw rate ramp, rad/s^2
+#define DRIFT_CURVE_RATE	110.0f	// curve rate at full angle, degrees/s
 #define DRIFT_ALIGN_GAIN	2.0f	// aligning pull past the slip cap, 1/s
 #define DRIFT_VEL_ALIGN_GAIN	3.0f	// slip error to velocity alignment, 1/s
 #define DRIFT_VEL_ALIGN_RATE	120.0f	// cap on the velocity alignment, degrees/s
