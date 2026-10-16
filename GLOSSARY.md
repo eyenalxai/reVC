@@ -285,6 +285,15 @@ the live pose and the glide ends exactly on the new pose. The view changes take
 `CAMERA_HANDOVER_TIME` (650 ms) and the sight zoom takes
 `CAMERA_SIGHTS_HANDOVER_TIME` (250 ms).
 
+## Look recenter
+
+The return of the first person vehicle look to straight ahead of the car. The
+mouse look is an offset from the car's heading; when the look rests for
+`CAMERA_LOOK_RECENTER_IDLE` (400 ms) the offset returns to zero over
+`CAMERA_LOOK_RECENTER_TIME` (800 ms) with an ease out curve. New look input
+cancels the return at once and takes the live offset over, and a held aim keeps
+the view where the mouse put it.
+
 ## Car ADS
 
 Aiming from the driver's seat with the mouse aim button: the follow camera

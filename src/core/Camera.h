@@ -126,6 +126,15 @@ public:
 	// Third person aim down the sights: 0.0 is stock, 1.0 is fully pulled in
 	float   m_fAdsAmount;
 	float   m_fAdsAmountSpeed;
+	// The look recenter of the first person vehicle view: the mouse look is an
+	// offset from the car's heading and this returns it to straight ahead after
+	// the look rests. From is the offset the return started at, so new input
+	// takes the live offset over at once.
+	bool    m_bRecenteringLook;
+	uint32  m_uiLookInputTime;
+	uint32  m_uiRecenterStart;
+	float   m_fRecenterFromYaw;
+	float   m_fRecenterFromPitch;
 #endif
 	float   m_fAlphaSpeedOverOneFrame;
 	float   m_fBetaSpeedOverOneFrame;
