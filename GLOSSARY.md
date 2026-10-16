@@ -121,3 +121,25 @@ the handbrake.
 The existing model in `CVehicle::ProcessWheel`: one grip budget per wheel,
 shared between the forward force and the sideways force. The drift layer changes
 how the budget is spent; it does not change the wheel list.
+
+## Magazine weapon
+
+A weapon with a clip of two or more rounds that fires instant hits. The active
+reload applies to magazine weapons only.
+
+## Active reload
+
+The timed reload of a magazine weapon. The player starts it with the reload
+key; a press inside the reload window finishes the reload fast, and a press
+before the window jams it. The player's reload is manual only: the clip never
+refills by itself.
+
+## Reload window
+
+The part of the active reload between 55% and 80% of the base reload time, when
+a press gives the fast reload.
+
+## Reload jam
+
+The longer reload after a press before the reload window. The press adds half
+the base reload time once, so the reload becomes about 1.5 times the base time.
