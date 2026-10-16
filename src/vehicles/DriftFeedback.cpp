@@ -25,10 +25,11 @@ DriftFeedbackTarget(CAutomobile *car)
 	if(car->GetStatus() != STATUS_PLAYER)
 		return 0.0f;
 	// The drift controller only keeps the slip angle fresh while it runs.
-	if(!car->m_DriftControl.IsActive())
+	CDriftControl::tSnapshot snap = car->m_DriftControl.GetSnapshot(car);
+	if(!snap.bActive)
 		return 0.0f;
 
-	float slip = car->m_DriftControl.m_fSlipAngle;
+	float slip = snap.fSlip;
 	float slipDeg = Abs(slip)*RADTODEG(1.0f);
 	if(slipDeg <= DRIFT_FEEDBACK_SLIP_MIN)
 		return 0.0f;
@@ -45,6 +46,7 @@ CDriftFeedback::Update(CAutomobile *car, float timeStep)
 		return;
 	}
 
+	// One step a frame, even when the car is pre-rendered twice.
 	if(ms_nLastFrame == CTimer::GetFrameCounter())
 		return;
 	ms_nLastFrame = CTimer::GetFrameCounter();

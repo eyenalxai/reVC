@@ -28,8 +28,10 @@ class CAutomobile;
 class CDriftFeedback
 {
 public:
-	// Steps the smoothed strength. The player's car and the chase camera
-	// both call in; only the first call in a frame does the work.
+	// Steps the smoothed strength once a frame. The player's car calls it from
+	// its PreRender (see Automobile.cpp), before the readers of the strength;
+	// the frame guard keeps a second pre-render of the car in a frame from
+	// stepping twice.
 	static void Update(CAutomobile *car, float timeStep);
 
 	// Signed strength of the drift, 0 while the feature is off.

@@ -135,6 +135,27 @@ CDriftControl::GetSteerAngleMult(void)
 	return 1.0f + (DRIFT_STEERLOCK_MULT - 1.0f)*m_fGripCut;
 }
 
+// One read of the live state, at the point of the read: the feedback and the
+// telemetry need the same values the on-screen readout shows (see
+// PrintDebugState), so one struct carries them all.
+CDriftControl::tSnapshot
+CDriftControl::GetSnapshot(CAutomobile *car)
+{
+	tSnapshot snap;
+
+	snap.ePhase = m_Phase;
+	snap.bActive = IsActive();
+	snap.bHandbrakeTurn = m_bHandbrakeTurn;
+	snap.fSlip = m_fSlipAngle;
+	snap.fTargetSlip = m_fTargetSlip;
+	snap.fYawRate = DotProduct(car->m_vecTurnSpeed, car->GetUp()) * DRIFT_TICK_RATE;
+	snap.fGripCut = m_fGripCut;
+	snap.fGripScale = GetRearGripScale();
+	snap.fCharge = m_fDriftTime;
+	snap.fBoost = m_fBoostLevel;
+	return snap;
+}
+
 bool
 CDriftControl::UpdateTargetAngle(CAutomobile *car, float dt)
 {
@@ -389,15 +410,24 @@ CDriftControl::PrintDebugState(CAutomobile *car)
 }
 
 // The entry gate that INACTIVE and RECOVER share: handbrake + steering, on
-// the ground and moving forward. An entry from INACTIVE ramps the rear grip
-// in (the ENGAGE phase starts at a zero cut); an entry from RECOVER is a chain
-// or a flip (see ADR 0008), and it enters DRIFT at the full cut so the second
-// corner of a chicane bites at once.
+// the ground and moving forward. Update asks it too, so an inactive frame
+// only skips the entry work when the entry would fail anyway.
 bool
-CDriftControl::TryStartDrift(CAutomobile *car, float fwdSpeed, bool onGround, bool handbrake, bool fromRecover)
+CDriftControl::CanStartDrift(CAutomobile *car, float fwdSpeed, bool onGround, bool handbrake)
 {
 	if(!handbrake || !onGround || fwdSpeed <= DRIFT_DEADSTOP ||
 	   Abs(car->m_fSteerInput) <= DRIFT_ENTRY_STEER)
+		return false;
+	return true;
+}
+
+// An entry from INACTIVE ramps the rear grip in (the ENGAGE phase starts at a
+// zero cut); an entry from RECOVER is a chain or a flip (see ADR 0008), and it
+// enters DRIFT at the full cut so the second corner of a chicane bites at once.
+bool
+CDriftControl::TryStartDrift(CAutomobile *car, float fwdSpeed, bool onGround, bool handbrake, bool fromRecover)
+{
+	if(!CanStartDrift(car, fwdSpeed, onGround, handbrake))
 		return false;
 
 	m_Phase = fromRecover ? DRIFT_PHASE_DRIFT : DRIFT_PHASE_ENGAGE;
@@ -426,16 +456,29 @@ CDriftControl::Update(CAutomobile *car, float timeStep)
 	float dt = timeStep / DRIFT_TICK_RATE;	// the time step is 1.0 at 50 fps
 
 	float fwdSpeed = GetForwardSpeed(car);
-	float rightSpeed = DotProduct(car->m_vecMoveSpeed, car->GetRight());
-	m_fSlipAngle = Atan2(rightSpeed, fwdSpeed);
-
-	float fMaxVelocity = GetMaxSpeed(car);
 	bool onGround = car->m_nWheelsOnGround >= 2;
 	bool handbrake = !!car->bIsHandbrakeOn;
+
+	// The drift state is only live while the drift runs or the readout is on;
+	// a frame that can enter a drift needs it too, and before the boost below
+	// moves the car.
+	bool bDriftLive = m_Phase != DRIFT_PHASE_INACTIVE || gDriftDebug ||
+	                  CanStartDrift(car, fwdSpeed, onGround, handbrake);
+	if(bDriftLive){
+		float rightSpeed = DotProduct(car->m_vecMoveSpeed, car->GetRight());
+		m_fSlipAngle = Atan2(rightSpeed, fwdSpeed);
+	}
 
 	// The boost stack lives outside the drift phases, so a chained boost keeps
 	// pushing after the handbrake is released.
 	ApplyBoost(car, dt);
+
+	// With the drift off, the readout off and the entry gate closed, the rest
+	// of the frame has nothing to do.
+	if(!bDriftLive)
+		return;
+
+	float fMaxVelocity = GetMaxSpeed(car);
 
 	// The readout shows the live drift state while it is on (see re3.cpp);
 	// the telemetry records it to a file (see DriftTelemetry.h).

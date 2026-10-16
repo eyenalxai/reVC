@@ -1733,7 +1733,9 @@ CAutomobile::PreRender(void)
 	int i, j, n;
 	CVehicleModelInfo *mi = (CVehicleModelInfo*)CModelInfo::GetModelInfo(GetModelIndex());
 
-	// Drift feedback is player-only, like the drift itself.
+	// Drift feedback is player-only, like the drift itself. This is its one
+	// per-frame step (see DriftFeedback.h); the skid marks and smoke below and
+	// the lean at render time read it.
 	if(GetStatus() == STATUS_PLAYER)
 		CDriftFeedback::Update(this, CTimer::GetTimeStepInSeconds());
 
