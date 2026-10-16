@@ -17,7 +17,7 @@ class CAutomobile;
 enum{
 	MAX_CARS_TO_KEEP = 2,
 	MAX_CAR_MODELS_IN_ARRAY = 25,
-	MAX_RANDOM_CARS = 200,
+	MAX_RANDOM_CARS = 1700,
 };
 
 #ifdef FIX_BUGS
