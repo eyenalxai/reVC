@@ -313,6 +313,76 @@ the triggers are the two boot countdowns, the area writer
 (`CCutsceneMgr::DeleteCutsceneData`); ADR 0021 holds the decisions and the
 restated acceptance.
 
+## Near bubble
+
+The 360-degree disc of 90 m around the player that the traffic never creates or
+removes an entity inside (VICE-127). The radius is the car side band (120 m)
+less the placement reserve of the ring table (30 m), so no spawn band places
+inside it; the population inside the bubble is the traffic that drove in from
+outside. A creation outside the bubble is allowed only while the player cannot
+see the position: beyond the visible range (the fade and the fog), behind the
+soft distance (the traffic behind the camera, off the view cone by the margin),
+or behind the confirmation ray (the occluded hint and the close blind spot are
+never allowed on their own: a blocked line of sight decides, bounded per frame).
+A removal needs the fresh-spawn grace, the removal distance (the bubble plus its
+reserve, at least the ring's despawn) and the same hidden condition. A car
+created off the view cone holds its alpha 0 until it is first on screen, so the
+reveal itself is the fade. The rules live in `src/control/NearBubble.h`, the
+engine arms and the counters in `NearBubble.cpp`; ADR 0025 holds the decisions.
+
+## Soft distance
+
+The distance at which the soft arm of the near bubble begins (VICE-127): the car
+side band less the widest lane offset of the shipped paths (17.5 m), so every
+placement of the band sits at or beyond it. A car off the view cone by the
+margin and at or beyond it may be created - the traffic behind the camera - and
+inside it only the confirmation ray decides. It is the arm that keeps a street
+with no occluders alive, because the ring's bands sit inside the visible range
+by the ring table's design (`NEAR_BUBBLE_SOFT_DISTANCE`).
+
+## Confirmation ray
+
+The one test that allows a car to be created or removed behind the near bubble's
+hints (VICE-127): `CWorld::GetIsLineOfSightClear` against the buildings, so a
+blocked line of sight means no turn of the camera can reveal the position. The
+occluded hint is a frame old and can be wrong against a turned camera, so it
+only selects the position; the close blind spot (off the view cone by the
+margin, inside the soft distance) uses the same ray. A frame spends at most four
+of them (`NEAR_BUBBLE_LOS_RAYS_PER_FRAME`).
+
+## Frustum counter
+
+One of the two acceptance counters of the near bubble (VICE-127), read live by
+`utils/caps-audit/live-counters.py`: `ms_nNearBubbleCreationsInFrustum` and
+`ms_nNearBubbleRemovalsInFrustum`. An event at a position the player could catch
+- in the frustum, inside the fade, not occluded - moves them; the rule never
+allows one, so a path that bypasses the rule shows up there. Both must stay 0 in
+a play session; the catchable events a fade covers are counted apart (fade
+creations and fade removals), and the cars created outside the traffic spawner
+have their own rows (`ms_nNearBubbleOtherCreations` and its in-frustum
+subdivision), so neither a transition nor a scripted car reads as a traffic
+violation.
+
+## Fresh-spawn grace
+
+The 5 seconds a freshly created car is protected from every cull
+(`NEAR_BUBBLE_GRACE_MS`, VICE-127). The vehicle holds it in
+`m_nRemovalProtectedUntil`, the one field the set pieces, the road blocks and
+the wreck cull already used as a not-before clock; the grace is set where a car
+of the traffic (or a parked car) is created. It is the same 5 s the stuck cull
+waits, so a car that was just placed is never the one a cull gives up on.
+
+## Bubble fill
+
+The number of cars the traffic spawner created (the random cars and the
+emergency services) inside the near bubble, read live as `ms_nNearBubbleFill`
+(VICE-127). The target is the share of the car budget the bubble's area takes of
+the despawn disc (`ms_fNearBubbleTarget`): about 6 cars at the stock settings
+and 10 at the owner's. The cars of the same budget that the spawner did not
+create (the scripts, the set pieces, the road blocks, the car parks, the
+garages, the cheats) are `ms_nNearBubbleOtherFill`; the orchestrator compares
+the sum of the two against the target while driving and during a camera turn.
+
 ## Pool
 
 The fixed storage for the entities and their list nodes: pedestrians, vehicles,

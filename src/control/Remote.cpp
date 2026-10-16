@@ -30,6 +30,7 @@ CRemote::GivePlayerRemoteControlledCar(float x, float y, float z, float rot, uin
 	car->AutoPilot.m_nNextLane = car->AutoPilot.m_nCurrentLane = 0;
 	car->bEngineOn = true;
 	CWorld::Add(car);
+	CCarCtrl::NearBubbleCountOtherCreation(car->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 	if (FindPlayerVehicle() != nil) 
 		FindPlayerVehicle()->SetStatus(STATUS_PLAYER_DISABLED);
 

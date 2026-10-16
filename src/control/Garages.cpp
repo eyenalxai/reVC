@@ -5,6 +5,7 @@
 
 #include "Bike.h"
 #include "Boat.h"
+#include "CarCtrl.h"
 #include "DMAudio.h"
 #include "General.h"
 #include "Font.h"
@@ -1931,6 +1932,10 @@ bool CGarage::RestoreCarsForThisHideout(CStoredCar* aCars)
 			CVehicle* pVehicle = aCars[i].RestoreCar();
 			if (pVehicle) {
 				CWorld::Add(pVehicle);
+				/* The stored car comes out of the garage (VICE-127): a car
+				 * created outside the traffic spawner, counted apart and
+				 * never in the traffic's fill. */
+				CCarCtrl::NearBubbleCountOtherCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 				aCars[i].Clear();
 			}
 		}

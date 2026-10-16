@@ -135,7 +135,21 @@ void CCarGenerator::DoInternalProcessing()
 	pVehicle->SetOrientation(0.0f, 0.0f, DEGTORAD(m_fAngle));
 	pVehicle->SetStatus(STATUS_ABANDONED);
 	pVehicle->m_nDoorLock = CARLOCK_UNLOCKED;
+	/* The near bubble (VICE-127): a parked car may appear only where the
+	 * player cannot see it. The gate is the ladder of the traffic, but its
+	 * blind-spot arm is off: an empty generator retries every four frames for
+	 * as long as it is in range, and the generators run before the traffic in
+	 * the frame, so a ray per candidate would eat the budget the traffic
+	 * needs. A spot behind the camera that no occluder covers waits for the
+	 * next look (a refusal does not advance the generator's timer, so
+	 * CCarGenerator::Process retries). */
+	if (!CCarCtrl::NearBubbleAllowsCreation(pos, FindPlayerCentreOfWorld(CWorld::PlayerInFocus), NEAR_BUBBLE_ENTITY_RADIUS, false)) {
+		delete pVehicle;
+		return;
+	}
+	pVehicle->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + NEAR_BUBBLE_GRACE_MS;
 	CWorld::Add(pVehicle);
+	CCarCtrl::NearBubbleCountCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 	if (CGeneral::GetRandomNumberInRange(0, 100) < m_nAlarm)
 		pVehicle->m_nAlarmState = -1;
 	if (CGeneral::GetRandomNumberInRange(0, 100) < m_nDoorlock)

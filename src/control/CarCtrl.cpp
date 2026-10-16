@@ -132,6 +132,10 @@ CCarCtrl::NumCarsInUse(void)
 void
 CCarCtrl::GenerateRandomCars()
 {
+	/* The near bubble begins its frame here, before any gate can run: the
+	 * line-of-sight budget of the frame and the target of the fill
+	 * (VICE-127). The cutscene gate below must not leave a stale frame. */
+	NearBubbleBeginFrame();
 	/* One table read per frame: the rate that fills the ring follows the ring
 	 * scale, exactly as the count target does. */
 	const STrafficRings rings = CurrentTrafficRings();
@@ -773,6 +777,24 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 			return false;
 		}
 	}
+	/* The near bubble (VICE-127): a car may only appear where the player
+	 * cannot see it. The gate is asked with the final position, after the
+	 * ground cast in the birth cull above, so the answer is about the spot
+	 * the car really takes: outside the bubble, and hidden now (occluded,
+	 * beyond the fade, or behind a blocked line of sight), or a frame the
+	 * fade covers (the fill burst). A refusal is not an error: the placement
+	 * loop of GenerateOneRandomCar tries its next candidate. */
+	if (!NearBubbleAllowsCreation(pVehicle->GetPosition(), vecTargetPos, NEAR_BUBBLE_ENTITY_RADIUS, true)) {
+		delete pVehicle;
+		return false;
+	}
+	/* The fresh-spawn grace: the culls of the frame may not take this car
+	 * before it has lived NEAR_BUBBLE_GRACE_MS. */
+	pVehicle->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + NEAR_BUBBLE_GRACE_MS;
+	/* The car is the traffic spawner's own: the bubble's fill counts it, and
+	 * the cars the scripts and the set pieces create (RANDOM_VEHICLE too, so
+	 * part of the car target) are the fill's other half (VICE-127). */
+	pVehicle->bIsTrafficCar = true;
 	CVehicleModelInfo* pVehicleModel = pVehicle->GetModelInfo();
 	float radiusToTest = pVehicleModel->GetColModel()->boundingSphere.radius;
 	if (testForCollision){
@@ -794,6 +816,10 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 	}
 	pVehicleModel->AvoidSameVehicleColour(&pVehicle->m_currentColour1, &pVehicle->m_currentColour2);
 	CWorld::Add(pVehicle);
+	/* The acceptance reads this: the car exists now, and the counter says
+	 * where. The gate above already refused every catchable spot, so this is
+	 * the guard of the paths that bypass it (VICE-127). */
+	NearBubbleCountCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 	if (carClass == COPS || carClass == COPS_BOAT)
 		CCarAI::AddPoliceCarOccupants(pVehicle);
 	else {
@@ -1082,10 +1108,25 @@ CCarCtrl::RemoveDistantCars()
 	 * CCarCtrl::Init and its script opcode, and neither the player's own car nor
 	 * the remote vehicle can be removed here. */
 	CVector vecPlayerPos = FindPlayerCentreOfWorld(CWorld::PlayerInFocus);
+	/* The fill of the near bubble (VICE-127): the traffic the spawner created
+	 * (the random cars, the emergency services) the player's own 90 m disc
+	 * holds, and the other half - the RANDOM_VEHICLEs the scripts, the set
+	 * pieces, the road blocks, the car parks, the garages and the cheats put
+	 * there. The car target counts both, so the two together are what the
+	 * target describes. The scan is the one this function already makes. */
+	int32 nearBubbleFill = 0;
+	int32 nearBubbleOtherFill = 0;
 	for (int i = CPools::GetVehiclePool()->GetSize()-1; i >= 0; i--) {
 		CVehicle* pVehicle = CPools::GetVehiclePool()->GetSlot(i);
 		if (!pVehicle)
 			continue;
+		if (pVehicle->VehicleCreatedBy == RANDOM_VEHICLE &&
+			(pVehicle->GetPosition() - vecPlayerPos).Magnitude2D() <= NEAR_BUBBLE_RADIUS) {
+			if (pVehicle->bIsTrafficCar)
+				nearBubbleFill++;
+			else
+				nearBubbleOtherFill++;
+		}
 		// PossiblyRemoveVehicle may delete the vehicle, so handle the road
 		// block peds first, while the pointer is still valid.
 		if (pVehicle->bCreateRoadBlockPeds){
@@ -1096,6 +1137,8 @@ CCarCtrl::RemoveDistantCars()
 		}
 		PossiblyRemoveVehicle(pVehicle, vecPlayerPos);
 	}
+	ms_nNearBubbleFill = nearBubbleFill;
+	ms_nNearBubbleOtherFill = nearBubbleOtherFill;
 }
 
 void
@@ -1105,9 +1148,19 @@ CCarCtrl::RemoveCarsIfThePoolGetsFull(void)
 		return;
 	if (CPools::GetVehiclePool()->GetNoOfFreeSpaces() >= 8)
 		return;
+	/* The valve of the pool is the last line behind the budgets: the creation
+	 * paths stop at the pool reserve, so it runs only when something outside
+	 * them filled the pool. The near bubble asks the rule first (a car outside
+	 * the bubble and its reserve, past the grace, hidden); when nothing passes,
+	 * the closest car goes anyway: a full pool would break the whole traffic,
+	 * and NearBubbleCountRemoval records the event. The selection below reads
+	 * the cheap arms itself, so one valve frame asks the gate at most once. */
+	CVector vecPlayerPos = FindPlayerCentreOfWorld(CWorld::PlayerInFocus);
 	int i = CPools::GetVehiclePool()->GetSize();
 	float md = 10000000.f;
 	CVehicle* pClosestVehicle = nil;
+	float mdCandidate = 10000000.f;
+	CVehicle* pClosestCandidate = nil;
 	while (i--) {
 		CVehicle* pVehicle = CPools::GetVehiclePool()->GetSlot(i);
 		if (!pVehicle)
@@ -1121,10 +1174,26 @@ CCarCtrl::RemoveCarsIfThePoolGetsFull(void)
 			md = distance;
 			pClosestVehicle = pVehicle;
 		}
+		if (distance < mdCandidate &&
+			(pVehicle->GetPosition() - vecPlayerPos).Magnitude2D() > NEAR_BUBBLE_REMOVE_DISTANCE &&
+			CTimer::GetTimeInMilliseconds() >= pVehicle->m_nRemovalProtectedUntil) {
+			mdCandidate = distance;
+			pClosestCandidate = pVehicle;
+		}
 	}
-	if (pClosestVehicle) {
-		CWorld::Remove(pClosestVehicle);
-		delete pClosestVehicle;
+	if (pClosestCandidate && !NearBubbleAllowsRemoval(pClosestCandidate, vecPlayerPos, 0.0f))
+		pClosestCandidate = nil;
+	CVehicle* pRemove = pClosestCandidate ? pClosestCandidate : pClosestVehicle;
+	if (pRemove) {
+		if (pClosestCandidate)
+			NearBubbleCountRemoval(pRemove->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, false);
+		else
+			/* The fallback: no car passes the rule and the pool is at its
+			 * last slots. The removal is the pool's own line, counted
+			 * apart from the culls the acceptance watches (VICE-127). */
+			NearBubbleCountValveRemoval();
+		CWorld::Remove(pRemove);
+		delete pRemove;
 	}
 }
 
@@ -1143,6 +1212,9 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 	if (!IsThisVehicleInteresting(pVehicle) && !pVehicle->bIsLocked &&
 		pVehicle->CanBeDeleted() && !CCranes::IsThisCarBeingTargettedByAnyCrane(pVehicle)){
 		if (pVehicle->bFadeOut && CVisibilityPlugins::GetClumpAlpha(pVehicle->GetClump()) == 0){
+			/* The tail of a removal that started hidden: the car is fully
+			 * faded, so the deletion is not an event the player can catch. */
+			NearBubbleCountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, true);
 			CWorld::Remove(pVehicle);
 			delete pVehicle;
 			return;
@@ -1161,9 +1233,18 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 		if (pVehicle->bExtendedRange)
 			threshold *= rings.extendedRangeFactor;
 		if (distanceToPlayer > threshold && !bInsideHideOutGarageAtEntry){
+			/* The near bubble (VICE-127): the threshold is the ring's own
+			 * (already the spawn band plus the reserve), raised by the bubble
+			 * and its reserve; the car must be hidden (off the frustum,
+			 * occluded, or beyond the fade) and past its fresh-spawn grace.
+			 * A car the player can see keeps driving: it fades out only
+			 * where a turn cannot reveal the change. */
+			if (!NearBubbleAllowsRemoval(pVehicle, vecPlayerPos, threshold))
+				return;
 			if (bOnScreenAtEntry){
 				pVehicle->bFadeOut = true;
 			}else{
+				NearBubbleCountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, false);
 				CWorld::Remove(pVehicle);
 				delete pVehicle;
 			}
@@ -1180,7 +1261,11 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 		pVehicle->CanBeDeleted() &&
 		!CTrafficLights::ShouldCarStopForLight(pVehicle, true) &&
 		!CTrafficLights::ShouldCarStopForBridge(pVehicle) &&
-		!bInsideHideOutGarageAtEntry){
+		!bInsideHideOutGarageAtEntry &&
+		/* The near bubble: the jam of a stopped car is cleared outside the
+		 * bubble, hidden, and after the grace (VICE-127). */
+		NearBubbleAllowsRemoval(pVehicle, vecPlayerPos, 22.0f)){
+		NearBubbleCountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, false);
 		CWorld::Remove(pVehicle);
 		delete pVehicle;
 		return;
@@ -1188,10 +1273,15 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 	if (pVehicle->GetStatus() == STATUS_WRECKED) {
 		if (pVehicle->m_nTimeOfDeath != 0) {
 			if (CTimer::GetTimeInMilliseconds() > pVehicle->m_nTimeOfDeath + 60000 &&
-				CTimer::GetTimeInMilliseconds() > pVehicle->m_nSetPieceExtendedRangeTime &&
+				CTimer::GetTimeInMilliseconds() > pVehicle->m_nRemovalProtectedUntil &&
 				!bOnScreenAtEntry) {
 				if ((pVehicle->GetPosition() - vecPlayerPos).MagnitudeSqr() > SQR(6.5f)) {
-					if (!bInsideHideOutGarageAtEntry) {
+					if (!bInsideHideOutGarageAtEntry &&
+						/* The near bubble: a wreck the player can see (or
+						 * one inside the bubble) stays on the road
+						 * (VICE-127). */
+						NearBubbleAllowsRemoval(pVehicle, vecPlayerPos, 6.5f)) {
+						NearBubbleCountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, false);
 						CWorld::Remove(pVehicle);
 						delete pVehicle;
 					}
@@ -3453,6 +3543,23 @@ bool CCarCtrl::GenerateOneEmergencyServicesCar(uint32 mi, CVector vecPos)
 	pVehicle->SetPosition(spawnPos);
 	pVehicle->SetMoveSpeed(CVector(0.0f, 0.0f, 0.0f));
 	pVehicle->SetStatus(STATUS_PHYSICS);
+	/* The near bubble (VICE-127): the ambulance or the fire truck appears only
+	 * where the player cannot see it. The rule's soft arm (a position behind
+	 * the camera) is what keeps the service alive on an open road: the
+	 * placement search above picks any crossing of the on-screen ring, and
+	 * the ones behind the camera pass. A refusal costs the call (the timer of
+	 * the emergency service asks again in 30 s), which is the same price the
+	 * other rejections of this path pay. */
+	if (!NearBubbleAllowsCreation(pVehicle->GetPosition(), pPlayerPos, NEAR_BUBBLE_ENTITY_RADIUS, true)) {
+		delete pVehicle;
+		return false;
+	}
+	pVehicle->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + NEAR_BUBBLE_GRACE_MS;
+	/* The service car starts invisible and fades in like every fresh car the
+	 * traffic creates (the same treatment as the road blocks and the set
+	 * pieces): the soft arm's appearance is a fade, not a hard cut. */
+	CVisibilityPlugins::SetClumpAlpha(pVehicle->GetClump(), 0);
+	pVehicle->bIsTrafficCar = true;
 	switch (mi){
 	case MI_FIRETRUCK:
 		pVehicle->bIsFireTruckOnDuty = true;
@@ -3467,6 +3574,7 @@ bool CCarCtrl::GenerateOneEmergencyServicesCar(uint32 mi, CVector vecPos)
 	}
 	pVehicle->m_bSirenOrAlarm = true;
 	CWorld::Add(pVehicle);
+	NearBubbleCountCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 	printf("CREATED EMERGENCY VEHICLE\n");
 	return true;
 }

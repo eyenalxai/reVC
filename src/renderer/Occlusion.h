@@ -44,6 +44,15 @@ public:
 	static COccluder aOccluders[NUMOCCLUSIONVOLUMES];
 	static CActiveOccluder aActiveOccluders[NUMACTIVEOCCLUDERS];
 
+	/* The view the active set was built for (VICE-127). The set is built
+	 * during the render, after the population's gates have run, so the gates
+	 * of the next frame read the previous frame's set: they trust an
+	 * "occluded" answer only while the camera still matches this stamp (the
+	 * near bubble's NEAR_BUBBLE_OCCLUDER_* constants). */
+	static CVector ms_vecProcessedCameraPos;
+	static CVector ms_vecProcessedCameraForward;
+	static float ms_fProcessedCameraFOV;
+
 	static void Init(void);
 	static void AddOne(float x, float y, float z, float width, float length, float height, float angle);
 	static void ProcessBeforeRendering(void); 

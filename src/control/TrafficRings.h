@@ -28,7 +28,10 @@
  * so the far clip is not what hides a spawn. The off-screen band is created out
  * of view, and the on-screen band is the original game's own arrangement, at a
  * few hundred metres, where the fog and the fade distance of the world around
- * the car do the hiding. The stricter blind-spot creation is VICE-127's work.
+ * the car do the hiding. The creation is stricter than that now: the near
+ * bubble (NearBubble.h, VICE-127) refuses a placement inside the bubble or in a
+ * view the fade, an occluder or a line-of-sight ray does not hide, and the
+ * table's visible range is the distance it reads as the fade and the fog.
  *
  * The cap has a floor under it: the stock ring at the live FOV factor. The cap
  * stops growth, it never pulls a radius below the radius the game always had:

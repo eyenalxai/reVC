@@ -23,6 +23,23 @@ enum {
 	PERMANENT_VEHICLE = 4,
 };
 
+/* A bike or a boat that was drawn may not be removed for this long: the
+ * original per-render guard of CBike::Render and CBoat::Render, where a render
+ * means the player can see the vehicle. The clock it writes never moves
+ * backwards, so the longer fresh-spawn grace of a car (NEAR_BUBBLE_GRACE_MS,
+ * VICE-127) survives a render. */
+#define VEHICLE_RENDERED_GRACE_MS 3000
+
+/* The steps of a vehicle's clump alpha (CVehicle::UpdateClumpAlpha): the
+ * original 16 a frame towards opaque and 8 a frame towards invisible, and the
+ * hidden step (VICE-127) the ramp runs at while the fade covers the screen, so
+ * a car created behind a transition's fade is opaque when the screen returns
+ * (the dark head of a fade is a quarter of its duration, shorter than the 16
+ * steps of the normal ramp). */
+#define VEHICLE_ALPHA_FADE_IN_STEP 16
+#define VEHICLE_ALPHA_FADE_OUT_STEP 8
+#define VEHICLE_ALPHA_HIDDEN_STEP 64
+
 enum eCarNodes
 {
 	CAR_WHEEL_RF = 1,
@@ -245,6 +262,7 @@ public:
 	uint8 bGunSwitchedOff : 1;  // Level designers can use this to switch off guns on boats
 	uint8 bVehicleColProcessed : 1;// Has ProcessEntityCollision been processed for this car?
 	uint8 bIsCarParkVehicle : 1; // Car has been created using the special CAR_PARK script command
+	uint8 bIsTrafficCar : 1; // Created by the traffic spawner (the ring, the burst, the emergency services): the near bubble's fill counts these (VICE-127)
 	uint8 bHasAlreadyBeenRecorded : 1; // Used for replays
 	uint8 bPartOfConvoy : 1;
 	uint8 bHeliMinimumTilt : 1; // This heli should have almost no tilt really
@@ -271,7 +289,11 @@ public:
 #if (!defined GTA_PS2 || defined FIX_BUGS)
 	CEntity* m_pBombRigger;
 #endif
-	uint32 m_nSetPieceExtendedRangeTime;
+	/* The vehicle may not be removed before this time (ms). A set piece or a
+	 * road block holds its own car until the player is gone, the wreck cull
+	 * reads it, and the traffic's fresh-spawn grace (NEAR_BUBBLE_GRACE_MS,
+	 * VICE-127) sets it on every car it creates. */
+	uint32 m_nRemovalProtectedUntil;
 	uint32 m_nGunFiringTime;    // last time when gun on vehicle was fired (used on boats)
 	uint32 m_nTimeOfDeath;
 	uint16 m_nTimeBlocked;

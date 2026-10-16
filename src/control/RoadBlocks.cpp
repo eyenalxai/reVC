@@ -256,9 +256,12 @@ CRoadBlocks::CreateRoadBlockBetween2Points(CVector point1, CVector point2)
 			if (pVehicle->GetUp().z > 0.94f) {
 				CVisibilityPlugins::SetClumpAlpha(pVehicle->GetClump(), 0);
 				CWorld::Add(pVehicle);
+				/* The blockade is created outside the traffic spawner (VICE-127):
+				 * counted apart, and never in the traffic's fill. */
+				CCarCtrl::NearBubbleCountOtherCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 				pVehicle->bCreateRoadBlockPeds = true;
 				pVehicle->m_nRoadblockType = DotProduct(pVehicle->GetRight(), pVehicle->GetPosition() - FindPlayerCoors()) >= 0.0f;
-				pVehicle->m_nSetPieceExtendedRangeTime = CTimer::GetTimeInMilliseconds() + 7000;
+				pVehicle->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + 7000;
 			}
 			else {
 				delete pVehicle;

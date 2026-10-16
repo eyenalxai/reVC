@@ -3,6 +3,7 @@
 #include "SetPieces.h"
 #include "Automobile.h"
 #include "CarAI.h"
+#include "CarCtrl.h"
 #include "CopPed.h"
 #include "GenericGameStorage.h"
 #include "PlayerPed.h"
@@ -103,7 +104,7 @@ void CSetPiece::Update(void)
 		pVehicle1->AutoPilot.m_vecDestinationCoors.x = m_vTarget1.x;
 		pVehicle1->AutoPilot.m_vecDestinationCoors.y = m_vTarget1.y;
 		pVehicle1->AutoPilot.m_vecDestinationCoors.z = 0.0f;
-		pVehicle1->m_nSetPieceExtendedRangeTime = CTimer::GetTimeInMilliseconds() + 25000;
+		pVehicle1->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + 25000;
 		CCarAI::AddPoliceCarOccupants(pVehicle1);
 		pVehicle2->SetStatus(STATUS_PHYSICS);
 		pVehicle2->AutoPilot.m_fMaxTrafficSpeed = pVehicle2->AutoPilot.m_nCruiseSpeed = 4;
@@ -112,7 +113,7 @@ void CSetPiece::Update(void)
 		pVehicle2->AutoPilot.m_vecDestinationCoors.x = m_vTarget2.x;
 		pVehicle2->AutoPilot.m_vecDestinationCoors.y = m_vTarget2.y;
 		pVehicle2->AutoPilot.m_vecDestinationCoors.z = 0.0f;
-		pVehicle2->m_nSetPieceExtendedRangeTime = CTimer::GetTimeInMilliseconds() + 25000;
+		pVehicle2->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + 25000;
 		CCarAI::AddPoliceCarOccupants(pVehicle2);
 		m_nLastTimeCreated = CTimer::GetTimeInMilliseconds();
 		break;
@@ -134,7 +135,7 @@ void CSetPiece::Update(void)
 		pVehicle1->AutoPilot.m_nCarMission = MISSION_BLOCKPLAYER_FORWARDANDBACK;
 		pVehicle1->AutoPilot.m_nTempAction = TEMPACT_GOFORWARD;
 		pVehicle1->AutoPilot.m_nTimeTempAction = CTimer::GetTimeInMilliseconds() + 100;
-		pVehicle1->m_nSetPieceExtendedRangeTime = CTimer::GetTimeInMilliseconds() + 10000;
+		pVehicle1->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + 10000;
 		pVehicle1->SetMoveSpeed(2.0f * pVehicle1->GetForward() / 3.0f);
 		CCarAI::AddPoliceCarOccupants(pVehicle1);
 		m_nLastTimeCreated = CTimer::GetTimeInMilliseconds();
@@ -157,7 +158,7 @@ void CSetPiece::Update(void)
 		pVehicle1->AutoPilot.m_nCarMission = MISSION_RAMCAR_CLOSE;
 		pVehicle1->AutoPilot.m_nTempAction = TEMPACT_GOFORWARD;
 		pVehicle1->AutoPilot.m_nTimeTempAction = CTimer::GetTimeInMilliseconds() + 100;
-		pVehicle1->m_nSetPieceExtendedRangeTime = CTimer::GetTimeInMilliseconds() + 10000;
+		pVehicle1->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + 10000;
 		pVehicle1->SetMoveSpeed(2.0f * pVehicle1->GetForward() / 3.0f);
 		CCarAI::AddPoliceCarOccupants(pVehicle1);
 		m_nLastTimeCreated = CTimer::GetTimeInMilliseconds();
@@ -218,7 +219,7 @@ void CSetPiece::Update(void)
 		pVehicle1->AutoPilot.m_nCarMission = MISSION_BLOCKPLAYER_FORWARDANDBACK;
 		pVehicle1->AutoPilot.m_nTempAction = TEMPACT_GOFORWARD;
 		pVehicle1->AutoPilot.m_nTimeTempAction = CTimer::GetTimeInMilliseconds() + 100;
-		pVehicle1->m_nSetPieceExtendedRangeTime = CTimer::GetTimeInMilliseconds() + 10000;
+		pVehicle1->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + 10000;
 		pVehicle1->SetMoveSpeed(2.0f * pVehicle1->GetForward() / 3.0f);
 		CCarAI::AddPoliceCarOccupants(pVehicle1);
 		CVehicle* pVehicle2 = TryToGenerateCopCar(m_vSpawn2, m_vTarget2);
@@ -233,7 +234,7 @@ void CSetPiece::Update(void)
 		pVehicle2->AutoPilot.m_nCarMission = MISSION_BLOCKPLAYER_FORWARDANDBACK;
 		pVehicle2->AutoPilot.m_nTempAction = TEMPACT_GOFORWARD;
 		pVehicle2->AutoPilot.m_nTimeTempAction = CTimer::GetTimeInMilliseconds() + 100;
-		pVehicle2->m_nSetPieceExtendedRangeTime = CTimer::GetTimeInMilliseconds() + 10000;
+		pVehicle2->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + 10000;
 		pVehicle2->SetMoveSpeed(2.0f * pVehicle2->GetForward() / 3.0f);
 		CCarAI::AddPoliceCarOccupants(pVehicle2);
 		m_nLastTimeCreated = CTimer::GetTimeInMilliseconds();
@@ -256,7 +257,7 @@ void CSetPiece::Update(void)
 		pVehicle1->AutoPilot.m_nCarMission = MISSION_RAMCAR_CLOSE;
 		pVehicle1->AutoPilot.m_nTempAction = TEMPACT_GOFORWARD;
 		pVehicle1->AutoPilot.m_nTimeTempAction = CTimer::GetTimeInMilliseconds() + 100;
-		pVehicle1->m_nSetPieceExtendedRangeTime = CTimer::GetTimeInMilliseconds() + 10000;
+		pVehicle1->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + 10000;
 		pVehicle1->SetMoveSpeed(2.0f * pVehicle1->GetForward() / 3.0f);
 		CCarAI::AddPoliceCarOccupants(pVehicle1);
 		CVehicle* pVehicle2 = TryToGenerateCopCar(m_vSpawn2, m_vTarget2);
@@ -271,7 +272,7 @@ void CSetPiece::Update(void)
 		pVehicle2->AutoPilot.m_nCarMission = MISSION_RAMCAR_CLOSE;
 		pVehicle2->AutoPilot.m_nTempAction = TEMPACT_GOFORWARD;
 		pVehicle2->AutoPilot.m_nTimeTempAction = CTimer::GetTimeInMilliseconds() + 100;
-		pVehicle2->m_nSetPieceExtendedRangeTime = CTimer::GetTimeInMilliseconds() + 10000;
+		pVehicle2->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + 10000;
 		pVehicle2->SetMoveSpeed(2.0f * pVehicle2->GetForward() / 3.0f);
 		CCarAI::AddPoliceCarOccupants(pVehicle2);
 		m_nLastTimeCreated = CTimer::GetTimeInMilliseconds();
@@ -302,6 +303,9 @@ CVehicle* CSetPiece::TryToGenerateCopCar(CVector2D vSpawn, CVector2D vTarget)
 	}
 	pVehicle->ChangeLawEnforcerState(true);
 	CWorld::Add(pVehicle);
+	/* The chase car is created outside the traffic spawner (VICE-127): it is
+	 * counted apart and never moves the traffic's own counters. */
+	CCarCtrl::NearBubbleCountOtherCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 	return pVehicle;
 }
 
