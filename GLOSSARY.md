@@ -95,6 +95,14 @@ The module `src/vehicles/DriftTelemetry.*`. It writes the drift state to
 read back. The game frame thread only appends text to a buffer; one writer
 thread owns the file. It changes nothing in the physics.
 
+## Drift snapshot
+
+One read of the drift layer's live state — the phase, the active and
+handbrake-turn flags, the slip angle, the target, the yaw rate, the grip cut,
+the grip scale, the charge, the boost and the entry speed — taken at the point
+of the read, so the feedback, the telemetry and the on-screen readout all see
+the same values. The drift layer's state stays private.
+
 ## Boost chain
 
 The stack of drift boosts. A clean drift that ends while a boost is still

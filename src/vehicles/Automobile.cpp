@@ -1733,10 +1733,6 @@ CAutomobile::PreRender(void)
 	int i, j, n;
 	CVehicleModelInfo *mi = (CVehicleModelInfo*)CModelInfo::GetModelInfo(GetModelIndex());
 
-	// Drift feedback is player-only, like the drift itself.
-	if(GetStatus() == STATUS_PLAYER)
-		CDriftFeedback::Update(this, CTimer::GetTimeStepInSeconds());
-
 	if(GetModelIndex() == MI_RHINO && m_aCarNodes[CAR_WINDSCREEN]){
 		// Rotate Rhino turret
 		CMatrix m;
@@ -1757,8 +1753,10 @@ CAutomobile::PreRender(void)
 
 
 	// VICE-32: a drift of the player's car leaves wider skid marks and throws
-	// extra smoke. Both stay neutral while the feature is off.
-	float driftSlip = GetStatus() == STATUS_PLAYER ? Abs(CDriftFeedback::GetStrength()) : 0.0f;
+	// extra smoke. Both stay neutral while the feature is off. The strength is
+	// stepped once a frame in CGame::Process, before the camera (see
+	// DriftFeedback.h).
+	float driftSlip = IsDriftCar(this) ? Abs(CDriftFeedback::GetStrength()) : 0.0f;
 	float driftSkidWidth = 1.0f + (DRIFT_SKID_WIDTH_MAX - 1.0f)*driftSlip;
 
 
@@ -3035,7 +3033,7 @@ CAutomobile::Render(void)
 
 	// The drift lean turns the rendered model only; the physics matrix comes
 	// back right after the draw call. It belongs to the player's car alone.
-	bool bDriftLean = GetStatus() == STATUS_PLAYER && CDriftFeedback::BeginLean(this);
+	bool bDriftLean = IsDriftCar(this) && CDriftFeedback::BeginLean(this);
 
 	if(CVehicle::bWheelsOnlyCheat){
 		RpAtomicRender((RpAtomic*)GetFirstObject(m_aCarNodes[CAR_WHEEL_RB]));
