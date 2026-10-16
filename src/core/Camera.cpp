@@ -2368,7 +2368,9 @@ CCamera::StartTransition(int16 newMode)
 		}
 		if(m_bTargetJustCameOffTrain)
 			m_bCamDirectlyInFront = true;
-		if(Cams[ActiveCam].Mode != CCam::MODE_CAM_ON_A_STRING)
+		// The rest is the step out of the car transition and needs a ped target;
+		// the follow camera serves a vehicle target too (VICE-71).
+		if(Cams[ActiveCam].Mode != CCam::MODE_CAM_ON_A_STRING || !pTargetEntity->IsPed())
 			break;
 		m_bUseTransitionBeta = true;
 		vehicleVertical = false;
