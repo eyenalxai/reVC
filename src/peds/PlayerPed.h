@@ -122,6 +122,7 @@ public:
 #ifdef FIRST_PERSON
 	void AimAtPosition(const CVector &position);
 	void UpdateFirstPersonAim(CPad *padUsed);
+#endif
 	void PlayerControlZelda(CPad*);
 	bool DoesPlayerWantNewWeapon(eWeaponType, bool);
 	void PlayIdleAnimations(CPad*);
