@@ -92,9 +92,6 @@
 #include "custompipes.h"
 #include "screendroplets.h"
 #include "VarConsole.h"
-#ifdef USE_TEXTURE_POOL
-#include "TexturePools.h"
-#endif
 
 eLevelName CGame::currLevel;
 int32 CGame::currArea;
@@ -193,9 +190,6 @@ CGame::InitialiseRenderWare(void)
 {
 	CFileMgr::SetDir("");
 	ValidateVersion();
-#ifdef USE_TEXTURE_POOL
-	_TexturePoolsInitialise();
-#endif
 
 	CTxdStore::Initialise();
 	CVisibilityPlugins::Initialise();
@@ -314,9 +308,6 @@ void CGame::ShutdownRenderWare(void)
 	
 	CVisibilityPlugins::Shutdown();
 	
-#ifdef USE_TEXTURE_POOL
-	_TexturePoolsShutdown();
-#endif
 }
 
 bool CGame::InitialiseOnceAfterRW(void)
@@ -381,9 +372,6 @@ bool CGame::Initialise(const char* datFile)
 	if (CIniFile::PedNumberMultiplier == 1.0f && CIniFile::CarNumberMultiplier == 2.0f)
 #endif
 		CIniFile::LoadIniFile();
-#endif
-#ifdef USE_TEXTURE_POOL
-	_TexturePoolsUnknown(false);
 #endif
 	currLevel = LEVEL_BEACH;
 	currArea = AREA_MAIN_MAP;
@@ -571,9 +559,6 @@ bool CGame::Initialise(const char* datFile)
 	CCollision::ms_collisionInMemory = currLevel;
 	for (int i = 0; i < MAX_PADS; i++)
 		CPad::GetPad(i)->Clear(true);
-#ifdef USE_TEXTURE_POOL
-	_TexturePoolsUnknown(true);
-#endif
 
 #ifndef MASTER
 	PlayerCoords = FindPlayerCoors();
@@ -591,9 +576,6 @@ bool CGame::Initialise(const char* datFile)
 
 bool CGame::ShutDown(void)
 {
-#ifdef USE_TEXTURE_POOL
-	_TexturePoolsUnknown(false);
-#endif
 	CReplay::FinishPlayback();
 	CReplay::EmptyReplayBuffer();
 	CPlane::Shutdown();
@@ -644,9 +626,6 @@ bool CGame::ShutDown(void)
 	CTxdStore::RemoveTxdSlot(gameTxdSlot);
 	CMBlur::MotionBlurClose();
 	CdStreamRemoveImages();
-#ifdef USE_TEXTURE_POOL
-	_TexturePoolsFinalShutdown();
-#endif
 	return true;
 }
 
@@ -739,9 +718,6 @@ void CGame::ReloadIPLs(void)
 
 void CGame::ShutDownForRestart(void)
 {
-#ifdef USE_TEXTURE_POOL
-	_TexturePoolsUnknown(false);
-#endif
 	CReplay::FinishPlayback();
 	CReplay::EmptyReplayBuffer();
 	DMAudio.DestroyAllGameCreatedEntities();
@@ -837,9 +813,6 @@ void CGame::InitialiseWhenRestarting(void)
 	CTimer::Update();
 	
 	DMAudio.ChangeMusicMode(MUSICMODE_GAME);
-#ifdef USE_TEXTURE_POOL
-	_TexturePoolsUnknown(true);
-#endif
 }
 
 void CGame::Process(void) 

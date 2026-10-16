@@ -3,7 +3,6 @@
 
 class CAutomobile;
 class CVehicle;
-class CControllerState;
 
 class CCarStateEachFrame
 {
@@ -54,12 +53,8 @@ public:
 	static void Init(void);
 	static void SaveOrRetrieveDataForThisFrame(void);
 	static void SaveOrRetrieveCarPositions(void);
-	static void StoreInfoForCar(CAutomobile*, CCarStateEachFrame*);
-	static void RestoreInfoForMatrix(CMatrix&, CCarStateEachFrame*);
-	static void RestoreInfoForCar(CAutomobile*, CCarStateEachFrame*, bool);
 	static void ProcessControlCars(void);
 	static bool ShouldThisPadBeLeftAlone(uint8 pad);
-	static void GiveUsACar(int32, CVector, float, CAutomobile**, uint8, uint8);
 	static void StartChaseScene(float);
 	static void CleanUpChaseScene(void);
 	static void SetUpCarsForChaseScene(void);
@@ -97,11 +92,6 @@ public:
 
 	static void SaveOrRetrieveDataForThisFrame(void);
 	static void Init(void);
-
-private:
-	static uint16 CalcGameChecksum(void);
-	static uint8* PackCurrentPadValues(uint8*, CControllerState*, CControllerState*);
-	static uint8* UnPackCurrentPadValues(uint8*, uint8, CControllerState*);
 };
 
 #endif // __GTA_RECORD_H__
