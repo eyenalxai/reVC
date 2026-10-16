@@ -3840,7 +3840,8 @@ CPed::KillPedWithCar(CVehicle *car, float impulse)
 		distVec.Normalise();
 
 		distVec *= Min(car->m_fMass / 1400.0f, 1.0f);
-		car->ApplyMoveForce(distVec * -100.0f);
+		// Running over a pedestrian barely slows the car.
+		car->ApplyMoveForce(distVec * (-100.0f * HIT_OBJECT_SPEED_PENALTY));
 		Say(SOUND_PED_DEFEND);
 
 	} else if (m_vecDamageNormal.z < -0.8f && impulse > 3.0f
@@ -3870,7 +3871,8 @@ CPed::KillPedWithCar(CVehicle *car, float impulse)
 		m_vecMoveSpeed.z = 0.0f;
 		distVec.Normalise();
 		distVec *= Min(car->m_fMass / 1400.0f, 1.0f);
-		car->ApplyMoveForce(distVec * -60.0f);
+		// Running over a pedestrian barely slows the car.
+		car->ApplyMoveForce(distVec * (-60.0f * HIT_OBJECT_SPEED_PENALTY));
 		Say(SOUND_PED_DEFEND);
 	}
 
