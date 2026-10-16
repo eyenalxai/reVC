@@ -42,8 +42,8 @@
  * The rule is written against one set: the *catchable* positions - in the
  * frustum, inside the fade and fog of the weather, not occluded - are the ones
  * the player can catch an event at, and the ladder lets an event through only
- * outside that set, or under the fade that covers the screen. Every arm is a
- * statement about the view:
+ * outside that set, under the fade that covers the screen, or inside the
+ * in-view band (arm 5). Every arm is a statement about the view:
  *
  *	1. the occluded hint
  *			COcclusion::IsPositionOccluded says an occluder volume
@@ -83,12 +83,30 @@
  *			hidden, however the stale data read. The ray is the one
  *			expensive test, so a frame may spend at most
  *			NEAR_BUBBLE_LOS_RAYS_PER_FRAME of them; a candidate that
- *			finds the budget spent is refused, not created.
+ *			finds the budget spent is refused, not created;
+ *	5. the in-view band
+ *			the position is in the frustum, inside the fade and fog
+ *			and not occluded, and it sits at or beyond the ring
+ *			table's on-screen spawn minimum
+ *			(CurrentTrafficRings().carOnScreenSpawnMin: 220 m stock,
+ *			440 m at the owner's settings). The stock game always had
+ *			this band - the spawner's on-screen branch aims at
+ *			carOnScreenSpawnMax and the birth cull holds a fresh
+ *			on-screen car at or beyond the minimum - and the car's own
+ *			reveal covers it: the alpha of a fresh car starts at 0 and
+ *			ramps up from the first render (CVehicle::UpdateClumpAlpha),
+ *			so the band shows a car forming, never a settled one. It
+ *			is the last allowed arm: the screen fade is decided first,
+ *			and the band is reached only for a position the catchable
+ *			set holds. Without it the rule refused every on-screen
+ *			placement of the spawner on an open street and starved the
+ *			traffic (VICE-146).
  *
  * Anything left - in the frustum or within the margin of it, not occluded,
- * inside the fade - is refused. The refused creation costs nothing: the
- * placement loop of the caller moves to its next candidate and the frame keeps
- * its budget.
+ * inside the fade and under the band minimum - is refused: that is the
+ * catchable zone, and the two frustum counters of the acceptance read it. The
+ * refused creation costs nothing: the placement loop of the caller moves to
+ * its next candidate and the frame keeps its budget.
  *
  * The removal rule
  * ----------------
@@ -101,12 +119,13 @@
  *	  (which already sits the reserve past the spawn band, the hysteresis of
  *	  the table) and the bubble plus its reserve, whichever is farther;
  *	- the car is hidden by an arm that does not rest on stale data: off the
- *	  frustum by the margin, beyond the fade, under a fade, or behind a
- *	  confirmation ray. The occluded hint is confirmed exactly like a
- *	  creation's, so a stale occluder cannot fade a car out in view; the
- *	  removal spends from the same ray budget, and a removal that finds the
- *	  budget spent simply waits - the car is hidden-ish and leaves a frame
- *	  later.
+ *	  frustum by the margin, beyond the fade, under a fade, behind a
+ *	  confirmation ray - or it sits in the in-view band, at or beyond the
+ *	  on-screen spawn minimum, the same arm a creation takes there. The
+ *	  occluded hint is confirmed exactly like a creation's, so a stale
+ *	  occluder cannot fade a car out in view; the removal spends from the
+ *	  same ray budget, and a removal that finds the budget spent simply
+ *	  waits - the car is hidden-ish and leaves a frame later.
  *
  * The fill burst (VICE-126)
  * -------------------------
@@ -125,10 +144,17 @@
  * The counters (the acceptance)
  * -----------------------------
  *
- *	creations in the frustum	the acceptance counter: a car placed where
- *					the player could catch it. Must stay 0.
+ *	creations in the frustum	the acceptance counter (VICE-146): a car
+ *					placed in the frustum nearer than the band
+ *					minimum - the catchable zone, where the
+ *					player could catch it. Must stay 0.
  *	removals in the frustum		the same for a car deleted (not faded)
  *					where the player could catch it.
+ *	band creations / removals	the in-view band: a car placed or
+ *					deleted in the frustum at or beyond the
+ *					band minimum. Allowed, covered by the
+ *					car's own reveal; the counters rise with
+ *					the traffic the band restores.
  *	fade creations / removals	the catchable events a fade covered:
  *					exempt. The hidden events of a faded frame are
  *					counted with the hidden ones, so the fade
@@ -246,6 +272,7 @@ enum ENearBubbleArm
 	NEAR_BUBBLE_ARM_SOFT,		/* off the frustum by the margin, beyond the soft distance */
 	NEAR_BUBBLE_ARM_RAY,		/* off the frustum by the margin, close: a ray decides */
 	NEAR_BUBBLE_ARM_FADE,		/* the screen fade covers the event */
+	NEAR_BUBBLE_ARM_ONSCREEN_BAND,	/* in the frustum, at or beyond the on-screen spawn minimum */
 };
 
 /* One candidate as the frame sees it. The caller fills the facts from the
@@ -257,6 +284,8 @@ struct SNearBubbleCandidate
 	float distToPlayer;	/* 2D: the bubble is a disc on the map */
 	float distToCamera;	/* 3D, the distance the renderer fades with */
 	float visibleRange;	/* CurrentTrafficRings().visibleRange */
+	float onScreenSpawnMin;	/* CurrentTrafficRings().carOnScreenSpawnMin:
+				 * the lower edge of the in-view band */
 	bool inFrustum;		/* TheCamera.IsSphereVisible(pos, radius) */
 	bool inFrustumMargin;	/* IsSphereVisible(pos, radius + NEAR_BUBBLE_SOFT_MARGIN) */
 	bool occluded;		/* COcclusion::IsPositionOccluded(pos, radius), trusted */
@@ -319,10 +348,14 @@ NearBubbleArmFor(const SNearBubbleCandidate &c)
 		return NEAR_BUBBLE_ARM_RAY;
 	}
 	/* In the frustum, inside the fade, nothing between the camera and the
-	 * position: only the fade that covers the screen lets an event through
-	 * (the fill burst of a transition), and the counters mark it exempt. */
+	 * position: only the fade that covers the screen (the fill burst of a
+	 * transition, exempt in the counters) and the in-view band let an event
+	 * through. The fade is decided first, so the band is reached only for a
+	 * position the screen does not already hide. */
 	if (c.fadeHides)
 		return NEAR_BUBBLE_ARM_FADE;
+	if (c.distToCamera >= c.onScreenSpawnMin)
+		return NEAR_BUBBLE_ARM_ONSCREEN_BAND;
 	return NEAR_BUBBLE_ARM_NONE;
 }
 
@@ -380,6 +413,13 @@ static_assert(NEAR_BUBBLE_SOFT_DISTANCE + NEAR_BUBBLE_SIDE_PLACEMENT_SLACK >= RI
 	"the soft distance must cover the side band's placement slack");
 static_assert(NEAR_BUBBLE_SOFT_DISTANCE > NEAR_BUBBLE_RADIUS,
 	"the soft distance must leave the bubble");
+/* The in-view band sits beyond the bubble and the soft arm at the stock
+ * numbers, and the ring table's scale floor keeps the live minimum at or above
+ * the stock value (the harness checks it over the control matrix). */
+static_assert(NEAR_BUBBLE_RADIUS < RING_CAR_ONSCREEN_SPAWN_MIN,
+	"the in-view band must sit beyond the bubble");
+static_assert(NEAR_BUBBLE_SOFT_DISTANCE < RING_CAR_ONSCREEN_SPAWN_MIN,
+	"the in-view band must sit beyond the soft arm");
 /* The margin is a bearing the camera must turn by before an event behind it
  * can be seen. */
 static_assert(NEAR_BUBBLE_SOFT_MARGIN > NEAR_BUBBLE_ENTITY_RADIUS,

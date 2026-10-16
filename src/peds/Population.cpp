@@ -105,10 +105,18 @@ uint32 CPopulation::ms_nOffNetworkDrowned;
 
 /* The fill burst (VICE-126). The state of the window and the counters the live
  * rig reads (utils/caps-audit/live-counters.py, the same rig the caps audit
- * uses). */
+ * uses). The "total" pair accumulates since boot (the last Initialise), so the
+ * boot burst stays readable after a later arming resets the window rows; the
+ * three "ended" counters count the burst runs by the reason they ended
+ * (VICE-146). */
 SFillBurst CPopulation::ms_FillBurst;
 uint32 CPopulation::ms_nFillBurstAttempts;
 uint32 CPopulation::ms_nFillBurstPlaced;
+uint32 CPopulation::ms_nFillBurstTotalAttempts;
+uint32 CPopulation::ms_nFillBurstTotalPlaced;
+uint32 CPopulation::ms_nFillBurstEndedLine;
+uint32 CPopulation::ms_nFillBurstEndedStalls;
+uint32 CPopulation::ms_nFillBurstEndedWindow;
 float CPopulation::ms_fFillBurstTarget;
 
 /* Arm the pedestrian fill burst (VICE-126). The burst of every trigger has the
@@ -116,7 +124,9 @@ float CPopulation::ms_fFillBurstTarget;
  * trickle, so a pedestrian never appears closer than the off-screen band
  * behind the player. (The shipped one-frame boot burst had its own wider band,
  * from 10 m; that band dies with it, because a spawn that close is a pop-in on
- * the first turn of the camera - VICE-127 forbids it.) */
+ * the first turn of the camera - VICE-127 forbids it.) The totals since boot
+ * and the end reasons are not reset here: they are the boot burst's own
+ * evidence after a later arming (VICE-146). */
 void
 CPopulation::ArmFillBurst(void)
 {
@@ -400,6 +410,14 @@ CPopulation::Initialise()
 	ms_nTotalMissionPeds = 0;
 	m_CountDownToPedsAtStart = 2;
 	bZoneChangeHasHappened = false; // III leftover
+
+	/* The burst totals and the end reasons are the evidence since this boot
+	 * (VICE-146). */
+	ms_nFillBurstTotalAttempts = 0;
+	ms_nFillBurstTotalPlaced = 0;
+	ms_nFillBurstEndedLine = 0;
+	ms_nFillBurstEndedStalls = 0;
+	ms_nFillBurstEndedWindow = 0;
 
 	// The strays and their counters start empty (VICE-122). The pointers are
 	// only dropped here: the strays belong to the game that ends with this call.
@@ -756,7 +774,17 @@ SpendFillBurstFrame(void)
 	const STrafficRings rings = CurrentTrafficRings();
 	float target = AreaPedCountTarget(playerCentreOfWorld, zoneInfo, rings);
 	CPopulation::ms_fFillBurstTarget = target;
+	/* The boot hazard (VICE-146): before the zone and the ring are live the
+	 * area target is 0, and the stop line would burn the whole burst on it (0
+	 * is at 90 % of 0). The frame waits for the target instead, in the same
+	 * bounded way the streaming wait uses, so the boot burst runs the moment
+	 * the area is known. */
+	if (target <= 0.0f) {
+		FillBurstSpendFrame(&CPopulation::ms_FillBurst, false, false);
+		return;
+	}
 	if (FillBurstTargetReached((float)CPopulation::ms_nTotalPeds, target)) {
+		CPopulation::ms_nFillBurstEndedLine++;
 		FillBurstDisarm(&CPopulation::ms_FillBurst);
 		return;
 	}
@@ -788,13 +816,19 @@ SpendFillBurstFrame(void)
 			CPools::GetPedPool()->GetNoOfFreeSpaces() < PED_POOL_RESERVE)
 			break;
 		CPopulation::ms_nFillBurstAttempts++;
+		CPopulation::ms_nFillBurstTotalAttempts++;
 		CPopulation::AddToPopulation(pcdm * rings.pedCreateMin, pcdm * rings.pedCreateMax,
 			pcdm * rings.pedOffScreenMax - rings.pedOffScreenPullBack, pcdm * rings.pedOffScreenMax);
 	}
 	int32 placed = CPools::GetPedPool()->GetNoOfUsedSpaces() - usedBefore;
 
 	CPopulation::ms_nFillBurstPlaced += placed;
-	FillBurstSpendFrame(&CPopulation::ms_FillBurst, true, placed > 0);
+	CPopulation::ms_nFillBurstTotalPlaced += placed;
+	EFillBurstEnded ended = FillBurstSpendFrame(&CPopulation::ms_FillBurst, true, placed > 0);
+	if (ended == FILL_BURST_ENDED_STALLS)
+		CPopulation::ms_nFillBurstEndedStalls++;
+	else if (ended == FILL_BURST_ENDED_WINDOW)
+		CPopulation::ms_nFillBurstEndedWindow++;
 }
 
 // More speed = wider area to spawn peds

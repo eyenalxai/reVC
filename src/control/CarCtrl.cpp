@@ -106,10 +106,18 @@ CVehicle* apCarsToKeep[MAX_CARS_TO_KEEP];
 uint32 aCarsToKeepTime[MAX_CARS_TO_KEEP];
 
 /* The fill burst (VICE-126): the state of the window and the counters the live
- * rig reads (utils/caps-audit/live-counters.py). */
+ * rig reads (utils/caps-audit/live-counters.py). The "total" pair accumulates
+ * since boot (the last Init or ReInit), so the boot burst stays readable after
+ * a later arming resets the window rows; the three "ended" counters count the
+ * burst runs by the reason they ended (VICE-146). */
 SFillBurst CCarCtrl::ms_FillBurst;
 uint32 CCarCtrl::ms_nFillBurstAttempts;
 uint32 CCarCtrl::ms_nFillBurstPlaced;
+uint32 CCarCtrl::ms_nFillBurstTotalAttempts;
+uint32 CCarCtrl::ms_nFillBurstTotalPlaced;
+uint32 CCarCtrl::ms_nFillBurstEndedLine;
+uint32 CCarCtrl::ms_nFillBurstEndedStalls;
+uint32 CCarCtrl::ms_nFillBurstEndedWindow;
 float CCarCtrl::ms_fFillBurstTarget;
 
 float
@@ -185,6 +193,8 @@ CCarCtrl::ArmFillBurst(bool withParkedCars)
 	ms_nFillBurstAttempts = 0;
 	ms_nFillBurstPlaced = 0;
 	ms_fFillBurstTarget = 0.0f;
+	/* The totals since boot and the end reasons are not reset here: they are
+	 * the boot burst's own evidence after a later arming (VICE-146). */
 	if (withParkedCars)
 		CTheCarGenerators::GenerateEvenIfPlayerIsCloseCounter = 20;
 }
@@ -217,8 +227,17 @@ CCarCtrl::SpendFillBurstFrame(void)
 	 * GenerateOneRandomCar stops at, and the car budget behind it. A burst never
 	 * runs past its target. */
 	ms_fFillBurstTarget = GetRandomCarTarget();
+	/* The boot hazard (VICE-146): before the camera and the ring are live the
+	 * target and the car budget line are 0, and the stop line would burn the
+	 * whole burst on a target that cannot be filled. The frame waits instead,
+	 * in the same bounded way the streaming wait uses. */
+	if (ms_fFillBurstTarget <= 0.0f || MaxNumberOfCarsInUse <= 0) {
+		FillBurstSpendFrame(&ms_FillBurst, false, false);
+		return;
+	}
 	if (FillBurstTargetReached((float)NumRandomCars, ms_fFillBurstTarget) ||
 		NumCarsInUse() >= MaxNumberOfCarsInUse) {
+		ms_nFillBurstEndedLine++;
 		FillBurstDisarm(&ms_FillBurst);
 		return;
 	}
@@ -244,6 +263,7 @@ CCarCtrl::SpendFillBurstFrame(void)
 			CPools::GetPedPool()->GetNoOfFreeSpaces() < PED_POOL_RESERVE)
 			break;
 		ms_nFillBurstAttempts++;
+		ms_nFillBurstTotalAttempts++;
 		int32 before = NumRandomCars;
 		GenerateOneRandomCar();
 		if (NumRandomCars > before)
@@ -251,7 +271,12 @@ CCarCtrl::SpendFillBurstFrame(void)
 	}
 
 	ms_nFillBurstPlaced += placed;
-	FillBurstSpendFrame(&ms_FillBurst, true, placed > 0);
+	ms_nFillBurstTotalPlaced += placed;
+	EFillBurstEnded ended = FillBurstSpendFrame(&ms_FillBurst, true, placed > 0);
+	if (ended == FILL_BURST_ENDED_STALLS)
+		ms_nFillBurstEndedStalls++;
+	else if (ended == FILL_BURST_ENDED_WINDOW)
+		ms_nFillBurstEndedWindow++;
 }
 
 void
@@ -2461,6 +2486,13 @@ void CCarCtrl::Init(void)
 	bCarsGeneratedAroundCamera = false;
 	CountDownToCarsAtStart = 2;
 	CarDensityMultiplier = 1.0f;
+	/* The burst totals and the end reasons are the evidence since this boot
+	 * (VICE-146). */
+	ms_nFillBurstTotalAttempts = 0;
+	ms_nFillBurstTotalPlaced = 0;
+	ms_nFillBurstEndedLine = 0;
+	ms_nFillBurstEndedStalls = 0;
+	ms_nFillBurstEndedWindow = 0;
 	for (int i = 0; i < MAX_CARS_TO_KEEP; i++)
 		apCarsToKeep[i] = nil;
 	for (int i = 0; i < TOTAL_CUSTOM_CLASSES; i++){
@@ -2490,6 +2522,12 @@ void CCarCtrl::ReInit(void)
 #endif
 	CountDownToCarsAtStart = 2;
 	CarDensityMultiplier = 1.0f;
+	/* The burst evidence restarts with the world (VICE-146). */
+	ms_nFillBurstTotalAttempts = 0;
+	ms_nFillBurstTotalPlaced = 0;
+	ms_nFillBurstEndedLine = 0;
+	ms_nFillBurstEndedStalls = 0;
+	ms_nFillBurstEndedWindow = 0;
 	for (int i = 0; i < MAX_CARS_TO_KEEP; i++)
 		apCarsToKeep[i] = nil;
 	for (int i = 0; i < TOTAL_CUSTOM_CLASSES; i++)

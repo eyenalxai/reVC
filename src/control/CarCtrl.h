@@ -195,23 +195,36 @@ public:
 
 	/* The fill burst (VICE-126): the window of the traffic fill and the
 	 * counters of the burst in flight. The counters are live for the
-	 * measurement rig (utils/caps-audit/live-counters.py). */
+	 * measurement rig (utils/caps-audit/live-counters.py). The "total" pair
+	 * accumulates since boot (the last Init), so the boot burst stays
+	 * readable after a later arming resets the window rows; the three
+	 * "ended" counters count the burst runs by the reason they ended
+	 * (VICE-146). */
 	static SFillBurst ms_FillBurst;
 	static uint32 ms_nFillBurstAttempts;
 	static uint32 ms_nFillBurstPlaced;
+	static uint32 ms_nFillBurstTotalAttempts;
+	static uint32 ms_nFillBurstTotalPlaced;
+	static uint32 ms_nFillBurstEndedLine;
+	static uint32 ms_nFillBurstEndedStalls;
+	static uint32 ms_nFillBurstEndedWindow;
 	static float ms_fFillBurstTarget;
 
 	/* The near bubble (VICE-127): the counters of the traffic's churn and the
 	 * state of the frame's line-of-sight budget. The two frustum counters are
-	 * the acceptance: a car placed or deleted where the player could catch it
-	 * is counted there, and both are zero while the bubble holds. The fade
-	 * counters are the catchable events a fade covered (the fill burst's
-	 * work); the hidden events subdivide by the arm (the occluded hint and
-	 * the close blind spot, both confirmed by the ray); the other pair counts
-	 * the cars created outside the traffic spawner, and their fill is the
-	 * rest of the car target. */
+	 * the acceptance (VICE-146): a car placed or deleted in the frustum
+	 * nearer than the band minimum - the catchable zone - is counted there,
+	 * and both are zero while the bubble and the band hold. The band
+	 * counters are the in-view band's events, at or beyond the minimum; the
+	 * fade counters are the catchable events a fade covered (the fill
+	 * burst's work); the hidden events subdivide by the arm (the occluded
+	 * hint and the close blind spot, both confirmed by the ray); the other
+	 * pair counts the cars created outside the traffic spawner, and their
+	 * fill is the rest of the car target. */
 	static uint32 ms_nNearBubbleCreationsInFrustum;
 	static uint32 ms_nNearBubbleRemovalsInFrustum;
+	static uint32 ms_nNearBubbleBandCreations;
+	static uint32 ms_nNearBubbleBandRemovals;
 	static uint32 ms_nNearBubbleFadeCreations;
 	static uint32 ms_nNearBubbleFadeRemovals;
 	static uint32 ms_nNearBubbleHiddenCreations;
