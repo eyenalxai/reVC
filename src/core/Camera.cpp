@@ -1865,11 +1865,14 @@ CCamera::UpdateTargetEntity(void)
 			   PLAYER->GetPedState() == PED_CARJACK ||
 			   PLAYER->GetPedState() == PED_OPEN_DOOR)
 				enteringCar = true;
-
-			if(!enteringCar)
-				if(Cams[ActiveCam].CamTargetEntity != pTargetEntity)
-					Cams[ActiveCam].CamTargetEntity = pTargetEntity;
 		}
+
+		// The camera must follow the player's vehicle too, not only the ped.
+		// The persistent first person view keeps the camera mode while the
+		// target changes, so the mode switch no longer sets the target.
+		if(!enteringCar)
+			if(Cams[ActiveCam].CamTargetEntity != pTargetEntity)
+				Cams[ActiveCam].CamTargetEntity = pTargetEntity;
 
 		bool cantOpen = true;
 		if(PLAYER){
