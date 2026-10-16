@@ -4183,9 +4183,72 @@ CCamera::FirstPersonViewEnabled(void)
 bool
 CCamera::UsingFirstPersonSights(void)
 {
-	// Aiming down the sights in the first person view
+	// Aiming down the sights in the first person view: the player camera holds
+	// the weapon pose at the view and the shot follows it, for the plain sights
+	// (the M16 camera mode serves the assault rifles and every other aiming
+	// weapon), the sniper scope and the rocket sight alike.
 	return FirstPersonViewEnabled() &&
-		PlayerWeaponMode.Mode == CCam::MODE_M16_1STPERSON;
+		(PlayerWeaponMode.Mode == CCam::MODE_M16_1STPERSON ||
+		 PlayerWeaponMode.Mode == CCam::MODE_SNIPER ||
+		 PlayerWeaponMode.Mode == CCam::MODE_ROCKETLAUNCHER);
+}
+
+// The sight camera mode of the aimed weapon: the mode the stock game would use,
+// which the first person player camera stands in for.
+static bool
+IsWeaponSightMode(int16 mode)
+{
+	return mode == CCam::MODE_M16_1STPERSON ||
+	       mode == CCam::MODE_SNIPER ||
+	       mode == CCam::MODE_ROCKETLAUNCHER;
+}
+
+int16
+CCamera::GetSightCameraMode(void)
+{
+	// The first person player camera serves the aiming weapons while they aim:
+	// it stands in for the sight camera of the aimed weapon, so the weapon fire
+	// paths and the weapon pose read the same mode in both views. Every other
+	// view reports its own mode.
+	if(FirstPersonViewEnabled() && Cams[ActiveCam].Mode == CCam::MODE_1STPERSON &&
+	   IsWeaponSightMode(PlayerWeaponMode.Mode))
+		return PlayerWeaponMode.Mode;
+
+	return Cams[ActiveCam].Mode;
+}
+
+int16
+CCamera::GetSightOverlayMode(void)
+{
+	// The first person player camera draws the overlay of the sight it serves
+	// only where the sight needs one: the sniper scope and the rocket sight.
+	// The plain sights need none in that view, because the raised weapon is the
+	// sight itself, exactly as it is for the weapons the stock game does not
+	// give a sight camera to.
+	if(FirstPersonViewEnabled() && Cams[ActiveCam].Mode == CCam::MODE_1STPERSON){
+		switch(PlayerWeaponMode.Mode){
+		case CCam::MODE_SNIPER:
+		case CCam::MODE_ROCKETLAUNCHER:
+			return PlayerWeaponMode.Mode;
+		default:
+			return CCam::MODE_NONE;
+		}
+	}
+
+	// Every other view draws the overlay of its own mode, if the mode has one
+	switch(Cams[ActiveCam].Mode){
+	case CCam::MODE_SNIPER:
+	case CCam::MODE_ROCKETLAUNCHER:
+	case CCam::MODE_M16_1STPERSON:
+	case CCam::MODE_HELICANNON_1STPERSON:
+	case CCam::MODE_CAMERA:
+	case CCam::MODE_SNIPER_RUNABOUT:
+	case CCam::MODE_ROCKETLAUNCHER_RUNABOUT:
+	case CCam::MODE_M16_1STPERSON_RUNABOUT:
+		return Cams[ActiveCam].Mode;
+	default:
+		return CCam::MODE_NONE;
+	}
 }
 
 float

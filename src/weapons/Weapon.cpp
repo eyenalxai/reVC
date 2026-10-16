@@ -2267,7 +2267,9 @@ CWeapon::FireProjectile(CEntity *shooter, CVector *fireSource, float power)
 
 		if ( shooter->IsPed() && ((CPed*)shooter)->IsPlayer() )
 		{
-			int16 mode = TheCamera.Cams[TheCamera.ActiveCam].Mode;
+			// The rocket leaves along the view: the sight camera, or the first
+			// person player camera standing in for it
+			int16 mode = TheCamera.GetSightCameraMode();
 			if (!( mode == CCam::MODE_M16_1STPERSON
 				|| mode == CCam::MODE_SNIPER
 				|| mode == CCam::MODE_ROCKETLAUNCHER
@@ -2443,7 +2445,9 @@ CWeapon::FireSniper(CEntity *shooter)
 	
 	if ( (CEntity *)FindPlayerPed() == shooter )
 	{
-		int16 mode = TheCamera.Cams[TheCamera.ActiveCam].Mode;
+		// The view the shot leaves from: the sniper fires from the sight camera
+		// or from the first person player camera standing in for it
+		int16 mode = TheCamera.GetSightCameraMode();
 		if (!( mode == CCam::MODE_M16_1STPERSON
 			|| mode == CCam::MODE_SNIPER
 			|| mode == CCam::MODE_CAMERA
@@ -2564,7 +2568,10 @@ CWeapon::FireM16_1stPerson(CEntity *shooter)
 {
 	ASSERT(shooter!=nil);
 
-	int16 mode = TheCamera.Cams[TheCamera.ActiveCam].Mode;
+	// The view the shot leaves from: the first person player camera stands in
+	// for the sight camera of the aimed weapon, so the rifle sight fires from
+	// here in both views (VICE-136)
+	int16 mode = TheCamera.GetSightCameraMode();
 
 	if (!( mode == CCam::MODE_M16_1STPERSON
 		|| mode == CCam::MODE_SNIPER
@@ -2574,11 +2581,6 @@ CWeapon::FireM16_1stPerson(CEntity *shooter)
 		|| mode == CCam::MODE_SNIPER_RUNABOUT
 		|| mode == CCam::MODE_ROCKETLAUNCHER_RUNABOUT
 		|| mode == CCam::MODE_HELICANNON_1STPERSON
-#ifdef FIRST_PERSON
-		// The mobile ADS runs the plain first person camera (the sight zoom
-		// comes from the queued weapon mode), so it fires from here too.
-		|| (mode == CCam::MODE_1STPERSON && TheCamera.UsingFirstPersonSights())
-#endif
 		) )
 	{
 		return false;

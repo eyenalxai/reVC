@@ -418,11 +418,15 @@ DrawCrosshairAndSights(CPlayerPed *playerPed, eWeaponType WeaponType, int32 Mode
 	bool CrossHairHidesHud = false;
 	bool DrawCrossHairPC = false;
 
-	if ((Mode == CCam::MODE_SNIPER || Mode == CCam::MODE_ROCKETLAUNCHER || Mode == CCam::MODE_M16_1STPERSON || Mode == CCam::MODE_HELICANNON_1STPERSON || Mode == CCam::MODE_CAMERA)
+	// The sight overlay the view draws: the stock sight camera mode, or the
+	// first person player camera standing in for the aimed weapon's sight
+	int32 sightMode = TheCamera.GetSightOverlayMode();
+
+	if ((sightMode == CCam::MODE_SNIPER || sightMode == CCam::MODE_ROCKETLAUNCHER || sightMode == CCam::MODE_M16_1STPERSON || sightMode == CCam::MODE_HELICANNON_1STPERSON || sightMode == CCam::MODE_CAMERA)
 		&& playerPed && !playerPed->GetWeapon()->IsTypeMelee())
 		DrawCrossHair = true;
 
-	if (Mode == CCam::MODE_M16_1STPERSON_RUNABOUT || Mode == CCam::MODE_ROCKETLAUNCHER_RUNABOUT || Mode == CCam::MODE_SNIPER_RUNABOUT)
+	if (sightMode == CCam::MODE_M16_1STPERSON_RUNABOUT || sightMode == CCam::MODE_ROCKETLAUNCHER_RUNABOUT || sightMode == CCam::MODE_SNIPER_RUNABOUT)
 		DrawCrossHairPC = true;
 	if (TheCamera.Cams[TheCamera.ActiveCam].Using3rdPersonMouseCam() && (!CPad::GetPad(0)->GetLookBehindForPed() || TheCamera.m_bPlayerIsInGarage)
 		|| Mode == CCam::MODE_1STPERSON_RUNABOUT) {
@@ -452,7 +456,7 @@ DrawCrosshairAndSights(CPlayerPed *playerPed, eWeaponType WeaponType, int32 Mode
 
 		RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
 
-		CrossHairHidesHud = DrawSights(playerPed, WeaponType, Mode, DrawCrossHairPC);
+		CrossHairHidesHud = DrawSights(playerPed, WeaponType, sightMode, DrawCrossHairPC);
 
 		RwRenderStateSet(rwRENDERSTATESRCBLEND, (void *)rwBLENDSRCALPHA);
 		RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void *)rwBLENDINVSRCALPHA);

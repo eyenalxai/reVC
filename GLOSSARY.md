@@ -274,6 +274,17 @@ setting keeps the camera at the player's eyes, the mouse aims and WASD stays
 with the movement. The stock look-around view (the setting off) is a separate,
 stock path and stays as it is.
 
+## Sight view
+
+The view the shot leaves from and the weapon holds its pose at while the player
+aims down the sights. `CCamera::GetSightCameraMode` names it: the stock sight
+camera mode, or the first person player camera standing in for it. The rifle
+sight (the M16 camera mode) and the plain first person sights hold it through
+the first person player camera; the sniper scope and the rocket sight keep
+their own views. `CCamera::GetSightOverlayMode` names the overlay the HUD
+draws: the sniper scope and the rocket sight draw over the first person player
+camera, the plain sights need none because the raised weapon is the sight.
+
 ## Camera handover
 
 One glide of the game camera with an ease out curve. A view change that would

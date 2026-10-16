@@ -698,6 +698,15 @@ public:
 	// The car ADS: the aim button held while the camera serves the player's
 	// vehicle, the third person mouse camera or the first person car view
 	bool UsingCarAds(void);
+	// The stock sight camera the current view stands in for. The first person
+	// player camera serves the aiming weapons, so while a weapon aims down its
+	// sights it answers with the sight camera mode of that weapon. The weapon
+	// fire paths ask this, so the shot follows the view in both views.
+	int16 GetSightCameraMode(void);
+	// The sight overlay the current view draws, as a stock sight camera mode,
+	// or MODE_NONE for no overlay. The HUD asks this, so the overlay follows
+	// the weapon the view aims with.
+	int16 GetSightOverlayMode(void);
 #endif
 
 	// Physical camera
