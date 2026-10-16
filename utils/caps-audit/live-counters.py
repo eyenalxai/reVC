@@ -238,6 +238,9 @@ FAR_TRAFFIC = [
     ("far: demotions (hand-overs)",  "_ZN11CFarTraffic23ms_nFarTrafficDemotionsE",      "I"),
     ("far: in reach (must be 0)",    "_ZN11CFarTraffic21ms_nFarTrafficInReachE",        "I"),
     ("far: refused",                 "_ZN11CFarTraffic21ms_nFarTrafficRefusedE",        "I"),
+    ("far: refused no site",         "_ZN11CFarTraffic27ms_nFarTrafficRefusedNoSiteE",  "I"),
+    ("far: refused band",            "_ZN11CFarTraffic25ms_nFarTrafficRefusedBandE",    "I"),
+    ("far: refused gate",            "_ZN11CFarTraffic25ms_nFarTrafficRefusedGateE",    "I"),
     ("far: refused model",           "_ZN11CFarTraffic26ms_nFarTrafficRefusedModelE",   "I"),
     ("far: refused pool",            "_ZN11CFarTraffic25ms_nFarTrafficRefusedPoolE",    "I"),
     ("far: attempts",                "_ZN11CFarTraffic22ms_nFarTrafficAttemptsE",       "I"),
@@ -460,6 +463,16 @@ def main():
         print(f"  the far layer: creations {far_creations}, removals {far_removals}, "
               f"promotions {far_promotions} (of them without a driver {far_safety}), "
               f"hand-overs {far_demotions}, refused {far_refused}")
+    far_no_site = values.get("far refused no site")
+    far_band = values.get("far refused band")
+    far_gate = values.get("far refused gate")
+    if far_no_site is not None:
+        # The causes of a refused attempt: the path network could not place at
+        # any site (the player over water or at the map's edge), every placement
+        # fell outside the band, or the near bubble's gate and the car build
+        # refused the in-band ones (a lane already taken is the normal case).
+        print(f"  the far layer: the refusals by cause: no site {far_no_site}, "
+              f"band {far_band}, gate {far_gate}")
     if far_updates is not None:
         print(f"  the far layer: the stagger moved {far_updates} cars so far "
               f"(about a third of the layer a frame)")
