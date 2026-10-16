@@ -32,7 +32,6 @@
 
 // The pedestrian ring comes from the one table (TrafficRings.h): the creation
 // ring, the off-screen band and the removal distances scale with it.
-#define OFFSCREEN_CREATION_MULT	0.5f
 #define PED_AREA_DENSITY_SCALE	3.0f // scale the zone density budget for dense on-foot crowds
 #define PED_ATTEMPTS_PER_FRAME	3 // spawn attempts per frame
 
@@ -381,9 +380,11 @@ CPopulation::Update(bool addPeds)
 				const STrafficRings rings = CurrentTrafficRings();
 				// The ring fills from the target and the lifetime, so the rate follows the ring scale.
 				for (int i = 0; i < PED_ATTEMPTS_PER_FRAME * rings.scale; i++) {
+					// The vehicle-speed multiplier widens the off-screen band's outer
+					// edge; the pull-back stays the width of the creation ring.
 					AddToPopulation(pcdm * rings.pedCreateMin,
 						pcdm * rings.pedCreateMax,
-						pcdm * rings.pedOffScreenMin,
+						pcdm * rings.pedOffScreenMax - rings.pedOffScreenPullBack,
 						pcdm * rings.pedOffScreenMax);
 				}
 			}
@@ -1127,7 +1128,7 @@ CPopulation::ManagePopulation(void)
 				pedIsFarAway = true;
 			}
 #ifndef EXTENDED_OFFSCREEN_DESPAWN_RANGE
-			else if (pedCreationDistMultiplier * rings.pedCreateMax * OFFSCREEN_CREATION_MULT < dist) {
+			else if (pedCreationDistMultiplier * rings.pedOffScreenMax < dist) {
 				if (CTimer::GetTimeInMilliseconds() > ped->m_nExtendedRangeTimer && !ped->GetIsOnScreen()) {
 					if (TheCamera.Cams[TheCamera.ActiveCam].Mode != CCam::MODE_SNIPER
 						&& TheCamera.Cams[TheCamera.ActiveCam].Mode != CCam::MODE_SNIPER_RUNABOUT

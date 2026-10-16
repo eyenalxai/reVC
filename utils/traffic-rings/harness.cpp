@@ -32,6 +32,25 @@
 static const float STOCK_DRAW_DISTANCE = 1.2f;
 static const float MAX_DRAW_DISTANCE = 16.0f;
 
+/* The components of the placement error the reserve must hold. They come from
+ * the code that places a fresh car, not from this table:
+ *   the lane offset   CarCtrl.cpp: (lane + OneWayLaneOffset()) * LANE_WIDTH,
+ *                     LANE_WIDTH is 5 m (PathFind.h), lane is below the link's
+ *                     lane count and the shipped paths.ipl holds up to 4 lanes
+ *                     per side, OneWayLaneOffset is 0.5 on a two-way road (the
+ *                     path nodes carry width 0, so the lane offset term of
+ *                     GetLaneOffset is 0): (4 - 1 + 0.5) * 5 = 17.5 m
+ *   the curve shift   CarCtrl.cpp: the final position is moved 2 m along the
+ *                     node link
+ *   the curve itself  the curve point at the placement fraction differs from
+ *                     the straight interpolation by the sagitta of the link,
+ *                     a few metres on the city's node spacing
+ * The reserve (30 m) is the game's own step from the on-screen ring (250 m) to
+ * the despawn (280 m). This program models the error as exactly that reserve:
+ * that is the assumption the numbers in the game have always carried. */
+static const float PLACEMENT_LANE_OFFSET = (4.0f - 1.0f + 0.5f) * 5.0f;
+static const float PLACEMENT_CURVE_SHIFT = 2.0f;
+
 /* The FOV factor the camera reports: 70/FOV capped at 2.2 (Camera.cpp). The
  * ticket's axis. */
 static float LodDistance(float fovFactor, float drawDistance)
@@ -52,10 +71,11 @@ static STrafficRings RingsAt(float spawnDistance, float fovFactor, float farClip
 /*
  * The radii the branch replaced, for the one comparison that matters: the
  * stock line must not move. The numbers are the old macros of CarCtrl.cpp,
- * Population.cpp and CarGen.cpp at their face value; the birth cull of the old
- * code used OFFSCREEN_DESPAWN_RANGE without the FOV factor, and the off-screen
- * despawn of PossiblyRemoveVehicle used the on-screen range (config.h defines
- * EXTENDED_OFFSCREEN_DESPAWN_RANGE), so the old car cull is 280 x SDM x FOV.
+ * Population.cpp and CarGen.cpp at their face value. The old birth cull of an
+ * off-screen car used OFFSCREEN_DESPAWN_RANGE (120 x SDM, no FOV factor), and
+ * the old lifetime cull of PossiblyRemoveVehicle used the on-screen range
+ * (280 x SDM x FOV, config.h defines EXTENDED_OFFSCREEN_DESPAWN_RANGE), which
+ * is why the two could disagree.
  */
 struct STodayRings
 {
@@ -92,6 +112,10 @@ static STodayRings TodayAt(float spawnDistance, float fovFactor)
 	t.pedRemoveSpecial = 145.0f * spawnDistance * fovFactor;
 	return t;
 }
+
+/* The ped creation is widened by the player's vehicle speed
+ * (Population.cpp, PedCreationDistMultiplier: 1.0 .. 1.5). */
+static const float PED_SPEED_MULT_MAX = 1.5f;
 
 static int g_failures = 0;
 
@@ -131,14 +155,19 @@ static void CheckRings(float sd, float fov, float farClip, const STrafficRings &
 		Fail("on-screen spawn band", sd, fov, farClip, "the front ring is not the reserve above the inner edge");
 	if (r.carOnScreenSpawnMin < r.carCameraMin)
 		Fail("camera rule", sd, fov, farClip, "the camera minimum reaches into the on-screen band");
-	/* The cap stops growth: a ring smaller than the stock one would drop
-	 * traffic into the player's view, so the floor keeps the stock ring. */
-	if (r.carOnScreenSpawnMax + reserve > r.visibleRange && r.scale > RING_MIN_SCALE)
-		Fail("visible range", sd, fov, farClip, "a grown on-screen ring aims past the visible range");
+	/* The cap stops growth, and its floor is the stock ring at the live FOV
+	 * factor: a ring smaller than that would drop traffic into the player's
+	 * view. The on-screen ring is therefore inside the visible range or, when
+	 * the floor binds, at the stock radius. */
+	float ringLimit = TrafficRingsMax(r.visibleRange - reserve, RING_CAR_ONSCREEN_SPAWN_MAX * fov);
+	if (r.carOnScreenSpawnMax > ringLimit)
+		Fail("visible range", sd, fov, farClip, "the on-screen ring aims past the visible range and the floor");
 	if (r.carDespawn < r.carSideSpawn)
 		Fail("off-screen spawn band", sd, fov, farClip, "the cull is inside the side ring");
-	if (r.scale < RING_MIN_SCALE)
-		Fail("scale", sd, fov, farClip, "the ring scale is below the floor");
+	/* The floor of the two scales: the stock radius at the live FOV factor, and
+	 * the stock off-screen band. */
+	if (r.scale < fov || r.sideScale < 1.0f)
+		Fail("scale", sd, fov, farClip, "a scale is below its floor");
 
 	/* The boat ring is the water factor over the car ring, and the extended
 	 * range factor multiplies the whole threshold, so the reserve scales with
@@ -148,22 +177,34 @@ static void CheckRings(float sd, float fov, float farClip, const STrafficRings &
 	if (r.boatSpawnFactor * r.carOnScreenSpawnMax + reserve > r.extendedRangeFactor * r.carDespawn)
 		Fail("on-screen boat band", sd, fov, farClip, "the boat front ring is not inside its cull");
 
-	/* The generator ring, clamped by the same table. */
-	if (r.generatorFar > r.visibleRange && r.scale > RING_MIN_SCALE)
-		Fail("generator ring", sd, fov, farClip, "a grown generator ring aims past the visible range");
-	if (r.generatorNear >= r.generatorFar)
+	/* The generator ring is clamped by the car table: what it must not do is
+	 * outgrow the despawn of the cars it makes, or the parked car would be
+	 * removed right after it appears. The boat generator makes a boat, so the
+	 * boat factor applies to it. */
+	if (r.generatorFar >= r.carDespawn)
+		Fail("generator ring", sd, fov, farClip, "the generator ring reaches the car despawn");
+	if (r.generatorFar <= r.generatorNear)
 		Fail("generator ring", sd, fov, farClip, "the generator ring lost its width");
-	if (r.generatorBoatFar <= r.generatorFar)
-		Fail("generator ring", sd, fov, farClip, "the boat generator ring is inside the far ring");
+	if (r.generatorBoatFar >= r.extendedRangeFactor * r.carDespawn)
+		Fail("generator ring", sd, fov, farClip, "the boat generator ring reaches the boat despawn");
 
 	/* The pedestrian band. A ped beyond its removal fades, it is not deleted,
-	 * so the stock one-metre step is enough: the creation ring stays inside. */
+	 * so the stock one-metre step is enough: the creation ring stays inside.
+	 * The player's vehicle speed multiplies the off-screen band's outer edge,
+	 * never its pull-back, so the band is checked at the standing and at the
+	 * driving multiplier. */
 	if (r.pedCreateMin >= r.pedCreateMax)
 		Fail("ped band", sd, fov, farClip, "the creation ring lost its width");
 	if (r.pedCreateMax >= r.pedRemove)
 		Fail("ped band", sd, fov, farClip, "the creation ring reaches the removal");
-	if (r.pedOffScreenMin >= r.pedOffScreenMax || r.pedOffScreenMax >= r.pedRemove)
-		Fail("ped band", sd, fov, farClip, "the off-screen band is not inside the removal");
+	for (float pcdm = 1.0f; pcdm <= PED_SPEED_MULT_MAX; pcdm += 0.5f) {
+		float inner = pcdm * r.pedOffScreenMax - r.pedOffScreenPullBack;
+		float outer = pcdm * r.pedOffScreenMax;
+		if (inner <= 0.0f || inner >= outer)
+			Fail("ped band", sd, fov, farClip, "the off-screen band lost its width");
+		if (outer >= pcdm * r.pedRemove)
+			Fail("ped band", sd, fov, farClip, "the off-screen band reaches the removal");
+	}
 
 	/* The two rings the spawner asks for, through the birth cull. The side band
 	 * is outside the camera cone, so it is created off screen; the front band is
@@ -183,16 +224,18 @@ static void CheckRings(float sd, float fov, float farClip, const STrafficRings &
 static void PrintRings(const char *title, const STrafficRings &r)
 {
 	printf("%s\n", title);
-	printf("  scale %.3f   visible range %.1f m (LOD %.1f)\n", r.scale, r.visibleRange, r.visibleRange);
-	printf("  car   side %.1f  on-screen %.1f .. %.1f  despawn %.1f  camera min %.1f  top-down %.1f\n",
-		r.carSideSpawn, r.carOnScreenSpawnMin, r.carOnScreenSpawnMax, r.carDespawn, r.carCameraMin, r.carTopDownDespawn);
+	printf("  scale %.3f   side scale %.3f   visible range %.1f m\n", r.scale, r.sideScale, r.visibleRange);
+	printf("  car   side %.1f  on-screen %.1f .. %.1f  despawn %.1f  camera min %.1f\n",
+		r.carSideSpawn, r.carOnScreenSpawnMin, r.carOnScreenSpawnMax, r.carDespawn, r.carCameraMin);
 	printf("  boat  water factor %.2f  extended range factor %.2f -> side %.1f / front %.1f, despawn %.1f\n",
 		r.boatSpawnFactor, r.extendedRangeFactor,
 		r.boatSpawnFactor * r.carSideSpawn, r.boatSpawnFactor * r.carOnScreenSpawnMax,
 		r.extendedRangeFactor * r.carDespawn);
 	printf("  gen   near %.1f  far %.1f  boat %.1f\n", r.generatorNear, r.generatorFar, r.generatorBoatFar);
-	printf("  ped   create %.1f .. %.1f  off-screen %.1f .. %.1f  remove %.1f / %.1f\n",
-		r.pedCreateMin, r.pedCreateMax, r.pedOffScreenMin, r.pedOffScreenMax, r.pedRemove, r.pedRemoveSpecial);
+	printf("  ped   create %.1f .. %.1f  off-screen %.1f .. %.1f (pull-back %.1f)  remove %.1f / %.1f\n",
+		r.pedCreateMin, r.pedCreateMax,
+		r.pedOffScreenMax - r.pedOffScreenPullBack, r.pedOffScreenMax, r.pedOffScreenPullBack,
+		r.pedRemove, r.pedRemoveSpecial);
 }
 
 static void CheckStockAgainstToday(void)
@@ -205,6 +248,7 @@ static void CheckStockAgainstToday(void)
 	printf("\n  the same rows before this branch:\n");
 	printf("  car   side %.1f  on-screen %.1f .. %.1f  despawn %.1f  camera min %.1f\n",
 		t.carSideSpawn, t.carOnScreenSpawnMin, t.carOnScreenSpawnMax, t.carDespawn, t.carCameraMin);
+	printf("  car   the birth cull of a fresh off-screen car stood at %.1f m\n", t.carBirthOffScreenCull);
 	printf("  gen   near %.1f  far %.1f  boat %.1f\n", t.generatorNear, t.generatorFar, t.generatorBoatFar);
 	printf("  ped   create %.1f .. %.1f  remove %.1f / %.1f\n",
 		t.pedCreateMin, t.pedCreateMax, t.pedRemove, t.pedRemoveSpecial);
@@ -213,8 +257,8 @@ static void CheckStockAgainstToday(void)
 		{ "car side ring", r.carSideSpawn, t.carSideSpawn },
 		{ "car on-screen inner edge", r.carOnScreenSpawnMin, t.carOnScreenSpawnMin },
 		{ "car on-screen ring", r.carOnScreenSpawnMax, t.carOnScreenSpawnMax },
-		{ "car despawn", r.carDespawn, t.carDespawn },
-		{ "car off-screen despawn", r.carOffScreenDespawn, t.carBirthOffScreenCull },
+		{ "car despawn (lifetime cull)", r.carDespawn, t.carDespawn },
+		{ "car birth cull, off screen", r.carDespawn, t.carBirthOffScreenCull },
 		{ "car camera minimum", r.carCameraMin, t.carCameraMin },
 		{ "generator near ring", r.generatorNear, t.generatorNear },
 		{ "generator far ring", r.generatorFar, t.generatorFar },
@@ -230,14 +274,14 @@ static void CheckStockAgainstToday(void)
 		printf("    %-28s %10.1f  before %10.1f  %s\n", rows[i].what, rows[i].now, rows[i].before,
 			same ? "same" : "moved");
 	}
-	printf("\n  One row moves, and it moves no spawn: the off-screen despawn goes from\n");
-	printf("  120 m to 150 m. Before, the birth cull of an off-screen spawn used the\n");
-	printf("  120 m off-screen ring itself, while the lifetime cull\n");
-	printf("  (PossiblyRemoveVehicle, with EXTENDED_OFFSCREEN_DESPAWN_RANGE) used the\n");
-	printf("  280 m on-screen threshold. The two now read the same row, so a fresh spawn\n");
-	printf("  that lands a lane offset past its ring survives, as the lifetime cull\n");
-	printf("  always intended. Every spawn ring, the on-screen despawn and the camera\n");
-	printf("  rule are unchanged.\n\n");
+	printf("\n  One row moves: the birth cull of a fresh off-screen car, from 120 m to 280 m.\n");
+	printf("  It has to move. The old birth cull used the off-screen ring itself\n");
+	printf("  (120 m), so a placement that lands a lane offset past its ring died on\n");
+	printf("  the frame it was created, while the lifetime cull of the same car\n");
+	printf("  (PossiblyRemoveVehicle, extended off-screen range) kept it to 280 m. The\n");
+	printf("  two now read the same row. No car roams farther: the lifetime cull is\n");
+	printf("  unchanged at 280 m, so the move only stops the deaths at birth.\n");
+	printf("  Every spawn ring, the on-screen despawn and the camera rule are unchanged.\n\n");
 }
 
 static void CheckMaxSettings(void)
@@ -274,7 +318,7 @@ static void CheckMatrix(float drawDistance, const char *title)
 	float minSide = 1e9f, maxSide = -1e9f;
 	float minFront = 1e9f, maxFront = -1e9f;
 	float minRange = 1e9f, maxRange = -1e9f;
-	int minScaleSd = 0, minScaleFov = 0, minScaleFar = 0;
+	float minCamera = 1e9f, maxCamera = -1e9f;
 
 	printf("== %s\n\n", title);
 	printf("  the ring scale, SpawnDistance 4.0 (rows FOV factor, columns far clip m):\n");
@@ -319,9 +363,7 @@ static void CheckMatrix(float drawDistance, const char *title)
 		STrafficRings r = RingsAt(spawnDistances[i], fovFactors[j], farClips[k], drawDistance);
 		cells++;
 		CheckRings(spawnDistances[i], fovFactors[j], farClips[k], r);
-		if (r.scale < minScale) {
-			minScale = r.scale; minScaleSd = i; minScaleFov = j; minScaleFar = k;
-		}
+		minScale = TrafficRingsMin(minScale, r.scale);
 		maxScale = TrafficRingsMax(maxScale, r.scale);
 		minSide = TrafficRingsMin(minSide, r.carSideSpawn);
 		maxSide = TrafficRingsMax(maxSide, r.carSideSpawn);
@@ -329,20 +371,40 @@ static void CheckMatrix(float drawDistance, const char *title)
 		maxFront = TrafficRingsMax(maxFront, r.carOnScreenSpawnMax);
 		minRange = TrafficRingsMin(minRange, r.visibleRange);
 		maxRange = TrafficRingsMax(maxRange, r.visibleRange);
+		minCamera = TrafficRingsMin(minCamera, r.carCameraMin);
+		maxCamera = TrafficRingsMax(maxCamera, r.carCameraMin);
 	}
 
 	printf("  cells %d (%d SpawnDistance x %d FOV factor x %d far clip), draw distance %.1f, LOD 300 x multiplier\n",
 		cells, nSd, nFov, nFar, drawDistance);
 	printf("  cells that fail a check so far: %d\n", g_failures);
-	printf("  scale %.3f .. %.3f (the smallest at SpawnDistance %.1f, FOV factor %.2f, far clip %.0f)\n",
-		minScale, maxScale, spawnDistances[minScaleSd], fovFactors[minScaleFov], farClips[minScaleFar]);
-	printf("  side ring %.1f .. %.1f m   on-screen ring %.1f .. %.1f m\n", minSide, maxSide, minFront, maxFront);
-	printf("  visible range %.1f .. %.1f m\n\n", minRange, maxRange);
+	printf("  scale %.3f .. %.3f   side ring %.1f .. %.1f m   on-screen ring %.1f .. %.1f m\n",
+		minScale, maxScale, minSide, maxSide, minFront, maxFront);
+	printf("  camera minimum %.1f .. %.1f m   visible range %.1f .. %.1f m\n\n",
+		minCamera, maxCamera, minRange, maxRange);
+}
+
+static void CheckPlacementReserve(void)
+{
+	printf("== 0. the reserve, and what the harness assumes\n\n");
+	printf("  the reserve of the table:                %8.1f m\n", RING_CAR_DESPAWN_RESERVE);
+	printf("  the lane offset of the widest road:      %8.1f m\n", PLACEMENT_LANE_OFFSET);
+	printf("  the curve shift of the final position:   %8.1f m\n", PLACEMENT_CURVE_SHIFT);
+	printf("  left for the curve and the float:        %8.1f m\n",
+		RING_CAR_DESPAWN_RESERVE - PLACEMENT_LANE_OFFSET - PLACEMENT_CURVE_SHIFT);
+	printf("\n  The real birth cull measures vecTargetPos -> the final position of the\n");
+	printf("  car: the ring crossing of the node segment, the lane offset, the curve\n");
+	printf("  placement and the 2 m shift. This program models that error as exactly\n");
+	printf("  the reserve, because the reserve is the game's own number for it (the\n");
+	printf("  250 m ring to the 280 m despawn, and the same 30 m down to the 220 m\n");
+	printf("  inner edge). That is the assumption, stated: no component of the error\n");
+	printf("  scales with the ring, and the two derived components above fit the\n");
+	printf("  reserve with room left.\n\n");
 }
 
 static void CheckBootPath(void)
 {
-	printf("== 4. the boot path: the time cycle is not loaded yet (far clip 0), LOD at the stock draw distance\n\n");
+	printf("== 5. the boot path: the time cycle is not loaded yet (far clip 0), LOD at the stock draw distance\n\n");
 	STrafficRingInput in;
 	in.spawnDistance = 1.0f;
 	in.fovFactor = 1.0f;
@@ -360,6 +422,7 @@ int main(void)
 	printf("reVC traffic rings: the one table and its invariant (VICE-120)\n");
 	printf("the table lives in src/control/TrafficRings.h; this program reads it directly\n\n");
 
+	CheckPlacementReserve();
 	CheckStockAgainstToday();
 	CheckMaxSettings();
 

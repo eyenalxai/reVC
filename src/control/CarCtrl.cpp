@@ -1018,7 +1018,6 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 	 * not inside this call. bFadeOut is written, not cached, below. */
 	bool bOnScreenAtEntry = pVehicle->GetIsOnScreen();
 	bool bInsideHideOutGarageAtEntry = CGarages::IsPointWithinHideOutGarage(pVehicle->GetPosition());
-	/* BUG: this variable is initialized only in if-block below but can be used outside of it. */
 	if (!IsThisVehicleInteresting(pVehicle) && !pVehicle->bIsLocked &&
 		pVehicle->CanBeDeleted() && !CCranes::IsThisCarBeingTargettedByAnyCrane(pVehicle)){
 		if (pVehicle->bFadeOut && CVisibilityPlugins::GetClumpAlpha(pVehicle->GetClump()) == 0){
@@ -1027,36 +1026,16 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 			return;
 		}
 		float distanceToPlayer = (pVehicle->GetPosition() - vecPlayerPos).Magnitude2D();
-		/* The one despawn threshold of the table: the on-screen spawn ring plus
-		 * its reserve. The extended range of a boat or a set piece multiplies
-		 * the whole threshold, so its own ring (1.5 times the car ring) keeps
-		 * the same reserve. */
+		/* The one despawn threshold of the table. config.h defines
+		 * EXTENDED_OFFSCREEN_DESPAWN_RANGE in every shipped build, so a car out
+		 * of sight is removed at the same distance as one in view: a car never
+		 * vanishes right before it comes into view, and the birth cull of
+		 * CCarCtrl::CreateCarFromPlacement reads the same row, so a fresh spawn
+		 * is never removed on the frame it is created. The extended range of a
+		 * boat or a set piece multiplies the whole threshold, so its own ring
+		 * (1.5 times the car ring) keeps the same reserve. */
 		const STrafficRings rings = CurrentTrafficRings();
-		float threshold = rings.carOffScreenDespawn;
-#ifdef EXTENDED_OFFSCREEN_DESPAWN_RANGE
-		/* One cull range for both view states: a car out of sight is removed at
-		 * the same distance as one in view, so a car never disappears right
-		 * before it comes into view. */
-		threshold = rings.carDespawn;
-#else
-		if (bOnScreenAtEntry ||
-			TheCamera.Cams[TheCamera.ActiveCam].LookingLeft ||
-			TheCamera.Cams[TheCamera.ActiveCam].LookingRight ||
-			TheCamera.Cams[TheCamera.ActiveCam].LookingBehind ||
-			TheCamera.GetLookDirection() == 0 ||
-			pVehicle->VehicleCreatedBy == PARKED_VEHICLE ||
-			pVehicle->GetModelIndex() == MI_AMBULAN ||
-			pVehicle->GetModelIndex() == MI_FIRETRUCK ||
-			pVehicle->bIsLawEnforcer ||
-			pVehicle->bIsCarParkVehicle ||
-			CTimer::GetTimeInMilliseconds() < pVehicle->m_nSetPieceExtendedRangeTime
-			)
-		{
-			threshold = rings.carDespawn;
-		}
-		if (TheCamera.GetForward().z < -0.9f)
-			threshold = rings.carTopDownDespawn;
-#endif
+		float threshold = rings.carDespawn;
 		if (pVehicle->bExtendedRange)
 			threshold *= rings.extendedRangeFactor;
 		if (distanceToPlayer > threshold && !bInsideHideOutGarageAtEntry){
