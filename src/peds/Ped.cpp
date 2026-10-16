@@ -1112,7 +1112,12 @@ CPed::MoveHeadToLook(void)
 
 	if (m_pLookTarget) {
 		if (m_pLookTarget->IsPed()) {
-			((CPed*)m_pLookTarget)->m_pedIK.GetComponentPosition(lookPos, PED_MID);
+			// A deleted ped can leave a stale look target. Its clump is nil then,
+			// and the IK cannot read a position from it, so use the ped's position.
+			if (m_pLookTarget->GetClump() == nil)
+				lookPos = m_pLookTarget->GetPosition();
+			else
+				((CPed*)m_pLookTarget)->m_pedIK.GetComponentPosition(lookPos, PED_MID);
 		} else {
 			lookPos = m_pLookTarget->GetPosition();
 		}

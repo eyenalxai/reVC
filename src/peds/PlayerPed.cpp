@@ -924,11 +924,13 @@ switchDetectDone:
 	}
 }
 
-// The active reload of the player: the reload key starts a reload, a later
-// press judges the timing window, and an idle player plays the reload
-// animation. The timing itself lives in src/weapons/ActiveReload.
+// The shared active reload input of the player: the reload key starts a
+// reload or judges the running one, and a perfect judgment aborts the reload
+// animation once the weapon is READY. The on-foot path and the three drive-by
+// callers use this, so the input behaves the same on foot and in a vehicle
+// (VICE-88, VICE-90). The timing itself lives in src/weapons/ActiveReload.
 void
-CPlayerPed::ProcessActiveReload(CPad *padUsed)
+CPlayerPed::ProcessActiveReloadInput(CPad *padUsed)
 {
 	CWeapon *weapon = GetWeapon();
 
@@ -938,6 +940,25 @@ CPlayerPed::ProcessActiveReload(CPad *padUsed)
 		else if (weapon->CanReload())
 			weapon->StartReload(this);
 	}
+
+	// The perfect judgment ends the timer almost at once, but the attack
+	// refuses while the reload association runs. Once the weapon state is
+	// READY, fade the animation out so the pose and the attack unblock
+	// (VICE-88). While the state is still RELOADING the attack path can
+	// blend a fresh reload animation and re-block, so wait.
+	if (weapon->m_eWeaponState == WEAPONSTATE_READY && ActiveReload::ConsumePerfect())
+		AbortReloadAnimation();
+}
+
+// The active reload of the player on foot: the shared input plus the reload
+// animation of the player who reloads while standing still. A driver holds
+// the drive-by pose, so only the input runs in a vehicle.
+void
+CPlayerPed::ProcessActiveReload(CPad *padUsed)
+{
+	CWeapon *weapon = GetWeapon();
+
+	ProcessActiveReloadInput(padUsed);
 
 	// Attack() starts the animation for the player who reloads in a fight;
 	// this covers the player who reloads while standing still. The claim keeps

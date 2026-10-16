@@ -112,31 +112,7 @@ CPhysical::Add(void)
 	for(y = ystart; y <= yend; y++)
 		for(x = xstart; x <= xend; x++){
 			s = CWorld::GetSector(x, y);
-			if(x == xmid && y == ymid) switch(m_type){
-			case ENTITY_TYPE_VEHICLE:
-				list = &s->m_lists[ENTITYLIST_VEHICLES];
-				break;
-			case ENTITY_TYPE_PED:
-				list = &s->m_lists[ENTITYLIST_PEDS];
-				break;
-			case ENTITY_TYPE_OBJECT:
-				list = &s->m_lists[ENTITYLIST_OBJECTS];
-				break;
-			default:
-				assert(0);
-			}else switch(m_type){
-			case ENTITY_TYPE_VEHICLE:
-				list = &s->m_lists[ENTITYLIST_VEHICLES_OVERLAP];
-				break;
-			case ENTITY_TYPE_PED:
-				list = &s->m_lists[ENTITYLIST_PEDS_OVERLAP];
-				break;
-			case ENTITY_TYPE_OBJECT:
-				list = &s->m_lists[ENTITYLIST_OBJECTS_OVERLAP];
-				break;
-			default:
-				assert(0);
-			}
+			list = CWorld::GetSectorEntityList(s, m_type, x == xmid && y == ymid);
 			CPtrNode *node = list->InsertItem(this);
 			assert(node);
 			m_entryInfoList.InsertItem(list, node, s);
@@ -180,27 +156,7 @@ CPhysical::RemoveAndAdd(void)
 	for(y = ystart; y <= yend; y++)
 		for(x = xstart; x <= xend; x++){
 			s = CWorld::GetSector(x, y);
-			if(x == xmid && y == ymid) switch(m_type){
-			case ENTITY_TYPE_VEHICLE:
-				list = &s->m_lists[ENTITYLIST_VEHICLES];
-				break;
-			case ENTITY_TYPE_PED:
-				list = &s->m_lists[ENTITYLIST_PEDS];
-				break;
-			case ENTITY_TYPE_OBJECT:
-				list = &s->m_lists[ENTITYLIST_OBJECTS];
-				break;
-			}else switch(m_type){
-			case ENTITY_TYPE_VEHICLE:
-				list = &s->m_lists[ENTITYLIST_VEHICLES_OVERLAP];
-				break;
-			case ENTITY_TYPE_PED:
-				list = &s->m_lists[ENTITYLIST_PEDS_OVERLAP];
-				break;
-			case ENTITY_TYPE_OBJECT:
-				list = &s->m_lists[ENTITYLIST_OBJECTS_OVERLAP];
-				break;
-			}
+			list = CWorld::GetSectorEntityList(s, m_type, x == xmid && y == ymid);
 			if(next){
 				// If we still have old nodes, use them
 				next->list->RemoveNode(next->listnode);

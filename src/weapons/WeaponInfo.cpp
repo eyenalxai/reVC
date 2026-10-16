@@ -105,6 +105,52 @@ CWeaponInfo::GetWeaponInfo(eWeaponType weaponType)
 	return &aWeaponInfo[weaponType];
 }
 
+// The magazine rework of the active reload follow-up (spec VICE-85). weapon.dat
+// is not in the repository, so the new values ship as this table, applied after
+// the parse. The table is a weapon rework and always runs: the ActiveReload
+// toggle governs only the mechanics of the feature (the player's manual
+// reload, the window, the abort, the voice and the vehicle manual reload).
+// With the toggle off the player's shotgun still reloads one round per firing
+// cycle, like the shipped one-round weapon.
+struct ActiveReloadWeaponData
+{
+	eWeaponType type;
+	int32 ammoInClip;
+	int32 firingRate;	// 0 keeps the parsed rate
+	int32 flags;		// flags to add, 0 keeps the parsed flags
+};
+
+static const ActiveReloadWeaponData aActiveReloadWeaponData[] = {
+	{ WEAPONTYPE_SHOTGUN, 7, 0, WEAPONFLAG_RELOAD },
+	{ WEAPONTYPE_STUBBY_SHOTGUN, 6, 0, WEAPONFLAG_RELOAD },
+	// The sniper reloads by timer only: it has no reload animation and no
+	// reload flag, and a magazine must not make the rifle semi-automatic,
+	// so it gets a bolt cycle instead of the 90 ms the parse recomputed
+	// from the animation loop.
+	{ WEAPONTYPE_SNIPERRIFLE, 5, 700, 0 },
+};
+
+void
+CWeaponInfo::ApplyActiveReloadWeaponData(void)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(aActiveReloadWeaponData); i++) {
+		CWeaponInfo *info = &aWeaponInfo[aActiveReloadWeaponData[i].type];
+		info->m_nAmountofAmmunition = aActiveReloadWeaponData[i].ammoInClip;
+		if (aActiveReloadWeaponData[i].firingRate != 0)
+			info->m_nFiringRate = aActiveReloadWeaponData[i].firingRate;
+		info->m_Flags |= aActiveReloadWeaponData[i].flags;
+	}
+}
+
+bool
+CWeaponInfo::IsActiveReloadMagazine(eWeaponType weaponType)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(aActiveReloadWeaponData); i++)
+		if (aActiveReloadWeaponData[i].type == weaponType)
+			return true;
+	return false;
+}
+
 void
 CWeaponInfo::Initialise(void)
 {
@@ -134,6 +180,9 @@ CWeaponInfo::Initialise(void)
 	}
 	debug("Loading weapon data...\n");
 	LoadWeaponData();
+	// The magazine rework always applies; the ActiveReload toggle only turns
+	// the mechanics of the feature on and off.
+	ApplyActiveReloadWeaponData();
 	debug("CWeaponInfo ready\n");
 }
 
