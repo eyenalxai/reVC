@@ -201,7 +201,7 @@ CPed::SetPointGunAt(CEntity *to)
 	// lower body (VICE-141). The crouch pose keeps its crouched legs, and the
 	// AI aim poses stay exactly as they are.
 	if (IsPlayer() && aimAssoc->animId == ANIM_WEAPON_FIRE)
-		aimAssoc->RemoveLowerBodySequences();
+		aimAssoc->MakeUpperBodyOnly();
 
 	if (to && !IsPlayer())
 		Say(SOUND_PED_ATTACK);
@@ -210,6 +210,13 @@ CPed::SetPointGunAt(CEntity *to)
 void
 CPed::PointGunAt(void)
 {
+	// The player's held aim pose drives only the upper body, and a fade that
+	// caught it must not lose it while the aim holds: re-add or revive it here
+	// every frame of the aim state (VICE-141). The AI aim poses keep their own
+	// behaviour.
+	if (IsPlayer())
+		((CPlayerPed*)this)->HoldUpperBodyAimPose();
+
 	CWeaponInfo *weaponInfo = CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType);
 	float animLoopStart = weaponInfo->m_fAnimLoopStart;
 	CAnimBlendAssociation *weaponAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_WEAPON_FIRE);

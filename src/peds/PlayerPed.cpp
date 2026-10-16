@@ -957,6 +957,15 @@ CPlayerPed::ProcessActiveReload(CPad *padUsed)
 		TryStartReloadAnimation();
 }
 
+// The held aim pose is an association that is present, does not run (a running
+// one belongs to an attack) and does not fade out. Everything else is not the
+// held pose (VICE-141).
+static bool
+HasHeldAimPose(CAnimBlendAssociation *aimAssoc)
+{
+	return aimAssoc && !aimAssoc->IsRunning() && aimAssoc->blendDelta >= 0.0f;
+}
+
 // Hold the weapon aim pose on the upper body while the player aims down the
 // sights or aims with the mouse camera (VICE-141). The pose is the weapon's
 // fire animation held at its loop start, like the stock/classic aim pose, but
@@ -978,9 +987,8 @@ CPlayerPed::HoldUpperBodyAimPose(void)
 
 	CAnimBlendAssociation *aimAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_WEAPON_FIRE);
 
-	// A running attack owns the association, and a fading one is on its way
-	// out: do not fight either of them
-	if (aimAssoc && (aimAssoc->IsRunning() || aimAssoc->blendDelta < 0.0f))
+	// A running attack owns the association
+	if (aimAssoc && aimAssoc->IsRunning())
 		return;
 
 	// Any other partial animation that runs (a reload, a hit, the crouch pose)
@@ -991,21 +999,25 @@ CPlayerPed::HoldUpperBodyAimPose(void)
 			return;
 	}
 
-	if (aimAssoc == nil) {
-		aimAssoc = CAnimManager::AddAnimation(GetClump(), weaponInfo->m_AnimToPlay, ANIM_WEAPON_FIRE);
-		if (aimAssoc == nil)
-			return;
-		aimAssoc->SetCurrentTime(weaponInfo->m_fAnimLoopStart);
-		aimAssoc->flags &= ~ASSOC_RUNNING;
-		aimAssoc->blendAmount = 0.0f;
+	if (!HasHeldAimPose(aimAssoc)) {
+		if (aimAssoc == nil) {
+			aimAssoc = CAnimManager::AddAnimation(GetClump(), weaponInfo->m_AnimToPlay, ANIM_WEAPON_FIRE);
+			if (aimAssoc == nil)
+				return;
+			aimAssoc->SetCurrentTime(weaponInfo->m_fAnimLoopStart);
+			aimAssoc->flags &= ~ASSOC_RUNNING;
+			aimAssoc->blendAmount = 0.0f;
+		}
+		// A released pose that the aim takes back must not fade out first:
+		// bring it back where it is, so the arms do not dip while the fade
+		// would run to its end
 		aimAssoc->blendDelta = 8.0f;
+		aimAssoc->flags &= ~ASSOC_DELETEFADEDOUT;
 	}
 
 	// Several fire animations carry a standing leg stance; the lower body keys
-	// must not freeze the movement cycle. The pose is the same association the
-	// fire and reload animations layer on, so this only runs while it is held.
-	if (aimAssoc->HasLowerBodySequences())
-		aimAssoc->RemoveLowerBodySequences();
+	// must not freeze the movement cycle
+	aimAssoc->MakeUpperBodyOnly();
 }
 
 // Fade the held aim pose out again when the sights go down and no attack or
@@ -1015,7 +1027,7 @@ void
 CPlayerPed::ReleaseHeldAimPose(void)
 {
 	CAnimBlendAssociation *aimAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_WEAPON_FIRE);
-	if (aimAssoc == nil || aimAssoc->IsRunning() || aimAssoc->blendDelta < 0.0f)
+	if (!HasHeldAimPose(aimAssoc))
 		return;
 
 	aimAssoc->flags |= ASSOC_DELETEFADEDOUT;

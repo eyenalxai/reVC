@@ -60,11 +60,11 @@ public:
 	bool HasTranslation(void) { return !!(flags & ASSOC_HAS_TRANSLATION); }
 	bool HasXTranslation(void) { return !!(flags & ASSOC_HAS_X_TRANSLATION); }
 
-	// The upper body half of the sequence map: the spine and everything above
-	// it. An association that drives only those leaves the root, the pelvis
-	// and the legs to the animation underneath it (VICE-141).
-	bool HasLowerBodySequences(void);
-	void RemoveLowerBodySequences(void);
+	// Drop every sequence that drives the lower body: the root, the pelvis and
+	// the legs. The association then drives only the upper body (the spine,
+	// the arms and the head), and the legs keep the animation underneath it
+	// (VICE-141). A no-op when the association is upper body only already.
+	void MakeUpperBodyOnly(void);
 
 	float GetBlendAmount(float weight) { return IsPartial() ? blendAmount : blendAmount*weight; }
 	CAnimBlendNode *GetNode(int i) { return &nodes[i]; }

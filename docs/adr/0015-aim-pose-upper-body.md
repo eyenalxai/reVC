@@ -1,4 +1,4 @@
-# ADR 0013: The player's aim pose is an upper body partial
+# ADR 0015: The player's aim pose is an upper body partial
 
 Date: 2026-10-16
 Status: Accepted
@@ -30,17 +30,21 @@ the control and the camera code; this decision stays in the animation layer.
 1. The aim pose stays the stock association. The player's copy drops every
    sequence below the spine: the root, the pelvis and the legs. The upper body
    is the spine, spine1, the neck, the head, both clavicles, the arms, the
-   hands and the fingers. `CAnimBlendAssociation::RemoveLowerBodySequences`
-   does this on the association instance.
+   hands and the fingers. `CAnimBlendAssociation::MakeUpperBodyOnly` does this
+   on the association instance; the tag list names the 8 lower body bones and
+   everything else stays.
 2. `CPed::SetPointGunAt` applies the rule to the player's standing aim pose.
    `CPlayerPed::HoldUpperBodyAimPose` holds the same pose for the first person
    sights and the third person mouse aim, and `CPed::ClearAimFlag` releases
-   it. The crouch pose (`ANIM_WEAPON_CROUCHFIRE`) and the AI aim poses keep
-   their legs.
+   it. `CPed::PointGunAt`, the per-frame keeper of the classic aim state,
+   calls the hold for the player too, so a fade that catches the held pose
+   cannot lose it while the aim holds. The crouch pose
+   (`ANIM_WEAPON_CROUCHFIRE`) and the AI aim poses keep their legs.
 3. The hold waits while the crouch pose, a reload, a running attack or any
-   other running partial association owns the upper body. The pose is the same
-   association the fire animation uses, so a burst that reuses it keeps the
-   same rule.
+   other running partial association owns the upper body; a held pose that a
+   fade has caught is brought back where it is instead of waiting for the fade
+   to end, so the arms do not dip. The pose is the same association the fire
+   animation uses, so a burst that reuses it keeps the same rule.
 4. The pose is held whenever the sights are up, not only at a run or a sprint:
    the arms must not shift when the movement speed changes, and the movement
    and the legs are the part that must not change.
@@ -67,10 +71,15 @@ the control and the camera code; this decision stays in the animation layer.
 - Firing reuses the same association, so a burst keeps the arms on the pose
   and the legs on the cycle. The reload animations release the pose through
   `ClearAimFlag` and layer on the upper body alone.
+- What is reachable today: the first person sprint with the sights up holds
+  the pose, because the first person sight branch of
+  `CPlayerPed::UpdateFirstPersonAim` has no sprint gate. Aim while sprinting
+  in third person and fire while sprinting are not reachable: the
+  control-side gates that require `m_nMoveState != PEDMOVE_SPRINT`
+  (`src/peds/PlayerPed.cpp:1073` mouse aim, `1677` free camera, `1744`
+  classic lock-on, fire `1626`) are VICE-137's scope. This decision fixes the
+  animation layering, and it applies unchanged when those gates are lifted.
 - The AI peds, the crouch poses, the sniper scope and the car ADS are
   untouched. The shotgun and stubby reloads (`WEAPON_pump`,
   `buddy_fireRELOAD`) still carry leg keys and layer exactly as before.
-- Control-side gates still stop the aim and the fire while sprinting in third
-  person (`src/peds/PlayerPed.cpp:1614`, `1665`, `1732`); VICE-137 owns them.
-  The animation layering here applies unchanged when they are lifted.
 - The feel needs the owner's play-test; there is no test suite.
