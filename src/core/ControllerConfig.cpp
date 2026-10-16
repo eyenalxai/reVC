@@ -747,13 +747,11 @@ void CControllerConfigManager::AffectControllerStateOn_ButtonDown(int32 button, 
 		{
 			firstPerson = true;
 		}
-#ifdef FIRST_PERSON
 		// The persistent first person view keeps the normal on-foot controls: the
 		// ADS uses the M16 camera mode for the zoom, but the player still moves.
 		if ((mode == CCam::MODE_1STPERSON || mode == CCam::MODE_M16_1STPERSON) &&
 		    TheCamera.FirstPersonViewEnabled())
 			firstPerson = false;
-#endif
 
 		CControllerState *state;
 		

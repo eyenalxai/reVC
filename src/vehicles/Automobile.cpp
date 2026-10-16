@@ -3795,9 +3795,7 @@ CAutomobile::DoDriveByShootings(void)
 	// look keys. The free aim shot has no animation of its own, so the drive-by
 	// arm stands in.
 	bool aiming = false;
-#ifdef FIRST_PERSON
 	aiming = TheCamera.UsingCarAds();
-#endif
 
 	if(lookingLeft || lookingRight || aiming){
 		if(aiming)

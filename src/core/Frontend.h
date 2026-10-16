@@ -596,14 +596,12 @@ struct MenuTrapezoid
 	}
 };
 
-#ifdef FIRST_PERSON
 // First person view FOV, in degrees
 #define FIRST_PERSON_FOV_MIN 50
 #define FIRST_PERSON_FOV_MAX 180
 #define FIRST_PERSON_SIGHTS_FOV_MULT 0.65f	// the sight view zooms in by this factor
 #define FIRST_PERSON_SIGHTS_FOV_MIN 30		// and never goes below this
 #define FIRST_PERSON_BODY_NEAR_CLIP 0.05f	// the player's own body parts sit close to the camera
-#endif
 
 // The follow camera sits this much further back in a vehicle, in metres
 #define CAR_CAMERA_DISTANCE_DEFAULT 3
@@ -658,11 +656,9 @@ public:
 	uint8 m_PrefsAllowNastyGame;
 	int8 m_PrefsMP3BoostVolume;
 	int8 m_ControlMethod;
-#ifdef FIRST_PERSON
 	// Kept in the menu manager; CCamera::Init memsets the camera.
 	bool m_bFirstPersonView;
 	uint8 m_nFirstPersonFOV;	// unsigned: the setting reaches 180
-#endif
 	// Extra follow camera distance in a vehicle, in metres
 	uint8 m_nCarCameraDistance;
 	int32 m_nPrefsVideoMode;
@@ -781,9 +777,7 @@ public:
 	};
 	bool GetIsMenuActive() {return !!m_bMenuActive;}
 
-#ifdef FIRST_PERSON
 	int32 GetFirstPersonFOV(void);
-#endif
 	int32 GetCarCameraDistance(void);
 
 #ifdef CUTSCENE_BORDERS_SWITCH

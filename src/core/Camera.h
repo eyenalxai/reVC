@@ -111,11 +111,9 @@ public:
 	float	f_rollSpeed;
 	float   m_fSyphonModeTargetZOffSet;
 	float   m_fAmountFractionObscured;
-#ifdef FIRST_PERSON
 	// Third person aim down the sights: 0.0 is stock, 1.0 is fully pulled in
 	float   m_fAdsAmount;
 	float   m_fAdsAmountSpeed;
-#endif
 	float   m_fAlphaSpeedOverOneFrame;
 	float   m_fBetaSpeedOverOneFrame;
 	float   m_fBufferedTargetBeta;
@@ -340,9 +338,7 @@ public:
 	bool m_bcutsceneFinished;
 	bool m_bCullZoneChecksOn;
 	bool m_bFirstPersonBeingUsed;
-#ifdef FIRST_PERSON
 	bool m_bFirstPersonViewWasOn;
-#endif
 	bool m_bJustJumpedOutOf1stPersonBecauseOfTarget;
 	bool m_bIdleOn;
 	bool m_bInATunnelAndABigVehicle;
@@ -643,7 +639,6 @@ public:
 	bool Find3rdPersonCamTargetVector(float dist, CVector pos, CVector &source, CVector &target);
 	float Find3rdPersonQuickAimPitch(void);
 	bool Using1stPersonWeaponMode(void);
-#ifdef FIRST_PERSON
 	bool FirstPersonViewEnabled(void);
 	bool UsingFirstPersonSights(void);
 	float GetFirstPersonSightsFOV(void);
@@ -654,7 +649,6 @@ public:
 	// The car ADS: the aim button held while the camera serves the player's
 	// vehicle, the third person mouse camera or the first person car view
 	bool UsingCarAds(void);
-#endif
 
 	// Physical camera
 	void SetRwCamera(RwCamera *cam);

@@ -510,10 +510,8 @@ CMenuManager::CMenuManager()
 	m_PrefsDMA = 1;
 	OS_Language = LANG_ENGLISH;
 	m_ControlMethod = CONTROL_STANDARD;
-#ifdef FIRST_PERSON
 	m_bFirstPersonView = false;
 	m_nFirstPersonFOV = 70;
-#endif
 	m_nCarCameraDistance = CAR_CAMERA_DISTANCE_DEFAULT;
 #ifdef PC_PLAYER_CONTROLS
 	CCamera::m_bUseMouse3rdPerson = true;
@@ -563,14 +561,12 @@ CMenuManager::CMenuManager()
 #endif
 }
 
-#ifdef FIRST_PERSON
 int32
 CMenuManager::GetFirstPersonFOV(void)
 {
 	// The FOV setting is clamped where it is read
 	return Clamp(m_nFirstPersonFOV, FIRST_PERSON_FOV_MIN, FIRST_PERSON_FOV_MAX);
 }
-#endif
 
 int32
 CMenuManager::GetCarCameraDistance(void)

@@ -61,13 +61,9 @@
 	#define FREE_CAM_TOGGLE
 #endif
 
-#ifdef FIRST_PERSON
 	#define FIRST_PERSON_TOGGLES \
 		MENUACTION_CFO_SELECT, "FEC_FPC", { new CCFOSelect((int8*)&FrontEndMenuManager.m_bFirstPersonView, "Display", "FirstPersonView", off_on, 2, false) }, 0, 0, MENUALIGN_LEFT, \
 		MENUACTION_CFO_DYNAMIC, "FEC_FOV", { new CCFODynamic((int8*)&FrontEndMenuManager.m_nFirstPersonFOV, "Display", "FirstPersonFOV", FirstPersonFOVDraw, FirstPersonFOVPress) }, 0, 0, MENUALIGN_LEFT,
-#else
-	#define FIRST_PERSON_TOGGLES
-#endif
 
 // The follow camera distance in a vehicle (see CCam::Process_FollowPed)
 #define CAR_CAMERA_DISTANCE_OPTION \
@@ -307,7 +303,6 @@ wchar* MultiSamplingDraw(bool *disabled, bool userHovering) {
 }
 #endif
 
-#ifdef FIRST_PERSON
 wchar* FirstPersonFOVDraw(bool *disabled, bool userHovering) {
 	static wchar unicodeTemp[16];
 	sprintf(gString, "%i", FrontEndMenuManager.m_nFirstPersonFOV);
@@ -328,7 +323,6 @@ void FirstPersonFOVPress(int8 action) {
 	FrontEndMenuManager.m_nFirstPersonFOV = Clamp(fov, FIRST_PERSON_FOV_MIN, FIRST_PERSON_FOV_MAX);
 	FrontEndMenuManager.SaveSettings();
 }
-#endif
 
 wchar* CarCameraDistanceDraw(bool *disabled, bool userHovering) {
 	static wchar unicodeTemp[16];

@@ -133,10 +133,8 @@ GetCameraShotView(CEntity *shooter)
 	if (shooter != FindPlayerPed())
 		return view;
 
-#ifdef FIRST_PERSON
 	view.firstPerson = TheCamera.UsingFirstPersonSights() || TheCamera.Using1stPersonView();
 	view.hipFire = TheCamera.Using1stPersonView() && !TheCamera.UsingFirstPersonSights();
-#endif
 	view.thirdPerson = TheCamera.Cams[0].Using3rdPersonMouseCam();
 
 	return view;
@@ -563,11 +561,9 @@ CWeapon::FireFromCar(CVehicle *shooter, bool left, bool right, bool aiming)
 		return false;
 
 	bool fired;
-#ifdef FIRST_PERSON
 	if ( aiming )
 		fired = FireInstantHitFromCarFreeAim(shooter);
 	else
-#endif
 		fired = FireInstantHitFromCar(shooter, left, right);
 
 	if ( fired )
@@ -1110,7 +1106,6 @@ CWeapon::FireInstantHit(CEntity *shooter, CVector *fireSource)
 		ahead.Normalise();
 #endif
 	}
-#ifdef FIRST_PERSON
 	else if ( shotView.hipFire )
 	{
 		// Hip fire: the shot leaves along the camera axis with the stock player spread
@@ -1154,7 +1149,6 @@ CWeapon::FireInstantHit(CEntity *shooter, CVector *fireSource)
 				CParticle::AddParticle(PARTICLE_SPARK, bulletPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.0f, rotSpeed);
 		}
 	}
-#endif
 	else if ( shotView.thirdPerson )
 	{
 		GetCameraShotRay(shooter, info->m_fRange, fireSource, source, target, false);
@@ -1903,11 +1897,9 @@ CWeapon::FireShotgun(CEntity *shooter, CVector *fireSource)
 		default:
 			break;
 	}
-#ifdef FIRST_PERSON
 	// Third person aim down the sights: the pellets stay tighter
 	if(shooter == FindPlayerPed() && TheCamera.UsingThirdPersonAds())
 		angleRange *= 0.6f;
-#endif
 	bool statUpdated = false;
 	float halfAngleRange = angleRange / 2.f;
 	float angleBetweenTwoShot = angleRange / (shootsAtOnce - 1.f);
@@ -2574,11 +2566,9 @@ CWeapon::FireM16_1stPerson(CEntity *shooter)
 		|| mode == CCam::MODE_SNIPER_RUNABOUT
 		|| mode == CCam::MODE_ROCKETLAUNCHER_RUNABOUT
 		|| mode == CCam::MODE_HELICANNON_1STPERSON
-#ifdef FIRST_PERSON
 		// The mobile ADS runs the plain first person camera (the sight zoom
 		// comes from the queued weapon mode), so it fires from here too.
 		|| (mode == CCam::MODE_1STPERSON && TheCamera.UsingFirstPersonSights())
-#endif
 		) )
 	{
 		return false;
@@ -2747,7 +2737,6 @@ CWeapon::FireInstantHitFromCar(CVehicle *shooter, bool left, bool right)
 	return FireFromCarAt(shooter, source, target);
 }
 
-#ifdef FIRST_PERSON
 // The free aim in a car: the target comes from the camera and the shot leaves
 // the right hand like the drive-by. There is no auto aim and no drive-by
 // spread: the crosshair decides where the shot goes.
@@ -2773,7 +2762,6 @@ CWeapon::FireInstantHitFromCarFreeAim(CVehicle *shooter)
 
 	return FireFromCarAt(shooter, source, target);
 }
-#endif
 
 // The shot from a car once the source and the target are known: the events, the
 // gun flash, the line of sight and the victim handling are shared by the stock

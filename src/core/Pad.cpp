@@ -1656,10 +1656,8 @@ int16 CPad::GetHandBrake(void)
 	// ignored, so a stale ini that still maps the handbrake to the aim button
 	// cannot brake the car (VICE-110). The handbrake keys set only the
 	// handbrake field, so they keep working.
-#ifdef FIRST_PERSON
 	if ( TheCamera.UsingCarAds() )
 		return 0;
-#endif
 
 	switch (CURMODE)
 	{
