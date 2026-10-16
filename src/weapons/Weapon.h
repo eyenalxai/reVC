@@ -41,6 +41,11 @@ public:
 	
 	bool Fire          (CEntity *shooter, CVector *fireSource);
 	bool FireFromCar   (CVehicle *shooter, bool left, bool right);
+	// The drive-by fire of the vehicle callers: fires and then sets the
+	// 70 ms drive-by cadence only when a shot left the barrel. A failed
+	// attempt, an empty clip or a started reload leaves the timer alone,
+	// so the call can never shorten a running reload (VICE-90).
+	void FireFromCarWithCadence(CVehicle *shooter, bool left, bool right);
 	bool FireMelee     (CEntity *shooter, CVector &fireSource);
 	bool FireInstantHit(CEntity *shooter, CVector *fireSource);
 	
