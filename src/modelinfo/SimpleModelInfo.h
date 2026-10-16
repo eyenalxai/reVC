@@ -3,6 +3,15 @@
 
 #include "BaseModelInfo.h"
 
+// The kind of plant a model name identified. A tree or a palm is a trunk
+// plant; every other plant is a leafy one.
+enum ePlantKind
+{
+	PLANT_NONE,
+	PLANT_TRUNK,
+	PLANT_LEAFY,
+};
+
 class CSimpleModelInfo : public CBaseModelInfo
 {
 public:
@@ -31,7 +40,7 @@ public:
 	uint16  m_ignoreDrawDist   : 1;
 	uint16  m_isCodeGlass      : 1;
 	uint16  m_isArtistGlass    : 1;
-	uint16  m_isVegetation     : 1;
+	uint16  m_plantKind        : 2; // an ePlantKind
 
 	CSimpleModelInfo(void) : CBaseModelInfo(MITYPE_SIMPLE) {}
 	CSimpleModelInfo(ModelInfoType id) : CBaseModelInfo(id) {}

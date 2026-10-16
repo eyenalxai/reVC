@@ -541,7 +541,8 @@ CPhysical::IsSoftHitEntity(CEntity *entity)
 		return false;
 	if(entity->IsObject() || entity->IsPed())
 		return true;
-	// A palm or a tree placed as a building is soft like a prop.
+	// A plant placed as a building (a tree, a palm, a bush or a hedge) is
+	// soft like a prop.
 	return entity->IsBuilding() && IsVegetationModel(entity->GetModelIndex());
 }
 
@@ -990,14 +991,18 @@ CPhysical::ApplyCollisionAlt(CEntity *B, CColPoint &colpoint, float &impulse, CV
 			else
 				impulse = -(m_fElasticity + 1.0f) * normalSpeed * mass;
 
-			// A car barely slows on an object, a pedestrian or a vegetation
-			// building. A vegetation building breaks above the smash impulse;
+			// A car barely slows on an object, a pedestrian or a plant
+			// building. A plant building breaks above the smash impulse;
 			// a real building still stops the car.
 			bool bSoftHit = false;
 			if(IsVehicle()){
-				if(B->IsBuilding() && IsVegetationModel(B->GetModelIndex())){
-					if(impulse > VEGETATION_SMASH_IMPULSE && B->bUsesCollision)
+				ePlantKind plantKind = GetPlantKind(B->GetModelIndex());
+				if(plantKind != PLANT_NONE){
+					if(impulse > VEGETATION_SMASH_IMPULSE && B->bUsesCollision){
+						// A leafy plant breaks. VICE-115 replaces this
+						// with a fall for PLANT_TRUNK (a tree or a palm).
 						SmashVegetation(B);
+					}
 					bSoftHit = true;
 				}else
 					bSoftHit = IsSoftHitEntity(B);

@@ -230,9 +230,17 @@ an OBJECT.DAT row is destructible; a building is not.
 
 ## Vegetation model
 
-A model whose name identifies it as a tree or a palm. A vegetation model without
-an OBJECT.DAT row spawns as a building; a vehicle that hits it breaks it like a
-prop.
+A model whose name identifies it as a plant. Two kinds of plant exist. A trunk
+plant is a tree or a palm, and the name contains `palm`, `palwee` or `tree`. A
+leafy plant is any other plant, and the name contains `bush`, `hedge`, `plant`,
+`fern`, `ivy`, `grass`, `shrub`, `rose` or `cactus`. The word test ignores
+case. A name that contains `lod`, `shad`, `reflect` or `street` is not a plant:
+it marks a LOD, a shadow, a reflection or a street light.
+
+A vegetation model without an OBJECT.DAT row spawns as a building. A vehicle
+that hits the building gets the soft hit, and the plant breaks above the smash
+impulse. The planned trunk fall fells a trunk like a light pole in place of the
+break.
 
 ## Soft hit
 
