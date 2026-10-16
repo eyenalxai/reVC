@@ -41,16 +41,12 @@
 #define PLAYER_AIR_ACCEL		(4.0f / 50.0f)
 #define PLAYER_AIR_TURN_RATE		1.6f	// radians per second
 
-// The measured root-motion speeds of the player's walk, run and sprint
-// animations in units per second (see the movement spec), in engine units.
-#define PLAYER_WALK_SPEED		(0.786f / 50.0f)
-#define PLAYER_RUN_SPEED		(6.439f / 50.0f)
-#define PLAYER_SPRINT_SPEED		(14.668f / 50.0f)
-
-// The m_fMoveSpeed blend (SetRealMoveAnim): the walk animation alone below the
-// split, the walk/run blend up to the run-only value, the run alone above it.
-#define PLAYER_WALK_RUN_SPLIT		1.0f
-#define PLAYER_RUN_ONLY			2.0f
+// The playback the game forces on the movement animations: the adrenaline
+// speeds the legs up while the world runs slow, and the fixed camera slows the
+// sprint animation down. The playback scaling in SetRealMoveAnim applies on top
+// of this, and the controller targets the speed the legs really cover.
+#define PLAYER_ADRENALINE_ANIM_SPEED		2.0f
+#define PLAYER_FIXED_CAM_SPRINT_ANIM_SPEED	0.7f
 
 // The animation playback follows the real speed between these bounds; the clamp
 // keeps a large mismatch from looking wrong
@@ -73,17 +69,6 @@ static const tPlayerMovementState playerMovementStates[PLAYERMOVE_NUMSTATES] = {
 	{ PLAYER_GROUND_ACCEL, PLAYER_GROUND_FRICTION, PLAYER_GROUND_TURN_RATE },	// PLAYERMOVE_GROUND
 	{ PLAYER_AIR_ACCEL, 0.0f, PLAYER_AIR_TURN_RATE },	// PLAYERMOVE_AIR
 };
-
-// The speed of the walk/run blend for a m_fMoveSpeed value, in engine units
-static float
-MoveSpeedToReferenceSpeed(float moveSpeed)
-{
-	if (moveSpeed < PLAYER_WALK_RUN_SPLIT)
-		return PLAYER_WALK_SPEED;
-	if (moveSpeed < PLAYER_RUN_ONLY)
-		return PLAYER_WALK_SPEED + (moveSpeed - PLAYER_WALK_RUN_SPLIT) * (PLAYER_RUN_SPEED - PLAYER_WALK_SPEED);
-	return PLAYER_RUN_SPEED;
-}
 
 // Move a velocity toward a target, at most maxDelta units per second
 static CVector2D
@@ -646,25 +631,21 @@ CPlayerPed::SetRealMoveAnim(void)
 		} else {
 			CTimer::SetTimeScale(1.0f / 3);
 			if (curWalkStartAssoc)
-				curWalkStartAssoc->speed = 2.0f;
+				curWalkStartAssoc->speed = PLAYER_ADRENALINE_ANIM_SPEED;
 			if (curWalkAssoc)
-				curWalkAssoc->speed = 2.0f;
+				curWalkAssoc->speed = PLAYER_ADRENALINE_ANIM_SPEED;
 			if (curRunAssoc)
-				curRunAssoc->speed = 2.0f;
+				curRunAssoc->speed = PLAYER_ADRENALINE_ANIM_SPEED;
 			if (curSprintAssoc)
-				curSprintAssoc->speed = 2.0f;
+				curSprintAssoc->speed = PLAYER_ADRENALINE_ANIM_SPEED;
 		}
 	} else {
 		if (curWalkAssoc)
 			curWalkAssoc->speed = animSpeed;
 		if (curRunAssoc)
 			curRunAssoc->speed = animSpeed;
-		if (curSprintAssoc) {
-			if (TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_FIXED) {
-				curSprintAssoc->speed = 0.7f * animSpeed;
-			} else
-				curSprintAssoc->speed = animSpeed;
-		}
+		if (curSprintAssoc)
+			curSprintAssoc->speed = GetMoveAnimPlayback(ANIM_STD_RUNFAST) * animSpeed;
 	}
 }
 
@@ -1019,7 +1000,7 @@ CPlayerPed::PlayerControlM16(CPad *padUsed)
 	// sights of the sniper, the rocket launcher and the camera stay put and
 	// keep their stock behaviour). Never sprints, and keeps the weapon aim state.
 	if (IsMoveControllerInCharge()) {
-		UpdatePlayerMovement(padUsed, false);
+		UpdatePlayerMovement(padUsed);
 		SetRealMoveAnim();
 	}
 
@@ -1058,7 +1039,7 @@ CPlayerPed::PlayerControlFighter(CPad *padUsed)
 
 	// The fight moves drive the ped with their own root motion, so the
 	// controller only turns the body and picks the animation blend here
-	UpdatePlayerMovement(padUsed, false);
+	UpdatePlayerMovement(padUsed);
 
 	if (padMove > 0.0f) {
 		m_takeAStepAfterAttack = padMove > (2 * PAD_MOVE_TO_GAME_WORLD_MOVE);
@@ -1082,7 +1063,7 @@ CPlayerPed::PlayerControl1stPersonRunAround(CPad *padUsed)
 {
 	// The body faces the camera and the pad moves it: one controller for the
 	// first person view and the mouse third person camera
-	UpdatePlayerMovement(padUsed, true);
+	UpdatePlayerMovement(padUsed);
 
 	if (m_nPedState == PED_ANSWER_MOBILE) {
 		SetRealMoveAnim();
@@ -1749,26 +1730,37 @@ CPlayerPed::CanMoveInWeaponSight(void)
 	}
 }
 
-// The speed the current animation state moves the ped at, in engine units. The
-// sprint animation is the fastest and only runs with a light weapon.
+// The playback speed the game forces on a movement animation: the adrenaline
+// speeds the legs up while the world runs slow, and the fixed camera slows the
+// sprint animation down. The playback scaling in SetRealMoveAnim applies on top
+// of it.
 float
-CPlayerPed::GetTargetMoveSpeed(bool bCanSprint) const
+CPlayerPed::GetMoveAnimPlayback(AnimationId animId) const
 {
-	if (bCanSprint && m_nMoveState == PEDMOVE_SPRINT)
-		return PLAYER_SPRINT_SPEED;
-	return MoveSpeedToReferenceSpeed(m_fMoveSpeed);
+	if (m_bAdrenalineActive)
+		return PLAYER_ADRENALINE_ANIM_SPEED;
+	if (animId == ANIM_STD_RUNFAST && TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_FIXED)
+		return PLAYER_FIXED_CAM_SPRINT_ANIM_SPEED;
+	return 1.0f;
 }
 
 // The speed the current walk/run/sprint animation blend moves the ped at, in
-// engine units. SetRealMoveAnim scales the animation playback by (real speed /
-// this), so the legs do not slide while the speed changes.
+// engine units: the ground speed of the playing animations at their playback
+// speed. The strafe, backward and weapon groups have their own animations with
+// their own measured speeds, so the legs and the movement agree in every
+// direction and with every weapon. SetRealMoveAnim scales the playback by
+// (real speed / this), and the controller moves the ped at this speed.
 float
 CPlayerPed::GetMoveAnimReferenceSpeed(void)
 {
-	float referenceSpeed = MoveSpeedToReferenceSpeed(m_fMoveSpeed);
-	CAnimBlendAssociation *sprintAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_RUNFAST);
-	if (sprintAssoc)
-		referenceSpeed = (1.0f - sprintAssoc->blendAmount) * referenceSpeed + sprintAssoc->blendAmount * PLAYER_SPRINT_SPEED;
+	static const AnimationId moveAnims[] = { ANIM_STD_STARTWALK, ANIM_STD_WALK, ANIM_STD_RUN, ANIM_STD_RUNFAST };
+	float referenceSpeed = 0.0f;
+
+	for (int i = 0; i < ARRAY_SIZE(moveAnims); i++) {
+		CAnimBlendAssociation *moveAssoc = RpAnimBlendClumpGetAssociation(GetClump(), moveAnims[i]);
+		if (moveAssoc)
+			referenceSpeed += moveAssoc->blendAmount * moveAssoc->hierarchy->rootSpeed * GetMoveAnimPlayback(moveAnims[i]);
+	}
 	return referenceSpeed;
 }
 
@@ -1778,7 +1770,7 @@ CPlayerPed::GetMoveAnimReferenceSpeed(void)
 // and the direction basis. The movement state decides the acceleration and the
 // friction, so a jump keeps the momentum and the air steering stays limited.
 void
-CPlayerPed::UpdatePlayerMovement(CPad *padUsed, bool bCanSprint)
+CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 {
 	float leftRight = padUsed->GetPedWalkLeftRight();
 	float upDown = padUsed->GetPedWalkUpDown();
@@ -1855,14 +1847,17 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed, bool bCanSprint)
 	// The smooth spray holds the ped in place: the facing turns but the input
 	// does not move it
 	bool bMoving = padMoveInGameUnit > 0.0f;
-	float targetSpeed = bMoving ? GetTargetMoveSpeed(bCanSprint) : 0.0f;
-	CVector2D targetVelocity = CVector2D(-Sin(m_fMoveHeading), Cos(m_fMoveHeading)) * targetSpeed;
+	// The ped moves at the ground speed of the animation it plays, so the legs
+	// stay with the movement in every direction and with every weapon
+	float targetSpeed = bMoving ? GetMoveAnimReferenceSpeed() : 0.0f;
+	CVector2D moveDirection(-Sin(m_fMoveHeading), Cos(m_fMoveHeading));
+	CVector2D targetVelocity = moveDirection * targetSpeed;
 
 	if (m_nMovementState == PLAYERMOVE_AIR) {
 		if (bMoving) {
 			// Keep the momentum and steer toward the input
 			if (ownSpeed > 0.0f)
-				velocity = SteerVelocityTowards(velocity, targetVelocity, state.turnRate * dt);
+				velocity = SteerVelocityTowards(velocity, moveDirection, state.turnRate * dt);
 			if (ownSpeed < targetSpeed) {
 				// Air control speeds the ped up to the target, never past it
 				velocity = MoveVelocityTowards(velocity, targetVelocity, state.accel * dt);
@@ -1879,7 +1874,7 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed, bool bCanSprint)
 		// stay with the movement; the speed follows the target at the
 		// acceleration or the friction.
 		if (ownSpeed > 0.0f)
-			velocity = SteerVelocityTowards(velocity, targetVelocity, state.turnRate * dt);
+			velocity = SteerVelocityTowards(velocity, moveDirection, state.turnRate * dt);
 		float rate = ownSpeed > targetSpeed ? state.friction : state.accel;
 		velocity = MoveVelocityTowards(velocity, targetVelocity, rate * dt);
 	} else {
@@ -1896,7 +1891,7 @@ CPlayerPed::PlayerControlZelda(CPad *padUsed)
 {
 	// The classic camera turns the body toward the movement direction; the
 	// controller owns the velocity
-	UpdatePlayerMovement(padUsed, true);
+	UpdatePlayerMovement(padUsed);
 
 	if (m_nPedState == PED_ANSWER_MOBILE) {
 		SetRealMoveAnim();

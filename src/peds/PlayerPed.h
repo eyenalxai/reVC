@@ -88,10 +88,10 @@ public:
 	void ProcessControl(void);
 	void ClearAdrenaline(void);
 	void UseSprintEnergy(void);
-	void UpdatePlayerMovement(CPad *padUsed, bool bCanSprint);
+	void UpdatePlayerMovement(CPad *padUsed);
 	bool IsMoveControllerInCharge(void);
 	bool CanMoveInWeaponSight(void);
-	float GetTargetMoveSpeed(bool bCanSprint) const;
+	float GetMoveAnimPlayback(AnimationId animId) const;
 	float GetMoveAnimReferenceSpeed(void);
 	class CPlayerInfo *GetPlayerInfoForThisPlayerPed();
 	void SetRealMoveAnim(void);
