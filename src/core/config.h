@@ -59,7 +59,7 @@ enum Config {
 	NUMALPHAENTITYLIST = 200,
 	NUMALPHAUNTERWATERENTITYLIST = 30,
 	NUMCOLCACHELINKS = 50,
-	NUMREFERENCES = 800,
+	NUMREFERENCES = 65536,
 
 	// Zones
 	NUMAUDIOZONES = 14,
@@ -228,7 +228,6 @@ enum Config {
 #define THIS_IS_STUPID
 #define DONT_FIX_REPLAY_BUGS
 #define USE_TXD_CDIMAGE // generate and load textures from txd.img
-//#define USE_TEXTURE_POOL // not possible because R* used custom RW33
 #define AUDIO_REFLECTIONS
 #else
 // This enables things from the PS2 version on PC
@@ -320,7 +319,6 @@ enum Config {
 #define DISABLE_LOADING_SCREEN // disable the loading screen which vastly improves the loading time
 #define DISABLE_VSYNC_ON_TEXTURE_CONVERSION // make texture conversion work faster by disabling vsync
 #define ANISOTROPIC_FILTERING	// set all textures to max anisotropic filtering
-//#define USE_TEXTURE_POOL
 #ifdef LIBRW
 #define EXTENDED_COLOURFILTER		// more options for colour filter (replaces mblur)
 #define EXTENDED_PIPELINES		// custom render pipelines (includes Neo)
