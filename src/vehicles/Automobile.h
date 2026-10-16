@@ -17,13 +17,17 @@ enum {
 };
 
 // The wheel pose blocks of CAutomobile::PreRender, one row of aWheelPoses each.
-// The blocks differed only in these: the node and the state slot, the side, the
-// burst and hover behaviour, the wheel scale and the steer angle.
+// They differ in the wheel frame and the state slot, the mirrored side (the left
+// wheels spin the other way, start at PI and lean the other way), the burst and
+// hover behaviour with the hover splash, the steer angle of the front wheels, the
+// plain spin of the rear right and mid right wheels (SetRotateX, not SetRotate) and
+// the wheel scale.
 enum eWheelPose {
 	WHEELPOSE_REAR_RIGHT,
 	WHEELPOSE_REAR_LEFT,
 	WHEELPOSE_MID_RIGHT,
 	WHEELPOSE_MID_LEFT,
+	WHEELPOSE_DODO_FRONT,
 	WHEELPOSE_TANK_RIGHT,
 	WHEELPOSE_TANK_LEFT,
 	WHEELPOSE_FRONT_RIGHT,
@@ -154,7 +158,7 @@ public:
 	void SetBusDoorTimer(uint32 timer, uint8 type);
 	void ProcessAutoBusDoors(void);
 	void ProcessSwingingDoor(int32 component, eDoors door);
-	void PoseWheel(eWheelPose pose, CVehicleModelInfo *mi, CMatrix &mat, CVector &pos);
+	void PoseWheel(eWheelPose pose, CVehicleModelInfo *mi);
 	void SetupDamageAfterLoad(void);
 	CObject *SpawnFlyingComponent(int32 component, uint32 type);
 	CObject *RemoveBonnetInPedCollision(void);

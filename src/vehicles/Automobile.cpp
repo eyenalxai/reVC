@@ -1729,75 +1729,78 @@ CAutomobile::Teleport(CVector pos)
 
 // The differences between the wheel pose blocks of CAutomobile::PreRender.
 enum {
-	WHEELPOSE_MIRRORED = 1 << 0,	// left wheel: spins the other way, its pose starts at PI
-	WHEELPOSE_STEER = 1 << 1,	// front wheel: the steer angle turns it
-	WHEELPOSE_BURST = 1 << 2,	// a burst tyre twists it as it spins
-	WHEELPOSE_HOVER = 1 << 3,	// the hover cheat poses it over water
-	WHEELPOSE_SPLASH = 1 << 4,	// hovering throws splash particles (the mid wheels do not)
-	WHEELPOSE_SPIN_X = 1 << 5,	// its plain spin is SetRotateX, not SetRotate
+	WHEELPOSE_F_NONE = 0,		// no flag: the plain pose
+	WHEELPOSE_F_MIRRORED = 1 << 0,	// left wheel: the spin, the lean and the splash side mirror
+	WHEELPOSE_F_STEER = 1 << 1,	// front wheel: the steer angle turns it
+	WHEELPOSE_F_BURST = 1 << 2,	// a burst tyre twists it as it spins
+	WHEELPOSE_F_HOVER = 1 << 3,	// the hover cheat poses it over water
+	WHEELPOSE_F_SPLASH = 1 << 4,	// that hover throws splash particles
+	WHEELPOSE_F_SPIN_X = 1 << 5,	// its plain spin is SetRotateX, not SetRotate
 };
 
 // One row per eWheelPose. The splash ranges are the two random arguments of the
 // hover splash, in the order the row draws them: the rear wheels draw (0,10)
-// then (0,90), the front wheels the other way round, and the mid wheels draw
-// none. Swapping a pair would change the order the global random generator is
-// read in, and with it every later random event.
+// then (0,90), the front wheels the other way round, and a row without
+// WHEELPOSE_F_SPLASH draws none. Swapping a pair would change the order the
+// global random generator is read in, and with it every later random event.
 struct tWheelPose
 {
 	int32 node;		// CAR_WHEEL_* node that holds the wheel frame
 	int32 wheel;		// CARWHEEL_* slot of the wheel state
-	uint32 flags;		// WHEELPOSE_* bits
+	uint32 flags;		// WHEELPOSE_F_* bits
 	uint32 handlingFlag;	// HANDLING_* flag that widens the wheel, 0 = none
 	float fWideScale;	// scale of the wide axis when that flag is set
 	float fSplashRotSpeed;	// hover splash: rotation speed random range
 	float fSplashRot;	// hover splash: rotation random range
 };
 
+// Columns: node, wheel, WHEELPOSE_F_* flags, handling flag (0 = plain scale), wide scale, splash ranges.
 static const tWheelPose aWheelPoses[WHEELPOSE_NUM] = {
-	{ CAR_WHEEL_RB, CARWHEEL_REAR_RIGHT, WHEELPOSE_BURST|WHEELPOSE_HOVER|WHEELPOSE_SPLASH|WHEELPOSE_SPIN_X, HANDLING_FAT_REARW, 1.15f, 10.0f, 90.0f },	// WHEELPOSE_REAR_RIGHT
-	{ CAR_WHEEL_LB, CARWHEEL_REAR_LEFT, WHEELPOSE_MIRRORED|WHEELPOSE_BURST|WHEELPOSE_HOVER|WHEELPOSE_SPLASH, HANDLING_FAT_REARW, 1.15f, 10.0f, 90.0f },	// WHEELPOSE_REAR_LEFT
-	{ CAR_WHEEL_RM, CARWHEEL_REAR_RIGHT, WHEELPOSE_BURST|WHEELPOSE_HOVER|WHEELPOSE_SPIN_X, HANDLING_FAT_REARW, 1.15f, 0.0f, 0.0f },	// WHEELPOSE_MID_RIGHT
-	{ CAR_WHEEL_LM, CARWHEEL_REAR_LEFT, WHEELPOSE_MIRRORED|WHEELPOSE_BURST|WHEELPOSE_HOVER, HANDLING_FAT_REARW, 1.15f, 0.0f, 0.0f },	// WHEELPOSE_MID_LEFT
-	{ CAR_WHEEL_RF, CARWHEEL_FRONT_RIGHT, 0, 0, 1.0f, 0.0f, 0.0f },	// WHEELPOSE_TANK_RIGHT
-	{ CAR_WHEEL_LF, CARWHEEL_FRONT_LEFT, WHEELPOSE_MIRRORED, 0, 1.0f, 0.0f, 0.0f },	// WHEELPOSE_TANK_LEFT
-	{ CAR_WHEEL_RF, CARWHEEL_FRONT_RIGHT, WHEELPOSE_STEER|WHEELPOSE_BURST|WHEELPOSE_HOVER|WHEELPOSE_SPLASH, HANDLING_NARROW_FRONTW, 0.7f, 90.0f, 10.0f },	// WHEELPOSE_FRONT_RIGHT
-	{ CAR_WHEEL_LF, CARWHEEL_FRONT_LEFT, WHEELPOSE_MIRRORED|WHEELPOSE_STEER|WHEELPOSE_BURST|WHEELPOSE_HOVER|WHEELPOSE_SPLASH, HANDLING_NARROW_FRONTW, 0.7f, 90.0f, 10.0f },	// WHEELPOSE_FRONT_LEFT
+	{ CAR_WHEEL_RB, CARWHEEL_REAR_RIGHT, WHEELPOSE_F_BURST|WHEELPOSE_F_HOVER|WHEELPOSE_F_SPLASH|WHEELPOSE_F_SPIN_X, HANDLING_FAT_REARW, 1.15f, 10.0f, 90.0f },	// WHEELPOSE_REAR_RIGHT
+	{ CAR_WHEEL_LB, CARWHEEL_REAR_LEFT, WHEELPOSE_F_MIRRORED|WHEELPOSE_F_BURST|WHEELPOSE_F_HOVER|WHEELPOSE_F_SPLASH, HANDLING_FAT_REARW, 1.15f, 10.0f, 90.0f },	// WHEELPOSE_REAR_LEFT
+	{ CAR_WHEEL_RM, CARWHEEL_REAR_RIGHT, WHEELPOSE_F_BURST|WHEELPOSE_F_HOVER|WHEELPOSE_F_SPIN_X, HANDLING_FAT_REARW, 1.15f, 0.0f, 0.0f },	// WHEELPOSE_MID_RIGHT
+	{ CAR_WHEEL_LM, CARWHEEL_REAR_LEFT, WHEELPOSE_F_MIRRORED|WHEELPOSE_F_BURST|WHEELPOSE_F_HOVER, HANDLING_FAT_REARW, 1.15f, 0.0f, 0.0f },	// WHEELPOSE_MID_LEFT
+	{ CAR_WHEEL_RF, CARWHEEL_FRONT_RIGHT, WHEELPOSE_F_STEER|WHEELPOSE_F_BURST, 0, 1.0f, 0.0f, 0.0f },	// WHEELPOSE_DODO_FRONT
+	{ CAR_WHEEL_RF, CARWHEEL_FRONT_RIGHT, WHEELPOSE_F_NONE, 0, 1.0f, 0.0f, 0.0f },	// WHEELPOSE_TANK_RIGHT
+	{ CAR_WHEEL_LF, CARWHEEL_FRONT_LEFT, WHEELPOSE_F_MIRRORED, 0, 1.0f, 0.0f, 0.0f },	// WHEELPOSE_TANK_LEFT
+	{ CAR_WHEEL_RF, CARWHEEL_FRONT_RIGHT, WHEELPOSE_F_STEER|WHEELPOSE_F_BURST|WHEELPOSE_F_HOVER|WHEELPOSE_F_SPLASH, HANDLING_NARROW_FRONTW, 0.7f, 90.0f, 10.0f },	// WHEELPOSE_FRONT_RIGHT
+	{ CAR_WHEEL_LF, CARWHEEL_FRONT_LEFT, WHEELPOSE_F_MIRRORED|WHEELPOSE_F_STEER|WHEELPOSE_F_BURST|WHEELPOSE_F_HOVER|WHEELPOSE_F_SPLASH, HANDLING_NARROW_FRONTW, 0.7f, 90.0f, 10.0f },	// WHEELPOSE_FRONT_LEFT
 };
 
 // Pose one wheel: the spin, the hover tilt or the road tilt, and the scale. The
-// wheels of the car differ only in their row of aWheelPoses. The left wheels are
-// mirrored: they spin the other way round and their pose starts at PI instead
-// of 0.
+// wheels of the car differ only in their row of aWheelPoses.
 void
-CAutomobile::PoseWheel(eWheelPose pose, CVehicleModelInfo *mi, CMatrix &mat, CVector &pos)
+CAutomobile::PoseWheel(eWheelPose pose, CVehicleModelInfo *mi)
 {
 	const tWheelPose &data = aWheelPoses[pose];
+	CMatrix mat;
+	CVector pos;
 	int32 wheel = data.wheel;
 	float fRot = m_aWheelRotation[wheel];
-	float fMirror = data.flags & WHEELPOSE_MIRRORED ? -1.0f : 1.0f;
-	float fZAngle = data.flags & WHEELPOSE_MIRRORED ? PI : 0.0f;
+	float fMirror = data.flags & WHEELPOSE_F_MIRRORED ? -1.0f : 1.0f;
+	float fZAngle = data.flags & WHEELPOSE_F_MIRRORED ? PI : 0.0f;
 	RwRGBA hoverParticleCol = { 255, 255, 255, 32 };
 
-	if(data.flags & WHEELPOSE_STEER)
+	if(data.flags & WHEELPOSE_F_STEER)
 		fZAngle += m_fSteerAngle;
 
 	mat.Attach(RwFrameGetMatrix(m_aCarNodes[data.node]));
 	pos = mat.GetPosition();
 	pos.z = m_aWheelPosition[wheel];
 
-	if((data.flags & WHEELPOSE_BURST) && Damage.GetWheelStatus(wheel) == WHEEL_STATUS_BURST)
+	if((data.flags & WHEELPOSE_F_BURST) && Damage.GetWheelStatus(wheel) == WHEEL_STATUS_BURST)
 		mat.SetRotate(fMirror*fRot, 0.0f, fZAngle + 0.3f*Sin(fRot));
-	else if(data.flags & WHEELPOSE_SPIN_X)
+	else if(data.flags & WHEELPOSE_F_SPIN_X)
 		mat.SetRotateX(fRot);
 	else
 		mat.SetRotate(fMirror*fRot, 0.0f, fZAngle);
 
-	if((data.flags & WHEELPOSE_HOVER) && GetStatus() == STATUS_PLAYER){
+	if((data.flags & WHEELPOSE_F_HOVER) && GetStatus() == STATUS_PLAYER){
 		if(bHoverCheat && m_aSuspensionSpringRatioPrev[wheel] < 1.0f &&
 		   m_aWheelColPoints[wheel].surfaceB == SURFACE_WATER){
 			// hovering on water
 			mat.RotateY(-fMirror*HALFPI);
-			if(data.flags & WHEELPOSE_SPLASH){
+			if(data.flags & WHEELPOSE_F_SPLASH){
 				if((CTimer::GetFrameCounter()+wheel) & 1){
 					CParticle::AddParticle(PARTICLE_STEAM_NY_SLOWMOTION, m_aWheelColPoints[wheel].point,
 						0.5f*m_vecMoveSpeed+fMirror*0.1f*GetRight(), nil, 0.4f, hoverParticleCol);
@@ -1817,6 +1820,7 @@ CAutomobile::PoseWheel(eWheelPose pose, CVehicleModelInfo *mi, CMatrix &mat, CVe
 			float groundOffset = pos.z + m_fHeightAboveRoad - 0.5f*mi->m_wheelScale;
 			if(GetModelIndex() == MI_VOODOO)
 				groundOffset *= 0.6f;
+			// like the hover pose, the left wheels lean the other way
 			mat.RotateY(Asin(Clamp(fMirror*groundOffset, -1.0f, 1.0f)));
 		}
 	}
@@ -2716,32 +2720,16 @@ CAutomobile::PreRender(void)
 		}
 	}
 
-	// Rear right wheel
-	PoseWheel(WHEELPOSE_REAR_RIGHT, mi, mat, pos);
+	PoseWheel(WHEELPOSE_REAR_RIGHT, mi);
+	PoseWheel(WHEELPOSE_REAR_LEFT, mi);
 
-	// Rear left wheel
-	PoseWheel(WHEELPOSE_REAR_LEFT, mi, mat, pos);
-
-	// Mid right wheel
 	if(m_aCarNodes[CAR_WHEEL_RM])
-		PoseWheel(WHEELPOSE_MID_RIGHT, mi, mat, pos);
-
-	// Mid left wheel
+		PoseWheel(WHEELPOSE_MID_RIGHT, mi);
 	if(m_aCarNodes[CAR_WHEEL_LM])
-		PoseWheel(WHEELPOSE_MID_LEFT, mi, mat, pos);
+		PoseWheel(WHEELPOSE_MID_LEFT, mi);
 
 	if(GetModelIndex() == MI_DODO){
-		// Front wheel
-		mat.Attach(RwFrameGetMatrix(m_aCarNodes[CAR_WHEEL_RF]));
-		pos = mat.GetPosition();
-		pos.z = m_aWheelPosition[CARWHEEL_FRONT_RIGHT];
-		if(Damage.GetWheelStatus(CARWHEEL_FRONT_RIGHT) == WHEEL_STATUS_BURST)
-			mat.SetRotate(m_aWheelRotation[CARWHEEL_FRONT_RIGHT], 0.0f, m_fSteerAngle+0.3f*Sin(m_aWheelRotation[CARWHEEL_FRONT_RIGHT]));
-		else
-			mat.SetRotate(m_aWheelRotation[CARWHEEL_FRONT_RIGHT], 0.0f, m_fSteerAngle);
-		mat.Scale(mi->m_wheelScale);
-		mat.Translate(pos);
-		mat.UpdateRW();
+		PoseWheel(WHEELPOSE_DODO_FRONT, mi);
 
 		// Rotate propeller
 		if(m_aCarNodes[CAR_WINDSCREEN]){
@@ -2770,8 +2758,8 @@ CAutomobile::PreRender(void)
 		ProcessSwingingDoor(CAR_DOOR_RF, DOOR_FRONT_RIGHT);
 	}else if(GetModelIndex() == MI_RHINO){
 		// no damaged wheels or steering on the tank's front wheels
-		PoseWheel(WHEELPOSE_TANK_RIGHT, mi, mat, pos);
-		PoseWheel(WHEELPOSE_TANK_LEFT, mi, mat, pos);
+		PoseWheel(WHEELPOSE_TANK_RIGHT, mi);
+		PoseWheel(WHEELPOSE_TANK_LEFT, mi);
 	}else if(IsRealHeli()){
 		// Top rotor
 		if(m_aCarNodes[CAR_BONNET]){
@@ -2806,11 +2794,8 @@ CAutomobile::PreRender(void)
 			mat.UpdateRW();
 		}
 	}else{
-		// Front right wheel
-		PoseWheel(WHEELPOSE_FRONT_RIGHT, mi, mat, pos);
-
-		// Front left wheel
-		PoseWheel(WHEELPOSE_FRONT_LEFT, mi, mat, pos);
+		PoseWheel(WHEELPOSE_FRONT_RIGHT, mi);
+		PoseWheel(WHEELPOSE_FRONT_LEFT, mi);
 
 		ProcessSwingingDoor(CAR_DOOR_LF, DOOR_FRONT_LEFT);
 		ProcessSwingingDoor(CAR_DOOR_RF, DOOR_FRONT_RIGHT);
