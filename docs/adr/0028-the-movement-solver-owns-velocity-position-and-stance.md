@@ -47,6 +47,12 @@ between the states, and later a wall run and a double jump.
    being attached, the replay, and the fight path, which keeps its
    animation-driven movement. A harness check in `utils/` fails when a movement
    write reads an animation association.
+   The input response is the same in every view: the pad always moves the ped.
+   The only gates are the scripted control flags (`PLAYERCONTROL_*`) and the
+   stationary sights (the sniper, the rocket launcher and the camera). The stock
+   rule that zeroed the movement while a smooth spray turned the body is gone;
+   it also read the duck flag, so it held a crouched walk in place in the third
+   person view.
 4. **The stride is data.** The state rows (acceleration, friction, turn rate),
    the stance rows (speed scale, turn scale, capsule), the speed ladder and the
    transition table hold the feel. A state or a transition is a row, not an `if`.
