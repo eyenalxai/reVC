@@ -1241,9 +1241,7 @@ CPed::ClearAimFlag(void)
 	if (IsPlayer()) {
 		((CPlayerPed*)this)->ReleaseHeldAimPose();
 		((CPlayerPed*)this)->m_fFPSMoveHeading = 0.0f;
-#ifdef FREE_CAM
-		((CPlayerPed*)this)->m_bFreeAimActive = false;
-#endif
+		((CPlayerPed*)this)->m_bWeaponAimActive = false;
 		((CPlayerPed*)this)->m_bFirstPersonAimActive = false;
 	}
 }

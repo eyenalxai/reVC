@@ -361,7 +361,7 @@ CPed::SetAttack(CEntity *victim)
 		if (m_pLookTarget) {
 			SetAimFlag(m_pLookTarget);
 #ifdef FREE_CAM
-		} else if (this != FindPlayerPed() || !((CPlayerPed*)this)->m_bFreeAimActive) {
+		} else if (this != FindPlayerPed() || !((CPlayerPed*)this)->m_bWeaponAimActive) {
 #else
 		} else {
 #endif
@@ -919,7 +919,7 @@ CPed::Attack(void)
 			m_pedIK.m_flags |= CPedIK::AIMS_WITH_ARM;
 		else
 #ifdef FREE_CAM
-			if (!IsPlayer() || !((CPlayerPed*)this)->m_bFreeAimActive)
+			if (!IsPlayer() || !((CPlayerPed*)this)->m_bWeaponAimActive)
 #endif
 			m_pedIK.m_flags &= ~CPedIK::AIMS_WITH_ARM;
 	}
@@ -1104,7 +1104,7 @@ CPed::Attack(void)
 			weaponAnimAssoc->flags &= ~ASSOC_RUNNING;
 			SetPointGunAt(m_pPointGunAt);
 #ifdef FREE_CAM
-		} else if (IsPlayer() && ((CPlayerPed*)this)->m_bFreeAimActive && GetWeapon()->m_eWeaponState != WEAPONSTATE_RELOADING) {
+		} else if (IsPlayer() && ((CPlayerPed*)this)->m_bWeaponAimActive && GetWeapon()->m_eWeaponState != WEAPONSTATE_RELOADING) {
 			float limitedCam = CGeneral::LimitRadianAngle(-TheCamera.Orientation);
 			SetLookFlag(limitedCam, true, true);
 			SetAimFlag(limitedCam);

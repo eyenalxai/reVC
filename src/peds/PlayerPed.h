@@ -57,8 +57,10 @@ public:
 	float m_fGunSpinAngle;
 	unsigned int m_nPadDownPressedInMilliseconds;
 	unsigned int m_nLastBusFareCollected;
+	// The player holds the aim: one state for every aiming weapon, in both
+	// views, in every movement state and in a vehicle.
+	bool m_bWeaponAimActive;
 #ifdef FREE_CAM
-	bool m_bFreeAimActive;
 	CVector m_cachedCamSource;
 	CVector m_cachedCamFront;
 	CVector m_cachedCamUp;
@@ -87,6 +89,7 @@ public:
 	void ClearAdrenaline(void);
 	void UseSprintEnergy(void);
 	void UpdatePlayerMovement(CPad *padUsed);
+	bool IsAimingWeapon(void) const { return m_bWeaponAimActive; }
 	bool IsMoveControllerInCharge(void);
 	bool UsingFirstPersonWeaponSight(void);
 	bool CanMoveInWeaponSight(void);

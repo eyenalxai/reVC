@@ -32,15 +32,9 @@ const float DefaultFOV = 70.0f; // beta: 80.0f
 // The camera handover: a view change that would snap in one frame glides from
 // the pose the last frame presented to the new pose over this long, with an
 // ease out curve. The first person view switching on or off, a vehicle entry
-// and exit and a camera handback all take it.
+// and exit, a sight camera taking the view and giving it back and a camera
+// handback all take it.
 #define CAMERA_HANDOVER_TIME		650	// milliseconds
-// The sight zoom of the first person view: entering or leaving the sights is
-// the same glide, only short.
-#define CAMERA_SIGHTS_HANDOVER_TIME	250	// milliseconds
-// The scope zoom of the first person view, the stock step and range of the
-// sniper camera
-#define FIRST_PERSON_SCOPE_ZOOM_STEP	10.0f
-#define FIRST_PERSON_SCOPE_FOV_MIN	15.0f
 
 class CCam
 {
@@ -125,9 +119,6 @@ public:
 	float	f_rollSpeed;
 	float   m_fSyphonModeTargetZOffSet;
 	float   m_fAmountFractionObscured;
-	// Third person aim down the sights: 0.0 is stock, 1.0 is fully pulled in
-	float   m_fAdsAmount;
-	float   m_fAdsAmountSpeed;
 	// The look recenter of the first person vehicle view: the mouse look is an
 	// offset from the car's heading and this returns it to straight ahead after
 	// the look rests. From is the offset the return started at, so new input
@@ -368,12 +359,6 @@ public:
 	CVector m_vecPresentedSource;
 	CVector m_vecPresentedFront;
 	float m_fPresentedFOV;
-	// The scope zoom of the first person view: the wheel steps the target FOV
-	// and the camera eases the value the way the stock sniper camera does
-	bool m_bScopeZoomRunning;
-	float m_fScopeFOV;
-	float m_fScopeFOVTarget;
-	float m_fScopeFOVSpeed;
 	bool m_bJustJumpedOutOf1stPersonBecauseOfTarget;
 	bool m_bIdleOn;
 	bool m_bInATunnelAndABigVehicle;
@@ -671,44 +656,38 @@ public:
 	void UpdateAimingCoors(CVector const &coors);
 	bool Find3rdPersonCamTargetVector(float dist, CVector pos, CVector &source, CVector &target);
 	float Find3rdPersonQuickAimPitch(void);
+	// The one aim ray of the player: the point the gun pose and the shot
+	// follow. The first person view and the weapon sight views aim along their
+	// camera; the third person mouse view aims through its crosshair, so the
+	// shot goes where the pointer points.
+	bool GetPlayerAimRay(float range, const CVector &pos, CVector &source, CVector &target);
 	bool Using1stPersonWeaponMode(void);
 	bool FirstPersonViewEnabled(void);
 	// The camera toggle: flip the persistent first person choice, the state the
 	// Display setting and the settings file use (VICE-139)
 	void ToggleFirstPersonView(void);
+	// Whether the first person view holds the weapon at the sights this frame:
+	// the plain first person view aims with the weapon while the player holds
+	// the aim. There is no sight camera and no sight zoom any more; the view
+	// keeps the player FOV and the shot follows the aim ray.
 	bool UsingFirstPersonSights(void);
-	float GetFirstPersonSightsFOV(void);
 	bool Using1stPersonView(void);
+	// The third person aim down the sights pull is gone: the camera does not
+	// move or zoom while a gun aims. The weapon code must drop this call.
 	bool UsingThirdPersonAds(void);
 	// The first person mode with the player's own vehicle as the target
 	bool InFirstPersonCarView(void);
-	// The car ADS: the aim button held while the camera serves the player's
-	// vehicle, the third person mouse camera or the first person car view
+	// The car aim: the driver holds the one aim state and the camera serves the
+	// vehicle, so the third person mouse camera or the first person car view
+	// aims freely. The handbrake suppression reads this.
 	bool UsingCarAds(void);
-	// The weapon aim modes the first person player camera serves with its own
-	// view: the plain sights (the M16 camera mode serves the assault rifles and
-	// every other aiming weapon), the sniper scope (the sniper and the laser
-	// scope) and the rocket sight. The stock cameras of these modes are
-	// stationary and drive the view from the movement keys, so the first person
-	// view runs them on the player camera instead. The photo camera is not one
-	// of them: the photograph reads its mode.
-	static bool FirstPersonServesSightMode(int16 weaponMode);
-	// The scope of the sniper and the laser scope aiming through the first
-	// person player camera: the view zooms like the stock scope and the scope
-	// overlay draws, but the player keeps moving (VICE-137)
-	bool UsingFirstPersonScope(void);
-	// The FOV of the first person view this frame: the plain view FOV, the
-	// sight zoom, and the scope zoom, which keeps the stock wheel zoom and
-	// starts at the view the scope came from.
-	float UpdateFirstPersonViewFOV(float previousFOV, bool usingSights, bool usingScope);
-	// The stock sight camera the current view stands in for. The first person
-	// player camera serves the aiming weapons, so while a weapon aims down its
-	// sights it answers with the sight camera mode of that weapon. The weapon
-	// fire paths ask this, so the shot follows the view in both views.
+	// The camera mode the weapon fire reads: the scope and the viewfinder run
+	// their own modes, and every other view reports its own mode. The weapon
+	// paths must move to GetPlayerAimRay, which is the one aim ray.
 	int16 GetSightCameraMode(void);
-	// The sight overlay the current view draws, as a stock sight camera mode,
-	// or MODE_NONE for no overlay. The HUD asks this, so the overlay follows
-	// the weapon the view aims with.
+	// The sight overlay the current view draws: the scope of the sniper and the
+	// laser scope, the viewfinder of the photo camera, or MODE_NONE so the HUD
+	// draws its own one reticle for a normal gun. The HUD asks this.
 	int16 GetSightOverlayMode(void);
 
 	// Physical camera
