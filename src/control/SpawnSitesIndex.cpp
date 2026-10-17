@@ -43,8 +43,11 @@ SpawnSiteFlags(const SSpawnSiteNode &node1, const SSpawnSiteNode &node2)
 	return flags;
 }
 
-/* The cell of a coordinate, the node grid's own arithmetic (PathFind.cpp
- * PathGridCell): the cast truncates towards zero, the cell index floors. */
+/* The cell of a coordinate, a deliberate copy of the node grid's own arithmetic
+ * (PathFind.cpp PathGridCell): the cast truncates towards zero, the cell index
+ * floors. The index is engine-free and cannot include the path graph's
+ * translation unit; the two copies must agree bit for bit, or a site's cell at
+ * build time and a query point's cell at request time would be different cells. */
 static inline int
 SpawnSiteGridCell(float coord, float origin, float invCell)
 {
@@ -217,17 +220,22 @@ CSpawnSiteIndex::CollectSitesNear(float x, float y, float radius, int32_t *out, 
 {
 	int32_t found = 0;
 	int32_t i;
-	const float radiusSq = radius * radius;
+	float radiusSq;
+
+	if (radius < 0.0f)
+		radius = 0.0f;
+	radiusSq = radius * radius;
 
 	if (m_hashValid) {
 		/* The rings of cells around the point, the node grid's own walk
-		 * (FindNodeClosestToCoors): a site in ring r is at least (r-1) cells
-		 * away, so the walk stops at radius/cellSize + 1 - the division
-		 * truncates, and the +1 keeps the ring whose (r-1)-cell edge can
-		 * still be inside the radius. Only a ring's own cells are visited
-		 * (an inner cell belongs to an earlier ring), and a ring clipped by
-		 * the grid visits its part inside it: a cell outside the grid holds
-		 * no site when the hash is valid. */
+		 * (FindNodeClosestToCoors). A site within `radius` sits at most
+		 * radius/cellSize + 1 cells away in Chebyshev distance (a cell's own
+		 * width bounds the far edge of the ring that can still reach the
+		 * radius; the +1 is the ring whose inner edge can), so the walk stops
+		 * there. Only a ring's own cells are visited (an inner cell belongs to
+		 * an earlier ring), and a clipped ring visits its part inside the
+		 * grid: a cell outside the grid holds no site when the hash is valid.
+		 * A truncated answer is in cell order, a cell's sites in site order. */
 		const float cellSize = (float)SPAWN_SITE_GRID_CELL;
 		int cx = SpawnSiteGridCell(x, (float)m_gridOriginX, 1.0f / cellSize);
 		int cy = SpawnSiteGridCell(y, (float)m_gridOriginY, 1.0f / cellSize);
@@ -267,7 +275,7 @@ CSpawnSiteIndex::CollectSitesNear(float x, float y, float radius, int32_t *out, 
 	}
 
 	/* No hash (a site outside the grid, or an empty index): the plain scan,
-	 * the site order kept. */
+	 * the site order kept (a truncated answer is the lowest site ids). */
 	for (i = 0; i < m_numSites; i++) {
 		float dx = m_sites[i].x - x, dy = m_sites[i].y - y;
 		if (dx * dx + dy * dy > radiusSq)

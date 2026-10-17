@@ -6,16 +6,16 @@
  * real hash query) and drives it over a synthetic car path graph of the
  * shipped node counts. No engine header is included anywhere.
  *
- *	A. The graph. The synthetic city: the shipped split of the car nodes
- *	   (2,973 road + 378 water = 3,351) over a sparse street network, with
- *	   the one-way streets, the cul-de-sacs, the disabled and between-levels
- *	   nodes, the harbour ramps (mixed land/water connections) and the
- *	   capacities' own bounds (the links and the connections below
- *	   NUM_CARPATHLINKS / NUM_PATHCONNECTIONS). The graph is synthetic on
- *	   purpose: the shipped graph is a dump of the running game
- *	   (tools/pathfind_check), and the live read is the acceptance; this
- *	   program proves the index's rules and its bounds, and the numbers it
- *	   cannot reach are named below.
+ *	A. The graph. Either the synthetic city: the shipped split of the car
+ *	   nodes (2,973 road + 378 water = 3,351) over a sparse street network,
+ *	   with the one-way streets, the cul-de-sacs, the disabled and
+ *	   between-levels nodes, the harbour ramps (mixed land/water connections)
+ *	   and the capacities' own bounds (the links and the connections below
+ *	   NUM_CARPATHLINKS / NUM_PATHCONNECTIONS); or the shipped graph itself,
+ *	   read from a path-graph dump (tools/pathfind_check's own format, the
+ *	   running game's memory) named on the command line. The synthetic city
+ *	   is the default because a dump needs a game session; the dump is the
+ *	   live read.
  *
  *	B. The build. The total and the usable site counts, the drops (the
  *	   one-way directions with no lanes, the mixed pairs), the boat/road
@@ -42,33 +42,52 @@
  *	   ticket's: the build count stands (no rebuild), the sites' structural
  *	   fields and their order hash the same before and after, the flags
  *	   follow the nodes, and the refresh's own time is measured - the gate
- *	   with no toggle is one comparison, and the refresh itself is a
- *	   fraction of the build and of a frame (the "no frame spike" row).
+ *	   with no toggle is one comparison, and the refresh itself (with the
+ *	   engine side's node re-read, mirrored) is a fraction of the build and
+ *	   of a frame (the "no frame spike" row).
  *
- *	F. The boat sweep, and the storage's worst case. Every mixed
+ *	F. The dump's round trip. The live read of the shipped graph arrives as
+ *	   a dump of the running game (tools/pathfind_check's format). The
+ *	   loader is exercised here end to end: the loaded graph is encoded back
+ *	   into the format, read through the loader again, compared field by
+ *	   field against what went in, and the index is built over the re-read
+ *	   graph - so the day a real dump appears, only the file changes.
+ *
+ *	G. The boat sweep, and the storage's worst case. Every mixed
  *	   land/water connection of the city is rejected (counted by this
  *	   program and by the index), and the index is built over a graph that
  *	   fills the capacities exactly (NUM_PATHCONNECTIONS directed
  *	   connections over 3,351 nodes and NUM_CARPATHLINKS link records) to
  *	   show the arrays hold it and what the worst-case build costs.
  *
- *	G. The hash fallback. A site outside the 4 km grid leaves the hash
- *	   unbuilt and the query keeps the plain scan - the node grid's own
- *	   contract (ADR 0024).
+ *	H. The hash fallback and the query's contract. A site outside the 4 km
+ *	   grid leaves the hash unbuilt and the query keeps the plain scan (the
+ *	   node grid's own contract, ADR 0024), a negative radius reads as 0,
+ *	   and a truncated answer (`max` smaller than the hits) writes at most
+ *	   `max` ids and returns that count.
+ *
+ * The store's memory is printed with the build: the site record, the index
+ * (the sites, the hash) and the engine side's snapshot (the car node block -
+ * sized to the graph, not to NUM_PATHNODES - the link block and the three
+ * connection arrays), in bytes.
  *
  * What this program cannot reach, stated plainly: the engine side's own
- * snapshot (SpawnSites.cpp) is not linked, so the node flags and the
- * info-zone indices here are the synthetic graph's, laid out the way the
- * engine side lays them out (the flags from the node bits, the zone index
- * from the connection's midpoint); the shipped graph itself needs a running
- * game; and the loader (CGame::Initialise) is the game's, not this program's.
+ * snapshot (SpawnSites.cpp) is not linked, so the node flags here are the
+ * graph's own and the info-zone indices are either the synthetic city's or -1
+ * for a dump (CTheZones is the engine's; the zone pass is priced by a mirror
+ * of its own shape); the loader's mirror of CPathNode/CCarPathLink is checked
+ * against the dump's declared struct sizes at read time, not against the
+ * game's headers; and the loader itself is exercised by the round trip here,
+ * while the shipped graph needs a running game (the live read: a dump from
+ * `build/pathfind_dump <pid> /tmp/pathgraph.bin`, then this program over it).
  *
  * Build and run (from the repository root):
  *
  *	c++ -std=c++17 -I src -I src/core -I src/control -O2 \
  *	    -o /tmp/spawn-service utils/spawn-service/harness.cpp \
  *	    src/control/SpawnSitesIndex.cpp
- *	/tmp/spawn-service
+ *	/tmp/spawn-service                        # the synthetic city
+ *	/tmp/spawn-service /tmp/pathgraph.bin     # a real graph (the dump)
  *
  * The exit code is 0 when every check passes. The output goes into the ticket.
  */
@@ -152,6 +171,13 @@ static int16_t g_connectionZone[NUM_PATHCONNECTIONS];
 static int g_numNodes;
 static int g_numLinks;
 static int g_numConnections;
+
+/* Where the loaded graph comes from: the synthetic city, or a path-graph dump
+ * of the running game (the format tools/pathfind_check writes). A dump carries
+ * no zones (CTheZones is the engine's), so its connections' zone indices stay
+ * -1, the index's own "the caller has none". */
+static bool g_graphIsDump;
+static bool g_zoneIndices = true;
 
 /* One road segment before the graph is laid out: `oneWay` is 0 two-way, 1 the
  * a -> b direction only, 2 the b -> a direction only. */
@@ -382,12 +408,6 @@ LayGraph(void)
 		int8_t left, right;
 
 		EdgeLanes(e, &left, &right);
-		/* The link record's own position: the graph's external links carry
-		 * the synthetic midpoint of the merged external nodes, which is not
-		 * the node pair's midpoint - the sites must read the node pair's own
-		 * (SpawnSites.h). The offset below stands for that. */
-		g_links[i].x = (g_nodes[e.a].x + g_nodes[e.b].x) * 0.5f + 7.0f;
-		g_links[i].y = (g_nodes[e.a].y + g_nodes[e.b].y) * 0.5f - 5.0f;
 		g_links[i].dirX = mag > 0.0f ? (int8_t)(dx / mag * 100.0f) : 0;
 		g_links[i].dirY = mag > 0.0f ? (int8_t)(dy / mag * 100.0f) : 0;
 		g_links[i].numLeftLanes = left;
@@ -436,6 +456,276 @@ MarkDeadEnds(void)
 			}
 		}
 	} while (cont);
+}
+
+/* ------------------------------------------------------------------ *
+ * the graph dump (tools/pathfind_check's own format)
+ * ------------------------------------------------------------------ */
+
+/*
+ * The live read of the shipped graph arrives as a dump of a running game
+ * (tools/pathfind_check/dump.cpp): a header with the magic, the counts and the
+ * four block sizes, then five blocks - the node array, the connections (with
+ * their flags), the distances, the connection -> link map and the link array.
+ * The dump is read out of the game's memory, so the graph in it is the shipped
+ * graph itself.
+ *
+ * The two raw structs below repeat CPathNode and CCarPathLink (PathFind.h)
+ * field by field, bitfields included. The header carries their sizes, so a
+ * dump from a build whose layout differs is refused instead of misread; the
+ * loader then checks the graph's own plausibility (the positions on the map,
+ * the counts in range) before the index sees anything.
+ */
+#define DUMP_MAGIC "RVCPATH1"
+#define DUMP_NODE_SLACK 4000.0f		/* metres: the map is 3.6 km across */
+
+struct SDumpHeader
+{
+	char magic[8];
+	uint32_t version;
+	uint32_t numPathNodes;
+	int32_t numCarPathNodes;
+	int32_t numPedPathNodes;
+	int32_t numConnections;
+	int32_t numCarPathLinks;
+	uint32_t sizes[4];	/* CPathNode, CCarPathLink, NUM_PATHCONNECTIONS, NUM_PATHNODES */
+};
+
+/* CPathNode (PathFind.h): 20 bytes on this build. */
+struct SRawPathNode
+{
+	int16_t prevIndex, nextIndex, x, y, z, distance, firstLink;
+	uint8_t width;
+	int8_t group;
+	uint8_t numLinks : 4;
+	uint8_t bDeadEnd : 1;
+	uint8_t bDisabled : 1;
+	uint8_t bBetweenLevels : 1;
+	uint8_t bUseInRoadBlock : 1;
+	uint8_t bWaterPath : 1;
+	uint8_t bOnlySmallBoats : 1;
+	uint8_t bSelected : 1;
+	uint8_t speedLimit : 2;
+	uint8_t spawnRate : 4;
+	uint8_t flagsC : 4;
+};
+
+/* CCarPathLink (PathFind.h): 12 bytes on this build. */
+struct SRawCarPathLink
+{
+	int16_t x, y, pathNodeIndex;
+	int8_t dirX, dirY;
+	int8_t numLeftLanes : 3;
+	int8_t numRightLanes : 3;
+	uint8_t trafficLightDirection : 1;
+	uint8_t trafficLightType : 2;
+	uint8_t bBridgeLights : 1;
+	uint8_t width;
+};
+
+static SDumpHeader g_dumpHeader;
+static SRawPathNode g_dumpNodes[NUM_PATHNODES];
+static uint16_t g_dumpConnections[NUM_PATHCONNECTIONS];
+static uint8_t g_dumpDistances[NUM_PATHCONNECTIONS];
+static int16_t g_dumpConnectionLinks[NUM_PATHCONNECTIONS];
+static SRawCarPathLink g_dumpLinks[NUM_CARPATHLINKS];
+
+/* The raw node's own flag bits -> the snapshot's (the engine side's own
+ * SpawnSiteNodeFlags, mirrored: a dump's node is a CPathNode). */
+static uint8_t
+NodeFlagsFromRaw(const SRawPathNode &raw)
+{
+	uint8_t flags = 0;
+	if (raw.bWaterPath)
+		flags |= SPAWN_SITE_NODE_WATER;
+	if (raw.bOnlySmallBoats)
+		flags |= SPAWN_SITE_NODE_SMALLBOATS;
+	if (raw.bDeadEnd)
+		flags |= SPAWN_SITE_NODE_DEADEND;
+	if (raw.bDisabled)
+		flags |= SPAWN_SITE_NODE_DISABLED;
+	if (raw.bBetweenLevels)
+		flags |= SPAWN_SITE_NODE_BETWEENLEVELS;
+	return flags;
+}
+
+/* The dump's node array -> the graph the index is built over. */
+static void
+GraphFromDumpNodes(void)
+{
+	int i;
+	for (i = 0; i < g_numNodes; i++) {
+		g_nodes[i].x = g_dumpNodes[i].x / 8.0f;
+		g_nodes[i].y = g_dumpNodes[i].y / 8.0f;
+		g_nodes[i].z = g_dumpNodes[i].z / 8.0f;
+		g_nodes[i].firstLink = g_dumpNodes[i].firstLink;
+		g_nodes[i].numLinks = g_dumpNodes[i].numLinks;
+		g_nodes[i].spawnRate = g_dumpNodes[i].spawnRate;
+		g_nodes[i].flags = NodeFlagsFromRaw(g_dumpNodes[i]);
+	}
+	for (i = 0; i < g_numLinks; i++) {
+		g_links[i].dirX = g_dumpLinks[i].dirX;
+		g_links[i].dirY = g_dumpLinks[i].dirY;
+		g_links[i].numLeftLanes = g_dumpLinks[i].numLeftLanes;
+		g_links[i].numRightLanes = g_dumpLinks[i].numRightLanes;
+		g_links[i].pathNodeIndex = g_dumpLinks[i].pathNodeIndex;
+		g_links[i].width = g_dumpLinks[i].width;
+	}
+	for (i = 0; i < g_numConnections; i++) {
+		g_connectionNode[i] = g_dumpConnections[i] & 0x3FFF;
+		g_connectionLink[i] = g_dumpConnectionLinks[i];
+		g_connectionZone[i] = -1;
+	}
+}
+
+/* The dump's five blocks -> the globals above, with the layout and the
+ * plausibility checks. Returns false (and says why) when the file is not a
+ * dump this build can read. */
+static bool
+LoadGraphDumpFile(FILE *f, const char *what)
+{
+	int i;
+
+	if (fread(&g_dumpHeader, 1, sizeof(g_dumpHeader), f) != sizeof(g_dumpHeader) ||
+	    memcmp(g_dumpHeader.magic, DUMP_MAGIC, 8) != 0) {
+		printf("the %s is not a path-graph dump (the magic)\n", what);
+		return false;
+	}
+	if (g_dumpHeader.sizes[0] != sizeof(SRawPathNode) ||
+	    g_dumpHeader.sizes[1] != sizeof(SRawCarPathLink) ||
+	    g_dumpHeader.sizes[2] != NUM_PATHCONNECTIONS ||
+	    g_dumpHeader.sizes[3] != NUM_PATHNODES) {
+		printf("the %s is from another layout (%u/%u/%u/%u; this build mirrors %u/%u/%u/%u)\n",
+			what, g_dumpHeader.sizes[0], g_dumpHeader.sizes[1], g_dumpHeader.sizes[2], g_dumpHeader.sizes[3],
+			(uint)sizeof(SRawPathNode), (uint)sizeof(SRawCarPathLink),
+			NUM_PATHCONNECTIONS, NUM_PATHNODES);
+		return false;
+	}
+	if (g_dumpHeader.numPathNodes < 1 || g_dumpHeader.numPathNodes > NUM_PATHNODES ||
+	    g_dumpHeader.numCarPathNodes < 1 || g_dumpHeader.numCarPathNodes > (int32_t)g_dumpHeader.numPathNodes ||
+	    g_dumpHeader.numConnections < 0 || g_dumpHeader.numConnections > NUM_PATHCONNECTIONS ||
+	    g_dumpHeader.numCarPathLinks < 1 || g_dumpHeader.numCarPathLinks > NUM_CARPATHLINKS) {
+		printf("the %s holds implausible counts (%u nodes, %u car, %d connections, %d links)\n",
+			what, g_dumpHeader.numPathNodes, g_dumpHeader.numCarPathNodes,
+			g_dumpHeader.numConnections, g_dumpHeader.numCarPathLinks);
+		return false;
+	}
+	if (fread(g_dumpNodes, 1, sizeof(SRawPathNode) * NUM_PATHNODES, f) != sizeof(SRawPathNode) * NUM_PATHNODES ||
+	    fread(g_dumpConnections, 1, 2 * NUM_PATHCONNECTIONS, f) != 2 * NUM_PATHCONNECTIONS ||
+	    fread(g_dumpDistances, 1, NUM_PATHCONNECTIONS, f) != NUM_PATHCONNECTIONS ||
+	    fread(g_dumpConnectionLinks, 1, 2 * NUM_PATHCONNECTIONS, f) != 2 * NUM_PATHCONNECTIONS ||
+	    fread(g_dumpLinks, 1, sizeof(SRawCarPathLink) * NUM_CARPATHLINKS, f) != sizeof(SRawCarPathLink) * NUM_CARPATHLINKS) {
+		printf("the %s is truncated\n", what);
+		return false;
+	}
+
+	g_numNodes = g_dumpHeader.numCarPathNodes;
+	g_numLinks = g_dumpHeader.numCarPathLinks;
+	g_numConnections = g_dumpHeader.numConnections;
+	GraphFromDumpNodes();
+
+	/* The map's own shape: a car node's position is on the 3.6 km map (the
+	 * grid holds 4 km), and the connection map points inside the car block. */
+	for (i = 0; i < g_numNodes; i++) {
+		if (fabs(g_nodes[i].x) > DUMP_NODE_SLACK || fabs(g_nodes[i].y) > DUMP_NODE_SLACK ||
+		    g_nodes[i].numLinks > 16 || g_nodes[i].firstLink < 0) {
+			printf("the %s has a node off the map (node %d: %.1f, %.1f, %d links)\n",
+				what, i, (double)g_nodes[i].x, (double)g_nodes[i].y, g_nodes[i].numLinks);
+			return false;
+		}
+	}
+	for (i = 0; i < g_numConnections; i++) {
+		if (g_connectionLink[i] < 0 || g_connectionLink[i] >= g_numLinks ||
+		    g_connectionNode[i] >= g_numNodes) {
+			printf("the %s has an unresolved connection (%d: node %d, link %d)\n",
+				what, i, g_connectionNode[i], g_connectionLink[i]);
+			return false;
+		}
+	}
+	g_zoneIndices = false;
+	return true;
+}
+
+/* A dump file, by path. */
+static bool
+LoadGraphDump(const char *path)
+{
+	FILE *f = fopen(path, "rb");
+	bool ok;
+
+	if (f == NULL) {
+		printf("the dump %s does not open\n", path);
+		return false;
+	}
+	ok = LoadGraphDumpFile(f, path);
+	fclose(f);
+	return ok;
+}
+
+/* The encoder of the same format, from the current graph: the round-trip
+ * self-test's own writer (a dump needs the game; the format does not). The
+ * link record's own position, x and y, is not part of the index's view
+ * (SpawnSites.h): the encoder writes zeros there, as the reader ignores them.
+ * The connection zone index has no place in the format either: the round trip
+ * names it as the one field a dump cannot carry. */
+static bool
+WriteGraphDump(FILE *f)
+{
+	SDumpHeader h;
+	int i;
+
+	memset(&h, 0, sizeof(h));
+	memcpy(h.magic, DUMP_MAGIC, 8);
+	h.version = 1;
+	h.numPathNodes = (uint32_t)g_numNodes;	/* the harness holds the car block */
+	h.numCarPathNodes = g_numNodes;
+	h.numPedPathNodes = 0;
+	h.numConnections = g_numConnections;
+	h.numCarPathLinks = g_numLinks;
+	h.sizes[0] = sizeof(SRawPathNode);
+	h.sizes[1] = sizeof(SRawCarPathLink);
+	h.sizes[2] = NUM_PATHCONNECTIONS;
+	h.sizes[3] = NUM_PATHNODES;
+
+	memset(g_dumpNodes, 0, sizeof(g_dumpNodes));
+	memset(g_dumpConnections, 0, sizeof(g_dumpConnections));
+	memset(g_dumpDistances, 0, sizeof(g_dumpDistances));
+	memset(g_dumpConnectionLinks, 0, sizeof(g_dumpConnectionLinks));
+	memset(g_dumpLinks, 0, sizeof(g_dumpLinks));
+	for (i = 0; i < g_numNodes; i++) {
+		g_dumpNodes[i].x = (int16_t)(g_nodes[i].x * 8.0f);
+		g_dumpNodes[i].y = (int16_t)(g_nodes[i].y * 8.0f);
+		g_dumpNodes[i].z = (int16_t)(g_nodes[i].z * 8.0f);
+		g_dumpNodes[i].firstLink = g_nodes[i].firstLink;
+		g_dumpNodes[i].numLinks = g_nodes[i].numLinks;
+		g_dumpNodes[i].spawnRate = g_nodes[i].spawnRate;
+		g_dumpNodes[i].bWaterPath = !!(g_nodes[i].flags & SPAWN_SITE_NODE_WATER);
+		g_dumpNodes[i].bOnlySmallBoats = !!(g_nodes[i].flags & SPAWN_SITE_NODE_SMALLBOATS);
+		g_dumpNodes[i].bDeadEnd = !!(g_nodes[i].flags & SPAWN_SITE_NODE_DEADEND);
+		g_dumpNodes[i].bDisabled = !!(g_nodes[i].flags & SPAWN_SITE_NODE_DISABLED);
+		g_dumpNodes[i].bBetweenLevels = !!(g_nodes[i].flags & SPAWN_SITE_NODE_BETWEENLEVELS);
+	}
+	for (i = 0; i < g_numLinks; i++) {
+		g_dumpLinks[i].dirX = g_links[i].dirX;
+		g_dumpLinks[i].dirY = g_links[i].dirY;
+		g_dumpLinks[i].numLeftLanes = g_links[i].numLeftLanes;
+		g_dumpLinks[i].numRightLanes = g_links[i].numRightLanes;
+		g_dumpLinks[i].pathNodeIndex = g_links[i].pathNodeIndex;
+		g_dumpLinks[i].width = g_links[i].width;
+	}
+	for (i = 0; i < g_numConnections; i++) {
+		g_dumpConnections[i] = g_connectionNode[i];
+		g_dumpConnectionLinks[i] = g_connectionLink[i];
+	}
+
+	if (fwrite(&h, 1, sizeof(h), f) != sizeof(h) ||
+	    fwrite(g_dumpNodes, 1, sizeof(SRawPathNode) * NUM_PATHNODES, f) != sizeof(SRawPathNode) * NUM_PATHNODES ||
+	    fwrite(g_dumpConnections, 1, 2 * NUM_PATHCONNECTIONS, f) != 2 * NUM_PATHCONNECTIONS ||
+	    fwrite(g_dumpDistances, 1, NUM_PATHCONNECTIONS, f) != NUM_PATHCONNECTIONS ||
+	    fwrite(g_dumpConnectionLinks, 1, 2 * NUM_PATHCONNECTIONS, f) != 2 * NUM_PATHCONNECTIONS ||
+	    fwrite(g_dumpLinks, 1, sizeof(SRawCarPathLink) * NUM_CARPATHLINKS, f) != sizeof(SRawCarPathLink) * NUM_CARPATHLINKS)
+		return false;
+	return true;
 }
 
 /* ------------------------------------------------------------------ *
@@ -538,22 +828,18 @@ CountFlag(const CSpawnSiteIndex &index, uint8_t bit)
  * A. the graph
  * ------------------------------------------------------------------ */
 
-/* The graph's own make-up, counted from the raw arrays. */
+/* The graph's own make-up, counted from the raw arrays (the graph view, not the
+ * edge list: a dump has no edges). */
 static void
 Section1Graph(void)
 {
 	int i, j;
-	int oneWayEdges = 0, waterEdges = 0, mixedEdges = 0;
-	int disabledNodes = 0, betweenNodes = 0, waterNodes = 0, deadEndNodes = 0;
+	int oneWayLinks = 0, waterConnections = 0, mixedConnections = 0;
+	int disabledNodes = 0, betweenNodes = 0, waterNodes = 0, singleLinkNodes = 0;
 
-	for (i = 0; i < g_numEdges; i++) {
-		if (g_edges[i].oneWay)
-			oneWayEdges++;
-		if (g_edges[i].a >= NUM_ROAD_NODES && g_edges[i].b >= NUM_ROAD_NODES)
-			waterEdges++;
-		if ((g_edges[i].a >= NUM_ROAD_NODES) != (g_edges[i].b >= NUM_ROAD_NODES))
-			mixedEdges++;
-	}
+	for (i = 0; i < g_numLinks; i++)
+		if (g_links[i].numLeftLanes == 0 || g_links[i].numRightLanes == 0)
+			oneWayLinks++;
 	for (i = 0; i < g_numNodes; i++) {
 		if (g_nodes[i].flags & SPAWN_SITE_NODE_DISABLED)
 			disabledNodes++;
@@ -562,28 +848,53 @@ Section1Graph(void)
 		if (g_nodes[i].flags & SPAWN_SITE_NODE_WATER)
 			waterNodes++;
 		if (g_nodes[i].numLinks == 1)
-			deadEndNodes++;
-	}
-	for (i = 0; i < g_numNodes; i++) {
+			singleLinkNodes++;
 		for (j = 0; j < g_nodes[i].numLinks; j++) {
 			int c = g_nodes[i].firstLink + j;
-			if (g_connectionNode[c] >= g_numNodes)
+			int other = g_connectionNode[c];
+			int water1, water2;
+			if (other < 0 || other >= g_numNodes) {
 				Fail("a connection points outside the graph");
+				continue;
+			}
+			water1 = !!(g_nodes[i].flags & SPAWN_SITE_NODE_WATER);
+			water2 = !!(g_nodes[other].flags & SPAWN_SITE_NODE_WATER);
+			if (water1 != water2)
+				mixedConnections++;
+			else if (water1)
+				waterConnections++;
 		}
 	}
 
-	printf("== 1. the graph (synthetic, the shipped node counts)\n\n");
-	printf("  the car nodes: %d (the shipped 3,351 = 2,973 road + 378 water)\n", g_numNodes);
+	if (g_graphIsDump) {
+		printf("== 1. the graph (a path-graph dump)\n\n");
+		printf("  the dump's version %u: %d path nodes (%d car, %d ped), %d connections, %d car links\n",
+			g_dumpHeader.version, g_dumpHeader.numPathNodes, g_dumpHeader.numCarPathNodes,
+			g_dumpHeader.numPedPathNodes, g_dumpHeader.numConnections, g_dumpHeader.numCarPathLinks);
+	} else {
+		printf("== 1. the graph (synthetic, the shipped node counts)\n\n");
+		printf("  the car nodes: %d (the shipped 3,351 = 2,973 road + 378 water)\n", g_numNodes);
+	}
 	printf("  the links: %d of the capacity %d, the connections: %d of the capacity %d\n",
 		g_numLinks, NUM_CARPATHLINKS, g_numConnections, NUM_PATHCONNECTIONS);
-	printf("  the make-up: %d one-way segments, %d water segments, %d harbour ramps (mixed),\n",
-		oneWayEdges, waterEdges, mixedEdges);
-	printf("  %d water nodes, %d disabled, %d between-levels, %d cul-de-sacs (one link)\n\n",
-		waterNodes, disabledNodes, betweenNodes, deadEndNodes);
-	Check(g_numLinks <= NUM_CARPATHLINKS, "the synthetic graph must fit the link capacity");
-	Check(g_numConnections <= NUM_PATHCONNECTIONS, "the synthetic graph must fit the connection capacity");
-	Check(oneWayEdges > 0 && waterEdges > 0 && mixedEdges > 0, "the graph must hold one-way, water and mixed segments");
-	Check(disabledNodes > 0 && betweenNodes > 0 && deadEndNodes > 0, "the graph must hold disabled, between-levels and dead-end nodes");
+	printf("  the make-up: %d one-way links, %d water connections, %d mixed land/water connections,\n",
+		oneWayLinks, waterConnections, mixedConnections);
+	printf("  %d water nodes, %d disabled, %d between-levels, %d single-link nodes\n",
+		waterNodes, disabledNodes, betweenNodes, singleLinkNodes);
+	if (g_zoneIndices)
+		printf("  the info-zone indices: the synthetic zones (a dump carries none: CTheZones is the engine's)\n");
+	printf("\n");
+	Check(g_numLinks <= NUM_CARPATHLINKS, "the graph must fit the link capacity");
+	Check(g_numConnections <= NUM_PATHCONNECTIONS, "the graph must fit the connection capacity");
+	if (!g_graphIsDump) {
+		/* The synthetic city is built to exercise every class of the index; a
+		 * real dump is whatever the shipped map holds, and its classes are
+		 * counted, not required. */
+		Check(oneWayLinks > 0 && waterConnections > 0 && mixedConnections > 0,
+			"the city must hold one-way, water and mixed links");
+		Check(disabledNodes > 0 && betweenNodes > 0 && singleLinkNodes > 0,
+			"the city must hold disabled, between-levels and single-link nodes");
+	}
 }
 
 /* ------------------------------------------------------------------ *
@@ -612,7 +923,7 @@ Section2Build(CSpawnSiteIndex &index)
 {
 	const int rounds = 20;
 	double best = 1e9, mean = 0.0;
-	int i;
+	int i, j;
 	const SSpawnSiteBuildStats *stats;
 
 	printf("== 2. the build: the sites over the directed connections\n\n");
@@ -648,18 +959,78 @@ Section2Build(CSpawnSiteIndex &index)
 		stats->hashCells, SPAWN_SITE_GRID_CELLS);
 	printf("  the build time: %.2f ms (the best of %d runs; the mean %.2f ms)\n",
 		best * 1000.0, rounds, mean * 1000.0);
-	printf("    %.0f ns for each of the %d directed connections\n\n",
-		best * 1e9 / stats->connections, stats->connections);
+	printf("    %.0f ns for each of the %d directed connections\n", best * 1e9 / stats->connections, stats->connections);
+
+	/* The store's bytes (the ticket wants the number, not a claim): the index
+	 * as this program links it, and the engine side's snapshot mirrored at the
+	 * same counts (its node block is sized to the graph, its link and
+	 * connection blocks to the capacities). */
+	printf("  the memory: the site record %u B, the index %u B (the sites %d x %u = %u B,\n",
+		(uint)sizeof(SSpawnSite), (uint)sizeof(CSpawnSiteIndex),
+		NUM_PATHCONNECTIONS, (uint)sizeof(SSpawnSite), (uint)(NUM_PATHCONNECTIONS * sizeof(SSpawnSite)));
+	printf("    the hash %u B: the cell offsets %u + the site list %u)\n",
+		(uint)((SPAWN_SITE_GRID_CELLS + 1) * 2 + NUM_PATHCONNECTIONS * 2),
+		(uint)((SPAWN_SITE_GRID_CELLS + 1) * 2), (uint)(NUM_PATHCONNECTIONS * 2));
+	printf("    the engine side's snapshot at this graph: %u B (the car nodes %d x %u,\n",
+		(uint)(g_numNodes * sizeof(SSpawnSiteNode) + NUM_CARPATHLINKS * sizeof(SSpawnSiteLink) +
+			NUM_PATHCONNECTIONS * 6),
+		g_numNodes, (uint)sizeof(SSpawnSiteNode));
+	printf("    the links %d x %u, the connection arrays %d x 6); the whole store %u B\n",
+		NUM_CARPATHLINKS, (uint)sizeof(SSpawnSiteLink), NUM_PATHCONNECTIONS,
+		(uint)(sizeof(CSpawnSiteIndex) + g_numNodes * sizeof(SSpawnSiteNode) +
+			NUM_CARPATHLINKS * sizeof(SSpawnSiteLink) + NUM_PATHCONNECTIONS * 6));
+
+	/* The zone pass's arithmetic, mirrored: the engine side runs one
+	 * CTheZones::FindInformationZoneForPosition per car connection, a linear
+	 * test of the information zones' rectangles. CTheZones is not linked here,
+	 * so the mirror is the shape at the shipped zone count (about 150) over
+	 * this graph's own pass. */
+	{
+		const int zoneCount = 150;
+		const int zoneRounds = 20;
+		double zoneBest = 1e9;
+		int r, c;
+		for (r = 0; r < zoneRounds; r++) {
+			double t0 = NowSeconds();
+			for (i = 0; i < g_numNodes; i++)
+				for (j = 0; j < g_nodes[i].numLinks; j++) {
+					int other = g_connectionNode[g_nodes[i].firstLink + j];
+					float mx = (g_nodes[i].x + g_nodes[other].x) * 0.5f;
+					float my = (g_nodes[i].y + g_nodes[other].y) * 0.5f;
+					int hit = 0;
+					for (c = 0; c < zoneCount; c++) {
+						/* a zone rectangle of the shipped size */
+						float zx = (float)((c * 197) % 3600) - 1800.0f;
+						float zy = (float)((c * 379) % 3600) - 1800.0f;
+						if (mx >= zx && mx < zx + 300.0f && my >= zy && my < zy + 300.0f)
+							hit = c + 1;
+					}
+					g_sink += hit;
+			}
+			double t1 = NowSeconds();
+			if (t1 - t0 < zoneBest)
+				zoneBest = t1 - t0;
+		}
+		printf("  the zone pass, mirrored (%d car connections x a %d rectangle linear test):\n",
+			stats->connections, zoneCount);
+		printf("    %.2f ms once at load (the real pass is CTheZones' own rectangles; this is\n",
+			zoneBest * 1000.0);
+		printf("    its shape and price on this machine, not a live read)\n\n");
+		Check(zoneBest * 1000.0 < 100.0, "the zone pass's mirror must stay a load-time cost");
+	}
 
 	Check(stats->connections == g_numConnections, "the build must examine every directed connection");
 	Check(stats->sites + stats->droppedNoLanes + stats->droppedMixed + stats->droppedUnresolved == stats->connections,
 		"every connection must be a site or one of the drops");
 	Check(stats->sites > 0 && stats->sites <= NUM_PATHCONNECTIONS, "the sites must fit the array");
 	Check(stats->boatSites > 0, "the water-water pairs must give boat sites");
-	Check(stats->droppedNoLanes > 0, "the one-way directions must be dropped");
-	Check(stats->droppedMixed > 0, "the harbour ramps must be dropped");
+	if (!g_graphIsDump) {
+		/* The city's own variety; a dump is whatever the shipped map holds. */
+		Check(stats->droppedNoLanes > 0, "the one-way directions must be dropped");
+		Check(stats->droppedMixed > 0, "the harbour ramps must be dropped");
+	}
 	Check(stats->droppedUnresolved == 0, "the graph must resolve every connection");
-	Check(index.IsHashValid(), "the city's hash must be built");
+	Check(index.IsHashValid(), "the graph's hash must be built");
 	return best;
 }
 
@@ -680,8 +1051,7 @@ Section3SpotCheck(CSpawnSiteIndex &index)
 	};
 	const int nClasses = sizeof(classes) / sizeof(classes[0]);
 	int gotSites = 0, gotNoLanes = 0, gotMixed = 0, gotUnresolved = 0;
-	int mismatches = 0, zoneRule = 0, zoneMidpoint = 0, zoneEntryNode = 0;
-	int linkPositionSites = 0;
+	int mismatches = 0, zoneRule = 0, zoneMidpoint = 0;
 	int sample = 0, stride;
 	int i, j, node, conn;
 
@@ -749,9 +1119,12 @@ Section3SpotCheck(CSpawnSiteIndex &index)
 				first = i;
 				break;
 			}
-		if (first < 0)
-			Fail("a site class has no site in the city");
-		else
+		if (first < 0) {
+			if (g_graphIsDump)
+				printf("    (a site class holds no site in this graph: its rule is not sampled)\n");
+			else
+				Fail("a site class has no site in the city");
+		} else
 			sampled[first] = true;
 	}
 	for (i = 0; i < numSites; i++)
@@ -785,41 +1158,34 @@ Section3SpotCheck(CSpawnSiteIndex &index)
 	Check(mismatches == 0, "every sampled site must equal the raw structures' own reading");
 	Check(sample > 512, "the sample must be a real spread");
 
-	/* A site's midpoint is the node pair's own, never the link record's
-	 * position (the graph's external links carry a synthetic position). The
-	 * harness's link records carry one on purpose, so this check has teeth. */
-	for (i = 0; i < numSites; i++) {
-		const SSpawnSite &s = sites[i];
-		if (s.x == g_links[s.link].x && s.y == g_links[s.link].y)
-			linkPositionSites++;
+	/* The zone index, when the graph carries any: the index stores the
+	 * *midpoint's* zone - the array the engine side resolved it from - and
+	 * never the entry node's (the sites' own claim in SpawnSites.h). A dump
+	 * has no zones (CTheZones is the engine's), so its indices are -1 and the
+	 * rule is not exercised there. */
+	if (g_zoneIndices) {
+		for (i = 0; i < numSites; i++) {
+			const SSpawnSite &s = sites[i];
+			if (s.zoneIndex == (int16_t)ZoneAt(s.x, s.y))
+				zoneRule++;
+			if (ZoneAt(s.x, s.y) != ZoneAt(g_nodes[s.node1].x, g_nodes[s.node1].y))
+				zoneMidpoint++;
+		}
+		printf("  the zone index, against the midpoint's own zone: %d of %d sites agree\n",
+			zoneRule, numSites);
+		printf("    (%d of them sit on a segment whose midpoint lies in another zone than the\n",
+			zoneMidpoint);
+		printf("    entry node's, so the midpoint rule is not vacuous)\n\n");
+		Check(zoneRule == numSites, "every site's zone index must be its midpoint's");
+		Check(zoneMidpoint > 0, "the zones must straddle some segments");
+	} else {
+		printf("  the zone indices: -1, this graph carries none (a dump has no CTheZones; the\n");
+		printf("    engine side resolves the shipped one's own)\n\n");
+		for (i = 0; i < numSites; i++)
+			if (sites[i].zoneIndex != -1)
+				zoneRule++;	/* reused as the "non -1" counter here */
+		Check(zoneRule == 0, "a graph without zones must store -1 in every site");
 	}
-	printf("  the sites whose midpoint equals their link record's own position: %d of %d\n",
-		linkPositionSites, numSites);
-	printf("    (the link positions here are synthetic, as the external links' are; a site's\n");
-	printf("    midpoint is the node pair's own)\n\n");
-	Check(linkPositionSites == 0, "a site's midpoint must never be the link record's position");
-
-	/* The zone index: the midpoint's own zone (never the entry node's) and the
-	 * index itself, never the info. */
-	for (i = 0; i < numSites; i++) {
-		const SSpawnSite &s = sites[i];
-		int zoneAtMid = ZoneAt(s.x, s.y);
-		if (s.zoneIndex == (int16_t)zoneAtMid)
-			zoneRule++;
-		if (zoneAtMid != ZoneAt(g_nodes[s.node1].x, g_nodes[s.node1].y))
-			zoneMidpoint++;
-		if (s.zoneIndex != (int16_t)ZoneAt(g_nodes[s.node1].x, g_nodes[s.node1].y))
-			zoneEntryNode++;
-	}
-	printf("  the zone index, against the midpoint's own zone: %d of %d sites agree\n",
-		zoneRule, numSites);
-	printf("    %d sites whose midpoint lies in another zone than the entry node's (the rule is\n",
-		zoneMidpoint);
-	printf("    not vacuous); %d sites where the entry node's zone would be stored instead)\n\n",
-		zoneEntryNode);
-	Check(zoneRule == numSites, "every site's zone index must be its midpoint's");
-	Check(zoneMidpoint > 0, "the zones must straddle some segments");
-	Check(zoneEntryNode == zoneMidpoint, "the entry node's zone must not be what is stored");
 }
 
 /* ------------------------------------------------------------------ *
@@ -922,9 +1288,29 @@ Section4Hash(CSpawnSiteIndex &index)
 	}
 	printf("  the queries: %d (300 points x %d radii), the sets that differ from the plain\n",
 		queries, nRadii);
-	printf("  radius scan: %d; the queries that found sites: %d\n\n", mismatches, hits);
+	printf("  radius scan: %d; the queries that found sites: %d\n", mismatches, hits);
 	Check(mismatches == 0, "the ring walk must answer what the plain scan answers");
 	Check(hits > 0, "the queries must find sites");
+
+	/* The contract's edges: a negative radius reads as 0, and a `max` smaller
+	 * than the hits truncates (the count written, the ids of the walk). */
+	{
+		int k, bad = 0;
+		q = index.CollectSitesNear(sites[0].x, sites[0].y, -5.0f, outHash, 8);
+		for (k = 0; k < q; k++)
+			if (sites[outHash[k]].x != sites[0].x || sites[outHash[k]].y != sites[0].y)
+				bad++;
+		Check(q >= 1 && bad == 0, "a negative radius must read as zero (the point's own sites only)");
+		q = index.CollectSitesNear(-500.0f, -500.0f, 5000.0f, outHash, 7);
+		Check(q == 7, "a small max must truncate the answer to its own bound");
+		bad = 0;
+		for (k = 0; k < q; k++)
+			if (outHash[k] < 0 || outHash[k] >= numSites)
+				bad++;
+		Check(bad == 0, "a truncated answer must hold valid ids");
+	}
+	printf("  a negative radius reads as zero (the point's own sites); a max of 7 over the\n");
+	printf("  whole map writes 7 ids\n\n");
 }
 
 /* ------------------------------------------------------------------ *
@@ -939,8 +1325,6 @@ static volatile uint32_t g_graphFlagsVersion;	/* CPathFind::m_nodeFlagsVersion *
 static volatile uint32_t g_siteFlagsVersion;	/* the version the index's flags hold */
 static int g_lastFlagChanges;
 
-/* The engine side's gate, mirrored (CSpawnSites::RefreshFlags): the graph's own
- * version moves the refresh, and a frame with no toggle reads it only. */
 static void
 HarnessRefreshFlags(CSpawnSiteIndex &index)
 {
@@ -1027,6 +1411,28 @@ FlagMismatches(const CSpawnSiteIndex &index)
 	return bad;
 }
 
+/* The engine side's node pass, mirrored (SpawnSites.cpp SpawnSiteNodeFlags):
+ * five bit tests and a store per car node, the pass that re-reads the graph's
+ * flags into the snapshot before the index's own re-derivation. The harness's
+ * nodes already carry the snapshot's bits, so the mirror reads them and writes
+ * the same byte back: the shape and the price are the engine's. */
+static uint8_t
+MirrorNodeFlagsPass(uint8_t flags)
+{
+	uint8_t out = 0;
+	if (flags & SPAWN_SITE_NODE_WATER)
+		out |= SPAWN_SITE_NODE_WATER;
+	if (flags & SPAWN_SITE_NODE_SMALLBOATS)
+		out |= SPAWN_SITE_NODE_SMALLBOATS;
+	if (flags & SPAWN_SITE_NODE_DEADEND)
+		out |= SPAWN_SITE_NODE_DEADEND;
+	if (flags & SPAWN_SITE_NODE_DISABLED)
+		out |= SPAWN_SITE_NODE_DISABLED;
+	if (flags & SPAWN_SITE_NODE_BETWEENLEVELS)
+		out |= SPAWN_SITE_NODE_BETWEENLEVELS;
+	return out;
+}
+
 static void
 Section5Refresh(CSpawnSiteIndex &index, double buildSec)
 {
@@ -1040,7 +1446,7 @@ Section5Refresh(CSpawnSiteIndex &index, double buildSec)
 	int disabledNodes = 0, betweenNodes = 0;
 	int disabledAfter, betweenAfter, changed;
 	double t0, t1, gateNs, refreshUs = 0.0;
-	int i;
+	int i, j;
 
 	printf("== 5. the flags refresh: a script's road toggle\n\n");
 	structuralBefore = HashStructural(index);
@@ -1068,9 +1474,13 @@ Section5Refresh(CSpawnSiteIndex &index, double buildSec)
 	disabledAfter = CountFlag(index, SPAWN_SITE_DISABLED);
 	betweenAfter = CountFlag(index, SPAWN_SITE_BETWEENLEVELS);
 
-	/* The refresh's own cost (the same call the engine side's gate makes). */
+	/* The whole refresh's cost, the engine side's own shape: the node flags
+	 * re-read into the snapshot (one pass over the car nodes), then the
+	 * index's re-derivation of the sites' flags. */
 	for (i = 0; i < refreshRounds; i++) {
 		double r0 = NowSeconds();
+		for (j = 0; j < g_numNodes; j++)
+			g_nodes[j].flags = MirrorNodeFlagsPass(g_nodes[j].flags);
 		g_sink += index.RefreshFlags(g_nodes);
 		double r1 = NowSeconds();
 		refreshUs += (r1 - r0) * 1e6;
@@ -1094,8 +1504,12 @@ Section5Refresh(CSpawnSiteIndex &index, double buildSec)
 		structuralBefore == structuralAfter ? "stands (no rebuild)" : "MOVED");
 	printf("  the sites' flags against the nodes' bits after the refresh: %d mismatches\n",
 		FlagMismatches(index));
-	printf("  the frame's gate (no toggle): %.0f ns;  the refresh itself: %.0f us\n",
-		gateNs, refreshUs);
+	if (gateNs < 1.0)
+		printf("  the frame's gate (no toggle): under 1 ns;  the whole refresh: %.0f us\n", refreshUs);
+	else
+		printf("  the frame's gate (no toggle): %.0f ns;  the whole refresh: %.0f us\n", gateNs, refreshUs);
+	printf("    (the %d car nodes' re-read, mirrored, plus the index's own pass over the sites)\n",
+		g_numNodes);
 	printf("    the refresh is %.4f %% of a 33 ms frame and %.2f %% of the build (%.2f ms)\n\n",
 		refreshUs / 33000.0 * 100.0, refreshUs / 1e6 / buildSec * 100.0, buildSec * 1000.0);
 
@@ -1134,7 +1548,111 @@ Section5Refresh(CSpawnSiteIndex &index, double buildSec)
 }
 
 /* ------------------------------------------------------------------ *
- * F. the boat sweep, and the storage's worst case
+ * F. the dump's round trip
+ * ------------------------------------------------------------------ */
+
+/*
+ * The live read of the shipped graph arrives as a dump (the loader above).
+ * A dump needs a running game, so until one exists the loader is exercised
+ * end to end here: the loaded graph is written back into the same format with
+ * the same encoder the reader would use, read through the loader again, and
+ * compared field by field with what went in - the counts, every node field,
+ * every link field, every connection - and then the index is built over the
+ * re-read graph and its sites compared with the first build's. The day a real
+ * dump appears, only the file changes.
+ *
+ * The one field the format cannot carry is the connection's zone index
+ * (CTheZones is the engine's): the round trip states it and compares the site
+ * records with that field taken out.
+ */
+static void
+Section6DumpRoundTrip(CSpawnSiteIndex &index)
+{
+	static SSpawnSiteNode nodesBefore[NUM_PATHNODES];
+	static SSpawnSiteLink linksBefore[NUM_CARPATHLINKS];
+	static uint16_t connNodeBefore[NUM_PATHCONNECTIONS];
+	static int16_t connLinkBefore[NUM_PATHCONNECTIONS];
+	static SSpawnSite sitesBefore[NUM_PATHCONNECTIONS];
+	FILE *f;
+	int i, nodeMismatches = 0, linkMismatches = 0, connMismatches = 0;
+	int bad, sitesCount;
+
+	printf("== 6. the dump's round trip (the live read's own path)\n\n");
+
+	memcpy(nodesBefore, g_nodes, sizeof(g_nodes));
+	memcpy(linksBefore, g_links, sizeof(g_links));
+	memcpy(connNodeBefore, g_connectionNode, sizeof(g_connectionNode));
+	memcpy(connLinkBefore, g_connectionLink, sizeof(g_connectionLink));
+	sitesCount = index.GetNumSites();
+	memcpy(sitesBefore, index.GetSites(), sizeof(SSpawnSite) * sitesCount);
+
+	f = tmpfile();
+	if (f == NULL) {
+		Fail("the self-test cannot open a temporary file");
+		return;
+	}
+	if (!WriteGraphDump(f)) {
+		Fail("the self-test cannot write the dump");
+		fclose(f);
+		return;
+	}
+	rewind(f);
+	if (!LoadGraphDumpFile(f, "the self-test's own dump")) {
+		Fail("the loader cannot read back the dump the writer wrote");
+		fclose(f);
+		return;
+	}
+	fclose(f);
+
+	/* The counts and every field of the graph. */
+	Check(g_numNodes == (int)g_dumpHeader.numCarPathNodes, "the re-read graph must hold the car nodes");
+	for (i = 0; i < g_numNodes; i++) {
+		if (g_nodes[i].x != nodesBefore[i].x || g_nodes[i].y != nodesBefore[i].y ||
+		    g_nodes[i].z != nodesBefore[i].z || g_nodes[i].firstLink != nodesBefore[i].firstLink ||
+		    g_nodes[i].numLinks != nodesBefore[i].numLinks || g_nodes[i].spawnRate != nodesBefore[i].spawnRate ||
+		    g_nodes[i].flags != nodesBefore[i].flags)
+			nodeMismatches++;
+	}
+	for (i = 0; i < g_numLinks; i++) {
+		if (g_links[i].dirX != linksBefore[i].dirX || g_links[i].dirY != linksBefore[i].dirY ||
+		    g_links[i].numLeftLanes != linksBefore[i].numLeftLanes ||
+		    g_links[i].numRightLanes != linksBefore[i].numRightLanes ||
+		    g_links[i].pathNodeIndex != linksBefore[i].pathNodeIndex ||
+		    g_links[i].width != linksBefore[i].width)
+			linkMismatches++;
+	}
+	for (i = 0; i < g_numConnections; i++)
+		if (g_connectionNode[i] != connNodeBefore[i] || g_connectionLink[i] != connLinkBefore[i])
+			connMismatches++;
+	printf("  the graph read back: %d nodes, %d links, %d connections\n",
+		g_numNodes, g_numLinks, g_numConnections);
+	printf("  the fields that differ: %d nodes, %d links, %d connections\n",
+		nodeMismatches, linkMismatches, connMismatches);
+	Check(nodeMismatches == 0 && linkMismatches == 0 && connMismatches == 0,
+		"the round trip must read back what it wrote");
+	Check(g_numConnections == 0 || g_connectionZone[0] == -1, "a graph without zones must store -1");
+
+	/* The index over the re-read graph: the same sites, the zone field aside
+	 * (the format carries none). */
+	index.Build(GraphView());
+	printf("  the index over the re-read graph: %d sites (before %d), the drops %d / %d / %d\n",
+		index.GetNumSites(), sitesCount, index.GetStats().droppedNoLanes,
+		index.GetStats().droppedMixed, index.GetStats().droppedUnresolved);
+	Check(index.GetNumSites() == sitesCount, "the re-read graph must give the same sites");
+	bad = 0;
+	for (i = 0; i < index.GetNumSites(); i++) {
+		SSpawnSite a = index.GetSites()[i];
+		SSpawnSite b = sitesBefore[i];
+		a.zoneIndex = b.zoneIndex = 0;
+		if (memcmp(&a, &b, sizeof(SSpawnSite)) != 0)
+			bad++;
+	}
+	printf("  the site records that differ (the zone index aside): %d\n\n", bad);
+	Check(bad == 0, "the round trip must not change a site");
+}
+
+/* ------------------------------------------------------------------ *
+ * G. the boat sweep, and the storage's worst case
  * ------------------------------------------------------------------ */
 
 /* The storage's worst case: NUM_PATHCONNECTIONS directed connections over
@@ -1186,8 +1704,6 @@ BuildCapacityGraph(void)
 		float dy = g_nodes[low].y - g_nodes[high].y;
 		float mag = (float)sqrt(dx * dx + dy * dy);
 
-		g_links[i].x = (g_nodes[a].x + g_nodes[b].x) * 0.5f;
-		g_links[i].y = (g_nodes[a].y + g_nodes[b].y) * 0.5f;
 		g_links[i].dirX = mag > 0.0f ? (int8_t)(dx / mag * 100.0f) : 0;
 		g_links[i].dirY = mag > 0.0f ? (int8_t)(dy / mag * 100.0f) : 0;
 		g_links[i].numLeftLanes = (i % 5 == 3) ? 0 : 2;
@@ -1198,7 +1714,7 @@ BuildCapacityGraph(void)
 }
 
 static void
-Section6SweepAndCapacity(CSpawnSiteIndex &cityIndex, CSpawnSiteIndex &capacityIndex)
+Section7SweepAndCapacity(CSpawnSiteIndex &cityIndex, CSpawnSiteIndex &capacityIndex)
 {
 	const int rounds = 5;
 	const int sites = cityIndex.GetNumSites();
@@ -1208,7 +1724,7 @@ Section6SweepAndCapacity(CSpawnSiteIndex &cityIndex, CSpawnSiteIndex &capacityIn
 	int mixedConnections = 0, mixedSites = 0, boatSites = 0, landSites = 0;
 	int boatSitesWithoutWater = 0;
 
-	printf("== 6. the boat sweep, and the storage's worst case\n\n");
+	printf("== 7. the boat sweep, and the storage's worst case\n\n");
 
 	for (node = 0; node < g_numNodes; node++)
 		for (j = 0; j < g_nodes[node].numLinks; j++) {
@@ -1272,17 +1788,17 @@ Section6SweepAndCapacity(CSpawnSiteIndex &cityIndex, CSpawnSiteIndex &capacityIn
 }
 
 /* ------------------------------------------------------------------ *
- * G. the hash fallback
+ * H. the hash fallback
  * ------------------------------------------------------------------ */
 
 static void
-Section7Fallback(CSpawnSiteIndex &index)
+Section8Fallback(CSpawnSiteIndex &index)
 {
 	static int out[NUM_PATHCONNECTIONS];
-	int near, far;
+	int near, far, truncated;
 	int i;
 
-	printf("== 7. the hash fallback (a site outside the grid)\n\n");
+	printf("== 8. the hash fallback (a site outside the grid)\n\n");
 
 	/* A three node graph with one node far past the 4 km grid: its
 	 * connections' midpoints are past the grid, so the hash cannot hold them
@@ -1307,9 +1823,7 @@ Section7Fallback(CSpawnSiteIndex &index)
 	g_connectionNode[3] = 1; g_connectionLink[3] = 1; g_connectionZone[3] = 0;
 	g_numConnections = 4;
 	for (i = 0; i < g_numLinks; i++) {
-		int a = i, b = i + 1;
-		g_links[i].x = (g_nodes[a].x + g_nodes[b].x) * 0.5f;
-		g_links[i].y = (g_nodes[a].y + g_nodes[b].y) * 0.5f;
+		int a = i;
 		g_links[i].dirX = -100; g_links[i].dirY = 0;
 		g_links[i].numLeftLanes = 1; g_links[i].numRightLanes = 1;
 		g_links[i].pathNodeIndex = (int16_t)a;
@@ -1319,40 +1833,77 @@ Section7Fallback(CSpawnSiteIndex &index)
 	index.Build(GraphView());
 	near = index.CollectSitesNear(150.0f, 100.0f, 1.0f, out, NUM_PATHCONNECTIONS);
 	far = index.CollectSitesNear(10100.0f, 100.0f, 1.0f, out, NUM_PATHCONNECTIONS);
+	truncated = index.CollectSitesNear(150.0f, 100.0f, 1.0f, out, 1);
 	printf("  the graph: 4 directed connections, 4 sites (one pair's midpoint past the 4 km grid)\n");
 	printf("  the hash: %s\n", index.IsHashValid() ? "built" : "not built (the plain scan)");
-	printf("  a query at the near pair: %d sites; at the far pair: %d sites\n\n", near, far);
+	printf("  a query at the near pair: %d sites; at the far pair: %d sites; the same at max 1: %d\n\n",
+		near, far, truncated);
 	Check(!index.IsHashValid(), "a site outside the grid must leave the hash unbuilt");
 	Check(index.GetStats().sites == 4, "the tiny graph must give four sites");
 	Check(near == 2, "the plain scan must find the near pair");
 	Check(far == 2, "the plain scan must find the far pair");
+	/* The fallback's truncation is in site order: the lowest ids first. */
+	Check(truncated == 1 && out[0] == 0, "the fallback must truncate in site order");
 }
 
 int
-main(void)
+main(int argc, char **argv)
 {
 	static CSpawnSiteIndex cityIndex;
 	static CSpawnSiteIndex capacityIndex;
 	static CSpawnSiteIndex fallbackIndex;
 	double buildSec;
 
-	BuildCityNodes();
-	BuildCityEdges();
-	LayGraph();
-	MarkDeadEnds();
+	if (argc > 2 && strcmp(argv[1], "--write-dump") == 0) {
+		/* A dump of the synthetic city, in the live read's own format: the
+		 * file path of the loader can be exercised before a real dump exists
+		 * (`spawn-service --write-dump city.bin; spawn-service city.bin`). */
+		FILE *f;
+		BuildCityNodes();
+		BuildCityEdges();
+		LayGraph();
+		MarkDeadEnds();
+		f = fopen(argv[2], "wb");
+		if (f == NULL) {
+			printf("cannot write %s\n", argv[2]);
+			return 1;
+		}
+		if (!WriteGraphDump(f)) {
+			printf("cannot write the dump\n");
+			fclose(f);
+			return 1;
+		}
+		fclose(f);
+		printf("wrote the synthetic city (%d nodes, %d links, %d connections) to %s\n",
+			g_numNodes, g_numLinks, g_numConnections, argv[2]);
+		return 0;
+	}
+	if (argc > 1) {
+		/* The live read: the shipped graph, out of a path-graph dump. */
+		if (!LoadGraphDump(argv[1]))
+			return 1;
+		g_graphIsDump = true;
+	} else {
+		BuildCityNodes();
+		BuildCityEdges();
+		LayGraph();
+		MarkDeadEnds();
+	}
 
 	Section1Graph();
 	buildSec = Section2Build(cityIndex);
 	Section3SpotCheck(cityIndex);
 	Section4Hash(cityIndex);
 	Section5Refresh(cityIndex, buildSec);
-	Section6SweepAndCapacity(cityIndex, capacityIndex);
-	Section7Fallback(fallbackIndex);
+	Section6DumpRoundTrip(cityIndex);
+	Section7SweepAndCapacity(cityIndex, capacityIndex);
+	Section8Fallback(fallbackIndex);
 
 	printf("== the verdict\n\n");
 	if (g_failures == 0)
-		printf("  every check passed (the city's index: %d sites of %d connections)\n",
-			cityIndex.GetNumSites(), NUM_PATHCONNECTIONS);
+		printf("  every check passed (the graph's index: %d sites of %d connections%s)\n",
+			cityIndex.GetNumSites(), cityIndex.GetStats().connections,
+			g_graphIsDump ? ", read from a path-graph dump" : ", the synthetic city");
 	else
 		printf("  %d checks failed\n", g_failures);
 	return g_failures == 0 ? 0 : 1;

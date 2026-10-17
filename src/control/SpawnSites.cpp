@@ -9,13 +9,21 @@
  * model and its rules are in SpawnSites.h/SpawnSitesIndex.cpp, which are
  * engine-free; this file is the snapshot out of ThePaths, the info-zone
  * indices, the build at load and the per-frame flags refresh.
+ *
+ * The snapshot is its own, not FarTrafficWorker.h's SFarTrafficWorld: the far
+ * world carries no water or small-boat flag, no spawn rate, no link width and
+ * no zone, and its link direction is a float vector with the lane offset
+ * precomputed for the rail arithmetic (SpawnSites.h, "why they are not reused").
  */
 
-/* The graph's plain view: the car block of the path arrays, field by field
- * (the shape FarTrafficWorker.h's snapshot has). The node flags are the only
- * field that moves after the build, and RefreshFlags re-reads them; nothing
- * else is written here. */
-static SSpawnSiteNode ms_aSiteNodes[NUM_PATHNODES];
+/* The graph's plain view: the car block of the path arrays, field by field.
+ * The node block is sized to the graph at Build (the car nodes only: the index
+ * reads no ped node), the link and connection blocks to the graph's own
+ * capacities (an id the graph can name must resolve). The node flags are the
+ * only field that moves after the build, and RefreshFlags re-reads them;
+ * nothing else is written here. */
+static SSpawnSiteNode *ms_pSiteNodes;
+static int32 ms_nSiteNodes;			/* the entries ms_pSiteNodes holds */
 static SSpawnSiteLink ms_aSiteLinks[NUM_CARPATHLINKS];
 static uint16 ms_aSiteConnNode[NUM_PATHCONNECTIONS];
 static int16 ms_aSiteConnLink[NUM_PATHCONNECTIONS];
@@ -26,6 +34,21 @@ static int16 ms_aSiteConnZone[NUM_PATHCONNECTIONS];
 static uint32 ms_nSiteFlagsVersion = ~0u;
 
 CSpawnSiteIndex CSpawnSites::ms_siteIndex;
+
+/* The node block, one allocation at the first build of the process (the graph
+ * never grows after PreparePathData; a later load finds the block big enough).
+ * The block is sized to the car nodes, not to NUM_PATHNODES: the shipped graph
+ * holds 3,351 car nodes against the 9,650 node capacity, so the car block sizes
+ * the snapshot honestly (20 B a node: 67 KB against 193 KB). */
+static void
+SpawnSiteNodesEnsure(int32 numNodes)
+{
+	if (ms_nSiteNodes >= numNodes)
+		return;
+	delete[] ms_pSiteNodes;
+	ms_nSiteNodes = numNodes;
+	ms_pSiteNodes = numNodes > 0 ? new SSpawnSiteNode[numNodes] : nil;
+}
 
 /* CPathNode -> the site snapshot's flag bits; the five bits the sites read. */
 static uint8
@@ -50,20 +73,20 @@ CSpawnSites::Build(void)
 {
 	int32 i, j;
 
+	SpawnSiteNodesEnsure(ThePaths.m_numCarPathNodes);
+
 	for (i = 0; i < ThePaths.m_numCarPathNodes; i++) {
 		CPathNode *pNode = &ThePaths.m_pathNodes[i];
-		ms_aSiteNodes[i].x = pNode->GetX();
-		ms_aSiteNodes[i].y = pNode->GetY();
-		ms_aSiteNodes[i].z = pNode->GetZ();
-		ms_aSiteNodes[i].firstLink = pNode->firstLink;
-		ms_aSiteNodes[i].numLinks = pNode->numLinks;
-		ms_aSiteNodes[i].spawnRate = pNode->spawnRate;
-		ms_aSiteNodes[i].flags = SpawnSiteNodeFlags(pNode);
+		ms_pSiteNodes[i].x = pNode->GetX();
+		ms_pSiteNodes[i].y = pNode->GetY();
+		ms_pSiteNodes[i].z = pNode->GetZ();
+		ms_pSiteNodes[i].firstLink = pNode->firstLink;
+		ms_pSiteNodes[i].numLinks = pNode->numLinks;
+		ms_pSiteNodes[i].spawnRate = pNode->spawnRate;
+		ms_pSiteNodes[i].flags = SpawnSiteNodeFlags(pNode);
 	}
 	for (i = 0; i < ThePaths.m_numCarPathLinks; i++) {
 		CCarPathLink *pLink = &ThePaths.m_carPathLinks[i];
-		ms_aSiteLinks[i].x = pLink->GetX();
-		ms_aSiteLinks[i].y = pLink->GetY();
 		ms_aSiteLinks[i].dirX = pLink->dirX;
 		ms_aSiteLinks[i].dirY = pLink->dirY;
 		ms_aSiteLinks[i].numLeftLanes = pLink->numLeftLanes;
@@ -82,10 +105,18 @@ CSpawnSites::Build(void)
 	 * its relatives) and a save load replaces them, so the service resolves
 	 * the info live through this index. The zone boundaries do not move after
 	 * PostZoneCreation, which ran before this build (CGame::Initialise), and a
-	 * save load rewrites the same rectangles in place. The walk is one scan of
-	 * the information zones per connection (CTheZones::FindInformationZoneForPosition
-	 * is a linear test of up to NUMINFOZONES rectangles): a few milliseconds
-	 * at the shipped data, paid once, under the loading screen. */
+	 * save load rewrites the same rectangles in place.
+	 *
+	 * The pass is one CTheZones::FindInformationZoneForPosition per directed
+	 * connection of the car block - every car connection, the dropped ones
+	 * included (the loop below is the graph walk, the drops are the index's) -
+	 * at the shipped scale about 2 x NUM_CARPATHLINKS of them, and each lookup
+	 * is a linear test of the information zones' rectangles (up to NUMINFOZONES
+	 * = 169; the shipped info.zon creates about 150, the root zone first). So
+	 * the shipped map pays around a million rectangle tests once, under the
+	 * loading screen; a map at the connection capacity pays two to three. The
+	 * offline harness cannot reach CTheZones, so its mirror of the pass (a
+	 * linear scan of the same shape) is what prices it (utils/spawn-service). */
 	for (i = 0; i < ThePaths.m_numCarPathNodes; i++) {
 		CPathNode *pNode = &ThePaths.m_pathNodes[i];
 		for (j = 0; j < pNode->numLinks; j++) {
@@ -109,7 +140,7 @@ CSpawnSites::Build(void)
 	graph.numNodes = ThePaths.m_numCarPathNodes;
 	graph.numLinks = ThePaths.m_numCarPathLinks;
 	graph.numConnections = ThePaths.m_numConnections;
-	graph.nodes = ms_aSiteNodes;
+	graph.nodes = ms_pSiteNodes;
 	graph.links = ms_aSiteLinks;
 	graph.connectionNode = ms_aSiteConnNode;
 	graph.connectionLink = ms_aSiteConnLink;
@@ -118,6 +149,34 @@ CSpawnSites::Build(void)
 
 	/* The index now holds the flags of the graph's own version. */
 	ms_nSiteFlagsVersion = ThePaths.m_nodeFlagsVersion;
+
+#ifdef DEBUG
+	/* The debug build's read of what was built (the guard is the build's own
+	 * DEBUG/NDEBUG define, CMakeLists.txt): a boot log line under the loading
+	 * screen, nothing in a release build. */
+	CSpawnSites::PrintStats();
+#endif
+}
+
+void
+CSpawnSites::PrintStats(void)
+{
+	const SSpawnSiteBuildStats &stats = ms_siteIndex.GetStats();
+	uint snapshotBytes = ms_nSiteNodes * sizeof(SSpawnSiteNode) +
+		NUM_CARPATHLINKS * sizeof(SSpawnSiteLink) +
+		NUM_PATHCONNECTIONS * (2 + 2 + 2);
+	uint indexBytes = sizeof(CSpawnSiteIndex);
+
+	printf("Spawn sites: %d of the %d directed connections usable (%d boats); dropped %d no lanes, %d mixed, %d unresolved; the hash %s, %d cells\n",
+		stats.sites, stats.connections, stats.boatSites, stats.droppedNoLanes,
+		stats.droppedMixed, stats.droppedUnresolved,
+		ms_siteIndex.IsHashValid() ? "built" : "not built (the plain scan)", stats.hashCells);
+	printf("Spawn sites: the store %u B (the index %u B: %d sites x %u B, the hash %u B; the snapshot %u B: %d nodes x %u B, %d links x %u B, %d connections x %u B)\n",
+		indexBytes + snapshotBytes, indexBytes, NUM_PATHCONNECTIONS, (uint)sizeof(SSpawnSite),
+		(SPAWN_SITE_GRID_CELLS + 1) * 2 + NUM_PATHCONNECTIONS * 2, snapshotBytes,
+		ms_nSiteNodes, (uint)sizeof(SSpawnSiteNode),
+		NUM_CARPATHLINKS, (uint)sizeof(SSpawnSiteLink),
+		NUM_PATHCONNECTIONS, (uint)(2 + 2 + 2));
 }
 
 void
@@ -134,6 +193,6 @@ CSpawnSites::RefreshFlags(void)
 	ms_nSiteFlagsVersion = ThePaths.m_nodeFlagsVersion;
 
 	for (int32 i = 0; i < ThePaths.m_numCarPathNodes; i++)
-		ms_aSiteNodes[i].flags = SpawnSiteNodeFlags(&ThePaths.m_pathNodes[i]);
-	ms_siteIndex.RefreshFlags(ms_aSiteNodes);
+		ms_pSiteNodes[i].flags = SpawnSiteNodeFlags(&ThePaths.m_pathNodes[i]);
+	ms_siteIndex.RefreshFlags(ms_pSiteNodes);
 }

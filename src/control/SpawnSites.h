@@ -20,7 +20,9 @@
  *
  * One site per directed connection, up to NUM_PATHCONNECTIONS (20,400): the
  * graph never moves after CPathFind::PreparePathData, so a site's geometry,
- * its lanes, its rarity and its endpoint flags are read once.
+ * its lanes and its rarity are read once. The flags are the one thing that
+ * moves with the graph (a script's road toggle, a save load): the refresh
+ * below re-derives them, and nothing else in a site changes.
  *
  * The site record
  * ---------------
@@ -61,9 +63,13 @@
  * A directed connection is a site only when the travelled side has lanes: a
  * zero count is the wrong direction of a one-way street (the primitive refuses
  * every placement there) and the pair is dropped, so `lanes` is always >= 1 on
- * a stored site. A pair whose ends disagree about water is dropped early too:
- * boat sites are directed water-water pairs, and a road site is a land-land
- * pair, so the SPAWN_SITE_BOAT bit is the whole of the split.
+ * a stored site. The index drops `lanes <= 0`, the primitive only `== 0`: after
+ * PreparePathData the counts are never negative (the lane fixups fall back to
+ * 0, PathFind.cpp), so the two agree on every shipped graph, and the index's
+ * stricter test keeps a corrupt snapshot out of `GetRandomNumber() % lanes`.
+ * A pair whose ends disagree about water is dropped early too: boat sites are
+ * directed water-water pairs, and a road site is a land-land pair, so the
+ * SPAWN_SITE_BOAT bit is the whole of the split.
  *
  * The flags, and what may change after the build
  * ----------------------------------------------
@@ -81,8 +87,8 @@
  * (FarTraffic.cpp), one comparison a frame. Positions, node pairs, lanes,
  * directions, widths, rarities, zones and the site order never change.
  *
- * Storage
- * -------
+ * Storage and memory
+ * ------------------
  *
  * Flat arrays plus a 32 m spatial hash, in the style of the path node grid
  * (CPathFind::BuildNodeGrid, ADR 0024): the hash's origin is the bounding box's
@@ -91,11 +97,41 @@
  * point. A site outside the grid leaves the hash unbuilt and the query keeps
  * the plain scan, exactly as the node grid does.
  *
+ * The store is static, sized by the graph's capacities: a site record is 28
+ * bytes and the index holds at most NUM_PATHCONNECTIONS of them (571,200 B),
+ * beside the hash's cell offsets (16,641 + 1 entries of 2 B = 33,284 B) and its
+ * site list (NUM_PATHCONNECTIONS of 2 B = 40,800 B), so a CSpawnSiteIndex is
+ * 645,336 B (630 KiB) as the harness prints it. The engine side's snapshot
+ * (SpawnSites.cpp) adds the car node block (sized to the graph at load: the
+ * shipped 3,351 nodes of 20 B = 67,020 B), the link block (NUM_CARPATHLINKS of
+ * 8 B = 28,000 B) and the three connection arrays (node, link, zone:
+ * NUM_PATHCONNECTIONS of 6 B = 122,400 B) - 217,420 B (212 KiB) at the shipped
+ * counts, and 862,756 B (843 KiB) for the whole store. utils/spawn-service
+ * prints both totals.
+ *
+ * Two neighbours, and why they are not reused. The snapshot is its own, not
+ * FarTrafficWorker.h's SFarTrafficWorld: the far world carries no water and
+ * small-boat flags, no spawn rate, no link width and no zone at all (a far car
+ * does not need them), and its link direction is a float vector with the lane
+ * offset precomputed for the rail arithmetic. And SpawnSitesIndex.cpp's cell
+ * arithmetic is a deliberate copy of PathFind.cpp's PathGridCell: this header
+ * is engine-free by design, and the two copies must agree bit for bit - the
+ * cell of a site at build time and the cell of a query point at request time.
+ *
+ * The engine side resolves the sites' info-zone indices in one pass: one
+ * CTheZones::FindInformationZoneForPosition per directed connection of the car
+ * block (every connection, dropped or not), each a linear test of the
+ * information zones' rectangles (up to NUMINFOZONES = 169, of which the shipped
+ * info.zon creates about 150). That is about a million rectangle tests at the
+ * shipped connection count (roughly 2 x NUM_CARPATHLINKS), paid once at load
+ * under the loading screen.
+ *
  * The module is engine-free: the index and its build read the plain snapshot
  * (SSpawnSiteGraph) and never touch CPathFind, CTheZones or the collision
  * world. SpawnSites.cpp is the engine side that fills the snapshot; the
  * evidence program (utils/spawn-service) drives the index over a synthetic
- * graph of the shipped node counts.
+ * graph of the shipped node counts and, given one, over a real graph dump
+ * (tools/pathfind_check's format).
  */
 
 #include <stdint.h>
@@ -124,10 +160,13 @@ struct SSpawnSiteNode
 };
 
 /* One car path link of the graph: the fields the sites read out of
- * CCarPathLink. The direction is hundredths (the graph stores int8 * 100). */
+ * CCarPathLink. The direction is hundredths (the graph stores int8 * 100). The
+ * link record's own position is deliberately not part of the view: a site's
+ * midpoint is its node pair's own (the external links' positions are the
+ * synthetic midpoints of the merged external nodes), so nothing here can read
+ * the wrong one. */
 struct SSpawnSiteLink
 {
-	float x, y;		/* the segment's own midpoint (metres) */
 	int8_t dirX, dirY;	/* the link's own direction (*100) */
 	int8_t numLeftLanes, numRightLanes;
 	int16_t pathNodeIndex;	/* the node the link record was made from */
@@ -229,8 +268,13 @@ public:
 
 	/* The sites whose midpoint is within `radius` of (x, y) - the hash's own
 	 * map-plane query (the path graph is a network in the map plane; a site's
-	 * z is its road's height). Writes at most `max` site ids into `out` and
-	 * returns how many were written. */
+	 * z is its road's height). A negative radius is read as 0. Writes at most
+	 * `max` site ids into `out` and returns how many were written; sites are
+	 * XY-only, and a site exactly at the radius is included (<=). The order of
+	 * a truncated answer is the walk's own: the hash answers cell by cell
+	 * (ring order), the fallback in site order - a caller that needs a
+	 * deterministic order sorts, a caller that needs them all passes a
+	 * `max` no smaller than GetNumSites(). */
 	int32_t CollectSitesNear(float x, float y, float radius, int32_t *out, int32_t max) const;
 
 	bool IsHashValid(void) const { return m_hashValid; }
@@ -271,6 +315,12 @@ public:
 	 * A frame whose graph flags did not move reads one integer; the sites are
 	 * only re-derived when CPathFind::m_nodeFlagsVersion moved. */
 	static void RefreshFlags(void);
+
+	/* A debug build's read of the index, right at the end of Build and usable
+	 * anywhere after it (CGame::Initialise's loading screen prints it): the
+	 * counts of the ticket's stats and the hash's state, plus the store's
+	 * bytes. The call is compiled out of a release build. */
+	static void PrintStats(void);
 
 	static const CSpawnSiteIndex &Index(void) { return ms_siteIndex; }
 	static int32_t GetNumSites(void) { return ms_siteIndex.GetNumSites(); }
