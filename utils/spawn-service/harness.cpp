@@ -980,6 +980,26 @@ Section2Build(CSpawnSiteIndex &index)
 		(uint)(sizeof(CSpawnSiteIndex) + g_numNodes * sizeof(SSpawnSiteNode) +
 			NUM_CARPATHLINKS * sizeof(SSpawnSiteLink) + NUM_PATHCONNECTIONS * 6));
 
+	/* The rarity weights of the sites (VICE-150's measurement): the spawn
+	 * service's rank reads them as its last key, so the graph's own histogram
+	 * is the number that key works with. 0..15, the old dice's own range (a
+	 * rate at or above 16 is counted at 15). */
+	{
+		int32_t histogram[16];
+		int32_t i;
+
+		memset(histogram, 0, sizeof(histogram));
+		for (i = 0; i < stats->sites; i++) {
+			uint8_t rate = index.GetSites()[i].spawnRate;
+			histogram[rate < 16 ? rate : 15]++;
+		}
+		printf("  the rarity weights (spawnRate, the planner's last rank key):");
+		for (i = 0; i < 16; i++)
+			if (histogram[i])
+				printf(" %d:%d", i, histogram[i]);
+		printf("\n");
+	}
+
 	/* The zone pass's arithmetic, mirrored: the engine side runs one
 	 * CTheZones::FindInformationZoneForPosition per car connection, a linear
 	 * test of the information zones' rectangles. CTheZones is not linked here,

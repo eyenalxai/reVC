@@ -305,7 +305,7 @@ CVehicle* CSetPiece::TryToGenerateCopCar(CVector2D vSpawn, CVector2D vTarget)
 	CWorld::Add(pVehicle);
 	/* The chase car is created outside the traffic spawner (VICE-127): it is
 	 * counted apart and never moves the traffic's own counters. */
-	CCarCtrl::NearBubbleCountOtherCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
+	CSpawnService::CountOtherCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 	return pVehicle;
 }
 

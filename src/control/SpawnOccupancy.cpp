@@ -162,6 +162,12 @@ CSpawnOccupancy::TotalCount(ESpawnOccupancyClass type)
 	return ms_Store.TotalCount(type);
 }
 
+SSpawnOccupancyStore &
+CSpawnOccupancy::Store(void)
+{
+	return ms_Store;
+}
+
 bool
 CSpawnOccupancy::ReserveSite(int32_t site, uint32_t now)
 {

@@ -1936,7 +1936,7 @@ bool CGarage::RestoreCarsForThisHideout(CStoredCar* aCars)
 				/* The stored car comes out of the garage (VICE-127): a car
 				 * created outside the traffic spawner, counted apart and
 				 * never in the traffic's fill. */
-				CCarCtrl::NearBubbleCountOtherCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
+				CSpawnService::CountOtherCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 				aCars[i].Clear();
 			}
 		}
