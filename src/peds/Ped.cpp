@@ -42,6 +42,7 @@
 #include "Clock.h"
 #include "Wanted.h"
 #include "SaveBuf.h"
+#include "TempColModels.h"
 
 CPed *gapTempPedList[50];
 uint16 gnNumTempPedList;
@@ -153,6 +154,7 @@ CPed::CPed(uint32 pedType) : m_pedIK(this)
 	m_nPrevMoveState = PEDMOVE_NONE;
 #endif
 	m_nStoredMoveState = PEDMOVE_NONE;
+	m_nStance = STANCE_STAND;
 	m_pFire = nil;
 	m_pPointGunAt = nil;
 	m_pLookTarget = nil;
@@ -2975,6 +2977,55 @@ CPed::ProcessControl(void)
 		ServiceTalking();
 }
 
+CColModel *
+CPed::GetCollisionColModel(void)
+{
+	CColModel *col = GetColModel();
+	// A model that carries its own col model (the cutscene specials own one)
+	// keeps it in every stance: the shared sets describe the ped model only.
+	if (col != &CTempColModels::ms_colModelPed1)
+		return col;
+
+	switch (m_nStance) {
+	case STANCE_CROUCH:
+		return &CTempColModels::ms_colModelPedCrouch;
+	case STANCE_PRONE:
+		return &CTempColModels::ms_colModelPedProne;
+	case STANCE_STAND:
+		break;
+	}
+	return col;
+}
+
+bool
+CPed::IsHeadroomClear(void)
+{
+	// The standing column: the line from the top of the standing body down
+	// to the ground under the feet, against the world. Peds are not checked
+	// (they move, and this ped is one), the vehicles are, so a car over the
+	// body refuses the stand. A hit above the posture's own top obstructs; a
+	// hit at or below it is the surface the body already rests on (the
+	// terrain under the feet, which the origin frame has not caught up with
+	// on a kerb edge yet), so it is not a ceiling.
+	//
+	// Cost: one CWorld::ProcessVerticalLine over the ped's own sector, the
+	// shape of one CPedPlacement::FindZCoorForPed ground query (the spawn
+	// runs two). The callers ask on a stance edge, not per frame. Tolerance:
+	// the posture's own box top is the margin; a hit exactly on it is
+	// accepted.
+	CColModel *standing = &CTempColModels::ms_colModelPed1;
+	CColModel *posture = GetCollisionColModel();
+	CColPoint point;
+	CEntity *found;
+	CVector standTop = GetPosition();
+	standTop.z += standing->boundingBox.max.z;
+
+	if (!CWorld::ProcessVerticalLine(standTop, GetPosition().z - FEET_OFFSET, point, found,
+	                                 true, true, false, true, true, false, nil))
+		return true;
+	return point.point.z <= GetPosition().z + posture->boundingBox.max.z;
+}
+
 int32
 CPed::ProcessEntityCollision(CEntity *collidingEnt, CColPoint *collidingPoints)
 {
@@ -2984,8 +3035,8 @@ CPed::ProcessEntityCollision(CEntity *collidingEnt, CColPoint *collidingPoints)
 	CColPoint intersectionPoint;
 	CColLine ourLine;
 
-	CColModel *ourCol = CModelInfo::GetColModel(GetModelIndex());
-	CColModel *hisCol = CModelInfo::GetColModel(collidingEnt->GetModelIndex());
+	CColModel *ourCol = GetCollisionColModel();
+	CColModel *hisCol = collidingEnt->GetCollisionColModel();
 
 	if (!bUsesCollision && !bJustCheckCollision)
 		return 0;
@@ -3039,6 +3090,14 @@ CPed::ProcessEntityCollision(CEntity *collidingEnt, CColPoint *collidingPoints)
 
 			// 0.52f should be a ped's approx. radius
 			float totalRadiusWhenCollided = collidingEnt->GetBoundRadius() + 0.52f - gravityEffect;
+			if (m_nStance == STANCE_PRONE) {
+				// The prone body hangs below and ahead of the origin, so the
+				// gate of the below-torso probe follows the body's own centre
+				// and bounding radius instead of the standing pelvis ones: a
+				// supporter under any part of the lying body is then found.
+				potentialCenter = GetPosition() + ourCol->boundingSphere.center;
+				totalRadiusWhenCollided = collidingEnt->GetBoundRadius() + ourCol->boundingSphere.radius - gravityEffect;
+			}
 			if (bWasStanding) {
 				if (collidedWithBoat) {
 					potentialCenter.z += 2.0f * gravityEffect;
@@ -3055,6 +3114,14 @@ CPed::ProcessEntityCollision(CEntity *collidingEnt, CColPoint *collidingPoints)
 					ourLine.p1.z = ourLine.p1.z + gravityEffect;
 					ourLine.p0.z = ourLine.p0.z + -0.25f;
 				}
+				// The probe spans the body's own height. Standing and
+				// crouching the body hangs above the origin, so the origin
+				// is its top and the probe runs down the legs to the ground
+				// (the stock line). A prone body hangs below the origin, so
+				// the probe starts at the body's own top and does not read
+				// the empty space above it as a torso.
+				if (m_nStance == STANCE_PRONE)
+					ourLine.p0.z = GetPosition().z + ourCol->boundingBox.max.z;
 				float minDist = 1.0f;
 				belowTorsoCollided = CCollision::ProcessVerticalLine(ourLine, collidingEnt->GetMatrix(), *hisCol,
 					intersectionPoint, minDist, false, false, &m_collPoly);

@@ -134,6 +134,12 @@ public:
 	virtual void RemoveLighting(bool);
 	virtual void FlagToDestroyWhenNextProcessed(void) {}
 
+	// The col model the entity collides with as a physical body (the
+	// ProcessEntityCollision paths). A pedestrian answers with the set of its
+	// stance (VICE-178); every other entity is its model's col model. The hit
+	// and placement queries keep GetColModel().
+	virtual CColModel *GetCollisionColModel(void) { return GetColModel(); }
+
 	bool IsBuilding(void) { return m_type == ENTITY_TYPE_BUILDING; }
 	bool IsVehicle(void) { return m_type == ENTITY_TYPE_VEHICLE; }
 	bool IsPed(void) { return m_type == ENTITY_TYPE_PED; }

@@ -2,8 +2,11 @@
 
 #include "TempColModels.h"
 #include "Game.h"
+#include "Ped.h"	// FEET_OFFSET, the ped origin height the stance sets are authored in
 
 CColModel CTempColModels::ms_colModelPed1;
+CColModel CTempColModels::ms_colModelPedCrouch;
+CColModel CTempColModels::ms_colModelPedProne;
 CColModel CTempColModels::ms_colModelPed2;
 CColModel CTempColModels::ms_colModelBBox;
 CColModel CTempColModels::ms_colModelBumper1;
@@ -20,6 +23,8 @@ CColModel CTempColModels::ms_colModelWeapon;
 
 
 CColSphere s_aPedSpheres[3];
+CColSphere s_aPedCrouchSpheres[3];
+CColSphere s_aPedProneSpheres[4];
 CColSphere s_aPed2Spheres[3];
 CColSphere s_aPedGSpheres[4];
 #ifdef FIX_BUGS
@@ -34,6 +39,43 @@ CColSphere s_aBootSpheres[4];
 CColSphere s_aWheelSpheres[2];
 CColSphere s_aBodyPartSpheres1[2];
 CColSphere s_aBodyPartSpheres2[2];
+
+// The per-stance ped sets (VICE-178).
+//
+// Every ped model shares ms_colModelPed1 (CFileLoader::LoadPedObject): three
+// 0.35 spheres up the vertical axis at -0.25/0.15/0.55, a 1.25 bounding
+// sphere and the box (-0.35,-0.35,-1.0)..(0.35,0.35,0.9). The origin sits
+// FEET_OFFSET above the feet in every stance, so every set is authored in
+// that one frame and local z = -FEET_OFFSET is the ground.
+//
+//   Crouch: the standing stack, the whole body dropped and the head dropped
+//   further, so the crouched body is lower and shorter.
+//   Prone: the body lying along the forward axis (local +y) on the ground,
+//   so the ped collides as a lying body and not as a standing one.
+//
+// Both sets stay LEVEL_GENERIC with ownsCollisionVolumes = false, exactly
+// like ms_colModelPed1: CColStore::RemoveCol clears every model of the level
+// it unloads with no ownership check, and the generic slot (0) is never
+// streamed, so the streaming can never free them.
+static const float PED_BODY_HALF_WIDTH = 0.35f;	// the standing sphere radius, a ped's half width
+static const float PED_FEET_Z = -1.0f;		// the standing box bottom, just above the ground
+
+// Crouch: the standing stack, the whole body PED_CROUCH_BODY_DROP lower and
+// the head PED_CROUCH_HEAD_DROP below the rest of the body.
+static const float PED_CROUCH_BODY_DROP = 0.2f;
+static const float PED_CROUCH_HEAD_DROP = 0.2f;
+static const float PED_CROUCH_BOUND_RADIUS = 1.0f;
+static const float PED_CROUCH_BOUND_Z = -0.2f;
+
+// Prone: four spheres along the forward axis, the end ones at
+// +-PED_PRONE_HALF_LENGTH, so the lying body is 1.92 long and 0.6 thick.
+static const float PED_PRONE_SPHERE_RADIUS = 0.3f;
+static const float PED_PRONE_HALF_LENGTH = 0.66f;
+static const float PED_PRONE_SPACING = 0.44f;
+static const float PED_PRONE_Z = PED_PRONE_SPHERE_RADIUS - FEET_OFFSET;	// the sphere centre, its bottom on the ground
+static const float PED_PRONE_BOX_Y = PED_PRONE_HALF_LENGTH + PED_PRONE_SPHERE_RADIUS;	// the body's half length
+static const float PED_PRONE_BODY_TOP = 2.0f * PED_PRONE_SPHERE_RADIUS - FEET_OFFSET;	// 0.6 above the ground
+static const float PED_PRONE_BOUND_RADIUS = 1.1f;
 
 void
 CTempColModels::Initialise(void)
@@ -77,6 +119,41 @@ CTempColModels::Initialise(void)
 	ms_colModelPed1.boundingSphere.Set(1.25f, CVector(0.0f, 0.0f, 0.0f));
 	ms_colModelPed1.boundingBox.Set(CVector(-0.35f, -0.35f, -1.0f), CVector(0.35f, 0.35f, 0.9f));
 	SET_COLMODEL_SPHERES(ms_colModelPed1, s_aPedSpheres);
+
+	// Crouch Spheres
+	// The standing stack, the whole body 0.2 lower and the head another
+	// 0.2 below that, so the crouched head top is 0.4 lower than the
+	// standing one. Same radius, surface and piece as standing.
+
+	for (i = 0; i < ARRAY_SIZE(s_aPedCrouchSpheres); i++) {
+		s_aPedCrouchSpheres[i].radius = s_aPedSpheres[i].radius;
+		s_aPedCrouchSpheres[i].center = s_aPedSpheres[i].center;
+		s_aPedCrouchSpheres[i].center.z -= PED_CROUCH_BODY_DROP;
+		s_aPedCrouchSpheres[i].surface = SURFACE_PED;
+		s_aPedCrouchSpheres[i].piece = 0;
+	}
+	s_aPedCrouchSpheres[2].center.z -= PED_CROUCH_HEAD_DROP;
+
+	ms_colModelPedCrouch.boundingSphere.Set(PED_CROUCH_BOUND_RADIUS, CVector(0.0f, 0.0f, PED_CROUCH_BOUND_Z));
+	ms_colModelPedCrouch.boundingBox.Set(CVector(-PED_BODY_HALF_WIDTH, -PED_BODY_HALF_WIDTH, PED_FEET_Z),
+		CVector(PED_BODY_HALF_WIDTH, PED_BODY_HALF_WIDTH, s_aPedCrouchSpheres[2].center.z + s_aPedCrouchSpheres[2].radius));
+	SET_COLMODEL_SPHERES(ms_colModelPedCrouch, s_aPedCrouchSpheres);
+
+	// Prone Spheres
+	// The body lying along the forward axis on the ground: four spheres from
+	// the feet end to the head end. Same surface and piece as standing.
+
+	for (i = 0; i < ARRAY_SIZE(s_aPedProneSpheres); i++) {
+		s_aPedProneSpheres[i].radius = PED_PRONE_SPHERE_RADIUS;
+		s_aPedProneSpheres[i].center = CVector(0.0f, -PED_PRONE_HALF_LENGTH + i * PED_PRONE_SPACING, PED_PRONE_Z);
+		s_aPedProneSpheres[i].surface = SURFACE_PED;
+		s_aPedProneSpheres[i].piece = 0;
+	}
+
+	ms_colModelPedProne.boundingSphere.Set(PED_PRONE_BOUND_RADIUS, CVector(0.0f, 0.0f, PED_PRONE_Z));
+	ms_colModelPedProne.boundingBox.Set(CVector(-PED_BODY_HALF_WIDTH, -PED_PRONE_BOX_Y, -FEET_OFFSET),
+		CVector(PED_BODY_HALF_WIDTH, PED_PRONE_BOX_Y, PED_PRONE_BODY_TOP));
+	SET_COLMODEL_SPHERES(ms_colModelPedProne, s_aPedProneSpheres);
 
 	// Ped 2 Spheres
 

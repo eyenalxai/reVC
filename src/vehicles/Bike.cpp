@@ -1758,7 +1758,7 @@ CBike::ProcessEntityCollision(CEntity *ent, CColPoint *colpoints)
 		colModel->numLines = 0;
 
 	int numCollisions = CCollision::ProcessColModels(GetMatrix(), *colModel,
-		ent->GetMatrix(), *ent->GetColModel(),
+		ent->GetMatrix(), *ent->GetCollisionColModel(),
 		colpoints,
 		m_aWheelColPoints, m_aSuspensionSpringRatio);
 

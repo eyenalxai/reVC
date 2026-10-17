@@ -292,8 +292,8 @@ int32
 CPhysical::ProcessEntityCollision(CEntity *ent, CColPoint *colpoints)
 {
 	int32 numSpheres = CCollision::ProcessColModels(
-		GetMatrix(), *GetColModel(),
-		ent->GetMatrix(), *ent->GetColModel(),
+		GetMatrix(), *GetCollisionColModel(),
+		ent->GetMatrix(), *ent->GetCollisionColModel(),
 		colpoints,
 		nil, nil);	// No Lines allowed!
 	if(numSpheres > 0){
