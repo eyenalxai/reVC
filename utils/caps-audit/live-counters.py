@@ -71,14 +71,18 @@ three frames.
 The spawn readiness rows (VICE-151) are the prewarm plan: the sets the
 blocking prewarms found resident (the boot, the death/arrest fade, the taxi
 shortcut, a save load, a drawn fade), the requests the pin budget deferred
-(the vehicle pins stop below MAXVEHICLESLOADED so the tracker keeps its
-reserve and a pin never starves the loader), the frames a requested set was
-not yet resident, the pins held (and the vehicle pins of them) and the stall:
-the last blocking prewarm's wall time - the acceptance's measured bound, the
-file processing included - and the sum since boot. A healthy boot reads the
-car set resident with a stall well under a second; a transition adds one more
-resident set; a deferral row that climbs in normal play means a zone set does
-not fit the budget and the planner is refusing.
+(the vehicle pins stop at SPAWN_READY_PIN_BUDGET, the tracker less a reserve
+of 25 slots - the streaming's own measured headroom - so the pins leave the
+non-pin side its room), the frames a requested set was not yet resident, the
+pins held (and the vehicle pins of them) and the stall: the last blocking
+prewarm's wall time - the acceptance's measured bound, the file processing
+included - and the sum since boot. A healthy boot reads the car set resident
+with no waited frames (the blocking boot leaves nothing waiting) and a stall
+well under a second; a transition adds one more resident set; the pins row is
+read next to `stream: ms_numVehiclesLoaded`, which carries the tracker's own
+occupancy (57..65 of 90 in the recorded census) as the risk evidence; a
+deferral row that climbs in normal play means a zone set does not fit the
+budget and the planner is refusing.
 The standable cell rows (VICE-154) are the off-network pedestrian placement's
 own counters: the cells the lazy build spent and queued, the queue's and the
 cache's drops (a nearer cell displaced a farther one, or the cache evicted the
@@ -389,13 +393,16 @@ CONFIG = "src/core/config.h"
 # fixed offsets in CSpawnReadiness::ms_Plan (the static_asserts of
 # SpawnReadiness.cpp pin the layout). The set rows are the blocking prewarms
 # that found every pin ready, the deferred rows are the budget's refusals
-# (the vehicle pins stop below MAXVEHICLESLOADED, so the tracker keeps its
-# reserve), the waited row counts the frames a requested set was not yet
-# resident, the pins are live, and the stall rows carry the acceptance's
-# measured bound (the last blocking prewarm's wall time and the total since
-# boot). A healthy boot reads the car set resident and a few frames waited;
-# a healthy transition reads one more set resident and a stall well under a
-# second.
+# (the vehicle pins stop at the budget, the tracker less a reserve of 25
+# slots: the streaming's own measured headroom, so the non-pin side keeps its
+# room), the waited row counts the frames a requested set was not yet
+# resident (0 through a successful blocking boot), the pins are live, and the
+# stall rows carry the acceptance's measured bound (the last blocking
+# prewarm's wall time and the total since boot). A healthy boot reads the car
+# set resident with no waited frames; a healthy transition reads one more set
+# resident and a stall well under a second. The pins row is read next to
+# `stream: ms_numVehiclesLoaded` (above), which carries the tracker's own
+# occupancy as the risk evidence.
 READINESS = [
     ("readiness: sets resident",     "_ZN15CSpawnReadiness7ms_PlanE", 0),
     ("readiness: requests deferred", "_ZN15CSpawnReadiness7ms_PlanE", 4),

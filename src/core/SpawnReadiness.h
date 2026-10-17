@@ -23,9 +23,13 @@
  * bookkeeping and its memory eviction (CStreaming::MakeSpaceFor ->
  * RemoveLeastUsedModel) move the txds and the animation blocks without
  * moving the model, so a check of HasModelLoaded alone can lie. A model
- * without an animation block (the animation index is -1: every pedestrian,
- * most cars) has nothing to evict and its animation read is true; a model
- * without a texture dictionary cannot be ready.
+ * without an animation block has nothing to evict and its animation read is
+ * true: the animation index is -1 when the model's .ide row names no
+ * animation file (most pedestrians, most cars) or names one the CD image
+ * does not hold (the index resolves against the blocks CStreaming::
+ * LoadCdDirectory registered from the image's .ifp entries, so a name with
+ * no file, e.g. the peds' "man", resolves to -1). A model without a texture
+ * dictionary cannot be ready.
  *
  * The whole-set predicate iterates the arrays the service plans from, never
  * the request mask: the car class arrays (CCarCtrl::LoadedCarsArray, the
@@ -34,7 +38,10 @@
  * (CStreaming::ms_bIsPedFromPedGroupLoaded) is set when a model is
  * *requested*, not when it is loaded, so it cannot answer "is the group in
  * memory" - the group's own model list can. The gang sets are checked the
- * same way (CGangs' two models per gang and the gang's car).
+ * same way (CGangs' two models per gang and the gang's car). An empty set
+ * (no stored models: no class row holds one, or every group slot is a -1
+ * hole) is never ready: the service has nothing to choose from, so its
+ * planner must refuse instead of reading a vacuous truth.
  *
  * The prewarm sets
  * ----------------
@@ -70,24 +77,30 @@
  * slots (MAXVEHICLESLOADED 90; the model store VEHICLEMODELSIZE 110 holds
  * every vehicle model the pins touch): the vehicle pins stop at
  * SPAWN_READY_PIN_BUDGET (the tracker less the reserve of
- * SPAWN_READY_PIN_RESERVE slots), so the rest of the streaming always has
- * tracker slots to load the cars it needs - a pin cannot starve the loader
- * (CStreaming::AddToLoadedVehiclesList fails only when the tracker is full
- * and nothing in it is removable). A pin request that does not fit the
- * budget is counted deferred and not made; the set then reads not resident
- * and the planner refuses, which is the service's own rule. The shipped data
- * fits with room: the class catalogue's 56 models plus the widest zone set
- * stay inside the budget (the evidence program prints the counts and the
- * headroom).
+ * SPAWN_READY_PIN_RESERVE slots). The reserve is the streaming's own room,
+ * not the pins': the pins are never removable while held, so the slots the
+ * rest of the streaming gets are exactly the reserve, and the reserve's 25
+ * is the measured headroom of the non-pin side (the tracker's normal
+ * occupancy is 57..65 of 90; the catalogue's 56 are the bulk of it). With
+ * the shipped data the widest zone set is 61 vehicle pins, 4 under the
+ * budget of 65, and the tracker keeps 29 slots beyond the pins. A pin
+ * request that does not fit the budget is counted deferred and not made; the
+ * set then reads not resident and the planner refuses, which is the
+ * service's own rule. The evidence program prints the counts and the
+ * headroom.
  *
  * The hosts
  * ---------
  *
  *	boot / loading screen	CGame::Initialise (the car set and the first
  *				zone set, blocking under the screen)
- *	interior exit		CGame::SetCurrArea (the zone set; the requests
- *				ride the ordinary streaming: the street appears
- *				behind walls, not behind a fade)
+ *	interior entry		CGame::SetCurrArea: the street's zone set is
+ *				released (the interior budget is flat and the
+ *				models would hold ~2.6 MB through the stay)
+ *	interior exit		CGame::SetCurrArea (the zone set again; the
+ *				requests ride the ordinary streaming: the
+ *				street appears behind walls, not behind a
+ *				fade)
  *	death / arrest fade	CGameLogic::SortOutStreamingAndMemory (the
  *				blocking path, the screen is faded out)
  *	taxi shortcut		CGameLogic's shortcut transition (the blocking
@@ -100,17 +113,34 @@
  *	the pump		CStreaming::Update, once a frame, next to
  *				StreamZoneModels: the zone is re-read, a changed
  *				set is requested, the pins are asserted, the
- *				waited frames are counted
+ *				waited frames are counted. It is the plain
+ *				restart's host: CGame::InitialiseWhenRestarting
+ *				has no player yet (the script creates it on the
+ *				first frames), so the guarded blocking call there
+ *				could not prewarm; the pump's requests ride the
+ *				restart screen and the fill bursts wait for them.
  *
  * No prewarm runs during a cutscene: the cutscene camera can see and the
  * biggest cutscenes delete the world, so the pump and every host return while
  * CCutsceneMgr::IsCutsceneProcessing(). The cutscene end stays the fill
  * burst's trigger; the fill waits out the streaming on its own.
  *
- * Where the spawn service calls this (the planner is the next ticket)
- * -------------------------------------------------------------------
+ * Where the spawn service calls this (the seam, now wired)
+ * --------------------------------------------------------
  *
- * The planner reads the predicates before it plans:
+ * The service core (VICE-150) exists and its readiness gate is the real call
+ * site: CSpawnService::RequestCar (SpawnService.cpp) reads
+ * CSpawnReadiness::IsModelReady(request.carModel) before it plans, so a car
+ * whose txd or animation block was evicted defers instead of being created
+ * half-loaded. The prewarm's pins hold the class catalogue's own models, txds
+ * and anim blocks, so the strict check costs the ambient traffic nothing (its
+ * models come from CCarCtrl::ChooseModel's class arrays or the police sets,
+ * whose anims are the pinned van block or none). A model outside the prewarm
+ * whose anim block was evicted has no healer here yet (the pump heals the
+ * pins, not arbitrary models): that is a follow-up decision if a requester
+ * ever feeds such a model to the gate.
+ *
+ * The other reads the planner may take (its own next ticket):
  *
  *	CSpawnReadiness::AreCarClassesReady()	before a car placement (the
  *						whole class set; a per-class
@@ -122,8 +152,7 @@
  *	CSpawnReadiness::IsModelReady(model)	the single-model form
  *
  * and never waits: a set that is not resident is a refusal (or a deferred
- * request), the service's own decision. Nothing of this module is wired into
- * the planner yet; the API is the seam.
+ * request), the service's own decision.
  *
  * No engine header beyond config.h is included: the evidence program in
  * utils/spawn-service drives the plan, the predicates and the budget on its
@@ -136,13 +165,18 @@
 
 /*
  * The pin budget: the vehicle pins stop SPAWN_READY_PIN_RESERVE slots below
- * the vehicle tracker's own capacity, so the tracker always keeps free slots
- * for the rest of the streaming. The reserve is the streaming channel's read
- * batch (CStreamingChannel holds 4 files) and margin: a pin set that fills
- * the tracker would make AddToLoadedVehiclesList fail whenever it finds no
- * removable model, and the failing load re-requests itself forever.
+ * the vehicle tracker's own capacity. The reserve is the streaming's own
+ * headroom, taken from the live census: the tracker normally holds 57..65 of
+ * its 90 slots (utils/caps-audit/live-counters.py, the recorded rows) and the
+ * pins hold the class catalogue permanently, so the reserve is what the rest
+ * of the streaming - the wanted sets, the gang cars, the mission cars, the
+ * read batch - had beyond the catalogue. 25 leaves that side its measured
+ * room; the shipped widest set (61 vehicle pins) stays 4 under the budget of
+ * 65. A pin set that filled the tracker would make AddToLoadedVehiclesList
+ * fail whenever it found no removable model, and the failing load re-requests
+ * itself forever, which is what the reserve rules out.
  */
-#define SPAWN_READY_PIN_RESERVE 8
+#define SPAWN_READY_PIN_RESERVE 25
 #define SPAWN_READY_PIN_BUDGET (MAXVEHICLESLOADED - SPAWN_READY_PIN_RESERVE)
 
 /* The pin array: the budget's vehicle pins plus the widest zone set (the 16
@@ -222,6 +256,13 @@ struct SSpawnReadyPlan
 	uint16_t m_nZoneGangCars;	/* the gang car mask */
 	bool m_bZoneSetRequested;
 
+	/* The pump's hint: a pin was requested (or a verification found one
+	 * missing), so the next pump verifies before it decides. It keeps the
+	 * steady state free of the readiness walk; a verification that finds
+	 * every pin ready clears it. The live reader does not read it (it sits
+	 * past the counter offsets). */
+	bool m_bPinsNeedVerify;
+
 	/* The pins. */
 	SSpawnReadyPin m_aPins[SPAWN_READY_MAX_PINS];
 
@@ -237,6 +278,7 @@ struct SSpawnReadyPlan
 		m_nVehiclePins = 0;
 		m_nLastStallMs = 0;
 		m_nStallMsTotal = 0;
+		m_bPinsNeedVerify = false;
 		Reset();
 	}
 
@@ -251,6 +293,7 @@ struct SSpawnReadyPlan
 		m_nZoneGangs = 0;
 		m_nZoneGangCars = 0;
 		m_bZoneSetRequested = false;
+		m_bPinsNeedVerify = false;
 		m_nPins = 0;
 		m_nVehiclePins = 0;
 	}
@@ -280,6 +323,18 @@ struct SSpawnReadyPlan
 		m_bZoneSetRequested = false;
 	}
 
+	/* The zone set is dropped (an interior entry): the identity is
+	 * forgotten, so the next RequestZone sees a changed set and pins it.
+	 * The caller releases the pins first. */
+	void
+	EndZoneSet(void)
+	{
+		m_nPedGroup = -1;
+		m_nZoneGangs = 0;
+		m_nZoneGangCars = 0;
+		m_bZoneSetRequested = false;
+	}
+
 	/* The budget: a pin fits when the array has room and, for a vehicle, the
 	 * tracker keeps its reserve. */
 	bool
@@ -298,16 +353,52 @@ struct SSpawnReadyPlan
 		return -1;
 	}
 
-	void
+	/* False when the array is full (the caller counts the request
+	 * deferred; PinFits refuses first, so the false path is the guard, not
+	 * the policy). */
+	bool
 	AddPin(const SSpawnReadyPin &pin, bool vehicle)
 	{
 		if (m_nPins >= SPAWN_READY_MAX_PINS)
-			return;
+			return false;
 		m_aPins[m_nPins] = pin;
 		m_aPins[m_nPins].vehicle = vehicle ? 1 : 0;
 		m_nPins++;
 		if (vehicle)
 			m_nVehiclePins++;
+		m_bPinsNeedVerify = true;
+		return true;
+	}
+
+	/*
+	 * Drop one set's pins (a zone change, an interior entry, a reset): a
+	 * pin the other set also holds keeps the other bit; a pin with no set
+	 * left leaves the ledger and is written to `released` for the caller to
+	 * unpin - the streaming flags are the engine's, not this struct's.
+	 * Returns the number written; `released` must hold every pin (the
+	 * callers pass SPAWN_READY_MAX_PINS entries).
+	 */
+	int32_t
+	ReleaseSet(uint8_t set, SSpawnReadyPin *released, int32_t maxReleased)
+	{
+		int32_t count = 0;
+
+		for (int32_t i = 0; i < m_nPins; ) {
+			SSpawnReadyPin &pin = m_aPins[i];
+			if ((pin.sets & set) == 0) {
+				i++;
+				continue;
+			}
+			pin.sets &= ~set;
+			if (pin.sets != 0) {
+				i++;
+				continue;
+			}
+			if (released && count < maxReleased)
+				released[count++] = pin;
+			RemovePinAt(i);
+		}
+		return count;
 	}
 
 	/* The entry is dropped; the last pin takes its place (the order is not
@@ -348,6 +439,7 @@ public:
 	static void PrewarmCarClasses(void);
 	static void RequestZone(const CVector &pos);
 	static void PrewarmInCover(const CVector &pos);
+	static void OnInteriorEnter(void);
 	static void OnInteriorExit(void);
 	static void Update(void);
 
@@ -427,14 +519,55 @@ SpawnReadyClassArraysMissing(const int32_t *rows, int32_t stride, const int32_t 
 	return missing;
 }
 
+/* The stored models of one list (the -1 holes are not models) and of the car
+ * class arrays: the whole-set verdict needs the count, so an empty set cannot
+ * read ready. */
+static inline int32_t
+SpawnReadyListStored(const int32_t *models, int32_t count)
+{
+	int32_t stored = 0;
+
+	for (int32_t i = 0; i < count; i++)
+		if (models[i] >= 0)
+			stored++;
+	return stored;
+}
+
+static inline int32_t
+SpawnReadyClassArraysStored(const int32_t *rows, int32_t stride, const int32_t *counts, int32_t numClasses)
+{
+	int32_t stored = 0;
+
+	for (int32_t c = 0; c < numClasses; c++) {
+		int32_t n = counts[c];
+		for (int32_t i = 0; i < n; i++)
+			if (rows[c * stride + i] >= 0)
+				stored++;
+	}
+	return stored;
+}
+
+/*
+ * The whole-set verdict: a set is ready when it holds at least one stored
+ * model and none of the stored models is missing. An empty set is never
+ * ready - the service has nothing to choose from, so its planner must refuse
+ * instead of reading a vacuous truth.
+ */
+static inline bool
+SpawnReadySetIsReady(int32_t stored, int32_t missing)
+{
+	return stored > 0 && missing == 0;
+}
+
 /*
  * The gang mask a zone's own thresholds select (the shipped rule of
- * CStreaming::StreamZoneModels and CCarCtrl::ChooseModel): the mask's bit g
- * is set when the gang's threshold is the first that differs from the cops'
+ * CStreaming::StreamZoneModels, the mask's only reader; CCarCtrl::ChooseModel
+ * reads the same thresholds per gang, not the mask). The mask's bit g is set
+ * when the gang's threshold is the first that differs from the cops'
  * threshold, or differs from its predecessor's. Two overloads, because the
- * pedestrian thresholds are uint16 and the car thresholds int16. CTheZones
- * exposes them as GetZoneGangPedMask/GetZoneGangCarMask; the evidence program
- * checks the rule against the masks of the shipped zone data.
+ * pedestrian thresholds are uint16 and the car thresholds int16. The rule
+ * lives here, not in Zones, so the evidence program can drive it; CTheZones
+ * wraps it as GetZoneGangPedMask/GetZoneGangCarMask.
  */
 static inline uint16_t
 SpawnReadyGangMask(const uint16_t *thresholds, uint16_t copThreshold, int32_t numGangs)

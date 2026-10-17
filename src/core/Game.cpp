@@ -840,7 +840,13 @@ void CGame::InitialiseWhenRestarting(void)
 		FrontEndMenuManager.ProcessDialogTimer();
 #endif
 	}
-	
+
+	/* The spawn readiness (VICE-151): the plain restart's host is the pump,
+	 * not a blocking call here. The restart has no player yet (the script
+	 * creates it on the first frames), so the boot host's guarded call could
+	 * not prewarm; the pump's requests ride the restart screen and the fill
+	 * bursts wait for them. A save load prewarms in its own host
+	 * (DoGameSpecificStuffAfterSucessLoad, after the scene load). */
 	CTimer::Update();
 	
 	DMAudio.ChangeMusicMode(MUSICMODE_GAME);
@@ -1416,9 +1422,17 @@ void
 CGame::SetCurrArea(int32 area)
 {
 	bool leftInterior = IsInInterior() && area == AREA_MAIN_MAP;
+	bool enteredInterior = !IsInInterior() && area != AREA_MAIN_MAP;
 
 	currArea = area;
 
+	if (enteredInterior) {
+		/* The spawn readiness (VICE-151): the street's zone set is released
+		 * on the entry - the interior budget is flat and the street's
+		 * group and gangs would hold ~2.6 MB through the stay. The exit
+		 * requests them again (below) and the fill burst's gate waits. */
+		CSpawnReadiness::OnInteriorEnter();
+	}
 	if (leftInterior) {
 		ArmFillBursts(false);
 		/* The spawn readiness (VICE-151): the interior exit is a host - the

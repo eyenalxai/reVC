@@ -1576,7 +1576,12 @@ void
 CStreaming::SetModelIsDeletable(int32 id)
 {
 	ms_aInfoForModel[id].m_flags &= ~STREAMFLAGS_DONT_REMOVE;
-	if ((id >= STREAM_OFFSET_TXD && id < STREAM_OFFSET_COL || CModelInfo::GetModelInfo(id)->GetModelType() != MITYPE_VEHICLE) &&
+	/* The vehicle-type read is for model ids only: a txd, col or animation
+	 * id lives past MODELINFOSIZE (VICE-151: the anim release crashed on
+	 * the old narrower test), so the wider test - the one
+	 * SetMissionDoesntRequireModel already uses - keeps the read in
+	 * bounds. */
+	if ((id >= STREAM_OFFSET_TXD || CModelInfo::GetModelInfo(id)->GetModelType() != MITYPE_VEHICLE) &&
 	   (ms_aInfoForModel[id].m_flags & STREAMFLAGS_SCRIPTOWNED) == 0){
 		if(ms_aInfoForModel[id].m_loadState != STREAMSTATE_LOADED)
 			RemoveModel(id);

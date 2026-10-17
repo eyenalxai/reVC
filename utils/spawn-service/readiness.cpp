@@ -15,21 +15,26 @@
  *	   (the class rows in their ratings, packed, the counts separate) and
  *	   the pedestrian group (the 16 slots with their -1 holes): a healthy
  *	   set reads ready, an evicted animation block fails and names its
- *	   model, an unloaded model fails, the -1 holes are skipped. The gang
- *	   mask rule (the rule CTheZones and StreamZoneModels share) over
- *	   synthetic thresholds of the shipped shape.
+ *	   model, an unloaded model fails, the -1 holes are skipped, and an
+ *	   empty set (no stored model) is never ready. The gang mask rule (the
+ *	   rule CTheZones and StreamZoneModels share) over synthetic thresholds
+ *	   of the shipped shape.
  *
  *	C. The plan. The global car set is requested once; a zone change drops
  *	   the zone-only pins and keeps the car pins (a shared model keeps its
- *	   car bit); the pin budget refuses the vehicle pin at the budget and
- *	   counts it deferred while a pedestrian pin still fits; a duplicate
- *	   model is one pin; Reset drops the pins and keeps the counters.
+ *	   car bit) through the plan's own ReleaseSet; the pin budget refuses
+ *	   the vehicle pin at the budget and counts it deferred while a
+ *	   pedestrian pin still fits; a duplicate model is one pin; Reset drops
+ *	   the pins and keeps the counters.
  *
  *	D. The shipped sets, from the installed game's data when it is readable
  *	   (data/default.ide, data/pedgrp.dat, models/gta3.dir): the 56 class
  *	   models, a pedestrian group (the default one) and the gang set; the
  *	   pin counts against the budget and the tracker's headroom, and the
- *	   files, sectors and bytes the prewarm reads.
+ *	   files, sectors and bytes the prewarm reads. An .ide anim name counts
+ *	   only when the image holds the .ifp: the engine's anim index resolves
+ *	   against the registered blocks (the peds' "man" has no file, so the
+ *	   model has no block).
  *
  *	E. The stall. The blocking path's I/O share is measured against the real
  *	   image (models/gta3.img): every file of a set is read once at its own
@@ -42,7 +47,7 @@
  * What this program cannot reach, stated plainly: the live arrays are the
  * engine's (CCarCtrl::LoadedCarsArray, CPopulation::ms_pPedGroups, the zone
  * info), so the checks drive the same predicates over arrays of the shipped
- * shape and the engine's own walk is checked by the build; the streaming
+ * shape and the engine's own walk is compiled and inspected here, not driven; the streaming
  * calls (the requests, the pins as STREAMFLAGS_DONT_REMOVE, the blocking
  * LoadAllRequestedModels) are the engine's, driven by inspection here; the
  * file *processing* (the clump, txd and anim loads) needs RenderWare and
@@ -534,6 +539,27 @@ TestWholeSetPredicate(void)
 	Check(SpawnReadyListMissing(pedModels, pedReady, NUMMODELSPERPEDGROUP, &firstMissing) == 1,
 		"the -1 hole is skipped whatever its readiness bit says");
 
+	/* The whole-set verdict: an empty set is never ready, however clean its
+	 * missing count is. */
+	Check(!SpawnReadySetIsReady(0, 0), "an empty set is never ready");
+	Check(SpawnReadySetIsReady(1, 0), "a non-empty set with nothing missing is ready");
+	Check(!SpawnReadySetIsReady(5, 1), "a non-empty set with a missing model is not ready");
+	Check(SpawnReadyListStored(pedModels, NUMMODELSPERPEDGROUP) == NUMMODELSPERPEDGROUP - 1,
+		"the stored count skips the -1 holes");
+	for (int i = 0; i < NUMMODELSPERPEDGROUP; i++)
+		pedModels[i] = -1;
+	Check(SpawnReadyListStored(pedModels, NUMMODELSPERPEDGROUP) == 0 &&
+	      SpawnReadyListMissing(pedModels, pedReady, NUMMODELSPERPEDGROUP, &firstMissing) == 0 &&
+	      !SpawnReadySetIsReady(0, 0),
+		"an all-holes group stores nothing and is never ready");
+	int32_t emptyRows[NUM_CLASSES * MAX_CAR_MODELS_IN_ARRAY] = {};
+	int32_t emptyCounts[NUM_CLASSES] = {};
+	Check(SpawnReadyClassArraysStored(emptyRows, MAX_CAR_MODELS_IN_ARRAY, emptyCounts, NUM_CLASSES) == 0 &&
+	      SpawnReadyClassArraysMissing(emptyRows, MAX_CAR_MODELS_IN_ARRAY, emptyCounts, NUM_CLASSES, readyByModel, &firstMissing) == 0,
+		"empty class arrays store nothing and miss nothing (the verdict's own rule refuses them)");
+	Check(SpawnReadyClassArraysStored(rows, MAX_CAR_MODELS_IN_ARRAY, counts, NUM_CLASSES) == total,
+		"the class arrays' stored count is the shipped total");
+
 	/* The gang mask rule (CTheZones::GetZoneGangPedMask/GetZoneGangCarMask
 	 * and the header's own copy): the first threshold that differs from the
 	 * cops' opens the mask, every difference from its predecessor adds a
@@ -554,26 +580,6 @@ TestWholeSetPredicate(void)
 /* ------------------------------------------------------------------ *
  * C. the plan and the pin ledger
  * ------------------------------------------------------------------ */
-
-/* The engine's ReleaseZonePins loop, mirrored over the plan (the engine side
- * is a static function of SpawnReadiness.cpp; the shape is the plan's). */
-static void
-MirrorReleaseZonePins(SSpawnReadyPlan &plan)
-{
-	for (int32_t i = 0; i < plan.m_nPins; ) {
-		SSpawnReadyPin &pin = plan.m_aPins[i];
-		if ((pin.sets & SPAWN_READY_SET_ZONE) == 0) {
-			i++;
-			continue;
-		}
-		pin.sets &= ~SPAWN_READY_SET_ZONE;
-		if (pin.sets != 0) {
-			i++;
-			continue;
-		}
-		plan.RemovePinAt(i);
-	}
-}
 
 static void
 TestPlan(void)
@@ -628,12 +634,18 @@ TestPlan(void)
 	Check(plan.m_nVehiclePins == carModels, "a pedestrian pin is not a vehicle pin");
 
 	/* The zone change: the zone-only pin goes, the shared model keeps its
-	 * car bit and stays. */
+	 * car bit and stays. The release is the plan's own ReleaseSet (the
+	 * engine's ReleaseSetPins calls it and unpins what it hands back). */
 	plan.StartZoneSet(1, 0, 0);
-	MirrorReleaseZonePins(plan);
+	SSpawnReadyPin released[SPAWN_READY_MAX_PINS];
+	int32_t releasedCount = plan.ReleaseSet(SPAWN_READY_SET_ZONE, released, SPAWN_READY_MAX_PINS);
+	Check(releasedCount == 1 && released[0].model == 900,
+		"the zone change hands the zone-only pin back to the caller");
 	Check(plan.m_nPins == carModels, "the zone change drops the zone-only pin");
 	Check(plan.FindPin(shared) >= 0, "the shared model stays (the car set holds it)");
 	Check(plan.ZoneSetPending(1, 0, 0), "the new zone set is pending until its models are pinned");
+	Check(plan.ReleaseSet(SPAWN_READY_SET_ZONE, released, SPAWN_READY_MAX_PINS) == 0,
+		"the same set released twice hands nothing back");
 
 	/* The budget: fill the vehicle pins to the budget, then refuse. */
 	while (plan.PinFits(true)) {
@@ -733,8 +745,12 @@ AnimFileName(const SDataModel *m)
 	return s;
 }
 
-/* The files of one model: its clump, its txd and - when the data has one -
- * its animation block. */
+/* The files of one model: its clump, its txd and - when the model has one -
+ * its animation block. The anim block counts only when the image holds the
+ * .ifp: the engine's index resolves against the blocks
+ * CStreaming::LoadCdDirectory registered from the image's .ifp entries, so
+ * an .ide anim name with no file (the peds' "man") resolves to -1 and the
+ * model has no block to load. */
 static void
 FileSetAddModel(SFileSet *set, int model)
 {
@@ -743,8 +759,11 @@ FileSetAddModel(SFileSet *set, int model)
 	const SDataModel *m = &g_models[model];
 	FileSetAdd(set, ModelFileName(m, "dff"));
 	FileSetAdd(set, ModelFileName(m, "txd"));
-	if (strcmp(m->anim, "null") != 0 && m->anim[0])
-		FileSetAdd(set, AnimFileName(m));
+	if (strcmp(m->anim, "null") != 0 && m->anim[0]) {
+		const char *animFile = AnimFileName(m);
+		if (FindDirEntry(animFile))
+			FileSetAdd(set, animFile);
+	}
 }
 
 static void
