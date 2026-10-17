@@ -130,28 +130,63 @@ The existing model in `CVehicle::ProcessWheel`: one grip budget per wheel,
 shared between the forward force and the sideways force. The drift layer changes
 how the budget is spent; it does not change the wheel list.
 
+## Movement solver
+
+The module `src/peds/PlayerMoveSolver.*`: the state machine that owns the
+player's horizontal velocity on foot. It is engine free, so a harness compiles
+the translation unit alone. One step takes a move intent and returns a move
+snapshot. The movement state rows (acceleration, friction, turn rate) and the
+stance live here; the controller is only the adapter.
+
 ## Movement controller
 
-The module that owns the player's horizontal velocity on foot:
-`CPlayerPed::UpdatePlayerMovement` in `src/peds/PlayerPed.cpp`. Every on-foot
-control path calls it, in both views. The camera sets the view position and the
-direction basis only. The controller targets the reference speed and owns the
-velocity; the fight state, the attached states and the states that hold a
-blocking animation keep the animation driven movement.
+The adapter of the movement solver in `CPlayerPed::UpdatePlayerMovement`
+(`src/peds/PlayerPed.cpp`). Every on-foot control path calls it, in both views.
+It reads the pad, the camera and the ped into one move intent, steps the solver
+and writes the move snapshot back to `m_vecMoveSpeed.x/y`, `m_moved` and
+`m_nMovementState`. The camera sets the view position and the direction basis
+only. The fight state, the attached states and the states that hold a blocking
+animation keep the animation driven movement.
 
 ## Movement state
 
-One of the controller's states (`ePlayerMovementState`): ground and air today.
-Each state has its own acceleration, friction and turn rate row; the planned
-slide state will add a row. The ground state moves the velocity toward the
-target speed, turns the direction and slows the ped down with the friction. The
-air state keeps the momentum and steers with a smaller authority.
+One of the solver's states (`eMoveStateId`): ground and air today; the slide
+and the dive are planned. Each state has its own acceleration, friction and
+turn rate row (`PlayerMoveSolver.cpp`). The ground state moves the velocity
+toward the target speed, turns the direction and slows the ped down with the
+friction. The air state keeps the momentum and steers with a smaller
+authority.
+
+## Move intent
+
+One frame of the world as the movement solver may see it (`SMoveIntent`): the
+frame step, the own velocity with and without the surface speed, the slope
+normal, the movement heading, the target speed and the input's flags. The
+adapter fills it; the solver reads the engine through nothing else. The own
+velocity arrives fresh every frame, so a collision impulse from the previous
+frame survives the step.
+
+## Move snapshot
+
+The movement solver's one read surface (`SMoveSnapshot`): the state, the
+stance, the new velocity, the controller's own velocity, the speed, the
+heading, the stance values, the events and the reported movement state. Step
+returns it and `GetSnapshot` hands it out; the solver's own state stays
+private.
+
+## Stance
+
+One of the movement solver's stances (`eMoveStance`): stand, crouch and prone.
+The stance scales the speed and the turn rate and sets the collision capsule
+height. The stance table arrives with VICE-171; phase 0 has the stand row
+only.
 
 ## Engine velocity unit
 
 The unit of `m_vecMoveSpeed`: one unit per 1/50 second, so one engine velocity
-unit is 50 units per second. The tuning constants in `PlayerPed.cpp` divide the
-measured speeds and accelerations by 50.
+unit is 50 units per second. The tuning constants in `PlayerMoveSolver.cpp`
+and the reference speed in `PlayerPed.cpp` divide the measured speeds and
+accelerations by 50.
 
 ## Reference speed
 
@@ -159,9 +194,9 @@ The ground speed of the walk, run and sprint animation blend the ped plays: the
 net root motion of each playing animation over one cycle, at the playback speed
 the state forces on it. The animations of the strafe, backward and weapon groups
 carry their own speeds, so the reference follows the direction the legs move in
-and the weapon the ped holds. The controller targets it and scales the animation
-playback by (real speed / reference speed), so the legs stay planted while the
-speed changes.
+and the weapon the ped holds. The movement solver targets it and scales the
+animation playback by (real speed / reference speed), so the legs stay planted
+while the speed changes.
 
 ## Magazine weapon
 
