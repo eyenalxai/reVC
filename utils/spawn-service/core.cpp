@@ -19,8 +19,8 @@
  *
  *	C. The cheap gates. The occupancy store's capacity (3 per cell) and the
  *	   site reservations refuse by their own reason rows; the plan reserves
- *	   what it returns, two plans of the same frame cannot share a site, and
- *	   the run releases the reservations.
+ *	   what it returns while the plan is outstanding, two plans cannot share
+ *	   a site, and the run releases the reservations.
  *
  *	D. The deep facts. The zone and the reachability resolve for the ranked
  *	   prefix only (SPAWN_SERVICE_DEEP_CANDIDATES): a deep-refused candidate
@@ -313,10 +313,12 @@ static SSpawnOccupancyStore g_store;
 #define SPAWN_SCRIPT_DEFAULT 0xFF
 
 static uint8_t g_armOf[NUM_PATHCONNECTIONS];
+static uint8_t g_tryArm[NUM_PATHCONNECTIONS];	/* the attempt's own gate (L3) */
 static bool g_zoneRefused[NUM_PATHCONNECTIONS];
 static bool g_reachRefused[NUM_PATHCONNECTIONS];
 static ESpawnRefusal g_tryRefusal[NUM_PATHCONNECTIONS];
 static int32_t g_deepCalls;
+static int32_t g_deepSiteList[SPAWN_SERVICE_DEEP_CANDIDATES + 4];
 static int32_t g_tryCalls;
 static int32_t g_createdSite;
 
@@ -324,6 +326,7 @@ static void
 ScriptsReset(void)
 {
 	memset(g_armOf, SPAWN_SCRIPT_DEFAULT, sizeof(g_armOf));
+	memset(g_tryArm, SPAWN_SCRIPT_DEFAULT, sizeof(g_tryArm));
 	memset(g_zoneRefused, 0, sizeof(g_zoneRefused));
 	memset(g_reachRefused, 0, sizeof(g_reachRefused));
 	memset(g_tryRefusal, 0, sizeof(g_tryRefusal));
@@ -408,16 +411,23 @@ HarnessDeep(void *user, int32_t offerIndex, SSpawnSiteDeepFacts *facts)
 	const SSpawnOffer *offers = (const SSpawnOffer *)user;
 	int32_t site = offers[offerIndex].site;
 
+	if (g_deepCalls < (int32_t)(sizeof(g_deepSiteList) / sizeof(g_deepSiteList[0])))
+		g_deepSiteList[g_deepCalls] = site;
 	g_deepCalls++;
 	facts->zoneOk = !g_zoneRefused[site];
 	facts->reachOk = !g_reachRefused[site];
 }
 
 static ESpawnRefusal
-HarnessTry(void *user, const SSpawnPlanSite &planSite)
+HarnessTry(void *user, const SSpawnPlanSite &planSite, uint8_t *pArm)
 {
 	(void)user;
 	g_tryCalls++;
+	/* The scripted arm of the attempt's own gate (L3): the plan's midpoint
+	 * arm is the fallback, and a scenario can overwrite it to show the
+	 * covered-fill row reads the attempt's answer. */
+	if (g_tryArm[planSite.site] != SPAWN_SCRIPT_DEFAULT)
+		*pArm = g_tryArm[planSite.site];
 	if (g_tryRefusal[planSite.site] == SPAWN_REFUSAL_NONE) {
 		g_createdSite = planSite.site;
 		return SPAWN_REFUSAL_NONE;
@@ -487,6 +497,62 @@ PlanOnce(const SSpawnRingQuery &q, SSpawnPlan *plan, SSpawnServiceTelemetry *tel
 	return n;
 }
 
+/*
+ * The reference rank (M1): every valid offer sorted by the core's own public
+ * comparator with a plain selection sort - a different algorithm from the
+ * core's bounded insert - and the top `max` sites. The harness compares the
+ * deep callback's own prefix against it, so a wrong bounded insert (an
+ * unconditional overwrite of the buffer's worst entry) cannot pass.
+ */
+static int32_t
+ReferenceTopSites(const SSpawnRingQuery &q, int32_t *out, int32_t max)
+{
+	SSpawnOffer offers[SPAWN_SERVICE_MAX_CANDIDATES];
+	int32_t order[SPAWN_SERVICE_MAX_CANDIDATES];
+	int32_t n, i, j, kept = 0;
+
+	n = SpawnOfferSites(g_index, q, offers, SPAWN_SERVICE_MAX_CANDIDATES);
+	for (i = 0; i < n; i++) {
+		const SSpawnSite *pSite = &g_index.GetSites()[offers[i].site];
+		int32_t occupancy = g_store.CountAtPosition(SPAWN_OCCUPANCY_VEHICLE, pSite->x, pSite->y);
+
+		if (ArmOf(offers[i].site) == NEAR_BUBBLE_ARM_NONE)
+			continue;
+		if (occupancy >= SPAWN_SERVICE_CELL_CAPACITY)
+			continue;
+		if (g_store.SiteReserved(offers[i].site, 0))
+			continue;
+		order[kept++] = i;
+	}
+	for (i = 0; i < kept; i++) {
+		int32_t best = i;
+		for (j = i + 1; j < kept; j++) {
+			int32_t a = order[j], b = order[best];
+			const SSpawnSite *pA = &g_index.GetSites()[offers[a].site];
+			const SSpawnSite *pB = &g_index.GetSites()[offers[b].site];
+
+			if (SpawnPlanSiteSortsBefore(
+				SpawnVisibilityRank(ArmOf(offers[a].site)),
+				g_store.CountAtPosition(SPAWN_OCCUPANCY_VEHICLE, pA->x, pA->y),
+				offers[a].ringError, offers[a].spawnRate, offers[a].site,
+				SpawnVisibilityRank(ArmOf(offers[b].site)),
+				g_store.CountAtPosition(SPAWN_OCCUPANCY_VEHICLE, pB->x, pB->y),
+				offers[b].ringError, offers[b].spawnRate, offers[b].site))
+				best = j;
+		}
+		if (best != i) {
+			int32_t tmp = order[i];
+			order[i] = order[best];
+			order[best] = tmp;
+		}
+	}
+	if (kept > max)
+		kept = max;
+	for (i = 0; i < kept; i++)
+		out[i] = offers[order[i]].site;
+	return kept;
+}
+
 static uint32_t
 Refusal(const SSpawnServiceTelemetry &t, ESpawnRefusal r)
 {
@@ -500,6 +566,40 @@ Delta(uint32_t after, uint32_t before)
 }
 
 /* ------------------------------------------------------------------ section A */
+
+/*
+ * The site-to-placement mapping (B1): the primitive indexes m_carPathLinks
+ * with the site's LINK id; the directed connection slot (the site id) is a
+ * different number. The fixture must hold the difference for most sites, and
+ * the placement built through SpawnPlacementFromSite must carry the link.
+ */
+static void
+Section0Mapping(void)
+{
+	const SSpawnSite *sites = g_index.GetSites();
+	int32_t i, differing = 0;
+
+	printf("0. the site mapping: the connection slot is not the link id\n");
+	for (i = 0; i < g_index.GetNumSites(); i++) {
+		const SSpawnSite &site = sites[i];
+		SSpawnPlacement placement;
+
+		Check(site.link >= 0 && site.link < g_numLinks, "0: the site's link is a link id");
+		CheckInt(g_connectionLink[site.connection], site.link, "0: the site's link is its connection's link");
+		if (site.connection != site.link)
+			differing++;
+		SpawnPlacementFromSite(site, i, &placement);
+		CheckInt(placement.link, site.link, "0: the placement carries the site's link");
+		CheckInt(placement.site, i, "0: the placement carries the site id");
+		CheckInt(placement.node1, site.node1, "0: the placement carries the entry node");
+		CheckInt(placement.node2, site.node2, "0: the placement carries the target node");
+		Check(placement.x == site.x && placement.y == site.y && placement.z == site.z,
+			"0: the placement carries the midpoint");
+		Check(placement.between == 0.5f, "0: the midpoint is the pair's half");
+	}
+	Check(differing * 2 > g_index.GetNumSites(), "0: most sites' slots differ from their links");
+	printf("    %d of %d sites have a slot different from their link\n", differing, g_index.GetNumSites());
+}
 
 static void
 Section1Offer(void)
@@ -863,8 +963,9 @@ Section3Gates(void)
 		Check(Delta(after, before) >= 1, "C3: the visibility refusal is counted");
 	}
 
-	/* C4: two plans of the same frame cannot share a site; the run releases
-	 * its reservations, and the released sites plan again. */
+	/* C4: two plans outstanding at the same time cannot share a site; the
+	 * run releases its reservations (a created site's own at once), and the
+	 * released sites plan again. */
 	{
 		SSpawnPlan plan2;
 		SSpawnOffer offers[SPAWN_SERVICE_MAX_CANDIDATES];
@@ -991,6 +1092,36 @@ Section4DeepFacts(void)
 		CheckInt(plan2.sites[0].site, plan.sites[3].site, "D3: the rank's fourth candidate leads the second plan");
 		CheckInt(g_deepCalls, 3 + SPAWN_PLAN_MAX_PLACEMENTS, "D3: the deep facts stop at the filled plan");
 	}
+
+	/* D4: the bounded top-K holds the true best candidates (M1). The deep
+	 * facts refuse everything, so the deep callback's own site list is the
+	 * rank's prefix; the reference sort of every valid offer (a different
+	 * algorithm, the same public comparator) must match it element for
+	 * element. A bounded insert that overwrites its worst entry with every
+	 * later candidate cannot pass this. */
+	{
+		int32_t reference[SPAWN_SERVICE_DEEP_CANDIDATES];
+		int32_t refCount, i;
+		bool same = true;
+
+		g_store.Reset();
+		SpawnTelemetryReset(&tel);
+		ScriptsReset();
+		ArmAll(NEAR_BUBBLE_ARM_SOFT);
+		for (i = 0; i < g_index.GetNumSites(); i++)
+			g_reachRefused[i] = true;
+		refCount = ReferenceTopSites(q, reference, SPAWN_SERVICE_DEEP_CANDIDATES);
+		CheckInt(refCount, SPAWN_SERVICE_DEEP_CANDIDATES, "D4: the reference holds the bound");
+		PlanOnce(q, &plan, &tel, 0);
+		CheckInt(plan.count, 0, "D4: every candidate's reach refuses");
+		CheckInt(g_deepCalls, SPAWN_SERVICE_DEEP_CANDIDATES, "D4: the deep prefix is the bound, not the offer");
+		CheckInt((int)Refusal(tel, SPAWN_REFUSAL_REACHABILITY), SPAWN_SERVICE_DEEP_CANDIDATES,
+			"D4: every deep refusal is counted");
+		for (i = 0; i < g_deepCalls && i < SPAWN_SERVICE_DEEP_CANDIDATES; i++)
+			if (g_deepSiteList[i] != reference[i])
+				same = false;
+		Check(same, "D4: the deep prefix is the true top of the rank (M1)");
+	}
 }
 
 /* ------------------------------------------------------------------ section E */
@@ -1031,7 +1162,10 @@ Section5Run(void)
 			"E1: the run released both reservations");
 	}
 
-	/* E2: the covered fill - a fade-arm creation moves its own row. */
+	/* E2: the covered fill reads the attempt's arm (L3). The plan's midpoint
+	 * arm is the soft one, but the attempt's gate resolves the fade: the
+	 * covered-fill row must count the creation. The fallback case (the plan's
+	 * fade arm with no attempt override) counts too. */
 	{
 		SSpawnOffer offers[SPAWN_SERVICE_MAX_CANDIDATES];
 		SNearBubbleCandidate bubbles[SPAWN_SERVICE_MAX_CANDIDATES];
@@ -1042,17 +1176,35 @@ Section5Run(void)
 		SpawnTelemetryReset(&tel);
 		ScriptsReset();
 		ArmAll(NEAR_BUBBLE_ARM_NONE);
+		g_armOf[nearSite] = NEAR_BUBBLE_ARM_SOFT;
+		g_tryArm[nearSite] = NEAR_BUBBLE_ARM_FADE;
+		n = SpawnOfferSites(g_index, q, offers, SPAWN_SERVICE_MAX_CANDIDATES);
+		for (i = 0; i < n; i++)
+			BubbleForArm(&bubbles[i], ArmOf(offers[i].site));
+		SpawnPlanSites(g_index, offers, bubbles, n, &g_store, 0, HarnessDeep, offers, &plan, &tel);
+		CheckInt(plan.count, 1, "E2: the soft site plans");
+		CheckInt(plan.sites[0].arm, NEAR_BUBBLE_ARM_SOFT, "E2: the plan kept the midpoint arm");
+		coveredBefore = tel.m_nCoveredFillCreations;
+		CheckInt(SpawnRunPlan(plan, &g_store, HarnessTry, 0, &tel, SPAWN_PURPOSE_AMBIENT), SPAWN_REFUSAL_NONE,
+			"E2: the site creates");
+		CheckInt((int)Delta(tel.m_nCoveredFillCreations, coveredBefore), 1,
+			"E2: the covered-fill row reads the attempt's arm, not the midpoint's");
+
+		/* The fallback: the plan's own fade arm, no attempt override. */
+		g_store.Reset();
+		ScriptsReset();
+		ArmAll(NEAR_BUBBLE_ARM_NONE);
 		g_armOf[nearSite] = NEAR_BUBBLE_ARM_FADE;
 		n = SpawnOfferSites(g_index, q, offers, SPAWN_SERVICE_MAX_CANDIDATES);
 		for (i = 0; i < n; i++)
 			BubbleForArm(&bubbles[i], ArmOf(offers[i].site));
 		SpawnPlanSites(g_index, offers, bubbles, n, &g_store, 0, HarnessDeep, offers, &plan, &tel);
-		CheckInt(plan.count, 1, "E2: the fade site plans");
 		CheckInt(plan.sites[0].arm, NEAR_BUBBLE_ARM_FADE, "E2: the plan kept the fade arm");
 		coveredBefore = tel.m_nCoveredFillCreations;
 		CheckInt(SpawnRunPlan(plan, &g_store, HarnessTry, 0, &tel, SPAWN_PURPOSE_AMBIENT), SPAWN_REFUSAL_NONE,
 			"E2: the fade site creates");
-		CheckInt((int)Delta(tel.m_nCoveredFillCreations, coveredBefore), 1, "E2: the covered-fill row counts the creation");
+		CheckInt((int)Delta(tel.m_nCoveredFillCreations, coveredBefore), 1,
+			"E2: the plan's fade arm is the fallback");
 	}
 
 	/* E3: the function gate - the budget, the pool and the force bypass. */
@@ -1129,9 +1281,9 @@ Section5Run(void)
 		CheckInt((int)Delta(waitTel.m_nReadinessWaits, waitsBefore), 2, "E5: both deferrals count");
 		CheckInt((int)Refusal(waitTel, SPAWN_REFUSAL_READINESS), 2, "E5: the readiness refusals count");
 		SpawnReadinessReady(&waitTel, SPAWN_PURPOSE_AMBIENT, 1100);
-		CheckInt((int)waitTel.m_nReadinessWaitFrames, 100, "E5: the frames spent waiting are the clock's delta");
+		CheckInt((int)waitTel.m_nReadinessWaitMs, 100, "E5: the frames spent waiting are the clock's delta");
 		SpawnReadinessReady(&waitTel, SPAWN_PURPOSE_AMBIENT, 1200);
-		CheckInt((int)waitTel.m_nReadinessWaitFrames, 100, "E5: a second ready adds nothing");
+		CheckInt((int)waitTel.m_nReadinessWaitMs, 100, "E5: a second ready adds nothing");
 	}
 }
 
@@ -1233,6 +1385,24 @@ Section6Telemetry(void)
 /* ------------------------------------------------------------------ the cost */
 
 static void
+PrintRateHistogram(void)
+{
+	int32_t histogram[16];
+	int32_t i;
+
+	memset(histogram, 0, sizeof(histogram));
+	for (i = 0; i < g_index.GetNumSites(); i++) {
+		uint8_t rate = g_index.GetSites()[i].spawnRate;
+		histogram[rate < 16 ? rate : 15]++;
+	}
+	printf("  the rarity weights (the rank's last key, the old dice's own 0..15):");
+	for (i = 0; i < 16; i++)
+		if (histogram[i])
+			printf(" %d:%d", i, histogram[i]);
+	printf("\n");
+}
+
+static void
 PrintCost(void)
 {
 	SSpawnRingQuery q = QueryAt(140.0f, 140.0f, 120.0f);
@@ -1277,12 +1447,14 @@ main(void)
 
 	SpawnTelemetryReset(&tel);
 	ScriptsReset();
+	Section0Mapping();
 	Section1Offer();
 	Section2Rank();
 	Section3Gates();
 	Section4DeepFacts();
 	Section5Run();
 	Section6Telemetry();
+	PrintRateHistogram();
 	PrintCost();
 
 	printf("  %lld checks, %d failures\n", g_checks, g_failures);

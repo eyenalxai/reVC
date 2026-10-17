@@ -8,8 +8,9 @@
  * The service needs three questions answered cheaply: is the street around
  * this position already crowded, which cells hold the traffic, and has this
  * site just been promised to another request. This module is that memory and
- * nothing else: no placement, no decisions, and no consumer yet - the planner
- * and the director of the later tickets read it.
+ * nothing else: no placement, no decisions. The spawn service's planner
+ * reads it since VICE-150 (the cell counts for the capacity filter and the
+ * site reservations); the director is a later reader.
  *
  * The presence grid
  * -----------------

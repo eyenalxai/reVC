@@ -451,7 +451,10 @@ CCarCtrl::GenerateOneRandomCar()
 	 * the reachability - and the primitive creates the car there. The
 	 * class and the model above are the requester's policy; the water
 	 * fallback (the boat model, the cop boat) is the service's per-site
-	 * resolution, kept from this call. */
+	 * resolution, kept from this call.
+	 * The stream shift: the removed rarity draw and the moved budget gate
+	 * consume the shared dice differently (the model choice now rolls
+	 * before the gate), exactly as the fill burst's own shift (ADR 0021). */
 	SSpawnCarRequest request;
 	request.purpose = SPAWN_PURPOSE_AMBIENT;
 	request.force = false;
@@ -486,9 +489,11 @@ CCarCtrl::GenerateOneRandomCar()
  * refusal is one of ESpawnRefusal, which the service counts by reason;
  * `ppCreated` (optional) receives the car. The driver contract: SetUpDriver
  * needs RANDOM_VEHICLE, so the near tier creates with it (the far promotion
- * sets the tag before its own call). */
+ * sets the tag before its own call). `pArm` (optional) receives the arm the
+ * creation gate resolved at the final position (the covered-fill row's own
+ * answer). */
 ESpawnRefusal
-CCarCtrl::CreateCarFromPlacement(const SSpawnPlacement& placement, int carClass, int carModel, const CVector& vecTargetPos, const CVector2D& vecPlayerSpeed, bool testForCollision, ESpawnTier tier, CVehicle **ppCreated)
+CCarCtrl::CreateCarFromPlacement(const SSpawnPlacement& placement, int carClass, int carModel, const CVector& vecTargetPos, const CVector2D& vecPlayerSpeed, bool testForCollision, ESpawnTier tier, CVehicle **ppCreated, ENearBubbleArm *pArm)
 {
 	bool bFarTraffic = tier == SPAWN_TIER_FAR;
 	CPathNode* pCurNode = &ThePaths.m_pathNodes[placement.node1];
@@ -503,19 +508,22 @@ CCarCtrl::CreateCarFromPlacement(const SSpawnPlacement& placement, int carClass,
 		/* Do not create vehicle if there is nowhere to go. */
 		return SPAWN_REFUSAL_NO_SITE;
 	int16 idInNode = 0;
-	int16 connectionId;
-	/* A planned site carries the directed connection itself (the site
-	 * index's own key, VICE-148); a raw placement (the far layer's
-	 * collector) resolves it by its node-pair lookup. */
-	if (placement.connection >= 0) {
-		connectionId = placement.connection;
+	int16 linkId;
+	/* A planned site carries the car path LINK id itself (SSpawnSite::link,
+	 * the value m_carPathLinks is indexed with; the directed connection slot
+	 * is a different number and only the reservations and the site id use
+	 * it); a raw placement (the far layer's collector) resolves the link by
+	 * its node-pair lookup. */
+	if (placement.link >= 0) {
+		linkId = placement.link;
 	} else {
 		while (idInNode < pCurNode->numLinks &&
 			ThePaths.ConnectedNode(idInNode + pCurNode->firstLink) != placement.node2)
 			idInNode++;
-		connectionId = ThePaths.m_carPathConnections[idInNode + pCurNode->firstLink];
+		linkId = ThePaths.m_carPathConnections[idInNode + pCurNode->firstLink];
 	}
-	CCarPathLink* pPathLink = &ThePaths.m_carPathLinks[connectionId];
+	assert(linkId >= 0 && linkId < NUM_CARPATHLINKS);
+	CCarPathLink* pPathLink = &ThePaths.m_carPathLinks[linkId];
 	int16 lanesOnCurrentRoad = pPathLink->pathNodeIndex == placement.node2 ? pPathLink->numLeftLanes : pPathLink->numRightLanes;
 	if (lanesOnCurrentRoad == 0)
 		/* Not spawning vehicle if road is one way and intended direction is opposide to that way. */
@@ -595,7 +603,7 @@ CCarCtrl::CreateCarFromPlacement(const SSpawnPlacement& placement, int carClass,
 	}
 	if (pVehicle && pVehicle->GetModelIndex() == MI_MRWHOOP)
 		pVehicle->m_bSirenOrAlarm = true;
-	pVehicle->AutoPilot.m_nNextPathNodeInfo = connectionId;
+	pVehicle->AutoPilot.m_nNextPathNodeInfo = linkId;
 	pVehicle->AutoPilot.m_nNextLane = pVehicle->AutoPilot.m_nCurrentLane = lane;
 	CBox* boundingBox = &CModelInfo::GetColModel(pVehicle->GetModelIndex())->boundingBox;
 	float carLength = 1.0f + (boundingBox->max.y - boundingBox->min.y) / 2;
@@ -831,7 +839,7 @@ CCarCtrl::CreateCarFromPlacement(const SSpawnPlacement& placement, int carClass,
 	 * The far layer (VICE-128) asks the same gate with `rayAllowed` false:
 	 * its sites are behind the camera by the margin or beyond the fade, and a
 	 * line-of-sight ray of two kilometres is not the far layer's work. */
-	if (!CSpawnService::AllowsCreation(pVehicle->GetPosition(), vecTargetPos, NEAR_BUBBLE_ENTITY_RADIUS, !bFarTraffic)) {
+	if (!CSpawnService::AllowsCreation(pVehicle->GetPosition(), vecTargetPos, NEAR_BUBBLE_ENTITY_RADIUS, !bFarTraffic, pArm)) {
 		delete pVehicle;
 		return SPAWN_REFUSAL_VISIBILITY;
 	}
@@ -1281,10 +1289,10 @@ CCarCtrl::RemoveCarsIfThePoolGetsFull(void)
 			 * apart from the culls the acceptance watches (VICE-127). */
 			CSpawnService::CountValveRemoval();
 		CWorld::Remove(pRemove);
+		/* The service's own removal ledger (VICE-150): the note is taken
+		 * before the delete, and the row is the car's own class. */
+		CSpawnService::NoteVehicleRemoval(pRemove);
 		delete pRemove;
-		/* The service's own removal ledger (VICE-150): the cull's
-		 * deletions count as the ambient purpose. */
-		CSpawnService::NoteRemoval(SPAWN_PURPOSE_AMBIENT);
 	}
 }
 
@@ -1313,8 +1321,8 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 			 * faded, so the deletion is not an event the player can catch. */
 			CSpawnService::CountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, true);
 			CWorld::Remove(pVehicle);
+			CSpawnService::NoteVehicleRemoval(pVehicle);
 			delete pVehicle;
-			CSpawnService::NoteRemoval(SPAWN_PURPOSE_AMBIENT);
 			return;
 		}
 		float distanceToPlayer = (pVehicle->GetPosition() - vecPlayerPos).Magnitude2D();
@@ -1355,8 +1363,8 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 					return;
 				CSpawnService::CountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, false);
 				CWorld::Remove(pVehicle);
+				CSpawnService::NoteVehicleRemoval(pVehicle);
 				delete pVehicle;
-				CSpawnService::NoteRemoval(SPAWN_PURPOSE_AMBIENT);
 			}
 			return;
 		}
@@ -1378,8 +1386,8 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 		CSpawnService::AllowsRemoval(pVehicle, vecPlayerPos, 22.0f)){
 		CSpawnService::CountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, false);
 		CWorld::Remove(pVehicle);
+		CSpawnService::NoteVehicleRemoval(pVehicle);
 		delete pVehicle;
-		CSpawnService::NoteRemoval(SPAWN_PURPOSE_AMBIENT);
 		return;
 	}
 	if (pVehicle->GetStatus() == STATUS_WRECKED) {
@@ -1395,8 +1403,8 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 						CSpawnService::AllowsRemoval(pVehicle, vecPlayerPos, 6.5f)) {
 						CSpawnService::CountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, false);
 						CWorld::Remove(pVehicle);
+						CSpawnService::NoteVehicleRemoval(pVehicle);
 						delete pVehicle;
-						CSpawnService::NoteRemoval(SPAWN_PURPOSE_AMBIENT);
 					}
 				}
 			}

@@ -59,8 +59,9 @@
  * SpawnPlanSites drops the candidates the gates refuse (by reason), ranks what
  * is left - hidden arms first, then the emptier cell (spread), then the
  * nearest to the request's ring, then the rarity weight, then the site id -
- * and reserves the returned placements in the occupancy store, so two
- * requests cannot plan the same connection in the same frame. The deep facts
+ * and reserves the returned placements in the occupancy store while the plan
+ * is outstanding, so two requests cannot plan the same connection at the same
+ * time. The deep facts
  * (the live zone and the reachability's path search) resolve for the rank's
  * first SPAWN_SERVICE_DEEP_CANDIDATES only: the path search is the frame's
  * expensive call, and the prefix is twice the plan's four, so a few deep
@@ -82,18 +83,49 @@
  * random tag (the near road-site kind does; the far promotion sets the tag
  * before its own SetUpDriver call).
  *
+ * The equivalence, stated (the deliberate deltas)
+ * -----------------------------------------------
+ *
+ * The gates are the old ones, one by one, with the deltas this ticket owns
+ * and states rather than hides:
+ *
+ *	the candidate set	the plan's candidates are the sites whose
+ *				midpoint is in the ring band, not the node
+ *				pairs that bracket the ring (the index
+ *				carries no per-node positions); the rank's
+ *				"nearest to the ring" keeps the placement on
+ *				the ring.
+ *	the ped pool		the reserve is checked once per request as well
+ *				as once per frame and once per car (the
+ *				service's gate); the old path checked the
+ *				frame and the car only.
+ *	the top-down view	the ladder's bypass arm allows a creation the
+ *				old birth cull's top-down disjunct refused;
+ *				the ladder owns the view now.
+ *	the rarity		the old dice thinned the placements
+ *				probabilistically; the planner's weight is
+ *				the rank's last key, so the earlier keys
+ *				decide and the rate only breaks their ties.
+ *	the plan's conservatism	a candidate whose midpoint arm is catchable is
+ *				dropped (VISIBILITY) and never reaches the
+ *				primitive, so a final-position occluded hint
+ *				cannot rescue it; the old path attempted it.
+ *	the RNG stream		the removed rarity draw and the moved budget
+ *				gate consume the shared dice differently
+ *				(the fill burst's own shift, ADR 0021).
+ *
  * The telemetry (the ticket's list)
  * ---------------------------------
  *
  * Requests by purpose and by kind; refusals by reason (no site, occupancy,
  * visibility, zone, readiness, budget, pool, reachability); placements
  * created and removed by purpose, with the covered-fill creations in their
- * own row; the readiness waits (requests deferred for models and the frames
- * spent waiting); the plan cost (candidates examined, placements returned,
- * microseconds per plan call); the conservation check (the cell target sum
- * against the global target); and the primitive's defect rows (the ground,
- * the air offset and the water rejections). The counters are fields of
- * SSpawnServiceTelemetry under one owner per counter: the engine's one
+ * own row; the readiness waits (requests deferred for models and the
+ * milliseconds spent waiting); the plan cost (candidates examined, placements
+ * returned, microseconds per plan call); the conservation check (the cell
+ * target sum against the global target); and the primitive's defect rows (the
+ * ground, the air offset and the water rejections). The counters are fields
+ * of SSpawnServiceTelemetry under one owner per counter: the engine's one
  * static instance, CSpawnService::ms_Telemetry (read live by
  * utils/caps-audit/live-counters.py at the offsets pinned in SpawnService.cpp).
  *
@@ -213,7 +245,7 @@ struct SSpawnServiceTelemetry
 	uint32_t m_nRemovedByPurpose[SPAWN_PURPOSE_COUNT];
 	uint32_t m_nCoveredFillCreations;
 	uint32_t m_nReadinessWaits;
-	uint32_t m_nReadinessWaitFrames;
+	uint32_t m_nReadinessWaitMs;
 	uint32_t m_aReadinessSinceMs[SPAWN_PURPOSE_COUNT];	/* 0: not waiting */
 	uint32_t m_nPlanCalls;
 	uint32_t m_nPlanCandidates;
@@ -518,7 +550,13 @@ SpawnVisibilityRank(uint8_t arm)
 
 /* The rank's order: the hidden arms first, then the emptier cell (spread),
  * then the nearest to the request's ring, then the higher rarity weight, then
- * the site id (deterministic). True when `a` sorts before `b`. */
+ * the site id (deterministic). The rarity is the weight the old dice became
+ * (the ticket's decision, stated): it is the rank's last key, so the order's
+ * own keys decide first and a main street wins over a side street only where
+ * everything else is equal. It is deliberately not a pass/fail filter - a
+ * filter would thin the plan's candidates by the site's own rate, which is
+ * the dice again - and the shipped rates the key works with are printed by
+ * the dump path (utils/spawn-service). True when `a` sorts before `b`. */
 static inline bool
 SpawnPlanSiteSortsBefore(int32_t rankA, int32_t occupancyA, float ringErrorA, uint8_t rateA, int32_t siteA,
 	int32_t rankB, int32_t occupancyB, float ringErrorB, uint8_t rateB, int32_t siteB)
@@ -545,8 +583,10 @@ SpawnPlanSiteSortsBefore(int32_t rankA, int32_t occupancyA, float ringErrorA, ui
  * order for the ranked prefix: a zone the requested class is not carried in
  * (ZONE) and an unreachable site (REACHABILITY).
  *
- * The returned placements are reserved for SPAWN_OCCUPANCY_RESERVE_MS, so two
- * requests cannot plan the same connection; the run releases them (or the
+ * The returned placements are reserved for SPAWN_OCCUPANCY_RESERVE_MS while
+ * the plan is outstanding, so two requests cannot plan the same connection at
+ * the same time; the run releases them (a created site's own at once - the
+ * created car's presence in the store is the guard from then on - or the
  * expiry does). The plan's own `refusal` is the first drop reason (NONE when
  * something survived); a request whose offer list is empty counts NO_SITE and
  * returns an empty plan.
@@ -606,27 +646,40 @@ SpawnPlanSites(const CSpawnSiteIndex &index, const SSpawnOffer *offers,
 		}
 		rank = SpawnVisibilityRank(arm);
 
-		/* The bounded top-K insert (K = SPAWN_PLAN_MAX_PLACEMENTS): the
-		 * candidate walks up while it sorts before the entry above it. */
+		/* The bounded top-K insert (K = SPAWN_SERVICE_DEEP_CANDIDATES): a
+		 * full buffer takes the candidate only when it sorts before the
+		 * buffer's worst entry; then the candidate walks up while it sorts
+		 * before the entry above it. */
 		{
-			int32_t at = nb < SPAWN_SERVICE_DEEP_CANDIDATES ? nb : SPAWN_SERVICE_DEEP_CANDIDATES - 1;
-			while (at > 0 &&
-				SpawnPlanSiteSortsBefore(rank, occupancy, offers[i].ringError, offers[i].spawnRate, offers[i].site,
-					SpawnVisibilityRank(bestArm[at-1]), bestOcc[at-1], bestErr[at-1], bestRate[at-1], offers[bestOffer[at-1]].site)) {
-				bestOffer[at] = bestOffer[at-1];
-				bestOcc[at] = bestOcc[at-1];
-				bestArm[at] = bestArm[at-1];
-				bestErr[at] = bestErr[at-1];
-				bestRate[at] = bestRate[at-1];
-				at--;
+			bool insert = nb < SPAWN_SERVICE_DEEP_CANDIDATES;
+
+			if (!insert)
+				insert = SpawnPlanSiteSortsBefore(rank, occupancy, offers[i].ringError, offers[i].spawnRate, offers[i].site,
+					SpawnVisibilityRank(bestArm[SPAWN_SERVICE_DEEP_CANDIDATES-1]),
+					bestOcc[SPAWN_SERVICE_DEEP_CANDIDATES-1],
+					bestErr[SPAWN_SERVICE_DEEP_CANDIDATES-1],
+					bestRate[SPAWN_SERVICE_DEEP_CANDIDATES-1],
+					offers[bestOffer[SPAWN_SERVICE_DEEP_CANDIDATES-1]].site);
+			if (insert) {
+				int32_t at = nb < SPAWN_SERVICE_DEEP_CANDIDATES ? nb : SPAWN_SERVICE_DEEP_CANDIDATES - 1;
+				while (at > 0 &&
+					SpawnPlanSiteSortsBefore(rank, occupancy, offers[i].ringError, offers[i].spawnRate, offers[i].site,
+						SpawnVisibilityRank(bestArm[at-1]), bestOcc[at-1], bestErr[at-1], bestRate[at-1], offers[bestOffer[at-1]].site)) {
+					bestOffer[at] = bestOffer[at-1];
+					bestOcc[at] = bestOcc[at-1];
+					bestArm[at] = bestArm[at-1];
+					bestErr[at] = bestErr[at-1];
+					bestRate[at] = bestRate[at-1];
+					at--;
+				}
+				bestOffer[at] = i;
+				bestOcc[at] = occupancy;
+				bestArm[at] = arm;
+				bestErr[at] = offers[i].ringError;
+				bestRate[at] = offers[i].spawnRate;
+				if (nb < SPAWN_SERVICE_DEEP_CANDIDATES)
+					nb++;
 			}
-			bestOffer[at] = i;
-			bestOcc[at] = occupancy;
-			bestArm[at] = arm;
-			bestErr[at] = offers[i].ringError;
-			bestRate[at] = offers[i].spawnRate;
-			if (nb < SPAWN_SERVICE_DEEP_CANDIDATES)
-				nb++;
 		}
 	}
 
@@ -674,18 +727,22 @@ SpawnPlanSites(const CSpawnSiteIndex &index, const SSpawnOffer *offers,
 /*
  * The caller's attempt at one planned site: the engine resolves the model and
  * calls the primitive; the evidence program scripts the answer. The return is
- * the refusal (NONE: created).
+ * the refusal (NONE: created). `pArm` starts as the arm the rank read and the
+ * attempt may overwrite it with the arm its own gate resolved at the final
+ * position - the creation's covered-fill row reads the attempt's arm, not the
+ * midpoint's.
  */
-typedef ESpawnRefusal (*SpawnTryFn)(void *user, const SSpawnPlanSite &site);
+typedef ESpawnRefusal (*SpawnTryFn)(void *user, const SSpawnPlanSite &site, uint8_t *pArm);
 
 /*
  * Try the plan's sites in order. Every attempt that refuses is counted by its
  * reason; the site's reservation is released either way (the created site's
  * siblings too, so an abandoned plan frees the street at once). A creation
  * counts by purpose, and a creation the screen fade covered moves the
- * covered-fill row (the arm the rank read; the primitive's gate answered it).
- * The return is NONE on a creation, else the last attempt's refusal (or the
- * plan's own first drop reason when there was nothing to try).
+ * covered-fill row (the arm the attempt's gate resolved; the plan's midpoint
+ * arm is the fallback). The return is NONE on a creation, else the last
+ * attempt's refusal (or the plan's own first drop reason when there was
+ * nothing to try).
  */
 static inline ESpawnRefusal
 SpawnRunPlan(const SSpawnPlan &plan, SSpawnOccupancyStore *store, SpawnTryFn attempt, void *user,
@@ -697,13 +754,14 @@ SpawnRunPlan(const SSpawnPlan &plan, SSpawnOccupancyStore *store, SpawnTryFn att
 	if (plan.count == 0)
 		return last;
 	for (i = 0; i < plan.count; i++) {
-		ESpawnRefusal refusal = attempt(user, plan.sites[i]);
+		uint8_t arm = plan.sites[i].arm;
+		ESpawnRefusal refusal = attempt(user, plan.sites[i], &arm);
 		if (store)
 			store->ReleaseSite(plan.sites[i].site);
 		if (refusal == SPAWN_REFUSAL_NONE) {
 			if (tel) {
 				SpawnNoteCreated(tel, purpose);
-				if (plan.sites[i].arm == NEAR_BUBBLE_ARM_FADE)
+				if (arm == NEAR_BUBBLE_ARM_FADE)
 					tel->m_nCoveredFillCreations++;
 			}
 			for (j = i + 1; j < plan.count; j++)
@@ -783,7 +841,7 @@ SpawnReadinessReady(SSpawnServiceTelemetry *tel, ESpawnPurpose purpose, uint32_t
 	if (purpose < 0 || purpose >= SPAWN_PURPOSE_COUNT)
 		return;
 	if (tel->m_aReadinessSinceMs[purpose] != 0) {
-		tel->m_nReadinessWaitFrames += nowMs - tel->m_aReadinessSinceMs[purpose];
+		tel->m_nReadinessWaitMs += nowMs - tel->m_aReadinessSinceMs[purpose];
 		tel->m_aReadinessSinceMs[purpose] = 0;
 	}
 }
@@ -792,8 +850,10 @@ SpawnReadinessReady(SSpawnServiceTelemetry *tel, ESpawnPurpose purpose, uint32_t
 
 /* The explicit request: the exact position, the model, the heading and the
  * lifetime the caller gives (a script, a mission, a set piece). The tag is
- * the vehicle's VehicleCreatedBy; 0 asks for the random tag, the one the
- * driver contract needs. */
+ * the vehicle's VehicleCreatedBy; 0 asks for the random tag (RANDOM_VEHICLE),
+ * the one the driver contract needs: a caller that does not name a tag lets
+ * the service pick the traffic's own, so SetUpDriver works on the car it just
+ * made (a script that wants a mission car names MISSION_VEHICLE itself). */
 struct SSpawnExplicitRequest
 {
 	ESpawnPurpose purpose;
@@ -866,15 +926,35 @@ SpawnBetweenNodesClamp(float between, float carLength, float distanceBetweenNode
 /* One planned creation handed to the primitive: the site's own geometry plus
  * the fraction between the nodes. `site` is -1 for a raw placement (the far
  * layer's collector, until its own migration): the primitive then resolves
- * the connection by its own node-pair lookup. */
+ * the link by its own node-pair lookup. `link` is the site's **car path link
+ * id** (`SSpawnSite::link`, the value `m_carPathLinks` is indexed with), not
+ * the directed connection slot the site id and the reservations use: the two
+ * differ on almost every site of the shipped graph. */
 struct SSpawnPlacement
 {
 	int32_t site;
 	int16_t node1, node2;
-	int16_t connection;
+	int16_t link;
 	float x, y, z;		/* the site midpoint (or the collector's point) */
 	float between;
 };
+
+/* The placement of one planned site, the one construction of the mapping: the
+ * site's midpoint, its node pair and its link id, the fraction 0.5 (the
+ * midpoint is the pair's own). The engine and the evidence program both build
+ * placements through this, so the slot-versus-link mistake cannot come back. */
+static inline void
+SpawnPlacementFromSite(const SSpawnSite &site, int32_t siteId, SSpawnPlacement *pOut)
+{
+	pOut->site = siteId;
+	pOut->node1 = site.node1;
+	pOut->node2 = site.node2;
+	pOut->link = site.link;
+	pOut->x = site.x;
+	pOut->y = site.y;
+	pOut->z = site.z;
+	pOut->between = 0.5f;
+}
 
 /* --- The request envelopes ----------------------------------------------- */
 
@@ -927,17 +1007,23 @@ public:
 
 	/* The ladder's API (NearBubble.cpp's gates, behavior preserved): the
 	 * creation and removal gates and the acceptance counters. Every caller
-	 * goes through here; the counters stay CCarCtrl's own (one owner). */
+	 * goes through here; the counters stay CCarCtrl's own (one owner).
+	 * `pArm` (optional) receives the arm the creation gate resolved at the
+	 * final position, for the covered-fill row. */
 	static void BeginFrame(void);
-	static bool AllowsCreation(const CVector &pos, const CVector &playerCentre, float radius, bool rayAllowed);
+	static bool AllowsCreation(const CVector &pos, const CVector &playerCentre, float radius, bool rayAllowed, ENearBubbleArm *pArm = 0);
 	static bool AllowsRemoval(CVehicle *pVehicle, const CVector &playerCentre, float ringThreshold, bool rayAllowed = true);
 	static void CountCreation(const CVector &pos, float radius);
 	static void CountRemoval(const CVector &pos, float radius, bool wasInvisible);
 	static void CountOtherCreation(const CVector &pos, float radius);
 	static void CountValveRemoval(void);
 
-	/* The removal note: the near cull's deletions, by purpose. */
-	static void NoteRemoval(ESpawnPurpose purpose);
+	/* The removal note: the near cull's deletions, by the removed car's own
+	 * class (RANDOM_VEHICLE -> ambient, MISSION_VEHICLE -> mission,
+	 * PARKED_VEHICLE -> parked, PERMANENT_VEHICLE -> special; a class the
+	 * map does not name counts as the ambient traffic's, the cull's own
+	 * subject). */
+	static void NoteVehicleRemoval(CVehicle *pVehicle);
 
 	/* The primitive's defect notes (the ground casts and the water casts). */
 	static void NoteGroundRejection(void);
@@ -951,8 +1037,6 @@ public:
 
 	/* The boot, the restart and the load: the counters go. */
 	static void ReInit(void);
-
-	static SSpawnServiceTelemetry &Telemetry(void) { return ms_Telemetry; }
 
 private:
 	/* The engine's one counter home (the live reader's symbol). */

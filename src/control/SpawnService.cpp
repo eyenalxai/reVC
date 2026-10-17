@@ -114,8 +114,18 @@ struct SSpawnCarAttempt
  * same target area answers the same way, and the frame makes up to six car
  * calls with the same target, so a small direct-mapped cache keeps the search
  * out of the per-creation loop: the key is the site id and the target's
- * presence cell (16 m), and an entry lives SPAWN_REACH_CACHE_FRAMES. A load or
- * a restart clears it (ReInit).
+ * presence cell (16 m), and an entry lives SPAWN_REACH_CACHE_FRAMES (15, a
+ * quarter second at 60 fps) so a stale answer cannot outlive the target's own
+ * movement inside the cell by long.
+ *
+ * The caveats, stated: the key is the target's 2D cell, so two targets inside
+ * one 16 m cell share an answer (the search is against the target's actual
+ * position and height, so the sharing is an approximation - the created car's
+ * final collision query and the route join stay the true guards); and the
+ * graph's flags (a script's road toggle, a save load) move the answer, so the
+ * cache is cleared when CPathFind::m_nodeFlagsVersion moved - the
+ * SpawnSites::RefreshFlags pattern, one comparison. A load or a restart
+ * clears it too (ReInit).
  */
 #define SPAWN_REACH_CACHE_ENTRIES 256
 #define SPAWN_REACH_CACHE_FRAMES 15
@@ -141,6 +151,7 @@ struct SReachCache
 };
 
 static SReachCache ms_ReachCache;
+static uint32 ms_nReachCacheVersion;
 
 static void
 SpawnReachCacheClear(void)
@@ -158,6 +169,13 @@ SpawnReachOf(int32 site, const CVector &target)
 	int32 cell = -1;
 	uint32 slot, frame = CTimer::GetFrameCounter();
 	SReachCacheEntry *pEntry;
+
+	/* The graph's flags move the answer (a script's road toggle, a save
+	 * load): the index's own refresh pattern, one comparison a use. */
+	if (ThePaths.m_nodeFlagsVersion != ms_nReachCacheVersion) {
+		SpawnReachCacheClear();
+		ms_nReachCacheVersion = ThePaths.m_nodeFlagsVersion;
+	}
 
 	SSpawnOccupancyStore::CellAt(target.x, target.y, cell);
 	slot = ((uint32)site * 31u + (uint32)cell) & (SPAWN_REACH_CACHE_ENTRIES - 1);
@@ -190,22 +208,27 @@ SpawnResolveDeepFacts(void *user, int32 offerIndex, SSpawnSiteDeepFacts *facts)
 
 	facts->zoneOk = SpawnZoneAdmitsClass(sitePos, pAttempt->pRequest->carClass);
 	facts->reachOk = true;
-	if (!offer.boat && pAttempt->pRequest->requireReach)
+	/* The zone gate answers first (the core checks it first too), so a
+	 * zone-refused candidate costs no path search. */
+	if (facts->zoneOk && !offer.boat && pAttempt->pRequest->requireReach)
 		facts->reachOk = SpawnReachOf(offer.site, pAttempt->target);
 }
 
 /* The attempt at one planned site: the model the site takes (the ambient's
  * water fallback, kept verbatim: the cop boat once, the boat model once per
  * call) and the primitive. The lane draw, the duration and the site facts are
- * the primitive's own. */
+ * the primitive's own; `pArm` receives the arm the creation gate resolved at
+ * the final position (the covered-fill row's own answer, L3). */
 static ESpawnRefusal
-SpawnTrySite(void *user, const SSpawnPlanSite &planSite)
+SpawnTrySite(void *user, const SSpawnPlanSite &planSite, uint8_t *pArm)
 {
 	SSpawnCarAttempt *pAttempt = (SSpawnCarAttempt *)user;
 	const SSpawnCarRequest &request = *pAttempt->pRequest;
 	const SSpawnSite &site = CSpawnSites::Index().GetSites()[planSite.site];
 	int carClass = request.carClass;
 	int carModel = request.carModel;
+	ENearBubbleArm arm = NEAR_BUBBLE_ARM_NONE;
+	ESpawnRefusal refusal;
 
 	if (site.flags & SPAWN_SITE_BOAT) {
 		if (!request.allowBoats)
@@ -231,17 +254,16 @@ SpawnTrySite(void *user, const SSpawnPlanSite &planSite)
 	}
 
 	SSpawnPlacement placement;
-	placement.site = planSite.site;
-	placement.node1 = site.node1;
-	placement.node2 = site.node2;
-	placement.connection = (int16)site.connection;
-	placement.x = site.x;
-	placement.y = site.y;
-	placement.z = site.z;
-	placement.between = 0.5f;
-	return CCarCtrl::CreateCarFromPlacement(placement, carClass, carModel,
+
+	/* The site's own mapping (B1): the primitive indexes m_carPathLinks with
+	 * the site's LINK id, never with the directed connection slot. */
+	SpawnPlacementFromSite(site, planSite.site, &placement);
+	refusal = CCarCtrl::CreateCarFromPlacement(placement, carClass, carModel,
 		pAttempt->target, CVector2D(request.playerSpeedX, request.playerSpeedY),
-		request.testForCollision, SPAWN_TIER_NEAR, pAttempt->ppCreated);
+		request.testForCollision, SPAWN_TIER_NEAR, pAttempt->ppCreated, &arm);
+	if (refusal == SPAWN_REFUSAL_NONE && pArm)
+		*pArm = (uint8_t)arm;
+	return refusal;
 }
 
 bool
@@ -339,7 +361,11 @@ CSpawnService::RequestExplicit(const SSpawnExplicitRequest &request, CVehicle **
 		return false;
 	}
 	if (request.carModel < 0) {
-		SpawnNoteRefusal(&ms_Telemetry, SPAWN_REFUSAL_READINESS);
+		/* No model is a bad request, not a streaming wait: NO_SITE (there
+		 * is no car to place); a model that is merely not resident is not
+		 * refused here - the force bypass's own contract is that the
+		 * streaming cannot fail a mission, so the creation asks for it. */
+		SpawnNoteRefusal(&ms_Telemetry, SPAWN_REFUSAL_NO_SITE);
 		return false;
 	}
 
@@ -351,8 +377,13 @@ CSpawnService::RequestExplicit(const SSpawnExplicitRequest &request, CVehicle **
 		pVehicle = new CBike(request.carModel, decision.createdBy);
 	else
 		pVehicle = new CAutomobile(request.carModel, decision.createdBy);
-	if (pVehicle == nil)
+	if (pVehicle == nil) {
+		/* The constructor's own pool refusal (the free-space check above
+		 * passed, so this is the pool's last slot going to another path in
+		 * between): the pool's reason, counted. */
+		SpawnNoteRefusal(&ms_Telemetry, SPAWN_REFUSAL_POOL);
 		return false;
+	}
 
 	/* The exact position and heading the caller gave: no plan, no ring, no
 	 * visibility (the script asks for the car; where it stands is the
@@ -391,9 +422,9 @@ CSpawnService::BeginFrame(void)
 }
 
 bool
-CSpawnService::AllowsCreation(const CVector &pos, const CVector &playerCentre, float radius, bool rayAllowed)
+CSpawnService::AllowsCreation(const CVector &pos, const CVector &playerCentre, float radius, bool rayAllowed, ENearBubbleArm *pArm)
 {
-	return CCarCtrl::NearBubbleAllowsCreation(pos, playerCentre, radius, rayAllowed);
+	return CCarCtrl::NearBubbleAllowsCreation(pos, playerCentre, radius, rayAllowed, pArm);
 }
 
 bool
@@ -428,10 +459,27 @@ CSpawnService::CountValveRemoval(void)
 
 /* --- The notes ----------------------------------------------------------- */
 
-void
-CSpawnService::NoteRemoval(ESpawnPurpose purpose)
+/* The purpose of a removed car's class: the ledger names the class the
+ * vehicle was created as (VICE-150), so a scripted or parked deletion is not
+ * hidden inside the ambient traffic's row. */
+static ESpawnPurpose
+SpawnPurposeOfVehicle(const CVehicle *pVehicle)
 {
-	SpawnNoteRemoval(&ms_Telemetry, purpose);
+	switch (pVehicle->VehicleCreatedBy) {
+	case RANDOM_VEHICLE:	return SPAWN_PURPOSE_AMBIENT;
+	case MISSION_VEHICLE:	return SPAWN_PURPOSE_MISSION;
+	case PARKED_VEHICLE:	return SPAWN_PURPOSE_PARKED;
+	case PERMANENT_VEHICLE:	return SPAWN_PURPOSE_SPECIAL;
+	default:		return SPAWN_PURPOSE_AMBIENT;	/* a class outside the map: the cull's own subject */
+	}
+}
+
+void
+CSpawnService::NoteVehicleRemoval(CVehicle *pVehicle)
+{
+	if (pVehicle == nil)
+		return;
+	SpawnNoteRemoval(&ms_Telemetry, SpawnPurposeOfVehicle(pVehicle));
 }
 
 void

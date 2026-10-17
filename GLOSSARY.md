@@ -877,11 +877,13 @@ the final collision query at creation stays the true guard.
 
 The occupancy store's short promise on a site (VICE-149): the planner reserves
 a site id - the site index's directed connection - before it creates the actor
-there, so two requests cannot plan the same connection in the same frame. The
-reservation expires after two seconds (`SPAWN_OCCUPANCY_RESERVE_MS`), so an
-abandoned plan frees the site by itself. A held entry is one whose remaining
-lifetime is inside the reserve window: a clock that moved backwards (a load)
-reads the site free, and a stale entry cannot read held.
+there, so two requests cannot plan the same connection at the same time. The
+run releases a created site's own reservation at once (the created car's
+presence in the store is the guard from then on); the reservation expires
+after two seconds (`SPAWN_OCCUPANCY_RESERVE_MS`), so an abandoned plan frees
+the site by itself. A held entry is one whose remaining lifetime is inside the
+reserve window: a clock that moved backwards (a load) reads the site free, and
+a stale entry cannot read held.
 ## Spawn site
 
 A place a vehicle may be created on the car path graph, one per **directed**
@@ -955,11 +957,18 @@ TestCoorsCloseness`, the path search the primitive used to pay per creation),
 and `SpawnPlanSites` filters by reason, ranks - hidden arms first, then the
 emptier presence cell (spread), then the nearest to the request's ring, then
 the rarity weight, then the site id - and reserves the returned placements in
-the occupancy store, so two requests cannot plan the same connection in the
-same frame. `SpawnRunPlan` tries the plan's sites in order through the
-primitive and counts every post-plan refusal. The rank keeps the first
-`SPAWN_SERVICE_DEEP_CANDIDATES` (8) candidates for the deep facts, and the
-plan returns at most `SPAWN_PLAN_MAX_PLACEMENTS` (4).
+the occupancy store while the plan is outstanding, so two requests cannot plan
+the same connection at the same time. The rarity is the rank's last key by
+decision: it is the weight the old dice became, so the order's own keys decide
+first and the rate only breaks their ties (not a filter - that would be the
+dice again; the dump path prints the shipped rates). A candidate whose
+midpoint arm is catchable is dropped (VISIBILITY) and never reaches the
+primitive - the plan's stated conservatism: the old path attempted it and a
+final-position occluded hint could allow it by ray. `SpawnRunPlan` tries the
+plan's sites in order through the primitive and counts every post-plan
+refusal. The rank keeps the first `SPAWN_SERVICE_DEEP_CANDIDATES` (8)
+candidates for the deep facts, and the plan returns at most
+`SPAWN_PLAN_MAX_PLACEMENTS` (4).
 
 ## Creation primitive (spawn)
 

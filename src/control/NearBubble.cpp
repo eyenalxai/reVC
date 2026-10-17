@@ -222,14 +222,18 @@ CCarCtrl::NearBubbleBeginFrame(void)
 	ms_fNearBubbleTarget = NearBubbleTarget((float)GetRandomCarTarget(), CurrentTrafficRings().carDespawn);
 }
 
-/* The creation gate: may a car appear at this position? */
+/* The creation gate: may a car appear at this position? `pArm` (optional)
+ * receives the arm the ladder resolved, so the service's covered-fill row can
+ * name the final position's arm instead of the plan's midpoint one. */
 bool
-CCarCtrl::NearBubbleAllowsCreation(const CVector &pos, const CVector &playerCentre, float radius, bool rayAllowed)
+CCarCtrl::NearBubbleAllowsCreation(const CVector &pos, const CVector &playerCentre, float radius, bool rayAllowed, ENearBubbleArm *pArm)
 {
 	SNearBubbleCandidate c = NearBubbleCandidateAt(pos, playerCentre, radius);
 	ENearBubbleArm arm;
 	bool allowed = NearBubbleResolve(c, pos, rayAllowed, &arm);
 
+	if (pArm)
+		*pArm = arm;
 	if (!allowed)
 		ms_nNearBubbleRefused++;
 	return allowed;

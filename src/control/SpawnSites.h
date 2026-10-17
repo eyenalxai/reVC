@@ -31,10 +31,13 @@
  *			never the link record's position (the external links'
  *			positions are the synthetic midpoints of the merged
  *			external nodes, PathFind.cpp PreparePathDataForType)
- *	connection	the directed connection's id (the m_connections
- *			index): the key the creation primitive repeats its own
- *			lane lookup with
- *	link		the connection's car path link (m_carPathConnections)
+ *	connection	the directed connection's slot (the m_connections
+ *			index): the site id and the reservations' key. It is
+ *			*not* the car path link id the creation primitive
+ *			indexes m_carPathLinks with
+ *	link		the connection's car path link (m_carPathConnections):
+ *			the id m_carPathLinks is indexed with, the value the
+ *			primitive needs
  *	dirX, dirY	the travel direction, hundredths: the link's own
  *			direction with the primitive's sign rule
  *	lanes		the lane count of the travelled side (the primitive's
@@ -207,9 +210,9 @@ struct SSpawnSiteGraph
 struct SSpawnSite
 {
 	float x, y, z;		/* the connection midpoint (metres) */
-	uint16_t connection;
+	uint16_t connection;	/* the directed connection slot: the site id */
 	int16_t node1, node2;	/* the node pair in travel order */
-	int16_t link;		/* the connection's car path link */
+	int16_t link;		/* the connection's car path link: the m_carPathLinks index */
 	int16_t zoneIndex;	/* the info-zone index of the midpoint (-1: none) */
 	int8_t dirX, dirY;	/* the travel direction (*100) */
 	uint8_t lanes;		/* the travelled side's lanes (never 0) */
@@ -299,9 +302,9 @@ private:
 
 /*
  * The engine side (SpawnSites.cpp): the snapshot of ThePaths, the build at
- * load, and the per-frame flags refresh. Nothing consumes the index yet
- * (VICE-148); the spawn service and the planner are the next tickets, and the
- * harness (utils/spawn-service) is the index's reader today.
+ * load, and the per-frame flags refresh. The spawn service's planner reads
+ * the index since VICE-150; the harness (utils/spawn-service) is the other
+ * reader.
  */
 class CSpawnSites
 {

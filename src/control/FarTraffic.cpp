@@ -750,16 +750,17 @@ FarTrafficTrySite(const SFarTrafficBand &band, const CVector &playerPos, const C
 			continue;
 		pResult->inBand = true;
 		CVehicle *pCar = nil;
-		/* The far layer's own placement (its migration to a service request
-		 * is a later ticket): the raw node pair, no planned site, the far
-		 * tier's birth-cull skip. The old primitive's rarity dice is gone
-		 * with VICE-150 (the planner's weight replaces it); the far layer's
-		 * own rarity weight arrives with its request. */
+		/* The far layer's own placement until VICE-167 (its migration to a
+		 * service request, where it becomes a first-class requester): the
+		 * raw node pair, no planned site, the far tier's birth-cull skip.
+		 * The old primitive's rarity dice is gone with VICE-150 (the
+		 * planner's weight replaces it); the far layer's own rarity weight
+		 * arrives with its request. */
 		SSpawnPlacement placement;
 		placement.site = -1;
 		placement.node1 = placements[i].node1;
 		placement.node2 = placements[i].node2;
-		placement.connection = -1;
+		placement.link = -1;
 		placement.x = placements[i].position.x;
 		placement.y = placements[i].position.y;
 		placement.z = placements[i].position.z;
