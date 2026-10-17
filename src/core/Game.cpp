@@ -68,6 +68,7 @@
 #include "Skidmarks.h"
 #include "SetPieces.h"
 #include "SpawnOccupancy.h"
+#include "SpawnReadiness.h"
 #include "SpecialFX.h"
 #include "SpawnSites.h"
 #include "Stats.h"
@@ -569,6 +570,15 @@ bool CGame::Initialise(const char* datFile)
 	for (int i = 0; i < MAX_PADS; i++)
 		CPad::GetPad(i)->Clear(true);
 
+	/* The spawn readiness (VICE-151): the boot is a loading-screen host. The
+	 * car class set is global and requested once; the first zone set is the
+	 * player's own. The prewarm takes the blocking path - the screen covers
+	 * it - and the pins stay for the session (a save load rebuilds them).
+	 * The explicit call is here, not in the drawing function: LoadingScreen
+	 * draws, it does not load. */
+	if (FindPlayerPed())
+		CSpawnReadiness::PrewarmInCover(FindPlayerCoors());
+
 #ifndef MASTER
 	PlayerCoords = FindPlayerCoors();
 	VarConsole.Add("X PLAYER COORD", &PlayerCoords.x, 10.0f, -10000.0f, 10000.0f, true);
@@ -667,6 +677,11 @@ void CGame::ReInitGameObjectVariables(void)
 	CStreaming::RequestBigBuildings(LEVEL_GENERIC);
 	CStreaming::RemoveIslandsNotUsed(LEVEL_BEACH);
 	CStreaming::RemoveIslandsNotUsed(LEVEL_MAINLAND);
+	/* The spawn readiness (VICE-151): a restart and a save load rebuild the
+	 * world, so the prewarm state is dropped here and rebuilt by the load's
+	 * own host (DoGameSpecificStuffAfterSucessLoad) or by the boot-like
+	 * frames of a plain restart. */
+	CSpawnReadiness::Reset();
 	CStreaming::LoadAllRequestedModels(false);
 	currArea = AREA_MAIN_MAP;
 	CPed::Initialise();
@@ -745,6 +760,10 @@ void CGame::ShutDownForRestart(void)
 	CWorld::ClearForRestart();
 	CGameLogic::ClearShortCut();
 	CTimer::Shutdown();
+	/* The spawn readiness (VICE-151): the pins are released before the
+	 * streamer's own sweep, so ReInit's removal sees the flags already
+	 * gone and its tracker sweep is clean. */
+	CSpawnReadiness::Reset();
 	CStreaming::ReInit();
 	CRadar::RemoveRadarSections();
 	FrontEndMenuManager.UnloadTextures();
@@ -1401,8 +1420,14 @@ CGame::SetCurrArea(int32 area)
 
 	currArea = area;
 
-	if (leftInterior)
+	if (leftInterior) {
 		ArmFillBursts(false);
+		/* The spawn readiness (VICE-151): the interior exit is a host - the
+		 * street's zone set is requested here, so the fill burst's own gate
+		 * finds the models on their way. The requests ride the ordinary
+		 * streaming; the street appears behind walls, not behind a fade. */
+		CSpawnReadiness::OnInteriorExit();
+	}
 }
 
 /*

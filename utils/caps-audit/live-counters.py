@@ -67,6 +67,18 @@ reserve is the layer's own promise to the rest of the game). The "in reach" row
 is the layer's own acceptance gauge and must stay 0. The updates row is the
 stagger's work: about a third of the layer a frame, so it grows by the cap each
 three frames.
+
+The spawn readiness rows (VICE-151) are the prewarm plan: the sets the
+blocking prewarms found resident (the boot, the death/arrest fade, the taxi
+shortcut, a save load, a drawn fade), the requests the pin budget deferred
+(the vehicle pins stop below MAXVEHICLESLOADED so the tracker keeps its
+reserve and a pin never starves the loader), the frames a requested set was
+not yet resident, the pins held (and the vehicle pins of them) and the stall:
+the last blocking prewarm's wall time - the acceptance's measured bound, the
+file processing included - and the sum since boot. A healthy boot reads the
+car set resident with a stall well under a second; a transition adds one more
+resident set; a deferral row that climbs in normal play means a zone set does
+not fit the budget and the planner is refusing.
 """
 
 import os
@@ -266,6 +278,28 @@ FAR_TRAFFIC = [
 
 CONFIG = "src/core/config.h"
 
+# The spawn readiness and prewarm (VICE-151): the plan's counters, at their
+# fixed offsets in CSpawnReadiness::ms_Plan (the static_asserts of
+# SpawnReadiness.cpp pin the layout). The set rows are the blocking prewarms
+# that found every pin ready, the deferred rows are the budget's refusals
+# (the vehicle pins stop below MAXVEHICLESLOADED, so the tracker keeps its
+# reserve), the waited row counts the frames a requested set was not yet
+# resident, the pins are live, and the stall rows carry the acceptance's
+# measured bound (the last blocking prewarm's wall time and the total since
+# boot). A healthy boot reads the car set resident and a few frames waited;
+# a healthy transition reads one more set resident and a stall well under a
+# second.
+READINESS = [
+    ("readiness: sets resident",     "_ZN15CSpawnReadiness7ms_PlanE", 0),
+    ("readiness: requests deferred", "_ZN15CSpawnReadiness7ms_PlanE", 4),
+    ("readiness: frames waited",     "_ZN15CSpawnReadiness7ms_PlanE", 8),
+    ("readiness: missing models",    "_ZN15CSpawnReadiness7ms_PlanE", 12),
+    ("readiness: pins held",         "_ZN15CSpawnReadiness7ms_PlanE", 16),
+    ("readiness: vehicle pins",      "_ZN15CSpawnReadiness7ms_PlanE", 20),
+    ("readiness: last stall ms",     "_ZN15CSpawnReadiness7ms_PlanE", 24),
+    ("readiness: stall ms total",    "_ZN15CSpawnReadiness7ms_PlanE", 28),
+]
+
 
 def find_pid():
     out = subprocess.run(["pgrep", "-x", "reVC"], capture_output=True, text=True).stdout.split()
@@ -371,6 +405,26 @@ def main():
             print(f"  {label:44s} {v:.4f}")
         else:
             print(f"  {label:44s} {v}")
+
+    # The spawn readiness (VICE-151): the prewarm plan's counters, read at
+    # their fixed offsets in CSpawnReadiness::ms_Plan (SpawnReadiness.cpp
+    # static-asserts them). "Sets resident" counts the blocking prewarms that
+    # found every pin ready (the boot, a transition, a save load); "requests
+    # deferred" counts the pins the budget refused (the vehicle pins stop at
+    # SPAWN_READY_PIN_BUDGET, the tracker less its reserve, so a pin never
+    # starves the loader); "frames waited" counts the frames a requested set
+    # was not yet resident; "pins held" and "vehicle pins" are live; "last
+    # stall" is the wall time of the last blocking prewarm (the acceptance's
+    # measured stall bound, with the file processing in it) and the total is
+    # the sum since boot.
+    print()
+    for label, mangled, offset in READINESS:
+        off = sym.get(mangled)
+        if off is None:
+            print(f"  {label:44s} symbol missing")
+            continue
+        v = read(off + offset, "i")
+        print(f"  {label:44s} {v}")
 
     print()
     for label, mangled, enum_name in POOLS:

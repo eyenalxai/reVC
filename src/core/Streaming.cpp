@@ -27,6 +27,7 @@
 #include "CutsceneMgr.h"
 #include "CdStream.h"
 #include "Streaming.h"
+#include "SpawnReadiness.h"
 #include "Replay.h"
 #include "main.h"
 #include "ColStore.h"
@@ -348,6 +349,11 @@ CStreaming::Update(void)
 	   !CReplay::IsPlayingBack()){
 		StreamVehiclesAndPeds();
 		StreamZoneModels(FindPlayerCoors());
+		/* The spawn readiness pump (VICE-151): the zone set follows the
+		 * player, the pins are asserted, and a set whose screen is covered
+		 * by the drawn fade takes the blocking path. No prewarm during a
+		 * cutscene - this block is already behind that gate. */
+		CSpawnReadiness::Update();
 	}
 
 	LoadRequestedModels();
@@ -1821,18 +1827,10 @@ CStreaming::StreamZoneModels(const CVector &pos)
 	RequestModel(MI_MALE01, STREAMFLAGS_DONT_REMOVE);
 	RequestModel(MI_TAXI_D, STREAMFLAGS_DONT_REMOVE);
 
-	gangsToLoad = 0;
-	gangCarsToLoad = 0;
-	if(info.gangPedThreshold[0] != info.copPedThreshold)
-		gangsToLoad = 1;
-	for(i = 1; i < NUM_GANGS; i++)
-		if(info.gangPedThreshold[i] != info.gangPedThreshold[i-1])
-			gangsToLoad |= 1<<i;
-	if(info.gangThreshold[0] != info.copThreshold)
-		gangCarsToLoad = 1;
-	for(i = 1; i < NUM_GANGS; i++)
-		if(info.gangThreshold[i] != info.gangThreshold[i-1])
-			gangCarsToLoad |= 1<<i;
+	/* The gangs the zone's thresholds select (VICE-151: the rule moved to
+	 * CTheZones so the spawn readiness prewarm reads the same one). */
+	gangsToLoad = CTheZones::GetZoneGangPedMask(info);
+	gangCarsToLoad = CTheZones::GetZoneGangCarMask(info);
 
 	if(gangsToLoad == ms_loadedGangs && gangCarsToLoad == ms_loadedGangCars)
 		return;

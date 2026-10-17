@@ -918,3 +918,52 @@ the snapshot out of `ThePaths` and the info-zone indices in `SpawnSites.cpp`
 (the engine side), and `utils/spawn-service` is the evidence program. Nothing
 consumes the index yet (VICE-148); the spawn service's planner is the next
 ticket.
+
+## Model readiness
+
+The spawn service's rule for "the model can be used now" (VICE-151):
+`HasModelLoaded && HasTxdLoaded && HasAnimLoaded` - the model's own stream, its
+texture dictionary and its animation block. A "loaded" model can have an
+evicted animation block (the streamer's memory eviction moves txds and anim
+blocks without moving the model), so a check of `HasModelLoaded` alone can
+lie. A model without an animation block (the animation index is -1: every
+pedestrian, most cars) needs none. The whole-set predicate iterates the arrays
+the service plans from - the car class arrays (`CCarCtrl::LoadedCarsArray`,
+the models a class chooses from) and the pedestrian group
+(`CPopulation::ms_pPedGroups`) - never
+`CStreaming::ms_bIsPedFromPedGroupLoaded`, which is set on *request*, not on
+load. `CSpawnReadiness` is the engine side; `SpawnReadiness.h` is engine-free
+and `utils/spawn-service/readiness.cpp` is the evidence program.
+
+## Prewarm set
+
+A set of models the spawn service requests before the planning frames need it
+(VICE-151). The car class set is global - every model of
+`CCarCtrl::CarArrays`, the shipped data's 56 class rows - requested once per
+load (the boot, after a save load) and pinned for the session. The pedestrian
+group and the gang sets are per zone: the zone's pedestrian group (the 16
+models) and the gangs the zone's thresholds select
+(`CTheZones::GetZoneGangPedMask`/`GetZoneGangCarMask`, the rule
+`StreamZoneModels` loads by), requested when the zone changes and released
+when it changes again. Every model, txd and animation request carries
+`STREAMFLAGS_PRIORITY`; in a cover (the drawn fade, the boot and loading
+screen, the death/arrest fade, the taxi shortcut, a save load) the set is read
+with the blocking `CStreaming::LoadAllRequestedModels(false)` path as
+`CStreaming::LoadScene` does, and the readiness is verified per model. No
+prewarm runs during a cutscene. `CSpawnReadiness::PrewarmInCover` is the
+blocking host, the per-frame pump lives in `CStreaming::Update`.
+
+## Prewarm pin
+
+The `STREAMFLAGS_DONT_REMOVE` bit a prewarm set puts on its model, its txd and
+its animation block, so the streaming's eviction cannot take the set
+(VICE-151). The ledger remembers which flags the plan set itself (the owned
+bits), so a release never clears a flag another system holds, and the pump
+re-asserts a flag that was cleared under a pin. The vehicle pins - the ones
+that take a `CStreaming::ms_vehiclesLoaded` tracker slot - stop at
+`SPAWN_READY_PIN_BUDGET` (`MAXVEHICLESLOADED` 90 less the reserve of
+`SPAWN_READY_PIN_RESERVE` 8 slots), so the rest of the streaming always has
+tracker slots to load the cars it needs and a pin never starves the loader; a
+pin request that does not fit is counted deferred and not made. The shipped
+sets fit with room: the class catalogue's 56 models plus the widest zone set
+are 61 vehicle pins against the budget of 82.
