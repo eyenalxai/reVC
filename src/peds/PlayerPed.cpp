@@ -53,6 +53,14 @@
 // The player's aim pose aims at a point this far along the aim ray
 #define PLAYER_AIM_DISTANCE AIM_RAY_DISTANCE
 
+// The solver's report mirror (PlayerMoveSolver.h) names the engine's eMoveState
+// values; a drift here would report the wrong movement state (VICE-171).
+static_assert((int)MOVE_REPORT_NONE == (int)PEDMOVE_NONE && (int)MOVE_REPORT_STILL == (int)PEDMOVE_STILL
+	&& (int)MOVE_REPORT_WALK == (int)PEDMOVE_WALK && (int)MOVE_REPORT_JOG == (int)PEDMOVE_JOG
+	&& (int)MOVE_REPORT_RUN == (int)PEDMOVE_RUN && (int)MOVE_REPORT_SPRINT == (int)PEDMOVE_SPRINT
+	&& (int)MOVE_REPORT_THROWN == (int)PEDMOVE_THROWN,
+	"the movement report mirror must match eMoveState");
+
 bool CPlayerPed::bDontAllowWeaponChange;
 #ifndef MASTER
 bool CPlayerPed::bDebugPlayerInfo;
