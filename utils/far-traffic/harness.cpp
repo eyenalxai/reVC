@@ -1,10 +1,11 @@
 /*
  * The evidence program for the far traffic layer (ticket VICE-128).
  *
- * This program reads src/control/FarTraffic.h, the ring table (TrafficRings.h),
- * the near bubble's ladder (NearBubble.h) and the cap table (PopulationBudget.h)
- * on their own - none of them includes an engine header - and checks the
- * layer's rules and its bounds:
+ * This program reads src/control/FarTraffic.h, the worker's contract
+ * (FarTrafficWorker.h), the ring table (TrafficRings.h), the near bubble's
+ * ladder (NearBubble.h) and the cap table (PopulationBudget.h) on their own -
+ * none of them includes an engine header - and checks the layer's rules and its
+ * bounds:
  *
  *	A. The band. The layer's inner edge is the near traffic's own despawn and
  *	   its outer edge the fog of the frame; the sites, the cap, the switches
@@ -43,11 +44,24 @@
  *	     shipped node and link counts, because the engine's own call is not
  *	     linked here. The live frame read is the measurement that decides.
  *
+ *	G. The pose boundary (VICE-168). The one predicate the simulation and the
+ *	   applicator share (FarTrafficPoseIsInWorld, FarTraffic.h): a pose is held
+ *	   by the world when the position and the directions are finite and x/y
+ *	   sit in the sector grid. The sweep holds the four edges (the grid is
+ *	   half-open: the minimum edge is inside, the maximum edge is not), the
+ *	   NaN and the infinities of every field, and the four one-metre-outside
+ *	   points; the shape checks read the fields the boundary carries where the
+ *	   headers expose them (SFarSimPose's refusal byte, SFarTrafficOutput's
+ *	   count, SFarTrafficWorld's bounds, the applicator's new row).
+ *
  *	   What this program cannot exercise at all: the engine-side gates
  *	   (CCarCtrl::NearBubbleAllowsCreation/Removal - the occlusion, the fade,
  *	   the ray budget, the pool reserves), the pay of a real car build and the
- *	   real scan's data (the shipped node graph). Those are the live rig's and
- *	   the owner's frame recipe's business.
+ *	   real scan's data (the shipped node graph), the sector walk of
+ *	   CPhysical::RemoveAndAdd the pose rule keeps a pose out of, and the
+ *	   promotion's AutoPilot write-back (engine state, and the worker module
+ *	   links no vehicle). Those are the live rig's and the owner's frame
+ *	   recipe's business.
  *
  * Build and run:
  *
@@ -58,8 +72,13 @@
  */
 
 #include "FarTraffic.h"
+/* The worker's contract: the pose block, the output block and the world
+ * snapshot the boundary's fields live in (VICE-168). It is engine-free, like
+ * FarTraffic.h; the harness reads the shapes and links nothing. */
+#include "FarTrafficWorker.h"
 
 #include <math.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -1128,6 +1147,109 @@ Section6SiteMargin(void)
 	Check(failed == 0, "the sites must sit inside their band at every cell");
 }
 
+/* ------------------------------------------------------------------ G. the pose boundary */
+
+/*
+ * The world's own rule over a pose (VICE-168): FarTrafficPoseIsInWorld, the one
+ * predicate the simulation (FarTrafficWorker.cpp) and the applicator
+ * (FarTraffic.cpp) share. The world's sector grid is x [-2400, 1600),
+ * y [-2000, 2000): World.h's WORLD_MIN_X, WORLD_MIN_Y, WORLD_MAX_X and
+ * WORLD_MAX_Y are what CFarTraffic::BuildWorldSnapshot copies into the
+ * snapshot. The harness cannot
+ * include World.h (an engine header), so the bounds below re-state the engine's
+ * constants; the snapshot's own copy of them is the applicator's and the live
+ * build's, not this program's, to test. The grid is half-open: the minimum edge
+ * is a sector of the grid, the maximum edge is one past the last one, so a
+ * point exactly on the maximum edge is refused - CPhysical::RemoveAndAdd's
+ * sector walk must never see it.
+ *
+ * What the sweep cannot see: the sector walk itself is engine code, and the
+ * simulation's refusal byte and the applicator's counting and recovery are
+ * engine-side too (the worker module links no vehicle, and this program links
+ * no applicator). The evidence is the rule both ask, plus the shape of the
+ * fields they carry it in.
+ */
+static void
+Section7PoseBoundary(void)
+{
+	const SFarTrafficWorldBounds bounds = { -2400.0f, 1600.0f, -2000.0f, 2000.0f };
+
+	struct SPoseCase { const char *what; float x, y, z, dirX, dirY; bool held; };
+	static const SPoseCase cases[] = {
+		/* the finite and inside cases, the four edges included: the minimum
+		 * edge is a sector of the grid, the maximum edge is one past it */
+		{ "the city centre",                        0.0f,             0.0f,             12.0f,  1.0f,  0.0f, true  },
+		{ "the minimum corner, exactly",            bounds.minX,      bounds.minY,      0.0f,   0.0f, -1.0f, true  },
+		{ "the x minimum edge, exactly",            bounds.minX,      0.0f,             0.0f,  -1.0f,  0.0f, true  },
+		{ "the y minimum edge, exactly",            0.0f,             bounds.minY,      0.0f,   0.0f, -1.0f, true  },
+		{ "1 m inside the far corner",              bounds.maxX - 1.0f, bounds.maxY - 1.0f, 0.0f, 1.0f, 1.0f, true  },
+		/* the four one-metre-outside points */
+		{ "1 m outside the x minimum",              bounds.minX - 1.0f, 0.0f,            0.0f,   1.0f,  0.0f, false },
+		{ "1 m outside the x maximum",              bounds.maxX + 1.0f, 0.0f,            0.0f,   1.0f,  0.0f, false },
+		{ "1 m outside the y minimum",              0.0f,             bounds.minY - 1.0f, 0.0f,  1.0f,  0.0f, false },
+		{ "1 m outside the y maximum",              0.0f,             bounds.maxY + 1.0f, 0.0f,  1.0f,  0.0f, false },
+		/* the maximum edges themselves: the half-open boundary */
+		{ "the x maximum edge, exactly",            bounds.maxX,      0.0f,             0.0f,   1.0f,  0.0f, false },
+		{ "the y maximum edge, exactly",            0.0f,             bounds.maxY,      0.0f,   1.0f,  0.0f, false },
+		/* the NaN of every field of the rule */
+		{ "a NaN x",                                NAN,              0.0f,             0.0f,   1.0f,  0.0f, false },
+		{ "a NaN y",                                0.0f,             NAN,              0.0f,   1.0f,  0.0f, false },
+		{ "a NaN z",                                0.0f,             0.0f,             NAN,    1.0f,  0.0f, false },
+		{ "a NaN dirX",                             0.0f,             0.0f,             0.0f,   NAN,   0.0f, false },
+		{ "a NaN dirY",                             0.0f,             0.0f,             0.0f,   1.0f,  NAN,  false },
+		/* the infinities of every field: an infinity fails a comparison the
+		 * bounds and the finite test both */
+		{ "an x of +infinity",                      INFINITY,         0.0f,             0.0f,   1.0f,  0.0f, false },
+		{ "an x of -infinity",                      -INFINITY,        0.0f,             0.0f,   1.0f,  0.0f, false },
+		{ "a y of +infinity",                       0.0f,             INFINITY,         0.0f,   1.0f,  0.0f, false },
+		{ "a y of -infinity",                       0.0f,             -INFINITY,        0.0f,   1.0f,  0.0f, false },
+		{ "a z of +infinity",                       0.0f,             0.0f,             INFINITY, 1.0f, 0.0f, false },
+		{ "a z of -infinity",                       0.0f,             0.0f,             -INFINITY, 1.0f, 0.0f, false },
+		{ "a dirX of +infinity",                    0.0f,             0.0f,             0.0f,   INFINITY, 0.0f, false },
+		{ "a dirY of -infinity",                    0.0f,             0.0f,             0.0f,   1.0f, -INFINITY, false },
+	};
+	const int nCases = sizeof(cases) / sizeof(cases[0]);
+	int held = 0, refused = 0, wrong = 0;
+
+	printf("== 7. the pose boundary (VICE-168)\n\n");
+	printf("  the grid the snapshot carries (World.h): x [%.0f, %.0f), y [%.0f, %.0f)\n",
+		(double)bounds.minX, (double)bounds.maxX, (double)bounds.minY, (double)bounds.maxY);
+	for (int i = 0; i < nCases; i++) {
+		bool ok = FarTrafficPoseIsInWorld(bounds,
+			cases[i].x, cases[i].y, cases[i].z, cases[i].dirX, cases[i].dirY);
+		if (ok)
+			held++;
+		else
+			refused++;
+		if (ok != cases[i].held) {
+			wrong++;
+			Fail(cases[i].what);
+		}
+	}
+	printf("  the sweep: %d poses, %d held, %d refused, %d wrong\n", nCases, held, refused, wrong);
+	Check(held > 0 && refused > 0, "the sweep must hold and refuse poses");
+	Check(wrong == 0, "the pose rule must hold the edges and the finite values only");
+
+	/* The shape of the fields the boundary carries, where the headers expose
+	 * them. The rows themselves (the simulation's count and the applicator's
+	 * increments) are engine-side code: the worker module and the applicator
+	 * are not linked here, and the harness says so above. */
+	Check(sizeof(((SFarSimPose *)0)->bRefused) == 1 &&
+	      offsetof(SFarSimPose, bRefused) == offsetof(SFarSimPose, bShortCurve) + 1,
+		"the refusal must be one byte next to the pick's clamped-curve byte");
+	Check(sizeof(((SFarTrafficOutput *)0)->numRefused) == sizeof(int32_t),
+		"the refused poses must be counted in the block's own int32 count");
+	Check(sizeof(((SFarTrafficWorld *)0)->bounds) == sizeof(SFarTrafficWorldBounds),
+		"the snapshot must carry the world's bounds");
+	Check(sizeof(CFarTraffic::ms_nFarTrafficRefusedPoses) == sizeof(unsigned int),
+		"the applicator's refused poses row must exist");
+	printf("  the fields: the refusal byte %d, next to the clamped curve; the output count %d bytes;\n",
+		(int)sizeof(((SFarSimPose *)0)->bRefused), (int)sizeof(((SFarTrafficOutput *)0)->numRefused));
+	printf("  the snapshot bounds %d bytes, the applicator's row %d bytes\n\n",
+		(int)sizeof(((SFarTrafficWorld *)0)->bounds),
+		(int)sizeof(CFarTraffic::ms_nFarTrafficRefusedPoses));
+}
+
 /* ------------------------------------------------------------------ main */
 
 int
@@ -1140,6 +1262,7 @@ main(void)
 	Section4Events();
 	Section5Cost();
 	Section6SiteMargin();
+	Section7PoseBoundary();
 
 	if (g_failures == 0)
 		printf("RESULT: every check passed.\n");
