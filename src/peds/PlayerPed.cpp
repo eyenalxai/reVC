@@ -1821,7 +1821,7 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 	float padMoveInGameUnit = CVector2D(leftRight, upDown).Magnitude() / PAD_MOVE_TO_GAME_WORLD_MOVE;
 
 	// The pad always moves the ped, in every view, in every state: no weapon or
-	// presentation state gates the input response (ADR 0028)
+	// presentation state gates the input response
 	bool bHasInput = padMoveInGameUnit > 0.0f;
 	if (bHasInput) {
 		float padHeading = CGeneral::GetRadianAngleBetweenPoints(0.0f, 0.0f, -leftRight, upDown);

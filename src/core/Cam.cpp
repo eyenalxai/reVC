@@ -898,7 +898,8 @@ float fMiniGunBetaOffset = 0.3f;
 // takes this one height and none of the stock duck camera's back and right
 // repositioning, which stays for the peds that still set bIsDucking. The stance
 // case never adds that duck offset on top: for the player the solver owns the
-// stance (ADR 0028), so the flag is clear for him and the two cannot double up.
+// stance (the movement solver owns it), so the flag is clear for him and the
+// two cannot double up.
 struct tStanceCamOffset
 {
 	float bodyHeight;	// the follow cameras' target height
@@ -2464,7 +2465,7 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 			// (the AI, the scripted states) and for the player's crouch and
 			// prone, which own the same case through the stance. The eye height
 			// above is the authority and the duck offset is never added on top
-			// of it: the solver owns the player's stance (ADR 0028), so the
+			// of it: the solver owns the player's stance, so the
 			// flag is clear for him and the two cannot double up.
 			Source.x -= fDuckingBackOffset*CamTargetEntity->GetForward().x;
 			Source.y -= fDuckingBackOffset*CamTargetEntity->GetForward().y;

@@ -3008,8 +3008,6 @@ CMenuManager::LoadSettings()
 #ifdef FIX_BUGS
 	TheCamera.m_fMouseAccelVertical = TheCamera.m_fMouseAccelHorzntl + 0.0005f;
 #endif
-#ifdef PC_PLAYER_CONTROLS
-#endif
 #ifdef LEGACY_MENU_OPTIONS
 	m_PrefsVsync = m_PrefsVsyncDisp;
 #endif

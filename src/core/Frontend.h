@@ -100,7 +100,6 @@
 #define BRIEFS_LINE_SPACING 10.0f
 
 #define CONTSETUP_STANDARD_ROW_HEIGHT 10.7f
-#define CONTSETUP_CLASSIC_ROW_HEIGHT 9.0f
 #define CONTSETUP_BOUND_HIGHLIGHT_HEIGHT 10
 #define CONTSETUP_BOUND_COLUMN_WIDTH 190.0f
 #define CONTSETUP_LIST_TOP 58.0f
@@ -366,9 +365,6 @@ enum
 #endif
 };
 
-enum eControlMethod
-{
-};
 
 // Why??
 enum ControllerSetupColumn

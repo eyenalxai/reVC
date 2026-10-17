@@ -362,9 +362,6 @@ enum eMoveState {
 	PEDMOVE_THROWN
 };
 
-// The body stance the movement solver owns (ADR 0028, VICE-178). The
-// collision set follows it; STAND is the default and what a save load resets
-// to, the same way m_nMoveState does.
 extern float gfTommyFatness;
 
 class CVehicle;
@@ -535,7 +532,10 @@ public:
 	PedState m_nLastPedState;
 	eMoveState m_nMoveState;
 	int32 m_nStoredMoveState;
-	eStance m_nStance;	// the body stance; a save load zeroes it to STANCE_STAND
+	// The body stance the movement solver owns (Stance.h). The collision set,
+	// the camera and the animation choice follow it; STAND is the default and
+	// what a save load resets to, the same way m_nMoveState does.
+	eStance m_nStance;
 	int32 m_nPrevMoveState;
 	eWaitState m_nWaitState;
 	uint32 m_nWaitTimer;

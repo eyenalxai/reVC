@@ -200,7 +200,8 @@ CPed::SetPointGunAt(CEntity *to)
 	// drives only the upper body, so the walk, run and sprint cycles carry the
 	// lower body (VICE-141), and the crouch pose takes the same trim now that
 	// the crouch moves - a crouch that walks must not hold a frozen pair of
-	// legs (VICE-176, ADR 0015). The AI aim poses stay exactly as they are.
+	// legs (VICE-176; the aim pose drives the upper body alone). The AI aim poses
+	// stay exactly as they are.
 	if (IsPlayer() && (aimAssoc->animId == ANIM_WEAPON_FIRE || aimAssoc->animId == ANIM_WEAPON_CROUCHFIRE))
 		aimAssoc->MakeUpperBodyOnly();
 
@@ -420,7 +421,7 @@ CPed::SetAttack(CEntity *victim)
 				animAssoc = CAnimManager::BlendAnimation(GetClump(), curWeapon->m_AnimToPlay, GetCrouchFireAnim(curWeapon), 8.0f);
 				// The player's copy of the crouch fire pose drops the lower
 				// body like the standing one: the crouch moves, so its legs
-				// belong to the movement cycle (VICE-176, ADR 0015). The AI
+				// belong to the movement cycle (VICE-176). The AI
 				// copies keep their crouched legs.
 				if (IsPlayer())
 					animAssoc->MakeUpperBodyOnly();
