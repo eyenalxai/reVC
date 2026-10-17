@@ -18,6 +18,7 @@
 #include "Text.h"
 #include "Timer.h"
 #include "Script.h"
+#include "WeaponAim.h"
 #include "TxdStore.h"
 #include "User.h"
 #include "World.h"
@@ -214,7 +215,6 @@ struct
 };
 
 RwTexture *gpSniperSightTex;
-RwTexture *gpRocketSightTex;
 RwTexture *gpLaserSightTex;
 RwTexture *gpLaserDotTex;
 RwTexture *gpViewFinderTex;
@@ -296,184 +296,137 @@ DrawLaserDot(CPlayerPed *playerPed, eWeaponType WeaponType)
 	}
 }
 
-static bool
-DrawSights(CPlayerPed *playerPed, eWeaponType WeaponType, int32 Mode, bool DrawCrossHairPC)
+// The sight sprite of the overlay: the four quarters of one texture around
+// the screen centre, with a small inset so the quarters meet without a seam.
+static void
+DrawSightQuads(int32 sprite, float xOffset, float yOffset)
 {
-	bool CrossHairHidesHud = false;
-
-	float fStep = Sin((CTimer::GetTimeInMilliseconds() & 1023)/1024.0f * 6.28f);
-	float fMultBright = CHud::SpriteBrightness * 0.03f * (0.25f * fStep + 0.75f);
 	CRect rect;
-	if (DrawCrossHairPC && TheCamera.Cams[TheCamera.ActiveCam].Using3rdPersonMouseCam()) {
-		float f3rdX = SCREEN_WIDTH * TheCamera.m_f3rdPersonCHairMultX;
-		float f3rdY = SCREEN_HEIGHT * TheCamera.m_f3rdPersonCHairMultY;
-#ifdef ASPECT_RATIO_SCALE
-		f3rdY -= SCREEN_SCALE_Y(2.0f);
-#endif
-		if (playerPed && (WeaponType == WEAPONTYPE_M4 || WeaponType == WEAPONTYPE_RUGER || WeaponType == WEAPONTYPE_M60)) {
-			rect.left = f3rdX - SCREEN_SCALE_X(32.0f * 0.6f);
-			rect.top = f3rdY - SCREEN_SCALE_Y(32.0f  * 0.6f);
-			rect.right = f3rdX + SCREEN_SCALE_X(32.0f * 0.6f);
-			rect.bottom = f3rdY + SCREEN_SCALE_Y(32.0f  * 0.6f);
 
-			CHud::Sprites[HUD_SITEM16].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
-				0.0f, 0.0f,  1.0f, 0.0f,  0.0f, 1.0f,  1.0f, 1.0f);
-		}
-		else {
-			rect.left = f3rdX - SCREEN_SCALE_X(32.0f * 0.4f);
-			rect.top = f3rdY - SCREEN_SCALE_Y(32.0f  * 0.4f);
-			rect.right = f3rdX + SCREEN_SCALE_X(32.0f * 0.4f);
-			rect.bottom = f3rdY + SCREEN_SCALE_Y(32.0f  * 0.4f);
+	rect.left = SCREEN_WIDTH/2 - xOffset;
+	rect.top = SCREEN_HEIGHT/2 - yOffset;
+	rect.right = SCREEN_WIDTH/2;
+	rect.bottom = SCREEN_HEIGHT/2;
+	CHud::Sprites[sprite].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
+		0.01f, 0.01f,  1.0f, 0.0f,  0.01f, 1.0f,  1.0f, 1.0f);
 
-			CHud::Sprites[HUD_SITEM16].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
-				0.0f, 0.0f,  1.0f, 0.0f,  0.0f, 1.0f,  1.0f, 1.0f);
-		}
-	} else {
-		if (Mode == CCam::MODE_M16_1STPERSON ||
-		    Mode == CCam::MODE_M16_1STPERSON_RUNABOUT ||
-#ifdef FIRST_PERSON
-		    // The plain first person view draws this crosshair too; the
-		    // caller raises the flag only while aiming (the on-foot sights
-		    // or the car ADS)
-		    Mode == CCam::MODE_1STPERSON ||
-#endif
-		    Mode == CCam::MODE_HELICANNON_1STPERSON) {
-			rect.left = (SCREEN_WIDTH / 2) - SCREEN_SCALE_X(32.0f);
-			rect.top = (SCREEN_HEIGHT / 2) - SCREEN_SCALE_Y(32.0f);
-			rect.right = (SCREEN_WIDTH / 2) + SCREEN_SCALE_X(32.0f);
-			rect.bottom = (SCREEN_HEIGHT / 2) + SCREEN_SCALE_Y(32.0f);
-			CHud::Sprites[HUD_SITEM16].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
-				0.0f, 0.0f,  1.0f, 0.0f,  0.0f, 1.0f,  1.0f, 1.0f);
-		}
-		else if (Mode == CCam::MODE_1STPERSON_RUNABOUT) {
-			rect.left = (SCREEN_WIDTH / 2) - SCREEN_SCALE_X(32.0f * 0.7f);
-			rect.top = (SCREEN_HEIGHT / 2) - SCREEN_SCALE_Y(32.0f * 0.7f);
-			rect.right = (SCREEN_WIDTH / 2) + SCREEN_SCALE_X(32.0f * 0.7f);
-			rect.bottom = (SCREEN_HEIGHT / 2) + SCREEN_SCALE_Y(32.0f * 0.7f);
+	rect.left = SCREEN_WIDTH/2;
+	rect.top = SCREEN_HEIGHT/2 - yOffset;
+	rect.right = SCREEN_WIDTH/2 + xOffset;
+	rect.bottom = SCREEN_HEIGHT/2;
+	CHud::Sprites[sprite].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
+		0.99f, 0.0f,  0.01f, 0.01f,  0.99f, 1.0f,  0.01f, 1.0f);
 
-			CHud::Sprites[HUD_SITEM16].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
-				0.0f, 0.0f,  1.0f, 0.0f,  0.0f, 1.0f,  1.0f, 1.0f);
-		}
-		else if (Mode == CCam::MODE_ROCKETLAUNCHER || Mode == CCam::MODE_ROCKETLAUNCHER_RUNABOUT) {
-			RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void *)TRUE);
-			RwRenderStateSet(rwRENDERSTATESRCBLEND, (void *)rwBLENDONE);
-			RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void *)rwBLENDONE);
-			RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
-			RwRenderStateSet(rwRENDERSTATEZTESTENABLE, (void*)FALSE);
-			RwRenderStateSet(rwRENDERSTATETEXTURERASTER, RwTextureGetRaster(gpRocketSightTex));
+	rect.left = SCREEN_WIDTH/2 - xOffset;
+	rect.top = SCREEN_HEIGHT/2;
+	rect.right = SCREEN_WIDTH/2;
+	rect.bottom = SCREEN_HEIGHT/2 + yOffset;
+	CHud::Sprites[sprite].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
+		0.01f, 0.99f,  1.0f, 0.99f,  0.01f, 0.01f,  1.0f, 0.01f);
 
-			CSprite::RenderOneXLUSprite(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, 1.0f, SCREEN_SCALE_X(40.0f), SCREEN_SCALE_Y(40.0f), (100.0f * fMultBright), (200.0f * fMultBright), (100.0f * fMultBright), 255, 1.0f, 255);
-			RwRenderStateSet(rwRENDERSTATEVERTEXALPHAENABLE, (void*)FALSE);
-			RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)TRUE);
-		}
-		else {
-			int sprite = HUD_SITESNIPER;
-			float xOffset = SCREEN_SCALE_X(210.0f);
-			float yOffset = SCREEN_SCALE_Y(210.0f);
-
-			if (WeaponType == WEAPONTYPE_LASERSCOPE)
-			  sprite = HUD_SITELASER;
-
-			if (WeaponType == WEAPONTYPE_CAMERA) {
-				sprite = HUD_VIEWFINDER;
-				CrossHairHidesHud = true;
-				xOffset = SCREEN_SCALE_X(256.0f);
-				yOffset = SCREEN_SCALE_Y(192.0f);
-			}
-
-			rect.left = SCREEN_WIDTH/2 - xOffset;
-			rect.top = SCREEN_HEIGHT/2 - yOffset;
-			rect.right = SCREEN_WIDTH/2;
-			rect.bottom = SCREEN_HEIGHT/2;
-			CHud::Sprites[sprite].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
-				0.01f, 0.01f,  1.0f, 0.0f,  0.01f, 1.0f,  1.0f, 1.0f);
-
-			rect.left = SCREEN_WIDTH/2;
-			rect.top = SCREEN_HEIGHT/2 - yOffset;
-			rect.right = SCREEN_WIDTH/2 + xOffset;
-			rect.bottom = SCREEN_HEIGHT/2;
-			CHud::Sprites[sprite].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
-				0.99f, 0.0f,  0.01f, 0.01f,  0.99f, 1.0f,  0.01f, 1.0f);
-
-			rect.left = SCREEN_WIDTH/2 - xOffset;
-			rect.top = SCREEN_HEIGHT/2;
-			rect.right = SCREEN_WIDTH/2;
-			rect.bottom = SCREEN_HEIGHT/2 + yOffset;
-			CHud::Sprites[sprite].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
-				0.01f, 0.99f,  1.0f, 0.99f,  0.01f, 0.01f,  1.0f, 0.01f);
-
-			rect.left = SCREEN_WIDTH/2;
-			rect.top = SCREEN_HEIGHT/2;
-			rect.right = SCREEN_WIDTH/2 + xOffset;
-			rect.bottom = SCREEN_HEIGHT/2 + yOffset;
-			CHud::Sprites[sprite].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
-				0.99f, 0.99f,  0.01f, 0.99f,  0.99f, 0.01f,  0.01f, 0.01f);
-
-			DrawLaserDot(playerPed, WeaponType);
-		}
-	}
-
-	return CrossHairHidesHud;
+	rect.left = SCREEN_WIDTH/2;
+	rect.top = SCREEN_HEIGHT/2;
+	rect.right = SCREEN_WIDTH/2 + xOffset;
+	rect.bottom = SCREEN_HEIGHT/2 + yOffset;
+	CHud::Sprites[sprite].Draw(CRect(rect), CRGBA(255, 255, 255, 255),
+		0.99f, 0.99f,  0.01f, 0.99f,  0.99f, 0.01f,  0.01f, 0.01f);
 }
 
-static bool
-DrawCrosshairAndSights(CPlayerPed *playerPed, eWeaponType WeaponType, int32 Mode)
+// The one reticle of every aimed gun. The first person view and the stock
+// sight cameras draw it at the screen centre; the third person mouse view
+// draws it at the crosshair position of the camera, where its shots go.
+static void
+DrawAimReticle(void)
 {
-	// unused statics in here
-	bool DrawCrossHair = false;
-	bool CrossHairHidesHud = false;
-	bool DrawCrossHairPC = false;
+	float x = SCREEN_WIDTH/2;
+	float y = SCREEN_HEIGHT/2;
+	float size = 32.0f;
 
-	// The sight overlay the view draws: the stock sight camera mode, or the
-	// first person player camera standing in for the aimed weapon's sight
-	int32 sightMode = TheCamera.GetSightOverlayMode();
-
-	if ((sightMode == CCam::MODE_SNIPER || sightMode == CCam::MODE_ROCKETLAUNCHER || sightMode == CCam::MODE_M16_1STPERSON || sightMode == CCam::MODE_HELICANNON_1STPERSON || sightMode == CCam::MODE_CAMERA)
-		&& playerPed && !playerPed->GetWeapon()->IsTypeMelee())
-		DrawCrossHair = true;
-
-	if (sightMode == CCam::MODE_M16_1STPERSON_RUNABOUT || sightMode == CCam::MODE_ROCKETLAUNCHER_RUNABOUT || sightMode == CCam::MODE_SNIPER_RUNABOUT)
-		DrawCrossHairPC = true;
-	if (TheCamera.Cams[TheCamera.ActiveCam].Using3rdPersonMouseCam() && (!CPad::GetPad(0)->GetLookBehindForPed() || TheCamera.m_bPlayerIsInGarage)
-		|| Mode == CCam::MODE_1STPERSON_RUNABOUT) {
-		if (playerPed) {
-			if (playerPed->m_nPedState != PED_ENTER_CAR && playerPed->m_nPedState != PED_CARJACK) {
-
-				if (WeaponType >= WEAPONTYPE_COLT45 && WeaponType <= WEAPONTYPE_RUGER
-					|| WeaponType == WEAPONTYPE_M60 || WeaponType == WEAPONTYPE_MINIGUN
-					|| WeaponType == WEAPONTYPE_FLAMETHROWER) {
-					DrawCrossHairPC = 1;
-				}
-			}
-		}
-	}
-
-#ifdef FIRST_PERSON
-	// The plain first person view draws the crosshair while the player aims:
-	// the on-foot sights - the sight predicate the shot ray and the sight FOV
-	// already use - and the car ADS. The third person view draws the crosshair
-	// at the camera crosshair position above.
-	if (Mode == CCam::MODE_1STPERSON &&
-	    (TheCamera.UsingFirstPersonSights() || TheCamera.UsingCarAds()))
-		DrawCrossHairPC = 1;
+	if (TheCamera.Cams[TheCamera.ActiveCam].Using3rdPersonMouseCam()) {
+		x = SCREEN_WIDTH * TheCamera.m_f3rdPersonCHairMultX;
+		y = SCREEN_HEIGHT * TheCamera.m_f3rdPersonCHairMultY;
+		size = 32.0f * 0.4f;
+#ifdef ASPECT_RATIO_SCALE
+		y -= SCREEN_SCALE_Y(2.0f);
 #endif
-
-	if (DrawCrossHair || DrawCrossHairPC) {
-		RwRenderStateSet(rwRENDERSTATETEXTUREFILTER, (void *)rwFILTERLINEAR);
-
-		CHud::SpriteBrightness = Min(CHud::SpriteBrightness+1, 30);
-
-		RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
-
-		CrossHairHidesHud = DrawSights(playerPed, WeaponType, sightMode, DrawCrossHairPC);
-
-		RwRenderStateSet(rwRENDERSTATESRCBLEND, (void *)rwBLENDSRCALPHA);
-		RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void *)rwBLENDINVSRCALPHA);
-		RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)TRUE);
 	}
-	else {
+
+	CHud::Sprites[HUD_SITEM16].Draw(CRect(x - SCREEN_SCALE_X(size), y - SCREEN_SCALE_Y(size),
+		x + SCREEN_SCALE_X(size), y + SCREEN_SCALE_Y(size)), CRGBA(255, 255, 255, 255),
+		0.0f, 0.0f,  1.0f, 0.0f,  0.0f, 1.0f,  1.0f, 1.0f);
+}
+
+// The overlay of the sight view: the sniper and the laser scope draw their
+// scope (the laser scope its dot in it too), the photo camera its viewfinder.
+// The viewfinder hides the HUD, because the photograph is the whole frame.
+static bool
+DrawSights(CPlayerPed *playerPed, eWeaponType WeaponType, int32 sightMode)
+{
+	if (sightMode == CCam::MODE_CAMERA) {
+		DrawSightQuads(HUD_VIEWFINDER, SCREEN_SCALE_X(256.0f), SCREEN_SCALE_Y(192.0f));
+		return true;
+	}
+
+	if (sightMode == CCam::MODE_SNIPER) {
+		DrawSightQuads(WeaponType == WEAPONTYPE_LASERSCOPE ? HUD_SITELASER : HUD_SITESNIPER,
+			SCREEN_SCALE_X(210.0f), SCREEN_SCALE_Y(210.0f));
+		DrawLaserDot(playerPed, WeaponType);
+		return false;
+	}
+
+	DrawAimReticle();
+	return false;
+}
+
+// The player aims a gun: the free aim of the third person mouse view (the
+// ped's aim state, which the plain fire button raises too), the sight the
+// camera serves (the first person sights and the stock sight camera the
+// classic aim takes), or the car ADS. A gun that is not aimed draws nothing.
+static bool
+PlayerAimsGun(CPlayerPed *playerPed)
+{
+	// The free aim of the third person mouse view: the ped holds the gun at
+	// the crosshair. The look-behind view draws no crosshair, because its
+	// shots follow the forward of the ped, not the pointer; the garage adds
+	// its crosshair back.
+	if (TheCamera.Cams[TheCamera.ActiveCam].Using3rdPersonMouseCam() && playerPed && playerPed->IsAimingWeapon() &&
+	    (!CPad::GetPad(0)->GetLookBehindForPed() || TheCamera.m_bPlayerIsInGarage))
+		return true;
+
+	return TheCamera.Using1stPersonWeaponMode() || TheCamera.UsingCarAds();
+}
+
+// The reticle and the sight overlay of the aim. One rule for every aiming
+// weapon: the sniper and the laser scope draw their scope, the photo camera
+// its viewfinder, and every other aimed gun the one reticle of its view. The
+// overlay owns the view while it draws, so the reticle never goes over it,
+// and a gun that is not aimed draws nothing at all.
+static bool
+DrawCrosshairAndSights(CPlayerPed *playerPed, eWeaponType WeaponType)
+{
+	// The overlay the view draws: the stock sight camera mode, or the first
+	// person player camera standing in for the aimed weapon's sight
+	int32 sightMode = TheCamera.GetSightOverlayMode();
+	bool overlay = sightMode == CCam::MODE_SNIPER || sightMode == CCam::MODE_CAMERA;
+	bool reticle = !overlay && IsGunWeapon(WeaponType) && PlayerAimsGun(playerPed);
+
+	if (!overlay && !reticle) {
 		CHud::SpriteBrightness = 0;
+		return false;
 	}
+
+	RwRenderStateSet(rwRENDERSTATETEXTUREFILTER, (void *)rwFILTERLINEAR);
+
+	CHud::SpriteBrightness = Min(CHud::SpriteBrightness+1, 30);
+
+	RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)FALSE);
+
+	bool CrossHairHidesHud = DrawSights(playerPed, WeaponType, sightMode);
+
+	RwRenderStateSet(rwRENDERSTATESRCBLEND, (void *)rwBLENDSRCALPHA);
+	RwRenderStateSet(rwRENDERSTATEDESTBLEND, (void *)rwBLENDINVSRCALPHA);
+	RwRenderStateSet(rwRENDERSTATEZWRITEENABLE, (void*)TRUE);
+
 	return CrossHairHidesHud;
 }
 
@@ -1607,9 +1560,8 @@ void CHud::Draw()
 	if (m_Wants_To_Draw_Hud && !TheCamera.m_WideScreenOn) {
 		CPlayerPed *playerPed = FindPlayerPed();
 		eWeaponType WeaponType = playerPed->GetWeapon()->m_eWeaponType;
-		int32 Mode = TheCamera.Cams[TheCamera.ActiveCam].Mode;
 
-		bool CrossHairHidesHud = DrawCrosshairAndSights(playerPed, WeaponType, Mode);
+		bool CrossHairHidesHud = DrawCrosshairAndSights(playerPed, WeaponType);
 
 		DrawActiveReloadBar();
 
@@ -1931,8 +1883,6 @@ void CHud::Initialise()
 
 	if (gpSniperSightTex == nil)
 		gpSniperSightTex = RwTextureRead("sitesniper", nil); // unused
-	if (gpRocketSightTex == nil)
-		gpRocketSightTex = RwTextureRead("siterocket", nil);
 	if (gpLaserSightTex == nil)
 		gpLaserSightTex = RwTextureRead("sitelaser", nil); // unused
 	if (gpLaserDotTex == nil)
@@ -2167,9 +2117,6 @@ void CHud::Shutdown()
 
 	RwTextureDestroy(gpSniperSightTex);
 	gpSniperSightTex = nil;
-
-	RwTextureDestroy(gpRocketSightTex);
-	gpRocketSightTex = nil;
 
 	RwTextureDestroy(gpLaserSightTex);
 	gpLaserSightTex = nil;
