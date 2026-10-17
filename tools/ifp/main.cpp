@@ -12,6 +12,7 @@
 //   build/ifp extract   "<gameRoot>/anim/ped.ifp" /tmp/opencode/ifp/crouch.ifp
 //                       WALK_civi=walk_crouch run_civi=run_crouch sprint_civi=sprint_crouch
 //                       IDLE_stance=idle_crouch WALK_start=walk_start_crouch
+//   build/ifp crouch    "<gameRoot>/anim/ped.ifp" gamefiles/anim/crouch.ifp
 //   build/ifp plant     slotorder /tmp/opencode/ifp/crouch.ifp /tmp/opencode/ifp/crouch.bad.ifp
 //
 // A file argument may be a game root (a directory holding anim/ped.ifp) or an
@@ -52,6 +53,7 @@ Usage(void)
 		"  write     <file|gameroot> <out.ifp>\n"
 		"  roundtrip <file|gameroot> [--dir <dir>]\n"
 		"  extract   <file|gameroot> <out.ifp> <animation>[=<newname>]...\n"
+		"  crouch    <file|gameroot> <out.ifp>\n"
 		"  plant     <defect> <file|gameroot> <out.ifp>\n"
 		"\nplanted defects:");
 	for(int i = 0; i < ifp::NumPlantDefects; i++)
@@ -346,6 +348,51 @@ CommandExtract(int argc, char **argv)
 }
 
 static int
+CommandCrouch(int argc, char **argv)
+{
+	if(argc != 2){
+		Usage();
+		return 1;
+	}
+	std::string path = ResolveInput(argv[0]);
+	std::string out = argv[1];
+
+	ifp::ReadResult read = ifp::ReadBlock(path);
+	if(!read.problems.empty()){
+		PrintProblems(path, read.problems);
+		return 1;
+	}
+
+	Block block;
+	std::vector<std::string> problems;
+	ifp::BuildCrouchBlock(read.block, &block, &problems);
+
+	// The validator has the last word: the command writes nothing it rejects.
+	CheckOptions options;
+	options.movement = true;
+	ifp::CheckBlock(block, Stem(out), options, &problems);
+	ifp::CheckCrouchSets(block, &problems);
+	if(!problems.empty()){
+		PrintProblems(out, problems);
+		fprintf(stderr, "%s: the block is not written\n", out.c_str());
+		return 1;
+	}
+
+	std::string error;
+	if(!ifp::WriteBlock(out, block, &error)){
+		fprintf(stderr, "%s: %s\n", out.c_str(), error.c_str());
+		return 1;
+	}
+	Counts c = Count(block);
+	printf("wrote %s (block \"%s\", %d animations, %ld sequences, %ld keys)\n", out.c_str(),
+		block.name.c_str(), c.animations, c.sequences, c.keys);
+	printf("the four movement sets, in the engine's slot order (walk, run, runfast, idle, "
+		"startwalk):\n");
+	ifp::CrouchSetSummary(block, std::cout);
+	return 0;
+}
+
+static int
 CommandPlant(int argc, char **argv)
 {
 	if(argc != 3){
@@ -401,6 +448,8 @@ main(int argc, char **argv)
 		return CommandRoundtrip(argc - 2, argv + 2);
 	if(strcmp(command, "extract") == 0 && argc >= 5)
 		return CommandExtract(argc - 2, argv + 2);
+	if(strcmp(command, "crouch") == 0 && argc == 4)
+		return CommandCrouch(argc - 2, argv + 2);
 	if(strcmp(command, "plant") == 0 && argc == 5)
 		return CommandPlant(argc - 2, argv + 2);
 	Usage();

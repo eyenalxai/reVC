@@ -68,6 +68,21 @@ enum AssocGroupId
 	ASSOCGRP_CHAINSAWBACK,
 	ASSOCGRP_CHAINSAWLEFT,
 	ASSOCGRP_CHAINSAWRIGHT,
+
+	// The crouch and prone movement groups (VICE-186, VICE-187): one group per
+	// movement direction and stance, next to the strafe groups whose shape they
+	// share. The presentation picks the group for the stance (VICE-176); the ids
+	// stay under 256, because the replay stores a group id in a uint8.
+	ASSOCGRP_CROUCH,
+	ASSOCGRP_CROUCHBACK,
+	ASSOCGRP_CROUCHLEFT,
+	ASSOCGRP_CROUCHRIGHT,
+
+	ASSOCGRP_PRONE,
+	ASSOCGRP_PRONE_AIM,
+	ASSOCGRP_PRONE_BACK,
+	ASSOCGRP_PRONE_LEFT,
+	ASSOCGRP_PRONE_RIGHT,
 #endif
 
 	NUM_ANIM_ASSOC_GROUPS

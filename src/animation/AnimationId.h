@@ -285,6 +285,23 @@ enum AnimationId
 	ANIM_STRIP_E,
 	ANIM_STRIP_F,
 	ANIM_STRIP_G,
+
+	// The prone movement content (VICE-187): the five slots of a crawl set and
+	// the aim, dive and landing poses. The four crawl groups share the slot ids
+	// the way the strafe groups share the std ones, so one range serves every
+	// direction. Every new id stays under 256: the replay stores an id in a
+	// uint8 (CReplayState::animId).
+	ANIM_PRONE_WALK,
+	ANIM_PRONE_RUN,
+	ANIM_PRONE_RUNFAST,
+	ANIM_PRONE_IDLE,
+	ANIM_PRONE_STARTWALK,
+
+	ANIM_PRONE_AIM_FRONT,
+	ANIM_PRONE_AIM_SIDE,
+	ANIM_PRONE_AIM_BACK,
+	ANIM_PRONE_DIVE,
+	ANIM_PRONE_LAND,
 };
 
 #endif // __GTA_ANIMATIONID_H__

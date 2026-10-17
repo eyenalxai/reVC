@@ -241,6 +241,22 @@ struct CompareResult {
 // Compares two blocks key for key as the loader would see them.
 void CompareBlocks(const Block &a, const Block &b, CompareResult *result);
 
+// ---------------------------------------------------------------- crouch
+
+// Builds the crouch movement block (VICE-186, tools/ifp/crouch.cpp) out of the
+// shipped standing cycles: the crouch pose on the leg and spine bones, the
+// crouch body height on the root and a crouch stride. The tables the transform
+// reads live in crouch.cpp, the one place to tune the pose.
+bool BuildCrouchBlock(const Block &source, Block *out, std::vector<std::string> *problems);
+
+// The movement checks of the block's four directional sets, one set at a time:
+// the block's own movement check reads its first five animations only.
+bool CheckCrouchSets(const Block &block, std::vector<std::string> *problems);
+
+// One line per set: the five slot names and their root speeds, the ladder the
+// presentation picks the tier from.
+void CrouchSetSummary(const Block &block, std::ostream &out);
+
 // ---------------------------------------------------------------- planting
 
 // Test facility for the close-out evidence: writes a copy of the input with one

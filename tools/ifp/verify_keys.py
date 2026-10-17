@@ -35,8 +35,8 @@ def ReadRaw(path):
 		return (x + 3) & ~3
 
 	o = 8
+	count = i32(o + 8)				# the INFO body starts with the animation count
 	o += 8 + rd4(u32(o + 4))			# block INFO
-	count = i32(o - 4 - 4)
 	anims = {}
 	for _ in range(count):
 		size = u32(o + 4)
