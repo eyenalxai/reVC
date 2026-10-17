@@ -17,6 +17,7 @@
 #include "World.h"
 #include "HandlingMgr.h"
 #include "Heli.h"
+#include "SpawnOccupancy.h"
 #include "Plane.h"
 #include "MemoryHeap.h"
 
@@ -552,6 +553,9 @@ CPlane::ProcessControl(void)
 		}
 	}
 
+	/* The aircraft moves its matrix directly; the physics step does not
+	 * carry it. The occupancy store follows both (VICE-149). */
+	CSpawnOccupancy::EntityMoved(this);
 	bIsInSafePosition = true;
 	GetMatrix().UpdateRW();
 	UpdateRwFrame();

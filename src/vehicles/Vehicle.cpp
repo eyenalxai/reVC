@@ -93,7 +93,7 @@ CVehicle::CVehicle(uint8 CreatedBy)
 	bIsHandbrakeOn = false;
 #endif
 	CCarCtrl::UpdateCarCount(this, false);
-	CSpawnOccupancy::VehicleCreated(this);
+	CSpawnOccupancy::VehicleRegistered(this);
 	m_fHealth = 1000.0f;
 	bEngineOn = true;
 	bFreebies = true;

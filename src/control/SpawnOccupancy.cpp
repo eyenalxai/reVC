@@ -15,18 +15,27 @@
  *
  * The hooks and their call sites:
  *
- *	CSpawnOccupancy::VehicleCreated	the top of CVehicle's constructor, next
- *					to CCarCtrl::UpdateCarCount (Vehicle.cpp);
- *	CSpawnOccupancy::VehicleRemoved	CVehicle's destructor, next to the same
- *					counter;
- *	CSpawnOccupancy::PedCreated	the top of CPed's constructor, next to
- *					CPopulation::UpdatePedCount (Ped.cpp);
- *	CSpawnOccupancy::PedRemoved	CPed's destructor, next to the same counter;
- *	CSpawnOccupancy::EntityMoved	CWorld::Add (the placement, the teleport,
- *					the save load's restore), CPhysical::
- *					ApplyMoveSpeed (the physics step) and the
- *					far layer's own re-pose (its cars are
- *					static and off the moving list).
+ *	CSpawnOccupancy::VehicleRegistered	in CVehicle's constructor, next to
+ *						CCarCtrl::UpdateCarCount;
+ *	CSpawnOccupancy::VehicleRemoved	in CVehicle's destructor, next to the
+ *						same counter;
+ *	CSpawnOccupancy::PedRegistered	in CPed's constructor, next to
+ *						CPopulation::UpdatePedCount;
+ *	CSpawnOccupancy::PedRemoved	in CPed's destructor, next to the same
+ *						counter;
+ *	CSpawnOccupancy::EntityMoved	CWorld::Add (the placement, the
+ *					teleport, the save load's restore),
+ *					CPhysical::ApplyMoveSpeed (the physics
+ *					step), the aircraft's own movement
+ *					(CHeli::ProcessControl, CPlane::
+ *					ProcessControl, SteerAIHeliTowardsTarget
+ *					Coors), the far layer's re-pose, the
+ *					crane's carried car, the garage's
+ *					centring and CPed::SetPedPositionInCar;
+ *	CSpawnOccupancy::Resync		the replay restore (CReplay::
+ *					RestoreStuffFromMem) and the boot
+ *					(CGame::Initialise);
+ *	CSpawnOccupancy::Reset		CWorld::ClearForRestart.
  *
  * Every hook is O(1) and changes no game value; the store stays inert until
  * the planner and the director tickets read it.
@@ -60,10 +69,9 @@ PedHandle(CPed *pPed)
 }
 
 void
-CSpawnOccupancy::VehicleCreated(CVehicle *pVehicle)
+CSpawnOccupancy::VehicleRegistered(CVehicle *pVehicle)
 {
-	ms_Store.Create(SPAWN_OCCUPANCY_VEHICLE, VehicleHandle(pVehicle),
-		pVehicle->GetPosition().x, pVehicle->GetPosition().y);
+	ms_Store.Register(SPAWN_OCCUPANCY_VEHICLE, VehicleHandle(pVehicle));
 }
 
 void
@@ -73,10 +81,9 @@ CSpawnOccupancy::VehicleRemoved(CVehicle *pVehicle)
 }
 
 void
-CSpawnOccupancy::PedCreated(CPed *pPed)
+CSpawnOccupancy::PedRegistered(CPed *pPed)
 {
-	ms_Store.Create(SPAWN_OCCUPANCY_PED, PedHandle(pPed),
-		pPed->GetPosition().x, pPed->GetPosition().y);
+	ms_Store.Register(SPAWN_OCCUPANCY_PED, PedHandle(pPed));
 }
 
 void
@@ -96,6 +103,36 @@ CSpawnOccupancy::EntityMoved(CEntity *pEntity)
 			pEntity->GetPosition().x, pEntity->GetPosition().y);
 }
 
+void
+CSpawnOccupancy::Resync(void)
+{
+	/* The pool images can come back without a constructor (the replay
+	 * restore), and every record a load or a replay left can be wrong: the
+	 * rebuild clears everything - the reservations included, the clock may
+	 * have moved - and counts the live slots where they stand now. */
+	ms_Store.Reset();
+	CVehiclePool *pVehiclePool = CPools::GetVehiclePool();
+	for (int32_t i = 0; i < pVehiclePool->GetSize(); i++) {
+		CVehicle *pVehicle = pVehiclePool->GetSlot(i);
+		if (pVehicle)
+			ms_Store.Create(SPAWN_OCCUPANCY_VEHICLE, i,
+				pVehicle->GetPosition().x, pVehicle->GetPosition().y);
+	}
+	CPedPool *pPedPool = CPools::GetPedPool();
+	for (int32_t i = 0; i < pPedPool->GetSize(); i++) {
+		CPed *pPed = pPedPool->GetSlot(i);
+		if (pPed)
+			ms_Store.Create(SPAWN_OCCUPANCY_PED, i,
+				pPed->GetPosition().x, pPed->GetPosition().y);
+	}
+}
+
+void
+CSpawnOccupancy::Reset(void)
+{
+	ms_Store.Reset();
+}
+
 bool
 CSpawnOccupancy::CellAt(float x, float y, int32_t &cellX, int32_t &cellY)
 {
@@ -110,10 +147,7 @@ CSpawnOccupancy::CellAt(float x, float y, int32_t &cellX, int32_t &cellY)
 int32_t
 CSpawnOccupancy::CountAtPosition(ESpawnOccupancyClass type, float x, float y)
 {
-	int32_t cell;
-	if (!SSpawnOccupancyStore::CellAt(x, y, cell))
-		return 0;
-	return ms_Store.CountAt(type, cell);
+	return ms_Store.CountAtPosition(type, x, y);
 }
 
 int32_t
@@ -144,10 +178,4 @@ void
 CSpawnOccupancy::ReleaseSite(int32_t site)
 {
 	ms_Store.ReleaseSite(site);
-}
-
-void
-CSpawnOccupancy::Reset(void)
-{
-	ms_Store.Reset();
 }

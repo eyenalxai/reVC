@@ -367,7 +367,7 @@ CPed::CPed(uint32 pedType) : m_pedIK(this)
 	m_delayedSoundID = -1;
 	m_delayedSoundTimer = 0;
 	CPopulation::UpdatePedCount((ePedType)m_nPedType, false);
-	CSpawnOccupancy::PedCreated(this);
+	CSpawnOccupancy::PedRegistered(this);
 	m_lastComment = UINT32_MAX;
 }
 
@@ -7918,6 +7918,9 @@ CPed::SetPedPositionInCar(void)
 		m_fRotationCur = m_pMyVehicle->GetForward().Heading();
 	}
 	SetMatrix(newMat);
+	/* The occupancy store follows a carried pedestrian (VICE-149): its
+	 * position is the seat matrix, written here and nowhere else. */
+	CSpawnOccupancy::EntityMoved(this);
 }
 
 void

@@ -67,6 +67,7 @@
 #include "Shadows.h"
 #include "Skidmarks.h"
 #include "SetPieces.h"
+#include "SpawnOccupancy.h"
 #include "SpecialFX.h"
 #include "Stats.h"
 #include "Streaming.h"
@@ -350,6 +351,10 @@ bool CGame::Initialise(const char* datFile)
 #endif
 
 	CPools::Initialise();
+	/* The store's one true rebuild at boot (VICE-149): the pools are live
+	 * and empty, so the records start clean whatever the static memory
+	 * held. */
+	CSpawnOccupancy::Resync();
 
 #ifndef GTA_PS2
 #ifdef PED_CAR_DENSITY_SLIDERS

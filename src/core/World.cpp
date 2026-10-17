@@ -1797,6 +1797,9 @@ CWorld::ClearForRestart(void)
 			delete pEntity;
 		}
 	}
+	/* The world is empty and the restart may have moved the clock: the
+	 * records and the site reservations go (VICE-149). */
+	CSpawnOccupancy::Reset();
 	CPools::CheckPoolsEmpty();
 }
 

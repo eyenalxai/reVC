@@ -1,34 +1,57 @@
 /*
  * The evidence program for the occupancy store (ticket VICE-149).
  *
- * This program reads src/control/SpawnOccupancy.h on its own (the header has
- * no engine include) and drives the store through synthetic streams:
+ * This program reads src/control/SpawnOccupancy.h on its own (no engine
+ * include beyond config.h) and drives the store - the engine-free
+ * SSpawnOccupancyStore, the code the game's CSpawnOccupancy wraps - through
+ * synthetic streams:
  *
  *	A. The grid. The cell mapping over the corners, the cell edges and the
  *	   full width: every position lands in its own 16 m cell, the grid's
- *	   edge is the world's, and a position off the grid has no cell.
+ *	   edge is the world's, and a position off the grid (a NaN and a huge
+ *	   value included) has no cell.
  *
- *	B. The streams. Creates, moves and removes over a seeded stream, with
- *	   the per-cell counts checked against a reference the program keeps
- *	   itself (from the entities' positions, never from the store's
- *	   records): after every update the totals and the touched cells, and
- *	   every two thousand updates the whole grid. Then a world-clear-style
- *	   bulk removal (the pool swept by handle, no positions in hand), a
- *	   pool-valve-style churn (the oldest out, a new one in, over the
- *	   pool's own slot reuse) and a drift removal (entities moved without
- *	   the store watching, then deleted).
+ *	B. The lifecycle streams. The constructor's registration (a registered
+ *	   handle counts nothing until its first placement, so the constructor
+ *	   never reads the unplaced matrix), then creates, moves and removes
+ *	   over a seeded stream, with the counts checked against a reference
+ *	   the program keeps itself (from the entities' positions, never from
+ *	   the store's records): after every update the totals and the touched
+ *	   cells, and every two thousand updates the whole grid. Then a
+ *	   world-clear-style bulk removal (the pool swept by handle, no
+ *	   positions in hand), a pool-valve-style churn (the oldest out, a new
+ *	   one in, over the pool's own slot reuse) and a drift removal
+ *	   (entities moved without the store watching, then deleted).
  *
- *	C. Bounded movement. A same-cell move writes nothing; a crossing move
+ *	C. The grid edge. An entity crosses the west edge and comes back: the
+ *	   total drops and returns, the cell it left stays clean, and the
+ *	   removal leaves every cell zero.
+ *
+ *	D. The guards. Bad handles, unknown classes, NaN and huge positions,
+ *	   the readers and the mutation guard: an invalid update moves no
+ *	   count, an unknown class reads zero, a move off the grid drops the
+ *	   count, a battery of reads writes not one byte (the whole store is
+ *	   byte-compared around it), and an injected one-count fault is caught
+ *	   by the reference comparison and reads clean again once undone (the
+ *	   guard that the checks are not vacuous).
+ *
+ *	E. Bounded movement. A same-cell move writes nothing; a crossing move
  *	   touches exactly the two cells and nothing else; the totals never
  *	   move. Checked by diffing the store's own arrays.
  *
- *	D. Reservations. The reserve, the second request refused, the expiry,
- *	   the re-take after expiry, the release, the out-of-range ids and the
- *	   game timer's wrap.
+ *	F. Reservations. The reserve, the second request refused, the expiry,
+ *	   the re-take after expiry, the release, the out-of-range ids, the
+ *	   game timer's wrap, a clock that moved backwards and an entry older
+ *	   than the wrap half.
  *
- *	E. The cost. The per-update price of a fresh create, a create+remove
+ *	G. The cost. The per-update price of a fresh create, a create+remove
  *	   churn, a same-cell move and a crossing move, over precomputed
  *	   positions (the RNG is not inside the timed loops).
+ *
+ * What this program cannot reach: the engine wrapper CSpawnOccupancy and the
+ * hooks themselves (the pools, the constructors, CWorld::Add, the aircraft,
+ * Resync) are the game's, checked by the build and by inspection; this
+ * harness drives the store they call.
  *
  * Build and run:
  *
@@ -280,6 +303,25 @@ RefCheckFull(const char *what)
 	}
 }
 
+/* The mutation guard's silent read: the number of cells (and totals) where
+ * the store and the reference disagree. The checks above report their
+ * failures; this one tells the guard whether the machinery would have seen
+ * an injected fault, without printing anything. */
+static int32_t
+RefMismatches(void)
+{
+	int32_t n = 0;
+	for (int32_t cls = 0; cls < SPAWN_OCCUPANCY_CLASSES; cls++) {
+		for (int32_t cell = 0; cell < SPAWN_OCCUPANCY_CELLS; cell++) {
+			if (ms_aStore.CountAtCell((ESpawnOccupancyClass)cls, cell % SPAWN_OCCUPANCY_CELLS_X, cell / SPAWN_OCCUPANCY_CELLS_X) != ms_aRefCount[cls][cell])
+				n++;
+		}
+		if (ms_aStore.TotalCount((ESpawnOccupancyClass)cls) != ms_aRefTotal[cls])
+			n++;
+	}
+	return n;
+}
+
 /* ------------------------------------------------------------------ A. the grid */
 
 static void
@@ -330,7 +372,60 @@ SectionGrid(void)
 	printf("  the corner, the edges and every column and row: %d checks\n", walked + 7);
 }
 
-/* --------------------------------------------------------------- B. the streams */
+/* ------------------------------------------------- B. the lifecycle streams */
+
+/*
+ * The constructor's registration: the handle is marked, nothing is read and
+ * nothing is counted until the first placement - the game's shape is
+ * register (the constructor), place (the world add), move (the physics
+ * step), remove (the destructor).
+ */
+static void
+SectionRegister(void)
+{
+	printf("B. the constructor's registration (no position read)\n");
+	RefReset();
+	ms_aStore.Reset();
+
+	/* A registered handle holds no count until its first placement. */
+	ms_aStore.Register(SPAWN_OCCUPANCY_VEHICLE, 7);
+	Check(ms_aStore.TotalCount(SPAWN_OCCUPANCY_VEHICLE) == 0,
+		"a registered handle must not be counted");
+	Check(ms_aStore.CountAtPosition(SPAWN_OCCUPANCY_VEHICLE, 0.0f, 0.0f) == 0,
+		"a registered handle must count nowhere");
+
+	ms_aStore.Move(SPAWN_OCCUPANCY_VEHICLE, 7, 100.0f, 100.0f);
+	Check(ms_aStore.TotalCount(SPAWN_OCCUPANCY_VEHICLE) == 1 &&
+	      ms_aStore.CountAtPosition(SPAWN_OCCUPANCY_VEHICLE, 100.0f, 100.0f) == 1,
+		"the first placement must count the registered handle");
+	ms_aStore.Remove(SPAWN_OCCUPANCY_VEHICLE, 7);
+	Check(ms_aStore.TotalCount(SPAWN_OCCUPANCY_VEHICLE) == 0,
+		"a placed handle's removal must take the count back");
+
+	/* A handle created and destroyed before any placement leaves nothing. */
+	ms_aStore.Register(SPAWN_OCCUPANCY_PED, 3);
+	ms_aStore.Remove(SPAWN_OCCUPANCY_PED, 3);
+	Check(ms_aStore.TotalCount(SPAWN_OCCUPANCY_PED) == 0,
+		"an unplaced handle's removal must leave nothing");
+
+	/* The game's own walk, against the reference. */
+	for (int32_t i = 0; i < 400; i++) {
+		ms_aStore.Register(SPAWN_OCCUPANCY_VEHICLE, i);
+		float x = RandFloat(-1300.0f, 1300.0f);
+		float y = RandFloat(-1600.0f, 1600.0f);
+		ms_aStore.Move(SPAWN_OCCUPANCY_VEHICLE, i, x, y);
+		RefAdd(SPAWN_OCCUPANCY_VEHICLE, i, x, y);
+	}
+	RefCheckTotals("the register-place walk must count like the reference");
+	RefCheckFull("the whole grid must match after the register-place walk");
+	for (int32_t i = 0; i < 400; i++) {
+		ms_aStore.Remove(SPAWN_OCCUPANCY_VEHICLE, i);
+		RefRemove(SPAWN_OCCUPANCY_VEHICLE, i);
+	}
+	RefReset();
+	RefCheckFull("the register-place walk must empty cleanly");
+	printf("  register -> place -> move -> remove: the counts follow the placement\n");
+}
 
 /* A seeded create walk: hVehicles vehicles and hPeds pedestrians, each at a
  * random position well inside the map. */
@@ -373,7 +468,6 @@ StreamMove(int32_t nMoves)
 		RefCheckCell(e.cls, newOn ? newCell : -1);
 		if (i % 2000 == 0)
 			RefCheckFull("the whole grid must match the reference");
-		(void)newOn;
 	}
 }
 
@@ -557,7 +651,144 @@ SectionDrift(void)
 	printf("  the moves were never seen; the deletes still zeroed every cell\n");
 }
 
-/* ------------------------------------------------------- C. bounded movement */
+/* ------------------------------------------------------------ C. the grid edge */
+
+/*
+ * An entity against the west edge crosses out of the world and comes back:
+ * the total drops when it leaves and returns when it re-enters, the cell it
+ * left stays clean, and the removal at the end leaves every cell zero.
+ */
+static void
+SectionOffGrid(void)
+{
+	printf("C. the grid edge (a crossing, out and back)\n");
+	RefReset();
+	ms_aStore.Reset();
+
+	float inX = SPAWN_OCCUPANCY_GRID_MIN_X + 4.0f;
+	float inY = 0.0f;
+	float outX = SPAWN_OCCUPANCY_GRID_MIN_X - 100.0f;
+	int32_t cell;
+
+	Check(!SSpawnOccupancyStore::CellAt(outX, inY, cell), "a position past the west edge has no cell");
+
+	ms_aStore.Create(SPAWN_OCCUPANCY_PED, 0, inX, inY);
+	RefAdd(SPAWN_OCCUPANCY_PED, 0, inX, inY);
+	Check(ms_aStore.TotalCount(SPAWN_OCCUPANCY_PED) == 1, "the entity starts counted");
+	Check(ms_aStore.CountAtPosition(SPAWN_OCCUPANCY_PED, inX, inY) == 1, "counted in its cell");
+
+	ms_aStore.Move(SPAWN_OCCUPANCY_PED, 0, outX, inY);
+	RefMove(SPAWN_OCCUPANCY_PED, 0, outX, inY);
+	Check(ms_aStore.TotalCount(SPAWN_OCCUPANCY_PED) == 0, "the total drops when the entity leaves the grid");
+	Check(ms_aStore.CountAtPosition(SPAWN_OCCUPANCY_PED, inX, inY) == 0, "the cell it left is clean");
+	RefCheckFull("the whole grid must match the reference off the grid");
+
+	ms_aStore.Move(SPAWN_OCCUPANCY_PED, 0, inX, inY);
+	RefMove(SPAWN_OCCUPANCY_PED, 0, inX, inY);
+	Check(ms_aStore.TotalCount(SPAWN_OCCUPANCY_PED) == 1, "the total returns when the entity comes back");
+	Check(ms_aStore.CountAtPosition(SPAWN_OCCUPANCY_PED, inX, inY) == 1, "counted again where it stands");
+	RefCheckFull("the whole grid must match the reference back on the grid");
+
+	ms_aStore.Remove(SPAWN_OCCUPANCY_PED, 0);
+	RefRemove(SPAWN_OCCUPANCY_PED, 0);
+	RefReset();
+	RefCheckFull("the removal must leave every cell zero");
+	printf("  out: 1 -> 0, the left cell clean; back: 0 -> 1; remove: all zero\n");
+}
+
+/* ------------------------------------------------------------------ D. the guards */
+
+/*
+ * Bad input is inert, the readers write nothing, and the checks themselves
+ * are guarded: an injected one-count fault must be caught.
+ */
+static void
+SectionGuards(void)
+{
+	printf("D. the guards (invalid input, the readers, the mutation guard)\n");
+	RefReset();
+	ms_aStore.Reset();
+
+	/* Bad handles and unknown classes move no count. */
+	ms_aStore.Create(SPAWN_OCCUPANCY_VEHICLE, 0, 100.0f, 100.0f);
+	ms_aStore.Register(SPAWN_OCCUPANCY_VEHICLE, -1);
+	ms_aStore.Create(SPAWN_OCCUPANCY_VEHICLE, NUMVEHICLES, 200.0f, 200.0f);
+	ms_aStore.Move(SPAWN_OCCUPANCY_VEHICLE, NUMPEDS, 200.0f, 200.0f);
+	ms_aStore.Remove(SPAWN_OCCUPANCY_VEHICLE, NUMVEHICLES);
+	ms_aStore.Create(SPAWN_OCCUPANCY_CLASSES, 0, 200.0f, 200.0f);
+	ms_aStore.Move(SPAWN_OCCUPANCY_CLASSES, 0, 300.0f, 300.0f);
+	ms_aStore.Remove(SPAWN_OCCUPANCY_CLASSES, 0);
+	Check(ms_aStore.TotalCount(SPAWN_OCCUPANCY_VEHICLE) == 1 && ms_aStore.TotalCount(SPAWN_OCCUPANCY_PED) == 0,
+		"a bad handle or class must move no count");
+	Check(ms_aStore.CountAtPosition(SPAWN_OCCUPANCY_VEHICLE, 100.0f, 100.0f) == 1,
+		"the one real entity must stand");
+
+	/* Unknown classes read zero, by position, by cell and in the totals. */
+	Check(ms_aStore.TotalCount(SPAWN_OCCUPANCY_CLASSES) == 0, "an unknown class reads a zero total");
+	Check(ms_aStore.CountAtPosition(SPAWN_OCCUPANCY_CLASSES, 100.0f, 100.0f) == 0, "an unknown class reads no cell");
+	Check(ms_aStore.CountAtCell(SPAWN_OCCUPANCY_CLASSES, 0, 0) == 0, "an unknown class reads no cell by index");
+
+	/* The float-domain guard: off the grid, NaN and huge values. */
+	int32_t cell;
+	Check(!SSpawnOccupancyStore::CellAt(SPAWN_OCCUPANCY_GRID_MIN_X - 1.0f, 0.0f, cell), "west of the grid");
+	Check(!SSpawnOccupancyStore::CellAt(0.0f, SPAWN_OCCUPANCY_GRID_MIN_Y - 1.0f, cell), "south of the grid");
+	Check(!SSpawnOccupancyStore::CellAt(SPAWN_OCCUPANCY_GRID_MIN_X + SPAWN_OCCUPANCY_CELLS_X * SPAWN_OCCUPANCY_CELL_SIZE, 0.0f, cell), "the east edge");
+	Check(!SSpawnOccupancyStore::CellAt(0.0f, SPAWN_OCCUPANCY_GRID_MIN_Y + SPAWN_OCCUPANCY_CELLS_Y * SPAWN_OCCUPANCY_CELL_SIZE, cell), "the north edge");
+	Check(!SSpawnOccupancyStore::CellAt(NAN, 0.0f, cell), "a NaN x has no cell");
+	Check(!SSpawnOccupancyStore::CellAt(0.0f, NAN, cell), "a NaN y has no cell");
+	Check(!SSpawnOccupancyStore::CellAt(1e30f, 0.0f, cell), "a huge x has no cell");
+	Check(!SSpawnOccupancyStore::CellAt(0.0f, -1e30f, cell), "a huge negative y has no cell");
+
+	/* A move to a rejected position drops the count, like any move off the
+	 * grid; the removal of the dropped handle is clean. */
+	ms_aStore.Move(SPAWN_OCCUPANCY_VEHICLE, 0, NAN, 100.0f);
+	Check(ms_aStore.TotalCount(SPAWN_OCCUPANCY_VEHICLE) == 0, "a move to a rejected position drops the count");
+	ms_aStore.Remove(SPAWN_OCCUPANCY_VEHICLE, 0);
+	Check(ms_aStore.TotalCount(SPAWN_OCCUPANCY_VEHICLE) == 0, "the removal of a dropped handle is clean");
+
+	/* The readers write nothing: the whole store is byte-compared around a
+	 * battery of reads over a populated store. */
+	static unsigned char aSnapshot[sizeof(SSpawnOccupancyStore)];
+	float savedX = 0.0f, savedY = 0.0f;
+	ms_aStore.Reset();
+	RefReset();
+	for (int32_t i = 0; i < 100; i++) {
+		float x = RandFloat(-1300.0f, 1300.0f);
+		float y = RandFloat(-1600.0f, 1600.0f);
+		ms_aStore.Create(SPAWN_OCCUPANCY_VEHICLE, i, x, y);
+		RefAdd(SPAWN_OCCUPANCY_VEHICLE, i, x, y);
+		if (i == 0) {
+			savedX = x;
+			savedY = y;
+		}
+	}
+	memcpy(aSnapshot, &ms_aStore, sizeof(aSnapshot));
+	int32_t sink = 0;
+	for (int32_t i = 0; i < 200; i++) {
+		int32_t readCell;
+		sink += SSpawnOccupancyStore::CellAt(savedX + i, savedY, readCell) ? readCell : 0;
+		sink += ms_aStore.CountAtPosition(SPAWN_OCCUPANCY_VEHICLE, savedX, savedY);
+		sink += ms_aStore.CountAtCell(SPAWN_OCCUPANCY_VEHICLE, i % SPAWN_OCCUPANCY_CELLS_X, 0);
+		sink += ms_aStore.TotalCount(SPAWN_OCCUPANCY_VEHICLE);
+		sink += ms_aStore.TotalCount(SPAWN_OCCUPANCY_CLASSES);
+		sink += ms_aStore.SiteReserved(i % SPAWN_OCCUPANCY_SITES, (uint32_t)i);
+	}
+	Check(memcmp(aSnapshot, &ms_aStore, sizeof(aSnapshot)) == 0, "a battery of reads must write nothing");
+	(void)sink;
+
+	/* The mutation guard: the reference comparison is not vacuous. */
+	Check(RefMismatches() == 0, "the populated store must read clean");
+	ms_aStore.m_aVehicleCount[100] += 1;
+	Check(RefMismatches() > 0, "an injected count fault must be caught");
+	ms_aStore.m_aVehicleCount[100] -= 1;
+	ms_aStore.m_nVehicleTotal += 1;
+	Check(RefMismatches() > 0, "an injected total fault must be caught");
+	ms_aStore.m_nVehicleTotal -= 1;
+	Check(RefMismatches() == 0, "the undone store must read clean");
+	printf("  invalid updates inert; the reads byte-clean; the injected faults caught\n");
+}
+
+/* --------------------------------------------------------- E. bounded movement */
 
 /* The count of cells whose value differs between two snapshots. */
 static int32_t
@@ -573,7 +804,7 @@ CountDiffCells(const uint16_t *pa, const uint16_t *pb)
 static void
 SectionMovementBound(void)
 {
-	printf("C. bounded movement (what one update writes)\n");
+	printf("E. bounded movement (what one update writes)\n");
 	RefReset();
 	ms_aStore.Reset();
 
@@ -611,12 +842,12 @@ SectionMovementBound(void)
 	printf("  100 same-cell moves wrote 0 cells; 100 crossing moves wrote %d (2 each)\n", crossWritten);
 }
 
-/* -------------------------------------------------------- D. the reservations */
+/* ---------------------------------------------------------- F. the reservations */
 
 static void
 SectionReservations(void)
 {
-	printf("D. the reservations\n");
+	printf("F. the reservations\n");
 	ms_aStore.Reset();
 
 	int32_t site = 777;
@@ -649,10 +880,20 @@ SectionReservations(void)
 	Check(ms_aStore.SiteReserved(42, nearWrap + 100), "the reservation holds across the wrap");
 	Check(ms_aStore.SiteReserved(42, nearWrap + SPAWN_OCCUPANCY_RESERVE_MS - 1), "it holds until its expiry");
 	Check(!ms_aStore.SiteReserved(42, nearWrap + SPAWN_OCCUPANCY_RESERVE_MS), "and frees after it");
-	printf("  reserve, refusal, expiry, re-take, release, bounds and the timer wrap: ok\n");
+
+	/* A load can move the clock backwards; a stale entry (the timer past the
+	 * wrap half) must not read held either. */
+	ms_aStore.Reset();
+	Check(ms_aStore.ReserveSite(5, now), "reserve at t");
+	Check(!ms_aStore.SiteReserved(5, now - 1), "a clock that moved backwards frees the site");
+	Check(ms_aStore.SiteReserved(5, now), "the site is held again at t");
+	uint32_t staleNow = now + SPAWN_OCCUPANCY_RESERVE_MS + 0x80000000u + 1000u;
+	Check(!ms_aStore.SiteReserved(5, staleNow), "an entry older than the wrap half cannot read held");
+	Check(ms_aStore.ReserveSite(5, staleNow), "and it can be taken again");
+	printf("  reserve, refusal, expiry, re-take, release, bounds, wrap, backwards and stale: ok\n");
 }
 
-/* ------------------------------------------------------------------ E. the cost */
+/* ------------------------------------------------------------------ G. the cost */
 
 #define COST_N 1000000
 
@@ -705,7 +946,7 @@ CostSetup(void)
 static void
 SectionCost(void)
 {
-	printf("E. the cost (per update; %d updates per stream)\n", COST_N);
+	printf("G. the cost (per update; %d updates per stream)\n", COST_N);
 	CostSetup();
 	ms_aStore.Reset();
 	double t0, t1;
@@ -783,6 +1024,8 @@ main(void)
 	printf("The occupancy store (VICE-149): the grid, the streams, the movement, the reservations.\n\n");
 	SectionGrid();
 	printf("\n");
+	SectionRegister();
+	printf("\n");
 	SectionStreams();
 	printf("\n");
 	SectionWorldClear();
@@ -790,6 +1033,10 @@ main(void)
 	SectionValve();
 	printf("\n");
 	SectionDrift();
+	printf("\n");
+	SectionOffGrid();
+	printf("\n");
+	SectionGuards();
 	printf("\n");
 	SectionMovementBound();
 	printf("\n");
