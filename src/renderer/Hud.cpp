@@ -383,16 +383,17 @@ DrawSights(CPlayerPed *playerPed, eWeaponType WeaponType, int32 sightMode)
 static bool
 PlayerAimsGun(CPlayerPed *playerPed)
 {
+	if (playerPed == nil || !playerPed->IsAimingWeapon())
+		return false;
+
 	// The third person mouse view draws the crosshair where its shots go; the
 	// look-behind view draws none, because its shots follow the forward of the
 	// ped, not the pointer. The garage adds its crosshair back.
-	if (TheCamera.Cams[TheCamera.ActiveCam].Using3rdPersonMouseCam() && playerPed && playerPed->IsAimingWeapon() &&
-	    (!CPad::GetPad(0)->GetLookBehindForPed() || TheCamera.m_bPlayerIsInGarage))
-		return true;
+	if (TheCamera.Cams[TheCamera.ActiveCam].Using3rdPersonMouseCam() &&
+	    CPad::GetPad(0)->GetLookBehindForPed() && !TheCamera.m_bPlayerIsInGarage)
+		return false;
 
-	// The first person view, the classic view and the car view: the aim state
-	// is the one rule.
-	return playerPed && playerPed->IsAimingWeapon();
+	return true;
 }
 
 // The reticle and the sight overlay of the aim. One rule for every aiming
@@ -406,7 +407,7 @@ DrawCrosshairAndSights(CPlayerPed *playerPed, eWeaponType WeaponType)
 	// The overlay the view draws: the stock sight camera mode, or the first
 	// person player camera standing in for the aimed weapon's sight
 	int32 sightMode = TheCamera.GetSightOverlayMode();
-	bool overlay = sightMode == CCam::MODE_SNIPER || sightMode == CCam::MODE_CAMERA;
+	bool overlay = CCamera::IsSightCameraMode(sightMode);
 	bool reticle = !overlay && IsGunWeapon(WeaponType) && PlayerAimsGun(playerPed);
 
 	if (!overlay && !reticle) {

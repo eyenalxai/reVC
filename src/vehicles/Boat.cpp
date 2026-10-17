@@ -1425,7 +1425,7 @@ CBoat::DoDriveByShootings(void)
 		return;
 
 	CWeapon *weapon = pDriver->GetWeapon();
-	if(!IsGunWeapon(weapon->m_eWeaponType))
+	if(!IsAimableWeapon(weapon->m_eWeaponType))
 		return;
 
 	weapon->Update(pDriver->m_audioEntityId, nil);
@@ -1438,8 +1438,7 @@ CBoat::DoDriveByShootings(void)
 	// The car ADS aims and fires every gun from the boat too: the shot
 	// follows the one held pose.
 	if(aiming){
-		if(CPad::GetPad(0)->GetCarGunFired() && CTimer::GetTimeInMilliseconds() > weapon->m_nTimer)
-			weapon->FireFromCarWithCadence(this, true);
+		FireDriverAimedWeapon(weapon);
 	}else{
 		// The stock code refills the clip while the player does not aim.
 		// With the active reload on the clip is a magazine and refills only

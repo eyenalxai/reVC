@@ -88,7 +88,11 @@ public:
 	// The one aim of the on-foot player: the aim button raises the weapon and
 	// every control path runs this each frame while the player can aim
 	void AimWeapon(CPad *padUsed);
+	// The start of the aim: the state, the camera mode of the scope or the
+	// viewfinder, and the end of any lock-on. The vehicle aim starts here too.
+	void StartWeaponAim(void);
 	void StopWeaponAim(void);
+	void UpdateAimCameraMode(void);
 	void ClearAimCameraMode(void);
 	void AimAtPosition(const CVector &position);
 	bool IsMoveControllerInCharge(void);

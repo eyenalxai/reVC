@@ -6,6 +6,7 @@
 #include "RpAnimBlend.h"
 #include "Bones.h"
 #include "Ped.h"
+#include "WeaponAim.h"
 #include "AnimBlendAssociation.h"
 #include "Fire.h"
 #include "DMAudio.h"
@@ -1242,6 +1243,7 @@ CPed::ClearAimFlag(void)
 		((CPlayerPed*)this)->ReleaseHeldAimPose();
 		((CPlayerPed*)this)->m_fFPSMoveHeading = 0.0f;
 		((CPlayerPed*)this)->m_bWeaponAimActive = false;
+		((CPlayerPed*)this)->ClearAimCameraMode();
 	}
 }
 
@@ -4832,10 +4834,34 @@ CPed::ClearWeapons(void)
 void
 CPed::RemoveWeaponWhenEnteringVehicle(void)
 {
-	if (IsPlayer() && HasWeaponSlot(5) && GetWeapon(5).m_nAmmoTotal > 0 && ((CPlayerPed*)this)->GetPlayerInfoForThisPlayerPed()->m_bDriveByAllowed) {
+	if (!IsPlayer())
+		return;
+
+	// Every aiming weapon fires from the seat now: a weapon the ped holds and
+	// can aim stays in hand.
+	if (IsAimableWeapon(GetWeapon()->m_eWeaponType))
+		return;
+
+	// The held weapon cannot aim from the seat: take an aiming weapon the ped
+	// has, the submachine gun first like the stock game.
+	eWeaponType aimable = WEAPONTYPE_UNIDENTIFIED;
+	if (HasWeaponSlot(WEAPONSLOT_SUBMACHINEGUN) &&
+	    IsAimableWeapon(GetWeapon(WEAPONSLOT_SUBMACHINEGUN).m_eWeaponType) &&
+	    GetWeapon(WEAPONSLOT_SUBMACHINEGUN).m_nAmmoTotal > 0) {
+		aimable = GetWeapon(WEAPONSLOT_SUBMACHINEGUN).m_eWeaponType;
+	} else {
+		for (int i = 0; i < TOTAL_WEAPON_SLOTS; i++) {
+			if (HasWeaponSlot(i) && IsAimableWeapon(GetWeapon(i).m_eWeaponType) && GetWeapon(i).m_nAmmoTotal > 0) {
+				aimable = GetWeapon(i).m_eWeaponType;
+				break;
+			}
+		}
+	}
+
+	if (aimable != WEAPONTYPE_UNIDENTIFIED) {
 		if (m_storedWeapon == WEAPONTYPE_UNIDENTIFIED)
 			m_storedWeapon = GetWeapon()->m_eWeaponType;
-		SetCurrentWeapon(GetWeapon(5).m_eWeaponType);
+		SetCurrentWeapon(aimable);
 	} else {
 		CWeaponInfo *ourWeapon = CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType);
 		RemoveWeaponModel(ourWeapon->m_nModelId);
@@ -4844,15 +4870,13 @@ CPed::RemoveWeaponWhenEnteringVehicle(void)
 void
 CPed::ReplaceWeaponWhenExitingVehicle(void)
 {
-	eWeaponType weaponType = GetWeapon()->m_eWeaponType;
-
-	// If it's Uzi, we may have stored weapon. Uzi is the only gun we can use in car.
-	if (IsPlayer() && GetWeaponSlot(weaponType) == WEAPONSLOT_SUBMACHINEGUN) {
-		if (m_storedWeapon != WEAPONTYPE_UNIDENTIFIED) {
-			SetCurrentWeapon(m_storedWeapon);
-			m_storedWeapon = WEAPONTYPE_UNIDENTIFIED;
-		}
+	// The seat put the old weapon away or switched to an aiming one: the
+	// stored weapon comes back and the model follows the weapon.
+	if (IsPlayer() && m_storedWeapon != WEAPONTYPE_UNIDENTIFIED) {
+		SetCurrentWeapon(m_storedWeapon);
+		m_storedWeapon = WEAPONTYPE_UNIDENTIFIED;
 	} else {
+		eWeaponType weaponType = GetWeapon()->m_eWeaponType;
 		AddWeaponModel(CWeaponInfo::GetWeaponInfo(weaponType)->m_nModelId);
 	}
 }

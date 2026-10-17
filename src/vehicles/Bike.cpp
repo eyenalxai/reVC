@@ -2012,7 +2012,7 @@ CBike::DoDriveByShootings(void)
 		return;
 
 	CWeapon *weapon = pDriver->GetWeapon();
-	if(!IsGunWeapon(weapon->m_eWeaponType))
+	if(!IsAimableWeapon(weapon->m_eWeaponType))
 		return;
 
 	weapon->Update(pDriver->m_audioEntityId, nil);
@@ -2030,8 +2030,7 @@ CBike::DoDriveByShootings(void)
 		if(anim)
 			anim->blendDelta = -1000.0f;
 
-		if(CPad::GetPad(0)->GetCarGunFired() && CTimer::GetTimeInMilliseconds() > weapon->m_nTimer)
-			weapon->FireFromCarWithCadence(this, true);
+		FireDriverAimedWeapon(weapon);
 	}else if(CPad::GetPad(0)->GetCarGunFired()){
 		// The stock forward drive-by stays on the plain fire button without
 		// the aim: the shot waits for the arm to come out.

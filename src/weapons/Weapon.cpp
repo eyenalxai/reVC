@@ -101,9 +101,11 @@ GetShotRay(CEntity *shooter, float range, CVector *fireSource, CVector &source, 
 	ASSERT(IsPlayerShot(shooter));
 
 	if (shooter->IsVehicle()) {
+		// The shot starts at the driver's hand; the ray through the muzzle
+		// gives the aim direction the camera solved
+		CVector raySource;
+		TheCamera.GetPlayerAimRay(range, *fireSource, raySource, target);
 		source = *fireSource;
-		CVector aimSource;
-		TheCamera.GetPlayerAimRay(range, *fireSource, aimSource, target);
 	} else {
 		TheCamera.GetPlayerAimRay(range, *fireSource, source, target);
 	}
@@ -133,42 +135,6 @@ AddGunflashChain(tParticleType type, CVector pos, CVector const &dir, const Gunf
 		pos += chain[i].step * dir;
 		CParticle::AddParticle(type, pos, CVector(0.0f, 0.0f, 0.0f), nil, chain[i].size);
 	}
-}
-
-// The kick of an aimed shot: the stock sight recoil and the view shake, the
-// weapon rate sets the shake frequency. The rifle rounds kick harder than the
-// pistol rounds.
-static void
-KickAimedView(CWeaponInfo *info, eWeaponType type)
-{
-	float mult;
-	switch (type) {
-	case WEAPONTYPE_M4:
-	case WEAPONTYPE_HELICANNON:
-	case WEAPONTYPE_M60:
-		mult = 0.0003f;
-		break;
-	case WEAPONTYPE_RUGER:
-		mult = 0.00015f;
-		break;
-	default:
-		mult = 0.0002f;
-		break;
-	}
-
-	CPlayerPed *player = FindPlayerPed();
-	if (player->bIsDucking || player->m_attachedTo)
-		mult *= 0.3f;
-
-	TheCamera.Cams[TheCamera.ActiveCam].Beta  += float((CGeneral::GetRandomNumber() & 127) - 64) * mult;
-	TheCamera.Cams[TheCamera.ActiveCam].Alpha += float((CGeneral::GetRandomNumber() & 127) - 64) * mult;
-
-	// yes, double
-	double notFiringRate = (20.0 - info->m_nFiringRate) / 80.0;
-	double raisedNotFiringRate = Max(1.0, Max(0.0, notFiringRate));
-
-	uint8 shakeFreq = 80.0 * raisedNotFiringRate + 130.0;
-	CPad::GetPad(0)->StartShake(20000.0f * CTimer::GetTimeStep() / shakeFreq, shakeFreq);
 }
 
 CWeaponInfo *
@@ -289,6 +255,14 @@ CWeapon::Fire(CEntity *shooter, CVector *fireSource)
 
 	bool fired;
 	bool addFireRateAsDelay = true;
+
+	// The scope rifles and the photo camera fire only while the player aims:
+	// their sight view is the shot view, and the stock game never fires them
+	// from the hip. The AI sniper keeps the stock path.
+	if ( shooter == FindPlayerPed() &&
+	     (IsScopeRifle(m_eWeaponType) || IsPhotoCamera(m_eWeaponType)) &&
+	     !FindPlayerPed()->IsAimingWeapon() )
+		return false;
 
 	if ( GetInfo()->m_eWeaponFire != WEAPON_FIRE_MELEE )
 	{
@@ -1081,8 +1055,6 @@ CWeapon::FireInstantHit(CEntity *shooter, CVector *fireSource)
 			for (int32 i = 0; i < 16; i++)
 				CParticle::AddParticle(PARTICLE_SPARK, bulletPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.0f, rotSpeed);
 		}
-
-		KickAimedView(info, m_eWeaponType);
 	}
 	else if ( shooter->IsPed() && ((CPed *)shooter)->m_pPointGunAt )
 	{

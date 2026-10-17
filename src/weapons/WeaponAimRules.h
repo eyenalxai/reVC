@@ -3,6 +3,11 @@
 
 #include "WeaponType.h"
 
+// The reach of the one aim ray, in engine units. The gun pose and the shot
+// follow the point this far along the ray, so it is the same on foot and in a
+// vehicle.
+#define AIM_RAY_DISTANCE (30.0f)
+
 // The one classification of the aiming weapons, as pure rules over the weapon
 // data. WeaponAim.h wraps them with the loaded CWeaponInfo, and the aim matrix
 // harness checks them against weapon.dat without the engine.
