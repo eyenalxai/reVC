@@ -630,22 +630,20 @@ is gone.
 ## Sight view
 
 The view the shot leaves from and the weapon holds its pose at while the player
-aims down the sights. `CCamera::GetSightCameraMode` names it: the stock sight
-camera mode, or the first person player camera standing in for it. The first
-person view serves every aiming weapon with the player camera, so the player
-keeps moving and WASD stays with the movement in every movement state
-(VICE-137). The photo camera keeps its stock stationary viewfinder, because the
-photograph reads its mode. `CCamera::GetSightOverlayMode` names the overlay the
-HUD draws: the sniper scope and the rocket sight draw theirs over the player
-camera, and the plain first person view draws the on-foot reticle of the aim
-(VICE-143), the same sprite the stock sight camera draws.
+aims. There is one aiming path: every gun aims at the pointer, in both views
+and in a vehicle, and the shot follows the aim ray. A normal gun draws no zoom
+and moves no camera; `CCamera::GetPlayerAimRay` is the one ray. The sniper and
+the laser scope run their own `MODE_SNIPER` camera with the stock zoom, and the
+photo camera keeps `MODE_CAMERA` and its viewfinder. `CCamera::GetSightOverlayMode`
+names the overlay the HUD draws: the scope for the sniper and the laser scope,
+the viewfinder for the photo camera, and no overlay for a normal gun, which
+draws the one reticle of its view.
 
 ## Scope zoom
 
-The zoom of the sniper and the laser scope in the sight view. The first person
-view keeps the wheel zoom and the range of the stock sniper camera and starts
-at the FOV of the view the scope takes over, so the scope looks and zooms like
-the scope it stands in for.
+The zoom of the sniper and the laser scope. The scope runs its own `MODE_SNIPER`
+camera in both views, with the wheel zoom, the range and the sniper motion blur
+of the stock scope.
 
 ## Camera handover
 
@@ -655,8 +653,7 @@ view, the view switching on or off, a sight camera or a script taking the view
 over, and the handback. The from pose is the pose the last frame presented and
 the target is the live pose of the new view, so input during the glide works on
 the live pose and the glide ends exactly on the new pose. The view changes take
-`CAMERA_HANDOVER_TIME` (650 ms) and the sight zoom takes
-`CAMERA_SIGHTS_HANDOVER_TIME` (250 ms).
+`CAMERA_HANDOVER_TIME` (650 ms).
 
 ## Look recenter
 
@@ -667,20 +664,43 @@ mouse look is an offset from the car's heading; when the look rests for
 cancels the return at once and takes the live offset over, and a held aim keeps
 the view where the mouse put it.
 
-## Car ADS
+## Car ADS (car aim)
 
-Aiming from the driver's seat with the mouse aim button: the follow camera
-pulls in and the free aim fires along the camera. Only the drive-by vehicles
-(car, bike, boat) and the drive-by weapon take it, and the bullets ignore the
+Aiming from the driver's seat with the mouse aim button. The driver's aim state
+raises any gun, the aim ray is the camera ray, and one held weapon pose follows
+it: the arms and the torso follow the aim while the vehicle heading stays the
+drive heading, so the body never turns sideways. The bullets ignore the
 player's own car. The stock sideways drive-by of the look keys is gone
 (VICE-138); a bike keeps its stock forward drive-by on the plain fire button.
 
+## Aim state
+
+`CPlayerPed::m_bWeaponAimActive`, the one state the aim button raises for every
+gun and the photo camera, on foot and in a vehicle, in both views and in every
+movement state. The sniper and the laser scope add their scope camera and the
+photo camera its viewfinder; no other weapon changes the view.
+
+## Aim ray
+
+The one ray the gun pose and the shot follow, `CCamera::GetPlayerAimRay`. The
+third person mouse view aims through its crosshair, so the shot goes where the
+pointer points; the first person view, the scopes and the viewfinder aim along
+their own camera.
+
+## Gun
+
+A weapon that aims through the one aim system: it fires an instant hit, a flame
+or a rocket. The throwables, the detonator, the melee weapons and the photo
+camera are not guns; the camera aims with its viewfinder and the melee and the
+throwables keep the stock behavior. The rule lives in `WeaponAim.h`
+(`IsGunWeapon`, `IsAimableWeapon`).
+
 ## First person sights
 
-Aiming down the sights on foot in the first person view. The plain first person
-camera keeps the player moving (the M16 camera mode is the stock stationary
-aim). The sight predicate, `CCamera::UsingFirstPersonSights`, drives the sight
-zoom, the shot ray and the reticle together.
+The first person view with the weapon at the sights:
+`CCamera::UsingFirstPersonSights` is true while the first person view holds
+and the player aims a gun. The view keeps the player FOV; there is no sight
+zoom and no sight camera, the reticle and the aim ray alone serve the aim.
 ## Aim pose
 
 The pose of the player's upper body while the sights are up: the weapon's fire
@@ -765,3 +785,30 @@ instead of scanning every node of the type: rings of cells around the query
 point, stopped when no farther node can tie or beat the closest one found.
 Built once after `PreparePathData`, 53 KB inside `ThePaths`; the plain scan
 stays as the fallback for a map the grid cannot hold. See ADR 0024.
+
+## Mission car (mission vehicle)
+
+A vehicle the game created for a script, a mission or a set piece:
+`VehicleCreatedBy == MISSION_VEHICLE` (Vehicle.h). It counts in the car budget
+as `NumMissionCars`. A full save carries the mission cars - the pool save
+writes a vehicle out when `IsVehicleSaved` reads it as a mission car
+(Pools.cpp) - because the traffic and the parked cars are rebuilt around the
+player after a load; a mission-replay quicksave also carries the player's car,
+whatever its class (the same predicate, over `IsQuickSave`). A loaded mission
+car is counted once in `NumMissionCars` (VICE-163).
+
+## Vehicle counter
+
+One of the car classes' live counters in `CCarCtrl`: `NumRandomCars`,
+`NumLawEnforcerCars`, `NumMissionCars`, `NumParkedCars` and `NumPermanentCars`.
+A creation counts once in the class the vehicle carries (the `CVehicle`
+constructor) and a deletion takes the count back (the destructor); a class
+switch moves it (`CCarCtrl::UpdateCarCount`). `NumCarsInUse` sums four of the
+counters (random, law, mission, parked) and the two emergency counters; the
+permanent class and the far traffic stay outside it. A law-enforcer random car
+counts in both `NumLawEnforcerCars` and `NumRandomCars`, so the sum counts it
+twice and the budget blocks one car early per live law car; the double count is
+documented and on the safe side (`PopulationBudget.h`). `CCarCtrl::ReInit`
+zeroes every counter, and the save load calls it before the vehicle pool
+restore; each restored vehicle counts once in the class the save carries
+(VICE-163). The offline check is `utils/save-vehicle-count`.

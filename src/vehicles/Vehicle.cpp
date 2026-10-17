@@ -5,6 +5,8 @@
 #include "Timer.h"
 #include "Pad.h"
 #include "Vehicle.h"
+#include "PlayerPed.h"
+#include "WeaponAim.h"
 #include "Bike.h"
 #include "Automobile.h"
 #include "Pools.h"
@@ -1950,6 +1952,11 @@ CVehicle::AddPassenger(CPed *passenger, uint8 n)
 void
 CVehicle::RemoveDriver(void)
 {
+	// The held aim belongs to the seat: the player who leaves the vehicle drops
+	// the aim state, the held pose and the aim flag with it.
+	if(pDriver && pDriver->IsPlayer() && ((CPlayerPed*)pDriver)->IsAimingWeapon())
+		pDriver->ClearAimFlag();
+
 #ifdef FIX_BUGS
 	if (GetStatus() != STATUS_WRECKED)
 #endif
@@ -2546,29 +2553,54 @@ CVehicle::GetVehicleAppearance(void)
 	return VEHICLE_APPEARANCE_NONE;
 }
 
-// The drive-by arm for the car ADS. There is no free aim arm animation, so the
-// drive-by one stands in: the arm comes out on the side the camera aims at. It
-// is picked when the arm comes out and kept while it stays out, so swinging the
-// camera does not restart the animation and hold up the fire.
-CAnimBlendAssociation *
-CVehicle::UpdateDriveByAimAnim(AssocGroupId group, AnimationId leftAnim, AnimationId rightAnim)
+// The aim distance of the driver's gun: the same 30 units the on-foot aim ray
+// uses, so the car, the bike and the boat aim exactly as far as the player
+// aims on foot.
+#define DRIVER_AIM_DISTANCE (30.0f)
+
+// The aim of the player driver. While the car ADS is on and the driver holds a
+// gun, the camera ray is the one aim the held weapon pose and the shot follow.
+// One pose serves every gun and every direction: the arms and the torso follow
+// the ray through the ped IK, while the vehicle heading and the driver's body
+// turn stay the driving ones. The Hunter, the Sea Sparrow and the planes keep
+// their own fixed guns, so they never take the aim. The state clears when the
+// aim input goes, the weapon cannot aim or a script forbids the drive-by, and
+// RemoveDriver clears it when the player leaves the seat.
+bool
+CVehicle::UpdateDriverWeaponAim(void)
 {
-	CAnimBlendAssociation *anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), leftAnim);
-	if(anim && anim->blendDelta >= 0.0f)
-		return anim;
+	if (pDriver == nil || !pDriver->IsPlayer())
+		return false;
 
-	anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), rightAnim);
-	if(anim && anim->blendDelta >= 0.0f)
-		return anim;
+	CPlayerPed *player = (CPlayerPed*)pDriver;
+	CPlayerInfo *playerInfo = player->GetPlayerInfoForThisPlayerPed();
 
-	AnimationId aimAnim = DotProduct(TheCamera.Cams[TheCamera.ActiveCam].Front, GetRight()) < 0.0f ?
-		leftAnim : rightAnim;
+	bool aiming = player->m_nPedState == PED_DRIVING &&
+		(playerInfo == nil || playerInfo->m_bDriveByAllowed) &&
+		!IsRealHeli() && !IsRealPlane() &&
+		IsGunWeapon(player->GetWeapon()->m_eWeaponType) &&
+		(TheCamera.UsingCarAds() || CPad::GetPad(0)->GetCarAim());
 
-	anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), aimAnim);
-	if(anim == nil || anim->blendDelta < 0.0f)
-		anim = CAnimManager::AddAnimation(pDriver->GetClump(), group, aimAnim);
+	if (!aiming) {
+		if (player->IsAimingWeapon())
+			player->ClearAimFlag();
+		return false;
+	}
 
-	return anim;
+	CVector source, target;
+	TheCamera.GetPlayerAimRay(DRIVER_AIM_DISTANCE, player->GetPosition(), source, target);
+
+	// The pitch hangs on the upper arm, like the on-foot aim pose
+	RwV3d armPos;
+	player->m_pedIK.GetComponentPosition(armPos, PED_UPPERARMR);
+
+	player->m_bWeaponAimActive = true;
+	player->SetAimFlag(CGeneral::GetRadianAngleBetweenPoints(target.x, target.y, player->GetPosition().x, player->GetPosition().y));
+	player->m_fFPSMoveHeading = CGeneral::GetRadianAngleBetweenPoints(target.z,
+		Distance2D(player->GetPosition(), target.x, target.y), armPos.z, 0.0f);
+	player->HoldUpperBodyAimPose();
+
+	return true;
 }
 
 bool

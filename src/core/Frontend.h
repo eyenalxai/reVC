@@ -599,8 +599,6 @@ struct MenuTrapezoid
 // First person view FOV, in degrees
 #define FIRST_PERSON_FOV_MIN 50
 #define FIRST_PERSON_FOV_MAX 180
-#define FIRST_PERSON_SIGHTS_FOV_MULT 0.65f	// the sight view zooms in by this factor
-#define FIRST_PERSON_SIGHTS_FOV_MIN 30		// and never goes below this
 #define FIRST_PERSON_BODY_NEAR_CLIP 0.05f	// the player's own body parts sit close to the camera
 
 // The follow camera sits this much further back in a vehicle, in metres
