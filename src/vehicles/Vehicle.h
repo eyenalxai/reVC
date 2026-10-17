@@ -4,13 +4,10 @@
 #include "Physical.h"
 #include "AutoPilot.h"
 #include "ModelIndices.h"
-#include "AnimationId.h"
-#include "AnimManager.h"
 #include "WeaponType.h"
 #include "Collision.h"
 #include "HandlingMgr.h"
 
-class CAnimBlendAssociation;
 class CPed;
 class CPlayerPed;
 class CCopPed;
@@ -422,9 +419,9 @@ public:
 	void ActivateBomb(void);
 	void ActivateBombWhenEntered(void);
 	void KillPedsInVehicle(void);
-	// The drive-by arm for the car ADS: there is no free aim arm animation, so
-	// the drive-by one stands in
-	CAnimBlendAssociation *UpdateDriveByAimAnim(AssocGroupId group, AnimationId leftAnim, AnimationId rightAnim);
+	// The aim state of the player driver: the car ADS aims every gun with one
+	// held pose. Sets or clears the state and answers whether the driver aims.
+	bool UpdateDriverWeaponAim(void);
 
 	void SetComponentAtomicAlpha(RpAtomic *atomic, int32 alpha);
 	void UpdateClumpAlpha(void);
