@@ -2,14 +2,16 @@
 #define __GTA_PLAYERPED_H__
 
 #include "Ped.h"
+#include "PlayerMoveSolver.h"
 
 class CPad;
 class CCopPed;
 class CWanted;
 
-// The movement states of the player's controller. Each state has its own
-// acceleration and friction in playerMovementStates (PlayerPed.cpp); the
-// planned slide state will slot in here without a rewrite.
+// The movement state the controller reports (PlayerPed.cpp). The solver owns
+// the real state (eMoveStateId, PlayerMoveSolver.h), which grows past these two
+// with the state table (VICE-171); this field keeps the value the controller
+// used to expose.
 enum ePlayerMovementState
 {
 	PLAYERMOVE_GROUND,	// the feet are on a surface
@@ -52,6 +54,10 @@ public:
 	float m_fFPSMoveHeading;
 	float m_fMoveHeading; // world heading of the controller's movement direction
 	ePlayerMovementState m_nMovementState;
+	// The movement solver owns the player's horizontal velocity
+	// (PlayerMoveSolver.h); the controller only builds the intent, steps it and
+	// writes the snapshot back.
+	CPlayerMoveSolver m_MoveSolver;
 	RpAtomic* m_pMinigunTopAtomic; //atomic for the spinning part of the minigun model
 	float m_fGunSpinSpeed; // for minigun
 	float m_fGunSpinAngle;
@@ -83,6 +89,8 @@ public:
 	void ProcessControl(void);
 	void ClearAdrenaline(void);
 	void UseSprintEnergy(void);
+	// The adapter of the movement solver (PlayerMoveSolver.h): the pad block,
+	// the gates, the intent and the write-back of the snapshot.
 	void UpdatePlayerMovement(CPad *padUsed);
 	bool IsAimingWeapon(void) const { return m_bWeaponAimActive; }
 	// The one aim of the on-foot player: the aim button raises the weapon and
