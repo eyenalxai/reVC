@@ -156,6 +156,17 @@ angle, the contacts, the slope, the events of the step, and the reported movemen
 state. The presentation, the camera, the HUD and the telemetry all read it, so
 they cannot drift apart. It follows the drift snapshot pattern (ADR 0012).
 
+## Movement telemetry
+
+The module `src/peds/MovementTelemetry.*`. It writes the movement snapshot to
+`movement-telemetry.csv` while the movement debug flag is on, so a played session
+can be read back and replayed into the solver harness (VICE-172). The rows are
+the snapshot and nothing else: the game millisecond, the state, the stance, the
+speed and the target speed, the tier, the input direction in the body frame
+(forward and side), the body turn of the step, the surface, the slope and an
+event token. The game frame thread only appends text to a buffer; one writer
+thread owns the file. It changes nothing in the movement.
+
 ## Movement state
 
 One of the solver's states (`eMoveStateId`): ground, air, slide and dive.

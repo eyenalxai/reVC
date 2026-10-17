@@ -91,6 +91,9 @@ static const tSettingsEntry aSettings[] = {
 	{ "Drift", "Strength", SETTINGS_FLOAT, 0.0f, 2.0f, sizeof(float), &gDriftStrength },
 	{ "Drift", "Assist", SETTINGS_FLOAT, 0.0f, 2.0f, sizeof(float), &gDriftAssist },
 	{ "Drift", "Debug", SETTINGS_BOOL, SETTINGS_NO_BOUND, sizeof(bool), &gDriftDebug },
+	// The movement telemetry flag (MovementTelemetry.h): the movement debug
+	// readout and the movement-telemetry.csv record
+	{ "Movement", "Debug", SETTINGS_BOOL, SETTINGS_NO_BOUND, sizeof(bool), &gMovementDebug },
 	{ "Weapons", "ActiveReload", SETTINGS_BOOL, SETTINGS_NO_BOUND, sizeof(bool), &gActiveReloadEnabled },
 #ifdef PROPER_SCALING
 	{ "Draw", "ProperScaling", SETTINGS_BOOL, SETTINGS_NO_BOUND, sizeof(bool), &CDraw::ms_bProperScaling },
