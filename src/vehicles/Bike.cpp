@@ -32,6 +32,7 @@
 #include "AnimBlendAssociation.h"
 #include "Ped.h"
 #include "PlayerPed.h"
+#include "WeaponAim.h"
 #include "DamageManager.h"
 #include "Vehicle.h"
 #include "Automobile.h"
@@ -2002,13 +2003,16 @@ CBike::ProcessBuoyancy(void)
 void
 CBike::DoDriveByShootings(void)
 {
-	CAnimBlendAssociation *anim;
-	CPlayerInfo* playerInfo = ((CPlayerPed*)pDriver)->GetPlayerInfoForThisPlayerPed();
-	if (playerInfo && !playerInfo->m_bDriveByAllowed)
+	// The aim state comes first: it follows the gun and the aim input, and it
+	// must clear even when the stock gates stop the rest of the drive-by.
+	bool aiming = UpdateDriverWeaponAim();
+
+	// The stock drive-by gate: a script can forbid the drive-by to the player.
+	if (pDriver->IsPlayer() && !((CPlayerPed*)pDriver)->GetPlayerInfoForThisPlayerPed()->m_bDriveByAllowed)
 		return;
 
 	CWeapon *weapon = pDriver->GetWeapon();
-	if(CWeaponInfo::GetWeaponInfo(weapon->m_eWeaponType)->m_nWeaponSlot != 5)
+	if(!IsGunWeapon(weapon->m_eWeaponType))
 		return;
 
 	weapon->Update(pDriver->m_audioEntityId, nil);
@@ -2018,37 +2022,25 @@ CBike::DoDriveByShootings(void)
 	if (pDriver->IsPlayer())
 		((CPlayerPed*)pDriver)->ProcessActiveReloadInput(CPad::GetPad(0));
 
-	// The car ADS: the aim button aims freely with the camera. The free aim
-	// shot has no animation of its own, so the drive-by arm stands in. The
-	// stock side look and its drive-by are gone (VICE-138): the plain fire
-	// keeps the stock forward drive-by of a bike.
-	bool aiming = TheCamera.UsingCarAds();
+	CAnimBlendAssociation *anim;
+	if(aiming){
+		// The held weapon pose is the one aim of the car ADS: the plain
+		// forward drive-by arm goes when the aim takes over.
+		anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_FORWARD);
+		if(anim)
+			anim->blendDelta = -1000.0f;
 
-	if(aiming || CPad::GetPad(0)->GetCarGunFired()){
-		if(aiming){
-			// the forward arm goes when the free aim takes over
-			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_FORWARD);
-			if(anim)
-				anim->blendDelta = -1000.0f;
-			anim = UpdateDriveByAimAnim(m_bikeAnimType, ANIM_BIKE_DRIVEBY_LHS, ANIM_BIKE_DRIVEBY_RHS);
-		}else{
-			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_RHS);
-			if(anim)
-				anim->blendDelta = -1000.0f;
-			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_LHS);
-			if(anim)
-				anim->blendDelta = -1000.0f;
-			anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_FORWARD);
-			if(anim == nil || anim->blendDelta < 0.0f)
-				anim = CAnimManager::AddAnimation(pDriver->GetClump(), m_bikeAnimType, ANIM_BIKE_DRIVEBY_FORWARD);
-		}
+		if(CPad::GetPad(0)->GetCarGunFired() && CTimer::GetTimeInMilliseconds() > weapon->m_nTimer)
+			weapon->FireFromCarWithCadence(this, true);
+	}else if(CPad::GetPad(0)->GetCarGunFired()){
+		// The stock forward drive-by stays on the plain fire button without
+		// the aim: the shot waits for the arm to come out.
+		anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_FORWARD);
+		if(anim == nil || anim->blendDelta < 0.0f)
+			anim = CAnimManager::AddAnimation(pDriver->GetClump(), m_bikeAnimType, ANIM_BIKE_DRIVEBY_FORWARD);
 
-		// The free aim fires at once: the drive-by arm is only a stand-in and
-		// the first person car view does not show it
-		if (aiming || !anim || !anim->IsRunning()) {
-			if (CPad::GetPad(0)->GetCarGunFired() && CTimer::GetTimeInMilliseconds() > weapon->m_nTimer)
-				weapon->FireFromCarWithCadence(this, aiming);
-		}
+		if((!anim || !anim->IsRunning()) && CTimer::GetTimeInMilliseconds() > weapon->m_nTimer)
+			weapon->FireFromCarWithCadence(this, false);
 	}else{
 		// The stock code refills the clip while the player does not aim.
 		// With the active reload on the clip is a magazine and refills only
@@ -2056,12 +2048,7 @@ CBike::DoDriveByShootings(void)
 		// keep the stock refill.
 		if (CWeapon::UsesStockClipRefill(pDriver))
 			weapon->Reload();
-		anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_LHS);
-		if(anim)
-			anim->blendDelta = -1000.0f;
-		anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_RHS);
-		if(anim)
-			anim->blendDelta = -1000.0f;
+
 		anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), ANIM_BIKE_DRIVEBY_FORWARD);
 		if(anim)
 			anim->blendDelta = -1000.0f;

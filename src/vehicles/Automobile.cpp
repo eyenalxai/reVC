@@ -47,6 +47,7 @@
 #include "AnimBlendAssociation.h"
 #include "Ped.h"
 #include "PlayerPed.h"
+#include "WeaponAim.h"
 #include "Object.h"
 #include "Automobile.h"
 #include "Bike.h"
@@ -3749,13 +3750,16 @@ CAutomobile::ProcessBuoyancy(void)
 void
 CAutomobile::DoDriveByShootings(void)
 {
-	CAnimBlendAssociation *anim = nil;
-	CPlayerInfo* playerInfo = ((CPlayerPed*)pDriver)->GetPlayerInfoForThisPlayerPed();
-	if (playerInfo && !playerInfo->m_bDriveByAllowed)
+	// The aim state comes first: it follows the gun and the aim input, and it
+	// must clear even when the stock gates stop the rest of the drive-by.
+	bool aiming = UpdateDriverWeaponAim();
+
+	// The stock drive-by gate: a script can forbid the drive-by to the player.
+	if (pDriver->IsPlayer() && !((CPlayerPed*)pDriver)->GetPlayerInfoForThisPlayerPed()->m_bDriveByAllowed)
 		return;
 
 	CWeapon *weapon = pDriver->GetWeapon();
-	if(CWeaponInfo::GetWeaponInfo(weapon->m_eWeaponType)->m_nWeaponSlot != WEAPONSLOT_SUBMACHINEGUN)
+	if(!IsGunWeapon(weapon->m_eWeaponType))
 		return;
 
 	weapon->Update(pDriver->m_audioEntityId, nil);
@@ -3765,27 +3769,12 @@ CAutomobile::DoDriveByShootings(void)
 	if (pDriver->IsPlayer())
 		((CPlayerPed*)pDriver)->ProcessActiveReloadInput(CPad::GetPad(0));
 
-	AnimationId rightAnim = ANIM_STD_CAR_DRIVEBY_RIGHT;
-	AnimationId leftAnim = ANIM_STD_CAR_DRIVEBY_LEFT;
-	if (pDriver->m_pMyVehicle->bLowVehicle) {
-		rightAnim = ANIM_STD_CAR_DRIVEBY_RIGHT_LO;
-		leftAnim = ANIM_STD_CAR_DRIVEBY_LEFT_LO;
-	}
-
-	// The stock side look and its drive-by are gone (VICE-138): the car ADS is
-	// the way to aim and shoot from a car now. The free aim shot has no
-	// animation of its own, so the drive-by arm stands in.
-	bool aiming = TheCamera.UsingCarAds();
-
+	// The car ADS aims and fires every gun with the one held pose: the shot
+	// follows the camera ray. The weapon owns the fire type and the firing
+	// rate.
 	if(aiming){
-		anim = UpdateDriveByAimAnim(ASSOCGRP_STD, leftAnim, rightAnim);
-
-		// The free aim fires at once: the drive-by arm is only a stand-in and
-		// the first person car view does not show it
-		if(!anim || !anim->IsRunning()){
-			if (CPad::GetPad(0)->GetCarGunFired() && CTimer::GetTimeInMilliseconds() > weapon->m_nTimer)
-				weapon->FireFromCarWithCadence(this, aiming);
-		}
+		if(CPad::GetPad(0)->GetCarGunFired() && CTimer::GetTimeInMilliseconds() > weapon->m_nTimer)
+			weapon->FireFromCarWithCadence(this, true);
 	}else{
 		// The stock code refills the clip while the player does not aim.
 		// With the active reload on the clip is a magazine and refills only
@@ -3793,12 +3782,6 @@ CAutomobile::DoDriveByShootings(void)
 		// keep the stock refill.
 		if (CWeapon::UsesStockClipRefill(pDriver))
 			weapon->Reload();
-		anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), leftAnim);
-		if(anim)
-			anim->blendDelta = -1000.0f;
-		anim = RpAnimBlendClumpGetAssociation(pDriver->GetClump(), rightAnim);
-		if(anim)
-			anim->blendDelta = -1000.0f;
 	}
 }
 
