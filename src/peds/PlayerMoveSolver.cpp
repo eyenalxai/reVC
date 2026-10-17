@@ -87,17 +87,51 @@ static constexpr tMoveLadderRow moveLadder[] = {
 	{ TIER_SLIDE_JUMP,	STANCE_STAND, 1u << MOVE_SLIDE,    2.5f, MOVE_REPORT_SPRINT },
 };
 
+// The crawl's own speed (VICE-187): the content's crawl_fwd carries 0.443 units
+// per second, and the walk cycle the ladder is anchored on (walk_civi) carries
+// 1.13, so the crawl is 0.443 / 1.13 = 0.392 of the walk. The row takes the
+// playback floor instead - PLAYER_ANIM_SPEED_MIN is 0.4 (PlayerPed.cpp) - so
+// the scaler plays the crawl cycle exactly: the ratio it asks for is the row's
+// own scale, and at the floor the cycle keeps its feet planted instead of
+// running 2 percent fast. While the crawl content plays, today's reference
+// speed is the crawl's own, so the body crawls at the row's share of it (the
+// crouch's own shape, its stride share); VICE-184 makes the ladder the source
+// of the speed, and the share is then the only multiplier, which lands the
+// crawl on 0.4 of the content's 0.443.
+#define MOVE_PRONE_SPEED_SCALE		0.4f
+
+// The turn of a body that lies down: half the standing rate. The crouch's own
+// 1.25 is the opposite case - a crouch steers tighter than a stand.
+#define MOVE_PRONE_TURN_SCALE		0.5f
+
+// The top of VICE-178's prone set, in the ped's own frame: the lying body's
+// four 0.3 spheres put its top at 2 * 0.3 above the ground, and the origin sits
+// FEET_OFFSET above the ground, so the top is 0.6 - 1.04 = -0.44 and the set
+// hangs below the origin (PED_PRONE_BODY_TOP, TempColModels.cpp).
+#define MOVE_PRONE_CAPSULE_HEIGHT	-0.44f
+
+// FEET_OFFSET (common.h): the engine puts the ped origin this far above the
+// feet in every stance, so the ground under the body is this far below the
+// origin. The stance rows' rule reads it - a posture's top may hang below the
+// origin, the way the prone body does, but never under the ground - and the
+// step never touches it.
+#define MOVE_FEET_OFFSET		1.04f
+
 // One row per eStance: what the stance scales. The stand row carries the
 // phase-0 values (the turn scale 1.0 and the capsule 0.0 the snapshot
-// reported). The crouch row is the slow shuffle: half the walk - the stride
-// share the crouch content is authored at - the turn a quarter tighter than the
-// stand, and the capsule at the top of VICE-178's crouch set (its head sphere:
-// 0.55 - 0.2 - 0.2 + 0.35). The prone row arrives with VICE-177. The solver
-// reports the capsule height and owns no collision (VICE-178).
+// reported, which the parity harness pins). The crouch row is the slow
+// shuffle: half the walk - the stride share the crouch content is authored
+// at - the turn a quarter tighter than the stand, and the capsule at the top
+// of VICE-178's crouch set (its head sphere: 0.55 - 0.2 - 0.2 + 0.35). The
+// prone row is the crawl: the crawl cycle's own speed as a share of the
+// walk's, the turn at half the standing rate - a body that lies down drives
+// the direction slowly - and the capsule at the top of VICE-178's prone set,
+// which hangs below the origin. The solver reports the capsule height and owns
+// no collision (VICE-178).
 static constexpr tMoveStanceRow moveStanceRows[] = {
-	{ 1.0f, 1.0f, 0.0f },	// STANCE_STAND
-	{ 0.5f, 1.25f, 0.5f },	// STANCE_CROUCH
-	{ 0.0f, 0.0f, 0.0f },	// STANCE_PRONE: the row arrives with VICE-177
+	{ 1.0f, 1.0f, 0.0f },			// STANCE_STAND
+	{ 0.5f, 1.25f, 0.5f },			// STANCE_CROUCH
+	{ MOVE_PRONE_SPEED_SCALE, MOVE_PRONE_TURN_SCALE, MOVE_PRONE_CAPSULE_HEIGHT },	// STANCE_PRONE
 };
 
 // The slide's two speeds (VICE-180), engine units: a sprint holds 0.29336
@@ -139,9 +173,9 @@ static constexpr tMoveTransitionRow moveTransitions[] = {
 	// speed: no row resets a velocity, and the air row's keep-momentum holds
 	// what the slide had, so a slide jump is faster than a sprint jump.
 	{ MOVE_SLIDE,	TRIGGER_JUMP,		MOVE_AIR,	EVENT_JUMP, GUARD_NONE, 0.0f },
-	// MOVE_SLIDE: a prone request ends the slide on the ground. The prone
-	// stance the request asks for is the stance row of VICE-177, which owns the
-	// prone; this row only leaves the slide.
+	// MOVE_SLIDE: a prone request ends the slide on the ground, and the stance
+	// table lands the ped in the prone on the same edge (VICE-177): this row
+	// only leaves the slide.
 	{ MOVE_SLIDE,	TRIGGER_PRONE,		MOVE_GROUND,	0, GUARD_NONE, 0.0f },
 	// MOVE_SLIDE: the feet leaving the surface end the slide into the fall,
 	// with the speed the slide had.
@@ -153,29 +187,44 @@ static constexpr tMoveTransitionRow moveTransitions[] = {
 	{ MOVE_SLIDE,	TRIGGER_LAND,		MOVE_GROUND,	0, GUARD_SPEED_BELOW, MOVE_SLIDE_EXIT_SPEED },
 };
 
-// The stance transition table (VICE-176), in priority order like the state
-// one: the same trigger mask, the first row whose stance and trigger match
-// fires. The stance is the solver's, so its moves are rows: the Duck edge
-// crouches the ped and stands him up again, the sprint, the jump press and the
-// exit-vehicle press stand him up, and every one of those stand-ups is held
-// back while the body cannot rise - VICE-178's headroom test sits on top of
-// the stand-up rows, so a crouch under a low ceiling stays crouched. The
-// sprints's own gate is a row too: the sprint holds the stance standing, so a
-// Duck edge inside a sprint does not crouch. The prone moves arrive with
-// VICE-177.
+// The stance transition table (VICE-176, VICE-177), in priority order like the
+// state one: the same trigger mask, the first row whose stance and trigger
+// matches fires. The stance is the solver's, so its moves are rows: the Duck
+// edge crouches the ped and stands him up again, the prone action lies him
+// down and stands him up again, the sprint, the jump press and the exit-vehicle
+// press stand him up, and every one of those stand-ups is held back while the
+// body cannot rise - VICE-178's headroom test sits on top of the stand-up
+// rows, so a low body under a low ceiling stays down. The sprint's own gate is
+// a row too: the sprint holds the stance standing, so a Duck edge inside a
+// sprint does not crouch.
 static constexpr tMoveStanceTransitionRow moveStanceTransitions[] = {
 	// STANCE_STAND: the sprint owns the body, so a Duck edge inside a sprint
-	// does not crouch the ped (the stock gate), and otherwise the Duck edge
-	// crouches him
+	// does not crouch the ped (the stock gate); otherwise the Duck edge
+	// crouches him and the prone action lies him down
 	{ STANCE_STAND,		TRIGGER_SPRINT,			STANCE_STAND },
 	{ STANCE_STAND,		TRIGGER_CROUCH,			STANCE_CROUCH },
-	// STANCE_CROUCH: no headroom, the crouch holds; with it, the exits stand
-	// the ped up
+	{ STANCE_STAND,		TRIGGER_PRONE,			STANCE_PRONE },
+	// STANCE_CROUCH: no headroom, the crouch holds; with it, the crouch's own
+	// edge stands the ped up, the sprint, the jump and the exit-vehicle press
+	// stand him up, and the prone action lies him down - the prone is reachable
+	// from the crouch as well as from the stand
 	{ STANCE_CROUCH,	TRIGGER_HEADROOM_BLOCKED,	STANCE_CROUCH },
 	{ STANCE_CROUCH,	TRIGGER_CROUCH,			STANCE_STAND },
 	{ STANCE_CROUCH,	TRIGGER_SPRINT,			STANCE_STAND },
 	{ STANCE_CROUCH,	TRIGGER_JUMP,			STANCE_STAND },
 	{ STANCE_CROUCH,	TRIGGER_EXIT_VEHICLE,		STANCE_STAND },
+	{ STANCE_CROUCH,	TRIGGER_PRONE,			STANCE_PRONE },
+	// STANCE_PRONE: no headroom, the prone holds - the refusal sits above every
+	// exit, so a body under a ceiling stays down; with it, the prone action
+	// stands the ped up, the Duck edge lifts him into the crouch (so the low
+	// ladder is prone, crouch, stand), and the sprint, the jump and the
+	// exit-vehicle press stand him up
+	{ STANCE_PRONE,		TRIGGER_HEADROOM_BLOCKED,	STANCE_PRONE },
+	{ STANCE_PRONE,		TRIGGER_PRONE,			STANCE_STAND },
+	{ STANCE_PRONE,		TRIGGER_CROUCH,			STANCE_CROUCH },
+	{ STANCE_PRONE,		TRIGGER_SPRINT,			STANCE_STAND },
+	{ STANCE_PRONE,		TRIGGER_JUMP,			STANCE_STAND },
+	{ STANCE_PRONE,		TRIGGER_EXIT_VEHICLE,		STANCE_STAND },
 };
 
 // The row counts and the masks the check reads.
@@ -479,7 +528,10 @@ CPlayerMoveSolver::Step(const SMoveIntent &intent)
 		triggers |= TRIGGER_HEADROOM_BLOCKED;
 	if (intent.crouchRequested && intent.tier == TIER_SPRINT)
 		triggers |= TRIGGER_SLIDE;
-	if (intent.proneRequested)
+	// The prone action is a ground action (VICE-177): the body lies down on a
+	// surface, so with the feet off the ground the edge does nothing. The
+	// slide's own request already stands on the ground.
+	if (intent.proneRequested && intent.onGround)
 		triggers |= TRIGGER_PRONE;
 
 	// The slide's entry consumes the crouch edge: the one press cannot both
@@ -661,9 +713,11 @@ MoveTablesFail(const char **why, const char *rule)
 // The table check (VICE-171, VICE-180): every table to its invariants. The
 // rules are the ones the harness (VICE-172) needs: a state without a row, a
 // transition to an id out of range or to a guard out of range, a ladder row
-// that does not ascend, a stance row out of range, and the slide's own rules -
-// an entry row, an exit guard that names the exit speed, the exit speed below
-// the entry's, and the slide's rungs above the sprint's (VICE-180).
+// that does not ascend, a stance row out of range or one whose capsule top
+// sinks under the ground (VICE-177: the height is signed, the prone body lies
+// below the origin), and the slide's own rules - an entry row, an exit guard
+// that names the exit speed, the exit speed below the entry's, and the slide's
+// rungs above the sprint's (VICE-180).
 bool
 PlayerMoveTablesCheck(const SMoveTables &tables, const char **why)
 {
@@ -728,13 +782,19 @@ PlayerMoveTablesCheck(const SMoveTables &tables, const char **why)
 			return MoveTablesFail(why, "a state without a rung");
 	}
 
-	// One stance row per stance, in range
+	// One stance row per stance, in range. The capsule height is signed, the
+	// way the collision sets are: the prone body lies below the origin. The one
+	// rule that holds for every posture is that its top stays above the ground
+	// under the feet (TempColModels.cpp authors the sets in the origin frame,
+	// whose ground is FEET_OFFSET below).
 	if (tables.numStances != STANCE_NUM)
 		return MoveTablesFail(why, "a stance without a row");
 	for (int i = 0; i < tables.numStances; i++) {
 		const tMoveStanceRow &row = tables.stances[i];
-		if (!(row.speedScale >= 0.0f) || !(row.turnScale >= 0.0f) || !(row.capsuleHeight >= 0.0f))
+		if (!(row.speedScale >= 0.0f) || !(row.turnScale >= 0.0f))
 			return MoveTablesFail(why, "a stance row out of range");
+		if (!(row.capsuleHeight > -MOVE_FEET_OFFSET))
+			return MoveTablesFail(why, "a stance row whose top is under the ground");
 	}
 
 	// Every move names a state and a trigger in range, and its guard and

@@ -129,6 +129,11 @@ public:
 	// rides on the upper body only while the legs keep the movement animation.
 	void HoldUpperBodyAimPose(void);
 	void ReleaseHeldAimPose(void);
+	// The prone stance's own aim pose (VICE-177): VICE-187's three pose
+	// variants, held over the crawl while the body lies down and the aim is up.
+	void HoldProneAimPose(void);
+	void ReleaseProneAimPose(void);
+	float GetAimHeading(void);
 	void PlayerControlZelda(CPad*);
 	// The jump and the evade dive of the on-foot player, shared by the
 	// camera-facing and the classic walk controls.

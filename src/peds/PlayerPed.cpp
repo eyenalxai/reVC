@@ -389,12 +389,14 @@ CPlayerPed::SetRealMoveAnim(void)
 	CAnimBlendAssociation *curIdleAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_IDLE);
 	CAnimBlendAssociation *curRunStopAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_RUNSTOP1);
 	CAnimBlendAssociation *curRunStopRAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_RUNSTOP2);
-	// The stance is the solver's (VICE-176), read from the snapshot like every
-	// other presentation value. A crouch plays the walk slot alone, whatever
-	// the pad ramp says: it never runs or sprints (the sprint stands the ped
-	// up), and its idle is the movement group's own idle slot, which is the
-	// stance idle while the group is the crouch set.
-	bool crouched = m_MoveSolver.GetSnapshot().stance == STANCE_CROUCH;
+	// The stance is the solver's (VICE-176, VICE-177), read from the snapshot
+	// like every other presentation value. A low stance plays the walk slot
+	// alone, whatever the pad ramp says: a crouch and a prone never run or
+	// sprint (the sprint stands them up), and their idle is the movement
+	// group's own idle slot, which is the stance idle while the group is the
+	// stance's set.
+	bool lowStance = m_MoveSolver.GetSnapshot().stance == STANCE_CROUCH
+		|| m_MoveSolver.GetSnapshot().stance == STANCE_PRONE;
 
 	if (bResetWalkAnims) {
 		if (curWalkAssoc)
@@ -428,10 +430,10 @@ CPlayerPed::SetRealMoveAnim(void)
 			
 			RestoreHeadingRate();
 			if (!curIdleAssoc) {
-				// The stance idle owns the idle slot of a crouch: the tired
-				// standing idle is the standard group's and would stand the
-				// body up out of the stance
-				if (m_fCurrentStamina < 0.0f && !bIsAimingGun && !crouched && !CWorld::TestSphereAgainstWorld(GetPosition(), 0.5f,
+				// The stance idle owns the idle slot of a low stance: the
+				// tired standing idle is the standard group's and would stand
+				// the body up out of the stance
+				if (m_fCurrentStamina < 0.0f && !bIsAimingGun && !lowStance && !CWorld::TestSphereAgainstWorld(GetPosition(), 0.5f,
 						nil, true, false, false, false, false, false)) {
 					curIdleAssoc = CAnimManager::BlendAnimation(GetClump(), ASSOCGRP_STD, ANIM_STD_IDLE_TIRED, 8.0f);
 
@@ -445,7 +447,7 @@ CPlayerPed::SetRealMoveAnim(void)
 
 		} else if (m_fMoveSpeed == 0.0f && !curSprintAssoc) {
 			if (!curIdleAssoc) {
-				if (m_fCurrentStamina < 0.0f && !bIsAimingGun && !crouched && !CWorld::TestSphereAgainstWorld(GetPosition(), 0.5f,
+				if (m_fCurrentStamina < 0.0f && !bIsAimingGun && !lowStance && !CWorld::TestSphereAgainstWorld(GetPosition(), 0.5f,
 						nil, true, false, false, false, false, false)) {
 					curIdleAssoc = CAnimManager::BlendAnimation(GetClump(), ASSOCGRP_STD, ANIM_STD_IDLE_TIRED, 4.0f);
 					
@@ -460,7 +462,7 @@ CPlayerPed::SetRealMoveAnim(void)
 				CAnimManager::BlendAnimation(GetClump(), m_animGroup, ANIM_STD_IDLE, 4.0f);
 
 			} else if (m_nPedState != PED_FIGHT) {
-				if (m_fCurrentStamina < 0.0f && !bIsAimingGun && !crouched && curIdleAssoc->animId != ANIM_STD_IDLE_TIRED
+				if (m_fCurrentStamina < 0.0f && !bIsAimingGun && !lowStance && curIdleAssoc->animId != ANIM_STD_IDLE_TIRED
 					&& !CWorld::TestSphereAgainstWorld(GetPosition(), 0.5f, nil, true, false, false, false, false, false)) {
 					CAnimManager::BlendAnimation(GetClump(), ASSOCGRP_STD, ANIM_STD_IDLE_TIRED, 4.0f);
 
@@ -568,7 +570,7 @@ CPlayerPed::SetRealMoveAnim(void)
 				curWalkAssoc->blendAmount = 0.0f;
 				curRunAssoc->blendAmount = 0.0f;
 
-			} else if (m_nMoveState == PEDMOVE_SPRINT && !crouched) {
+			} else if (m_nMoveState == PEDMOVE_SPRINT && !lowStance) {
 				if (curSprintAssoc) {
 					// We have anim, do it
 					if (curSprintAssoc->blendDelta < 0.0f) {
@@ -583,12 +585,12 @@ CPlayerPed::SetRealMoveAnim(void)
 				}
 				UseSprintEnergy();
 			} else {
-				// The stance splits the blend: a crouch plays the walk slot
-				// alone - the crouch is a shuffle, and the run and the sprint
-				// slots belong to the standing blend - so the pad ramp picks
-				// nothing but the walk while the stance is crouched. The stand
-				// is the ramp, exactly as before.
-				if (crouched || m_fMoveSpeed < 1.0f) {
+				// The stance splits the blend: a low stance plays the walk
+				// slot alone - a crouch and a prone are shuffles, and the run
+				// and sprint slots belong to the standing blend - so the pad
+				// ramp picks nothing but the walk while the stance is low. The
+				// stand is the ramp, exactly as before.
+				if (lowStance || m_fMoveSpeed < 1.0f) {
 					curWalkAssoc->blendAmount = 1.0f;
 					curRunAssoc->blendAmount = 0.0f;
 					m_nMoveState = PEDMOVE_WALK;
@@ -883,6 +885,17 @@ HasHeldAimPose(CAnimBlendAssociation *aimAssoc)
 void
 CPlayerPed::HoldUpperBodyAimPose(void)
 {
+	// The prone stance owns the aim pose while the body lies down (VICE-177):
+	// the stance's own aim content is the pose the aim holds, so the weapon's
+	// fire pose is not seated, and the crawl keeps the legs.
+	if (m_MoveSolver.GetSnapshot().stance == STANCE_PRONE) {
+		HoldProneAimPose();
+		return;
+	}
+	// A body that stood up again carries no prone pose: the aim pose of the
+	// stance it left fades out with the stance
+	ReleaseProneAimPose();
+
 	CWeaponInfo *weaponInfo = CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType);
 	if (weaponInfo->m_AnimToPlay == ASSOCGRP_STD)
 		return;
@@ -935,6 +948,9 @@ CPlayerPed::HoldUpperBodyAimPose(void)
 void
 CPlayerPed::ReleaseHeldAimPose(void)
 {
+	// The stance's own aim pose goes with the aim (VICE-177)
+	ReleaseProneAimPose();
+
 	CAnimBlendAssociation *aimAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_WEAPON_FIRE);
 	if (!HasHeldAimPose(aimAssoc))
 		return;
@@ -1430,21 +1446,47 @@ CPlayerPed::BodyFacesCamera(void)
 	return TheCamera.Cams[0].Using3rdPersonMouseCam() || TheCamera.Using1stPersonView();
 }
 
-// The crouch movement set (VICE-176): the animation groups of the crouch
-// stance. The set is a block of its own, whose groups carry the direction in
-// their name the way the standing set carries ASSOCGRP_PLAYERLEFT/RIGHT/BACK.
-// The block, the groups and their entries are VICE-186's content, so this
-// lookup is by name and refuses to guess: a group is usable only while its
-// block is registered and loaded, its associations are built and its movement
-// slots are inside the built list. A group that fails any gate is refused, the
-// caller keeps the standing group, and a crouch without its content moves on
-// the standing cycles (see ProcessAnimGroups).
+// The movement sets of the low stances (VICE-176, VICE-177): one block per
+// stance whose groups carry the direction in their name the way the standing
+// set carries ASSOCGRP_PLAYERLEFT/RIGHT/BACK. The blocks, the groups and their
+// entries are the content workstream's (VICE-186, VICE-187), so this lookup is
+// by name and refuses to guess: a group is usable only while its block is
+// registered and loaded, its associations are built and the slots the caller
+// needs are inside the built list. A group that fails any gate is refused, the
+// caller keeps the standing group, and a low stance without its content moves
+// on the standing cycles (see ProcessAnimGroups).
 #define CROUCH_ANIM_BLOCK	"crouch"
+#define PRONE_ANIM_BLOCK	"prone"
 
-static AssocGroupId
-FindCrouchAnimGroup(const char *groupName)
+// The four movement groups of one stance, in the standing selection's own
+// sectors: the forward group and the side pair, whose direction is the sign of
+// the walk angle.
+struct tStanceAnimSet
 {
-	CAnimBlock *block = CAnimManager::GetAnimationBlock(CROUCH_ANIM_BLOCK);
+	const char *block;	// the block the groups live in
+	const char *forward;	// the forward group
+	const char *left;	// the group of an input to the body's left
+	const char *right;	// ... and to its right
+	const char *back;	// the group of an input behind the body
+};
+
+static const tStanceAnimSet aCrouchAnimSet = {
+	CROUCH_ANIM_BLOCK, "crouch", "crouchleft", "crouchright", "crouchback"
+};
+
+static const tStanceAnimSet aProneAnimSet = {
+	PRONE_ANIM_BLOCK, "prone", "proneleft", "proneright", "proneback"
+};
+
+// The group of one name, gated as above. `minAssociations` is how many slots
+// the caller looks up by id: the movement slots start at ANIM_STD_WALK in every
+// shipped table and the chooser indexes them by animation id, so a list that
+// stops short is not the group the caller asked for. -1 when the content is
+// not in the game.
+static AssocGroupId
+FindStanceAnimGroup(const char *blockName, const char *groupName, int minAssociations)
+{
+	CAnimBlock *block = CAnimManager::GetAnimationBlock(blockName);
 	CAnimBlendAssocGroup *groups = CAnimManager::GetAnimAssocGroups();
 
 	if (block == nil || !block->isLoaded || groups == nil)
@@ -1456,29 +1498,140 @@ FindCrouchAnimGroup(const char *groupName)
 			continue;
 		if (strcmp(CAnimManager::GetAnimGroupName((AssocGroupId)i), groupName) != 0)
 			continue;
-		// The list starts at ANIM_STD_WALK in every shipped table, and the
-		// chooser looks the movement slots up by animation id: a list that
-		// stops short is not a movement set and is refused
-		if (group.numAssociations < ANIM_STD_STARTWALK + 1)
+		if (group.numAssociations < minAssociations)
 			return (AssocGroupId)-1;
 		return (AssocGroupId)i;
 	}
 	return (AssocGroupId)-1;
 }
 
-// The crouch group of one walk angle, in the standing selection's own sectors:
+// The group of one walk angle, in the standing selection's own sectors:
 // forward below 50 degrees, the side sector up to 130, the back sector beyond
 // it. The angle is 0 unless the camera faces the body (UpdatePlayerMovement
-// writes it), so the classic camera turns the body toward the movement and
-// always lands in the forward group. -1 when the content is not in the game.
+// writes it), so a view that turns the body toward the movement always lands
+// in the forward group. -1 when the content is not in the game.
 static AssocGroupId
-CrouchAnimGroupForWalkAngle(float walkAngle)
+StanceAnimGroupForWalkAngle(const tStanceAnimSet &set, float walkAngle)
 {
 	if (walkAngle >= -DEGTORAD(50.0f) && walkAngle <= DEGTORAD(50.0f))
-		return FindCrouchAnimGroup("crouch");
+		return FindStanceAnimGroup(set.block, set.forward, ANIM_STD_STARTWALK + 1);
 	if (walkAngle >= -DEGTORAD(130.0f) && walkAngle <= DEGTORAD(130.0f))
-		return FindCrouchAnimGroup(walkAngle > 0.0f ? "crouchleft" : "crouchright");
-	return FindCrouchAnimGroup("crouchback");
+		return FindStanceAnimGroup(set.block, walkAngle > 0.0f ? set.left : set.right, ANIM_STD_STARTWALK + 1);
+	return FindStanceAnimGroup(set.block, set.back, ANIM_STD_STARTWALK + 1);
+}
+
+// The prone aim pose (VICE-177): the stance's own aim content is VICE-187's
+// proneaim group, whose three variants are the aim pose of one bucket of the
+// angle between the body and the aim direction - the front pose inside 50
+// degrees, the side pose to 130, the back pose beyond it, with the torso
+// lifting further the further behind the aim is. The pose rides over the crawl
+// as a partial, and its lower body keys are dropped, so the legs keep the
+// crawl while the torso and the arms hold the aim (ADR 0015's rule for a
+// moving stance). The aim IK's torso correction turns the pose onto the
+// target (CPedIK).
+#define PRONE_AIM_GROUP	"proneaim"
+
+// How many slots the aim group carries: the three variants the presentation
+// looks up by id.
+#define PRONE_AIM_VARIANTS	3
+
+// The pose of one relative angle between the body and the aim, in the movement
+// selection's own sectors.
+static AnimationId
+ProneAimVariantForGap(float gap)
+{
+	if (gap >= -DEGTORAD(50.0f) && gap <= DEGTORAD(50.0f))
+		return ANIM_PRONE_AIM_FRONT;
+	if (gap >= -DEGTORAD(130.0f) && gap <= DEGTORAD(130.0f))
+		return ANIM_PRONE_AIM_SIDE;
+	return ANIM_PRONE_AIM_BACK;
+}
+
+// The three variants, for the guards and the release that walk them.
+static const AnimationId aProneAimVariants[PRONE_AIM_VARIANTS] = {
+	ANIM_PRONE_AIM_FRONT, ANIM_PRONE_AIM_SIDE, ANIM_PRONE_AIM_BACK
+};
+
+// Whether an animation id is one of them: the pose owns the upper body, so a
+// variant is not the "other partial" the guards wait for.
+static bool
+IsProneAimVariant(int16 animId)
+{
+	for (int i = 0; i < PRONE_AIM_VARIANTS; i++)
+		if (animId == aProneAimVariants[i])
+			return true;
+	return false;
+}
+
+// The world heading of the aim the upper body points along: the one aim writes
+// its direction into m_fLookDirection, and the classic lock-on holds the entity
+// it aims at, which CPed::AimGun reads the same way. The prone aim pose's
+// bucket is measured from this heading.
+float
+CPlayerPed::GetAimHeading(void)
+{
+	if (m_pSeekTarget)
+		return CGeneral::GetRadianAngleBetweenPoints(m_pSeekTarget->GetPosition().x, m_pSeekTarget->GetPosition().y,
+			GetPosition().x, GetPosition().y);
+	return m_fLookDirection;
+}
+
+// Hold the prone aim pose: the variant of the angle between the body and the
+// aim direction, seated over the crawl. The stance's pose is the aim pose of
+// the lying body, so the weapon's fire pose is not held while the prone is
+// (HoldUpperBodyAimPose branches here); the pose fades the other partials out
+// the way a partial switch does.
+void
+CPlayerPed::HoldProneAimPose(void)
+{
+	AssocGroupId group = FindStanceAnimGroup(PRONE_ANIM_BLOCK, PRONE_AIM_GROUP, PRONE_AIM_VARIANTS);
+	CAnimBlendAssociation *aimAssoc;
+	AnimationId variant;
+
+	if (group == (AssocGroupId)-1)
+		return;
+
+	variant = ProneAimVariantForGap(CGeneral::LimitRadianAngle(GetAimHeading() - m_fRotationCur));
+	aimAssoc = RpAnimBlendClumpGetAssociation(GetClump(), variant);
+
+	// Any other partial animation that runs (a burst, a reload, a hit) owns the
+	// upper body while it lasts: the aim pose waits for it, exactly as the
+	// standing hold does.
+	for (CAnimBlendAssociation *assoc = RpAnimBlendClumpGetFirstAssociation(GetClump(), ASSOC_PARTIAL);
+	     assoc; assoc = RpAnimBlendGetNextAssociation(assoc, ASSOC_PARTIAL)) {
+		if (!IsProneAimVariant(assoc->animId) && assoc->IsRunning())
+			return;
+	}
+
+	if (aimAssoc == nil || aimAssoc->blendDelta < 0.0f) {
+		aimAssoc = CAnimManager::BlendAnimation(GetClump(), group, variant, 8.0f);
+		if (aimAssoc == nil)
+			return;
+		// A pose the aim takes back must not fade out first (the switch back
+		// from another bucket), exactly as the standing hold brings its own
+		// pose back: the blend goes up from where the pose is
+		aimAssoc->blendDelta = 8.0f;
+		aimAssoc->flags &= ~ASSOC_DELETEFADEDOUT;
+	}
+
+	// The crawl keeps the legs: the pose drives the upper body alone
+	aimAssoc->MakeUpperBodyOnly();
+}
+
+// Fade the prone aim pose out: the body stood up again, or the aim went down.
+// Every variant fades, so a pose caught mid-switch does not stay.
+void
+CPlayerPed::ReleaseProneAimPose(void)
+{
+	for (int i = 0; i < PRONE_AIM_VARIANTS; i++) {
+		CAnimBlendAssociation *assoc = RpAnimBlendClumpGetAssociation(GetClump(), aProneAimVariants[i]);
+
+		// A fade that is already running is left alone
+		if (assoc != nil && assoc->blendDelta >= 0.0f) {
+			assoc->flags |= ASSOC_DELETEFADEDOUT;
+			assoc->blendDelta = -4.0f;
+		}
+	}
 }
 
 void
@@ -1486,20 +1639,26 @@ CPlayerPed::ProcessAnimGroups(void)
 {
 	AssocGroupId groupToSet;
 
-	// The stance picks the movement set while the crouch holds (VICE-176): the
-	// direction picks the crouch group, the way the standing case below picks
-	// its strafe and back groups. The set is VICE-186's content; while it is
-	// not in the game the lookup refuses and the standing selection stands in,
-	// so a crouch without content moves on the standing cycles.
-	if (m_MoveSolver.GetSnapshot().stance == STANCE_CROUCH) {
-		AssocGroupId crouchGroup = CrouchAnimGroupForWalkAngle(m_fWalkAngle);
+	// The stance picks the movement set while a low stance holds (VICE-176,
+	// VICE-177): the direction picks the stance's group, the way the standing
+	// case below picks its strafe and back groups. The sets are the content
+	// workstream's blocks; while one is not in the game the lookup refuses and
+	// the standing selection stands in, so a stance without content moves on
+	// the standing cycles.
+	{
+		eStance stance = m_MoveSolver.GetSnapshot().stance;
 
-		if (crouchGroup != (AssocGroupId)-1) {
-			if (m_animGroup != crouchGroup) {
-				m_animGroup = crouchGroup;
-				ReApplyMoveAnims();
+		if (stance == STANCE_CROUCH || stance == STANCE_PRONE) {
+			const tStanceAnimSet &set = stance == STANCE_CROUCH ? aCrouchAnimSet : aProneAnimSet;
+			AssocGroupId stanceGroup = StanceAnimGroupForWalkAngle(set, m_fWalkAngle);
+
+			if (stanceGroup != (AssocGroupId)-1) {
+				if (m_animGroup != stanceGroup) {
+					m_animGroup = stanceGroup;
+					ReApplyMoveAnims();
+				}
+				return;
 			}
-			return;
 		}
 	}
 
@@ -1508,8 +1667,7 @@ CPlayerPed::ProcessAnimGroups(void)
 	// person view included: the forward cycle would leave the legs walking
 	// forward while the ped moves sideways. The thresholds split the walk angle
 	// into the side sector (50 to 130 degrees) and the back sector (beyond 130
-	// degrees); the crouch set has its own selection above (VICE-176), and the
-	// prone stance extends this selection later (VICE-177).
+	// degrees); the crouch and the prone sets have their own selection above.
 	if (BodyFacesCamera() && CanStrafeOrMouseControl()
 		&& (m_fWalkAngle <= -DEGTORAD(50.0f) || m_fWalkAngle >= DEGTORAD(50.0f))) {
 
@@ -1906,21 +2064,20 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 	// and, with the sprint tier, it is the slide's entry pair in this one frame
 	// (VICE-180).
 	intent.crouchRequested = padUsed->DuckJustDown();
-	// The rest of the stance request: the sprint, the exit-vehicle press and
-	// the jump stand the ped up - the stock toggle rules of ProcessPlayerWeapon,
-	// now rows of the solver's stance table. The headroom is the one world fact
-	// the exits need: VICE-178's test, asked here and only where a low stance
-	// can use it, because the test casts a line into the world and the solver
-	// never touches it.
+	// The rest of the stance request: the sprint, the jump and the exit-vehicle
+	// press stand the ped up - the stock toggle rules of ProcessPlayerWeapon,
+	// now rows of the solver's stance table - and so does the prone action
+	// (VICE-177). The headroom is the one world fact the exits need: VICE-178's
+	// test, asked here and only where a low stance can use it, because the test
+	// casts a line into the world and the solver never touches it.
 	intent.sprintRequested = padUsed->GetSprint();
 	intent.exitVehiclePressed = padUsed->ExitVehicleJustDown();
+	intent.proneRequested = padUsed->ProneJustDown();
 	intent.headroomClear = (m_MoveSolver.GetSnapshot().stance != STANCE_STAND
-		&& (intent.crouchRequested || intent.sprintRequested || intent.jumpRequested || intent.exitVehiclePressed))
+		&& (intent.crouchRequested || intent.proneRequested || intent.sprintRequested
+			|| intent.jumpRequested || intent.exitVehiclePressed))
 		? IsHeadroomClear()
 		: true;
-	// The prone action (PED_PRONE, V by default): the slide ends on it; the
-	// prone stance is the stance row of VICE-177.
-	intent.proneRequested = padUsed->ProneJustDown();
 
 	const SMoveSnapshot &snapshot = m_MoveSolver.Step(intent);
 	// The slide has no shipped cycle yet: its stand-in pose (VICE-180)

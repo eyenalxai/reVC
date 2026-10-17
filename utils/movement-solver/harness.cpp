@@ -73,6 +73,17 @@
  *	   the stance out of it: the reference maths has no stance row, so no
  *	   new edge is fed to it.
  *
+ *	I. The prone (VICE-177). The prone row is the crawl - the crawl cycle's
+ *	   own speed as a share of the walk's, half the standing turn rate and the
+ *	   signed capsule top of VICE-178's prone set, which hangs below the
+ *	   origin. The PED_PRONE edge lies the ped down from the stand and from
+ *	   the crouch and only on the ground, the prone's own edge stands him up,
+ *	   the Duck edge lifts him into the crouch (the low ladder is prone,
+ *	   crouch, stand), the sprint, the jump and the exit-vehicle press stand
+ *	   him up, and the headroom holds every one of those exits back. The
+ *	   parity stream keeps the prone out of it for the same reason as the
+ *	   crouch.
+ *
  * Build and run (from the repository root; the structural check drives the
  * compiler and nm itself and writes its scratch files under /tmp/opencode):
  *
@@ -236,6 +247,16 @@ CrouchIntent(float heading, float targetSpeed)
 {
 	SMoveIntent intent = WalkIntent(heading, targetSpeed);
 	intent.crouchRequested = true;
+	return intent;
+}
+
+/* The prone step of the prone section: the walk intent with the prone edge,
+ * the edge that lies the ped down on the ground (VICE-177). */
+static SMoveIntent
+ProneIntent(float heading, float targetSpeed)
+{
+	SMoveIntent intent = WalkIntent(heading, targetSpeed);
+	intent.proneRequested = true;
 	return intent;
 }
 
@@ -1013,12 +1034,17 @@ static tMoveStateRow g_plantStates[MOVE_NUMSTATES];
 static tMoveLadderRow g_plantLadder[TIER_NUM];
 static tMoveStanceRow g_plantStances[STANCE_NUM];
 static tMoveTransitionRow g_plantTransitions[7];
-static tMoveStanceTransitionRow g_plantStanceTransitions[7];
+static tMoveStanceTransitionRow g_plantStanceTransitions[15];
 
-/* The module's own slide numbers (PlayerMoveSolver.cpp), so the planted set is
- * a copy of the real one: the two speeds the guards name. */
+/* The module's own slide and prone numbers (PlayerMoveSolver.cpp), so the
+ * planted set is a copy of the real one: the two speeds the slide's guards
+ * name and the prone row - the crawl as a share of the walk, the half turn and
+ * the signed capsule top of the set that hangs below the origin (VICE-177). */
 #define PLANT_SLIDE_ENTRY_SPEED	0.18f
 #define PLANT_SLIDE_EXIT_SPEED	0.13f
+#define PRONE_SPEED_SCALE	0.4f
+#define PRONE_TURN_SCALE	0.5f
+#define PRONE_CAPSULE_HEIGHT	-0.44f
 
 static SMoveTables
 PlantSet(void)
@@ -1056,6 +1082,14 @@ PlantSet(void)
 		g_plantStances[i].turnScale = 1.0f;
 		g_plantStances[i].capsuleHeight = 0.0f;
 	}
+	/* the stance rows as the module carries them: the crouch's own numbers and
+	 * the prone's signed top (VICE-176, VICE-177) */
+	g_plantStances[STANCE_CROUCH].speedScale = 0.5f;
+	g_plantStances[STANCE_CROUCH].turnScale = 1.25f;
+	g_plantStances[STANCE_CROUCH].capsuleHeight = 0.5f;
+	g_plantStances[STANCE_PRONE].speedScale = PRONE_SPEED_SCALE;
+	g_plantStances[STANCE_PRONE].turnScale = PRONE_TURN_SCALE;
+	g_plantStances[STANCE_PRONE].capsuleHeight = PRONE_CAPSULE_HEIGHT;
 	g_plantTransitions[0].from = MOVE_GROUND; g_plantTransitions[0].trigger = TRIGGER_AIRBORNE;
 	g_plantTransitions[0].to = MOVE_AIR; g_plantTransitions[0].onEntryEvent = 0;
 	g_plantTransitions[0].guard = GUARD_NONE; g_plantTransitions[0].guardSpeed = 0.0f;
@@ -1079,28 +1113,45 @@ PlantSet(void)
 	g_plantTransitions[6].to = MOVE_GROUND; g_plantTransitions[6].onEntryEvent = 0;
 	g_plantTransitions[6].guard = GUARD_SPEED_BELOW; g_plantTransitions[6].guardSpeed = PLANT_SLIDE_EXIT_SPEED;
 
-	/* the stance moves of the module's own table (VICE-176), the sprint's own
-	 * gate row included */
+	/* the stance moves of the module's own table (VICE-176, VICE-177), the
+	 * sprint's own gate row, the prone's entries and exits and the headroom
+	 * refusals included */
 	g_plantStanceTransitions[0].from = STANCE_STAND; g_plantStanceTransitions[0].trigger = TRIGGER_SPRINT;
 	g_plantStanceTransitions[0].to = STANCE_STAND;
 	g_plantStanceTransitions[1].from = STANCE_STAND; g_plantStanceTransitions[1].trigger = TRIGGER_CROUCH;
 	g_plantStanceTransitions[1].to = STANCE_CROUCH;
-	g_plantStanceTransitions[2].from = STANCE_CROUCH; g_plantStanceTransitions[2].trigger = TRIGGER_HEADROOM_BLOCKED;
-	g_plantStanceTransitions[2].to = STANCE_CROUCH;
-	g_plantStanceTransitions[3].from = STANCE_CROUCH; g_plantStanceTransitions[3].trigger = TRIGGER_CROUCH;
-	g_plantStanceTransitions[3].to = STANCE_STAND;
-	g_plantStanceTransitions[4].from = STANCE_CROUCH; g_plantStanceTransitions[4].trigger = TRIGGER_SPRINT;
+	g_plantStanceTransitions[2].from = STANCE_STAND; g_plantStanceTransitions[2].trigger = TRIGGER_PRONE;
+	g_plantStanceTransitions[2].to = STANCE_PRONE;
+	g_plantStanceTransitions[3].from = STANCE_CROUCH; g_plantStanceTransitions[3].trigger = TRIGGER_HEADROOM_BLOCKED;
+	g_plantStanceTransitions[3].to = STANCE_CROUCH;
+	g_plantStanceTransitions[4].from = STANCE_CROUCH; g_plantStanceTransitions[4].trigger = TRIGGER_CROUCH;
 	g_plantStanceTransitions[4].to = STANCE_STAND;
-	g_plantStanceTransitions[5].from = STANCE_CROUCH; g_plantStanceTransitions[5].trigger = TRIGGER_JUMP;
+	g_plantStanceTransitions[5].from = STANCE_CROUCH; g_plantStanceTransitions[5].trigger = TRIGGER_SPRINT;
 	g_plantStanceTransitions[5].to = STANCE_STAND;
-	g_plantStanceTransitions[6].from = STANCE_CROUCH; g_plantStanceTransitions[6].trigger = TRIGGER_EXIT_VEHICLE;
+	g_plantStanceTransitions[6].from = STANCE_CROUCH; g_plantStanceTransitions[6].trigger = TRIGGER_JUMP;
 	g_plantStanceTransitions[6].to = STANCE_STAND;
+	g_plantStanceTransitions[7].from = STANCE_CROUCH; g_plantStanceTransitions[7].trigger = TRIGGER_EXIT_VEHICLE;
+	g_plantStanceTransitions[7].to = STANCE_STAND;
+	g_plantStanceTransitions[8].from = STANCE_CROUCH; g_plantStanceTransitions[8].trigger = TRIGGER_PRONE;
+	g_plantStanceTransitions[8].to = STANCE_PRONE;
+	g_plantStanceTransitions[9].from = STANCE_PRONE; g_plantStanceTransitions[9].trigger = TRIGGER_HEADROOM_BLOCKED;
+	g_plantStanceTransitions[9].to = STANCE_PRONE;
+	g_plantStanceTransitions[10].from = STANCE_PRONE; g_plantStanceTransitions[10].trigger = TRIGGER_PRONE;
+	g_plantStanceTransitions[10].to = STANCE_STAND;
+	g_plantStanceTransitions[11].from = STANCE_PRONE; g_plantStanceTransitions[11].trigger = TRIGGER_CROUCH;
+	g_plantStanceTransitions[11].to = STANCE_CROUCH;
+	g_plantStanceTransitions[12].from = STANCE_PRONE; g_plantStanceTransitions[12].trigger = TRIGGER_SPRINT;
+	g_plantStanceTransitions[12].to = STANCE_STAND;
+	g_plantStanceTransitions[13].from = STANCE_PRONE; g_plantStanceTransitions[13].trigger = TRIGGER_JUMP;
+	g_plantStanceTransitions[13].to = STANCE_STAND;
+	g_plantStanceTransitions[14].from = STANCE_PRONE; g_plantStanceTransitions[14].trigger = TRIGGER_EXIT_VEHICLE;
+	g_plantStanceTransitions[14].to = STANCE_STAND;
 
 	t.states = g_plantStates; t.numStates = MOVE_NUMSTATES;
 	t.ladder = g_plantLadder; t.numLadder = TIER_NUM;
 	t.stances = g_plantStances; t.numStances = STANCE_NUM;
 	t.transitions = g_plantTransitions; t.numTransitions = 7;
-	t.stanceTransitions = g_plantStanceTransitions; t.numStanceTransitions = 7;
+	t.stanceTransitions = g_plantStanceTransitions; t.numStanceTransitions = 15;
 	return t;
 }
 
@@ -1174,6 +1225,8 @@ CheckTables(void)
 			"a stance without a row is refused");
 		REJECTS(g_plantStances[STANCE_CROUCH].turnScale = -1.0f,
 			"a stance row out of range is refused");
+		REJECTS(g_plantStances[STANCE_PRONE].capsuleHeight = -1.5f,
+			"a stance row whose top is under the ground is refused");
 		REJECTS(g_plantTransitions[3].to = MOVE_NUMSTATES,
 			"a transition to a state out of range is refused");
 		REJECTS(g_plantTransitions[3].trigger = 0,
@@ -1313,8 +1366,9 @@ CheckFiniteness(void)
 			// the pad's extreme and, every fourth step, the zero input
 			intent.hasInput = (i % 4) != 3;
 			intent.vel = SMoveVec2{ RngFloat(-10.0f, 10.0f), RngFloat(-10.0f, 10.0f) };
-			// the slide's entry pair and the prone request, so the slide's own
-			// outputs are covered too (VICE-180)
+			// the slide's entry pair and the prone request, so the slide's
+			// own outputs and the low stances' rows are covered too
+			// (VICE-180, VICE-176, VICE-177)
 			intent.tier = (i % 4) == 0 ? TIER_SPRINT : intent.tier;
 			intent.crouchRequested = (i % 4) == 0;
 			intent.proneRequested = (i % 8) == 0;
@@ -1332,8 +1386,8 @@ CheckFiniteness(void)
 	Check(bad == 0, "every output is finite for dt {0, 1/50, 1/10}, the pad's extreme and the zero input");
 	printf("  %d steps: dt {0, 1/50, 1/10} x the targets {0, 2/60, 2, 0.3} x the input and its\n",
 		(int)ARRAY_COUNT(aDt) * FINITE_STEPS);
-	printf("  absence, over the ground, the air, the steep slope and the slide: every velocity,\n");
-	printf("  moved, speed, heading, turn scale and capsule finite\n");
+	printf("  absence, over the ground, the air, the steep slope, the slide, the crouch and the\n");
+	printf("  prone: every velocity, moved, speed, heading, turn scale and capsule finite\n");
 }
 
 /* ---------------------------------------------------------------------- *
@@ -1540,9 +1594,9 @@ CheckSlide(void)
 	}
 
 	/* (e) the two other exits the design names: a prone request ends the slide
-	 *     on the ground (the prone stance itself is VICE-177's row), and the
-	 *     feet leaving the surface end it into the fall with the speed it
-	 *     had. */
+	 *     on the ground and lands the ped in the prone (VICE-177's stance row
+	 *     fires on the same edge), and the feet leaving the surface end it into
+	 *     the fall with the speed it had. */
 	{
 		CPlayerMoveSolver solver;
 		SMoveIntent intent = WalkIntent(0.0f, SLIDE_SPRINT_SPEED);
@@ -1554,8 +1608,8 @@ CheckSlide(void)
 		intent.vel = SMoveVec2{ 0.0f, snapshot.moved.y };
 		snapshot = solver.Step(intent);
 		Check(snapshot.state == MOVE_GROUND, "a prone request ends the slide on the ground");
-		Check(snapshot.stance == STANCE_STAND,
-			"the prone stance the request asks for is VICE-177's row, not the slide's");
+		Check(snapshot.stance == STANCE_PRONE,
+			"the slide's prone request lands in the prone: the stance row fires on the same edge");
 
 		solver.Reset();
 		snapshot = StepIntoSlide(&solver);
@@ -1838,6 +1892,271 @@ CheckStance(void)
 }
 
 /* ---------------------------------------------------------------------- *
+ * 9. the prone (VICE-177)
+ * ---------------------------------------------------------------------- */
+
+/*
+ * The prone is the solver's lowest stance: the PED_PRONE edge lies the ped
+ * down, but only on the ground, and the row is the crawl - the crawl cycle's
+ * own speed as a share of the walk's, half the standing turn rate, and the
+ * signed capsule top of VICE-178's prone set, which lies below the origin
+ * because the body does. The exits walk back up the ladder: the prone's own
+ * edge stands the ped up, the Duck edge lifts him into the crouch, the sprint,
+ * the jump and the exit-vehicle press stand him up, and every one of them is
+ * held back while the body cannot rise (VICE-178's headroom). The digits below
+ * are the module's prone row (PlayerMoveSolver.cpp, moveStanceRows); the
+ * harness pins them so a table edit cannot pass unnoticed.
+ */
+
+/* The prone hold of the acceptance: a prone that is never cancelled must not
+ * time out. Sixty seconds of the pad's own step. */
+#define PRONE_HOLD_STEPS	3000
+
+/* The prone row's values and the scaled target, one step after the edge. */
+static void
+CheckProneRow(void)
+{
+	CPlayerMoveSolver standSolver, proneSolver;
+	SMoveIntent stand = WalkIntent(0.0f, 0.30f);
+	SMoveIntent prone = ProneIntent(0.0f, 0.30f);
+	const SMoveSnapshot &standSnap = standSolver.Step(stand);
+	const SMoveSnapshot &proneSnap = proneSolver.Step(prone);
+
+	Check(proneSnap.stance == STANCE_PRONE, "the prone edge lies the ped down in the step that reads it");
+	Check(proneSnap.turnScale == PRONE_TURN_SCALE, "the prone row's turn scale is the snapshot's turn scale");
+	Check(proneSnap.capsuleHeight == PRONE_CAPSULE_HEIGHT, "the prone row reports VICE-178's prone capsule top");
+	Check(proneSnap.capsuleHeight < 0.0f, "the prone capsule top hangs below the origin: the body lies on the ground");
+	Check(proneSnap.targetSpeed == PRONE_SPEED_SCALE * standSnap.targetSpeed,
+		"the prone row scales the target speed by the crawl's own share of the walk");
+	Check(proneSnap.targetSpeed < standSnap.targetSpeed, "the crawl is slower than the stand at the same intent");
+
+	/* the crawl walks its scaled target exactly, like the stand walks its own */
+	{
+		SMoveVec2 live = { 0.0f, 0.0f };
+		SMoveIntent intent = WalkIntent(0.0f, 0.30f);
+		const SMoveSnapshot *snap = &proneSnap;
+
+		for (int i = 0; i < 240; i++) {
+			intent.vel = live;
+			snap = &proneSolver.Step(intent);
+			live = snap->moved;
+		}
+		Check(snap->stance == STANCE_PRONE, "the prone holds over the crawl");
+		Check(snap->moved.x == 0.0f && snap->moved.y == PRONE_SPEED_SCALE * 0.30f,
+			"the crawl reaches the scaled target exactly");
+	}
+
+	printf("  the prone row: speed scale %.9g (the crawl's 0.443 over the walk's 1.13 is 0.392, taken to the\n",
+		PRONE_SPEED_SCALE);
+	printf("  playback floor 0.4 so the crawl cycle plays exactly), turn scale %.9g,\n", PRONE_TURN_SCALE);
+	printf("  capsule %.9g (the prone set's top: the body hangs below the origin)\n", PRONE_CAPSULE_HEIGHT);
+}
+
+/* The prone row's turn rate, behaviourally: one step of the prone is the
+ * reference maths with the prone row's rate (12 * 0.5) and its scaled target,
+ * the same step of the stand is that maths with 12 and the unscaled target, and
+ * the prone's direction settles looser - a body that lies down drives the
+ * direction slowly. */
+static void
+CheckProneTurn(void)
+{
+	const float dt = 1.0f / 50.0f;
+	const float targetSpeed = 0.30f;
+	/* the velocity points at +y; the input asks for +x: a quarter turn */
+	const float heading = -1.5707963267948966f;	/* -PI / 2: the move direction is (1, 0) */
+	SMoveVec2 velocity = { 0.0f, 1.0f };
+	SMoveVec2 moveDirection = { -sinf(heading), cosf(heading) };
+	SMoveIntent stand = WalkIntent(heading, targetSpeed);
+	SMoveIntent prone = ProneIntent(heading, targetSpeed);
+	CPlayerMoveSolver standSolver, proneSolver;
+	SMoveVec2 standGot, proneGot, steered, standWant, proneWant;
+
+	stand.vel = velocity;
+	prone.vel = velocity;
+	standGot = standSolver.Step(stand).moved;
+	proneGot = proneSolver.Step(prone).moved;
+
+	steered = RefSteerVelocityTowards(velocity, moveDirection, GROUND_TURN_RATE * dt);
+	standWant = RefMoveVelocityTowards(steered, SMoveVec2{ moveDirection.x * targetSpeed, moveDirection.y * targetSpeed },
+		GROUND_ACCEL * dt);
+	steered = RefSteerVelocityTowards(velocity, moveDirection, GROUND_TURN_RATE * PRONE_TURN_SCALE * dt);
+	proneWant = RefMoveVelocityTowards(steered,
+		SMoveVec2{ moveDirection.x * PRONE_SPEED_SCALE * targetSpeed, moveDirection.y * PRONE_SPEED_SCALE * targetSpeed },
+		GROUND_ACCEL * dt);
+
+	Check(standGot.x == standWant.x && standGot.y == standWant.y,
+		"the standing step turns at the state row's own rate, bit for bit");
+	Check(proneGot.x == proneWant.x && proneGot.y == proneWant.y,
+		"the prone step turns at the prone row's rate, bit for bit");
+
+	/* the prone's direction is the looser one: further from the input after one
+	 * step (both start a quarter turn away) */
+	{
+		float standAngle = atan2f(standGot.y, standGot.x);
+		float proneAngle = atan2f(proneGot.y, proneGot.x);
+		float targetAngle = atan2f(moveDirection.y, moveDirection.x);
+		float standGap = fabsf(RefLimitRadianAngle(targetAngle - standAngle));
+		float proneGap = fabsf(RefLimitRadianAngle(targetAngle - proneAngle));
+
+		Check(proneGap > standGap, "the prone turns looser than the stand: its direction is further from the input");
+	}
+}
+
+/* The prone's entries and exits: the edge lies the ped down from the stand and
+ * from the crouch and only on the ground, the prone's own edge stands him up,
+ * the Duck edge lifts him into the crouch (the low ladder is prone, crouch,
+ * stand), and the sprint, the jump and the exit-vehicle press stand him up. */
+static void
+CheckProneEdges(void)
+{
+	/* (a) the entries: the edge from the stand and from the crouch, and the
+	 *     step without an edge that keeps what it found */
+	{
+		CPlayerMoveSolver solver;
+		SMoveIntent intent = WalkIntent(0.0f, 0.3f);
+
+		Check(solver.Step(intent).stance == STANCE_STAND, "the stance starts standing");
+		Check(solver.Step(ProneIntent(0.0f, 0.3f)).stance == STANCE_PRONE, "the prone edge lies the ped down from the stand");
+		Check(solver.Step(intent).stance == STANCE_PRONE, "the prone holds without an edge");
+		Check(solver.Step(ProneIntent(0.0f, 0.3f)).stance == STANCE_STAND, "the prone edge stands the ped up again");
+
+		solver.Reset();
+		Check(solver.Step(CrouchIntent(0.0f, 0.3f)).stance == STANCE_CROUCH, "the Duck edge crouches the ped");
+		Check(solver.Step(ProneIntent(0.0f, 0.3f)).stance == STANCE_PRONE, "the prone edge reaches the prone from the crouch");
+	}
+
+	/* (b) the ground: the prone action is a ground action */
+	{
+		CPlayerMoveSolver solver;
+		SMoveIntent intent = ProneIntent(0.0f, 0.3f);
+
+		intent.onGround = false;
+		Check(solver.Step(intent).stance == STANCE_STAND,
+			"the prone edge with the feet off the ground does not lie the ped down");
+	}
+
+	/* (c) the low ladder: the prone's own edge stands the ped up, and the Duck
+	 *     edge lifts him into the crouch */
+	{
+		CPlayerMoveSolver solver;
+		SMoveIntent intent = WalkIntent(0.0f, 0.3f);
+
+		(void)solver.Step(ProneIntent(0.0f, 0.3f));
+		Check(solver.Step(CrouchIntent(0.0f, 0.3f)).stance == STANCE_CROUCH, "the Duck edge lifts the prone into the crouch");
+		Check(solver.Step(CrouchIntent(0.0f, 0.3f)).stance == STANCE_STAND, "the Duck edge again stands the crouch up");
+	}
+
+	/* (d) the sprint, the jump and the exit-vehicle press, each from a fresh
+	 *     prone */
+	{
+		static const char *const names[3] = { "the sprint", "the jump", "the exit-vehicle press" };
+		CPlayerMoveSolver solver;
+		SMoveIntent intent = WalkIntent(0.0f, 0.3f);
+
+		for (int i = 0; i < 3; i++) {
+			Check(solver.Step(ProneIntent(0.0f, 0.3f)).stance == STANCE_PRONE, "the prone edge lies the ped down");
+			if (i == 0)
+				intent.sprintRequested = true;
+			else if (i == 1)
+				intent.jumpRequested = true;
+			else
+				intent.exitVehiclePressed = true;
+			Check(solver.Step(intent).stance == STANCE_STAND, names[i]);
+			Check(solver.Step(intent).stance == STANCE_STAND, names[i]);
+			intent.sprintRequested = false;
+			intent.jumpRequested = false;
+			intent.exitVehiclePressed = false;
+		}
+	}
+
+	/* (e) the prone that is never cancelled: a minute of steps, no timeout */
+	{
+		CPlayerMoveSolver solver;
+		SMoveIntent intent = WalkIntent(0.0f, 0.3f);
+		int standsAfter = 0;
+
+		(void)solver.Step(ProneIntent(0.0f, 0.3f));
+		for (int i = 0; i < PRONE_HOLD_STEPS; i++) {
+			if (solver.Step(intent).stance != STANCE_PRONE)
+				standsAfter++;
+			intent.hasInput = (i % 3) != 2;
+			intent.vel = solver.GetSnapshot().moved;
+		}
+		Check(standsAfter == 0, "a prone that is never cancelled holds: sixty seconds of steps");
+		printf("  %d steps (%g s) in one prone, no edge: the stance never moves by itself\n",
+			PRONE_HOLD_STEPS, PRONE_HOLD_STEPS / 50.0);
+	}
+
+	/* (f) the air does not move the stance: a prone that leaves the surface
+	 *     stays prone while it falls */
+	{
+		CPlayerMoveSolver solver;
+		SMoveIntent intent = WalkIntent(0.0f, 0.3f);
+
+		(void)solver.Step(ProneIntent(0.0f, 0.3f));
+		intent.onGround = false;
+		intent.vel = SMoveVec2{ 0.0f, 0.05f };
+		const SMoveSnapshot &snap = solver.Step(intent);
+		Check(snap.state == MOVE_AIR && snap.stance == STANCE_PRONE,
+			"the feet leaving the surface move the state, not the stance: the body stays prone in the fall");
+	}
+}
+
+/* VICE-178's headroom over the prone (VICE-177): the adapter passes the
+ * world's answer in the intent, and every exit the prone has is held back while
+ * the body cannot rise - the prone's own edge, the Duck edge, the sprint, the
+ * jump and the exit-vehicle press. */
+static void
+CheckProneHeadroom(void)
+{
+	CPlayerMoveSolver solver;
+	SMoveIntent intent = WalkIntent(0.0f, 0.3f);
+
+	(void)solver.Step(ProneIntent(0.0f, 0.3f));
+	Check(solver.GetSnapshot().stance == STANCE_PRONE, "the ped lies prone under the ceiling");
+
+	intent.headroomClear = false;	/* the world above the ped refuses the stand */
+
+	intent.proneRequested = true;
+	Check(solver.Step(intent).stance == STANCE_PRONE, "the prone edge is refused: the prone holds with no headroom");
+	intent.proneRequested = false;
+	Check(solver.Step(intent).stance == STANCE_PRONE, "the refusal holds over the steps after it");
+
+	intent.crouchRequested = true;
+	Check(solver.Step(intent).stance == STANCE_PRONE, "the Duck edge is refused: the prone holds with no headroom");
+	intent.crouchRequested = false;
+
+	intent.sprintRequested = true;
+	Check(solver.Step(intent).stance == STANCE_PRONE, "the sprint is refused: the prone holds with no headroom");
+	intent.sprintRequested = false;
+
+	intent.jumpRequested = true;
+	Check(solver.Step(intent).stance == STANCE_PRONE, "the jump is refused: the prone holds with no headroom");
+	intent.jumpRequested = false;
+
+	intent.exitVehiclePressed = true;
+	Check(solver.Step(intent).stance == STANCE_PRONE, "the exit-vehicle press is refused with no headroom");
+	intent.exitVehiclePressed = false;
+
+	/* the ped crawls out from under it: the same edge stands him up */
+	intent.headroomClear = true;
+	intent.proneRequested = true;
+	Check(solver.Step(intent).stance == STANCE_STAND, "the same prone edge stands the ped up with the headroom clear");
+
+	printf("  no headroom: the prone edge, the Duck edge, the sprint, the jump and the exit-vehicle press all hold the prone\n");
+	printf("  the headroom clear again: the same edge stands the ped up\n");
+}
+
+static void
+CheckProne(void)
+{
+	CheckProneRow();
+	CheckProneTurn();
+	CheckProneEdges();
+	CheckProneHeadroom();
+}
+
+/* ---------------------------------------------------------------------- *
  * main
  * ---------------------------------------------------------------------- */
 
@@ -1870,6 +2189,8 @@ main(void)
 	CheckSlide();
 	printf("\n== 8. the stance (VICE-176): the crouch row, the stance moves and the headroom\n");
 	CheckStance();
+	printf("\n== 9. the prone (VICE-177): the crawl row, the ground entry, the low ladder and the headroom\n");
+	CheckProne();
 
 	printf("\nRESULT: %s (%d checks, %d failures)\n",
 		g_failures == 0 ? "every check passed" : "FAILURES", g_checks, g_failures);

@@ -294,24 +294,11 @@ AnimAssocDesc aStdAnimDescsSide[] = {
 	{ ANIM_STD_STARTWALK, ASSOC_HAS_TRANSLATION | ASSOC_HAS_X_TRANSLATION },
 };
 // The crawl sets of the prone block (VICE-187): the same five slots as the std
-// movement sets, with the crawl's own ids. The left and right sets carry the
-// lateral translation flag so the side crawl drives the ped sideways the way
-// the strafe groups do, and the aim, dive and landing poses are partials over
-// the crawl that is playing.
-AnimAssocDesc aProneAnimDescs[] = {
-	{ ANIM_PRONE_WALK, ASSOC_REPEAT | ASSOC_MOVEMENT | ASSOC_HAS_TRANSLATION | ASSOC_WALK },
-	{ ANIM_PRONE_RUN, ASSOC_REPEAT | ASSOC_MOVEMENT | ASSOC_HAS_TRANSLATION | ASSOC_WALK },
-	{ ANIM_PRONE_RUNFAST, ASSOC_REPEAT | ASSOC_MOVEMENT | ASSOC_HAS_TRANSLATION | ASSOC_WALK },
-	{ ANIM_PRONE_IDLE, ASSOC_REPEAT },
-	{ ANIM_PRONE_STARTWALK, ASSOC_HAS_TRANSLATION },
-};
-AnimAssocDesc aProneAnimDescsSide[] = {
-	{ ANIM_PRONE_WALK, ASSOC_REPEAT | ASSOC_MOVEMENT | ASSOC_HAS_TRANSLATION | ASSOC_HAS_X_TRANSLATION | ASSOC_WALK },
-	{ ANIM_PRONE_RUN, ASSOC_REPEAT | ASSOC_MOVEMENT | ASSOC_HAS_TRANSLATION | ASSOC_HAS_X_TRANSLATION | ASSOC_WALK },
-	{ ANIM_PRONE_RUNFAST, ASSOC_REPEAT | ASSOC_MOVEMENT | ASSOC_HAS_TRANSLATION | ASSOC_HAS_X_TRANSLATION | ASSOC_WALK },
-	{ ANIM_PRONE_IDLE, ASSOC_REPEAT },
-	{ ANIM_PRONE_STARTWALK, ASSOC_HAS_TRANSLATION | ASSOC_HAS_X_TRANSLATION },
-};
+// movement sets, which is the ids the chooser and the reference speed look up
+// (the crouch's groups carry them too). The left and right sets take the side
+// descs, whose lateral translation flag drives the ped sideways the way the
+// strafe groups do, and the aim, dive and landing poses are partials over the
+// crawl that is playing.
 AnimAssocDesc aProneAimAnimDescs[] = {
 	{ ANIM_PRONE_AIM_FRONT, ASSOC_REPEAT | ASSOC_PARTIAL },
 	{ ANIM_PRONE_AIM_SIDE, ASSOC_REPEAT | ASSOC_PARTIAL },
@@ -1086,11 +1073,11 @@ const AnimAssocDefinition CAnimManager::ms_aAnimAssocDefinitions[NUM_ANIM_ASSOC_
 	{ "crouchback", "crouch", MI_COP, awc(aCrouchBackAnimations), aStdAnimDescs },
 	{ "crouchleft", "crouch", MI_COP, awc(aCrouchLeftAnimations), aStdAnimDescsSide },
 	{ "crouchright", "crouch", MI_COP, awc(aCrouchRightAnimations), aStdAnimDescsSide },
-	{ "prone", "prone", MI_COP, awc(aProneAnimations), aProneAnimDescs },
+	{ "prone", "prone", MI_COP, awc(aProneAnimations), aStdAnimDescs },
 	{ "proneaim", "prone", MI_COP, awc(aProneAimAnimations), aProneAimAnimDescs },
-	{ "proneback", "prone", MI_COP, awc(aProneBackAnimations), aProneAnimDescs },
-	{ "proneleft", "prone", MI_COP, awc(aProneLeftAnimations), aProneAnimDescsSide },
-	{ "proneright", "prone", MI_COP, awc(aProneRightAnimations), aProneAnimDescsSide },
+	{ "proneback", "prone", MI_COP, awc(aProneBackAnimations), aStdAnimDescs },
+	{ "proneleft", "prone", MI_COP, awc(aProneLeftAnimations), aStdAnimDescsSide },
+	{ "proneright", "prone", MI_COP, awc(aProneRightAnimations), aStdAnimDescsSide },
 #endif
 };
 #undef awc
