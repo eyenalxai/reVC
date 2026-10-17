@@ -130,22 +130,64 @@ The existing model in `CVehicle::ProcessWheel`: one grip budget per wheel,
 shared between the forward force and the sideways force. The drift layer changes
 how the budget is spent; it does not change the wheel list.
 
-## Movement controller
+## Movement solver
 
-The module that owns the player's horizontal velocity on foot:
-`CPlayerPed::UpdatePlayerMovement` in `src/peds/PlayerPed.cpp`. Every on-foot
-control path calls it, in both views. The camera sets the view position and the
-direction basis only. The controller targets the reference speed and owns the
-velocity; the fight state, the attached states and the states that hold a
-blocking animation keep the animation driven movement.
+The module that owns the player's horizontal velocity, position and stance on
+foot: `src/peds/PlayerMoveSolver.*`. It is engine free: one intent struct in, one
+snapshot out, and its state stays private. There is one instance per player. The
+adapter in `CPlayerPed::UpdatePlayerMovement` builds the intent from the pad, the
+camera and the ped, calls the solver, and writes the velocity and the reported
+movement state back to the ped. The camera sets the view position and the
+direction basis only. The fight path, the attached states and the scripted states
+do not run the solver and keep the animation driven movement.
+
+## Movement intent
+
+The one frame request the adapter hands to the solver: the live velocity, the
+surface speed, the steep slope normal, the camera relative movement heading, the
+target speed, the grounded and steep flags, the speed tier and the action edges
+(jump, dive, slide, stand).
+
+## Movement snapshot
+
+One read of the solver's live state, taken at the point of the read: the state,
+the stance, the velocity, the speed, the facing relative direction, the spin
+angle, the contacts, the slope, the events of the step, and the reported movement
+state. The presentation, the camera, the HUD and the telemetry all read it, so
+they cannot drift apart. It follows the drift snapshot pattern (ADR 0012).
 
 ## Movement state
 
-One of the controller's states (`ePlayerMovementState`): ground and air today.
-Each state has its own acceleration, friction and turn rate row; the planned
-slide state will add a row. The ground state moves the velocity toward the
-target speed, turns the direction and slows the ped down with the friction. The
-air state keeps the momentum and steers with a smaller authority.
+One of the solver's states (`ePlayerMovementState`): ground, air, slide and dive.
+Each state has its own acceleration, friction and turn rate row, and the
+transition table decides the moves between them. The ground state moves the
+velocity toward the target speed, turns the direction and slows the ped down with
+the friction. The air state keeps the momentum and steers with a smaller
+authority. The slide state adds its entry boost and its friction curve. The dive
+state is the air state with the prone stance.
+
+## Stance
+
+The player's body attitude, an axis of its own beside the movement state: stand,
+crouch and prone. The stance scales the target speed, the turn rate and the
+collision capsule, and it owns the exits: standing up needs the headroom check.
+The duck action and the prone action drive the stance; it is the solver's value,
+not a flag the animation sets.
+
+## Speed ladder
+
+The explicit order of the on-foot speeds: walk < run < sprint < the slide entry
+boost < the slide jump, which carries the slide's speed. Every rung is a row in
+the solver's tables, so the feel is tuned in the tables and never in control
+flow.
+
+## Animation lock
+
+Movement that waits for an animation: the velocity or the input response may not
+change until a cycle, a blend or a callback finishes. The movement rework forbids
+it. The only exceptions are the genuinely scripted states: car entry and exit,
+the get-up, the cutscenes, the mission control flags, being attached and the
+replay. The solver harness checks the rule.
 
 ## Engine velocity unit
 
@@ -159,7 +201,7 @@ The ground speed of the walk, run and sprint animation blend the ped plays: the
 net root motion of each playing animation over one cycle, at the playback speed
 the state forces on it. The animations of the strafe, backward and weapon groups
 carry their own speeds, so the reference follows the direction the legs move in
-and the weapon the ped holds. The controller targets it and scales the animation
+and the weapon the ped holds. The solver targets it and scales the animation
 playback by (real speed / reference speed), so the legs stay planted while the
 speed changes.
 
