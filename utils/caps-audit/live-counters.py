@@ -67,6 +67,15 @@ reserve is the layer's own promise to the rest of the game). The "in reach" row
 is the layer's own acceptance gauge and must stay 0. The updates row is the
 stagger's work: about a third of the layer a frame, so it grows by the cap each
 three frames.
+
+The standable cell rows (VICE-154) are the off-network pedestrian placement's
+own counters: the cells the lazy build spent and queued, the queue's and the
+cache's drops (a nearer cell displaced a farther one, or the cache evicted the
+farthest entry), the positions the spawns requested and how they were answered
+(a validated spot, or a built cell with nothing on it), and the probes the
+builds ran with their verdicts - the rejects by reason (no ground, water, the
+level, a roof, the clearance, the slope). The counters are cumulative since the
+boot, so a soak reads the growth of the builds and the mix of the reasons.
 """
 
 import os
@@ -98,6 +107,14 @@ SYMBOLS = [
     ("peds: ms_nNumDummy",           "_ZN11CPopulation12ms_nNumDummyE",                "I"),
     ("peds: ms_nNumCop",             "_ZN11CPopulation10ms_nNumCopE",                  "I"),
     ("peds: ms_nNumCivMale",         "_ZN11CPopulation14ms_nNumCivMaleE",              "I"),
+    # The off-network spawns (VICE-122, the standable cells of VICE-154): the
+    # created pedestrians that stood on a cell and the ones the node path
+    # took (the realised share the target ratio is held against), and the
+    # strays the cull took by their reason.
+    ("peds: off-network spawns",     "_ZN11CPopulation20ms_nOffNetworkSpawnsE",        "I"),
+    ("peds: network spawns",         "_ZN11CPopulation17ms_nNetworkSpawnsE",           "I"),
+    ("peds: off-network stuck",      "_ZN11CPopulation19ms_nOffNetworkStuckE",         "I"),
+    ("peds: off-network drowned",    "_ZN11CPopulation21ms_nOffNetworkDrownedE",       "I"),
     # The fill burst (VICE-126): the countdown that arms the boot burst, the
     # target the last burst frame aimed at, and what the burst has spent so far.
     # The "since boot" pair accumulates over every run of the session; the
@@ -264,6 +281,37 @@ FAR_TRAFFIC = [
     ("far: refused poses (must be 0)", "_ZN11CFarTraffic26ms_nFarTrafficRefusedPosesE", "I"),
 ]
 
+# The pedestrian standable cells (VICE-154). The store holds the truth
+# (CPedSites::ms_cells); the facade mirrors its stats into these plain statics
+# after every pump and every request, so the rig can name them. The rows are
+# cumulative since the last reset (a boot, a restart or a save load:
+# CPopulation::Initialise resets the store): the cells built and queued, the
+# queue's and the cache's drops (the queue gives up its farthest cell for a
+# nearer one; the cache evicts the farthest entry for a nearer build, or
+# drops an entry a request found stale at another level), the positions the
+# off-network spawns requested and how they were answered (a spot, a dead
+# cell), the probes the builds ran and their verdicts - the rejects by their
+# reason, the ticket's telemetry. The off-network counters of the population
+# above them are the other side of the same story: the spawns that stood on a
+# cell (ms_nOffNetworkSpawns) against the ones the node path took
+# (ms_nNetworkSpawns).
+PED_SITES = [
+    ("ped sites: cells built",       "_ZN9CPedSites14ms_nCellsBuiltE",       "I"),
+    ("ped sites: cells queued",      "_ZN9CPedSites15ms_nCellsQueuedE",      "I"),
+    ("ped sites: cells dropped",     "_ZN9CPedSites16ms_nCellsDroppedE",     "I"),
+    ("ped sites: cells evicted",     "_ZN9CPedSites16ms_nCellsEvictedE",     "I"),
+    ("ped sites: requests",          "_ZN9CPedSites12ms_nRequestsE",         "I"),
+    ("ped sites: requests answered", "_ZN9CPedSites20ms_nRequestsAnsweredE", "I"),
+    ("ped sites: requests dead",     "_ZN9CPedSites16ms_nRequestsDeadE",     "I"),
+    ("ped sites: probes",            "_ZN9CPedSites10ms_nProbesE",           "I"),
+    ("ped sites: rejects no ground", "_ZN9CPedSites19ms_nRejectsNoGroundE",  "I"),
+    ("ped sites: rejects water",     "_ZN9CPedSites16ms_nRejectsWaterE",     "I"),
+    ("ped sites: rejects level",     "_ZN9CPedSites16ms_nRejectsLevelE",     "I"),
+    ("ped sites: rejects roof",      "_ZN9CPedSites15ms_nRejectsRoofE",      "I"),
+    ("ped sites: rejects clearance", "_ZN9CPedSites20ms_nRejectsClearanceE", "I"),
+    ("ped sites: rejects slope",     "_ZN9CPedSites16ms_nRejectsSlopeE",     "I"),
+]
+
 CONFIG = "src/core/config.h"
 
 
@@ -343,6 +391,14 @@ def main():
             continue
         v = read(off + offset, "i")
         print(f"  {label:44s} {v}")
+
+    print()
+    for label, mangled, fmt in PED_SITES:
+        off = sym.get(mangled)
+        if off is None:
+            print(f"  {label:44s} symbol missing")
+            continue
+        print(f"  {label:44s} {read(off, fmt)}")
 
     print()
     for label, mangled, fmt in NEAR_BUBBLE:

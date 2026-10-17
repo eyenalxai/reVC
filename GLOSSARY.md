@@ -552,15 +552,32 @@ an area without nodes stays empty: nothing spawns there before VICE-122.
 
 ## Off-network spawn
 
-A pedestrian created off the pedestrian node network. The population picks a
-random point in the creation ring and takes it only if it is free: ground at
-the level of the ring, no surface more than a step above it (no roof or
-canopy), ground above the water line, a clearance sphere clear of the static
-world, clear of other pedestrians, and a ped node inside the walk bound and on
-the same level. The wander state walks the pedestrian to the closest node from
-there. A bounded fraction of the spawns takes this path
-(`PED_OFF_NETWORK_FRACTION`, a fraction of zero draws no random number); the
-rest keeps the node path (VICE-122).
+A pedestrian created off the pedestrian node network. The population holds the
+share of these spawns at a target ratio (`PED_OFF_NETWORK_TARGET_RATIO`, 0.15;
+a target of zero asks for nothing and keeps the node path bit-exact) and takes
+the position from a validated standable cell (VICE-154); a request the cells
+cannot answer falls back to the node path for that spawn. The wander state
+walks the pedestrian to the closest node from there, and the stray cull
+watches it (ADR 0019, which VICE-154 replaces in part).
+
+## Standable cell
+
+One 16 m cell of the world grid the off-network pedestrian spawns stand on
+(VICE-154, `src/peds/PedSites.h`): 250 x 250 cells over the world, a cell
+unvalidated until its build. The build probes a 4 x 4 lattice of the cell on
+the main thread and keeps up to four spread points that pass the predicate:
+the ground cast down from the level of the request (3 m of tolerance), no
+water (the ground above the line plus 0.1 m), the top surface over the point
+no more than a step (0.5 m) above the ground the point stands on (a roof, a
+canopy or a bridge deck rejects), a free clearance sphere over the feet, and a
+ground not steeper than the walk limit (cos 45, the new slope predicate). A
+request maps the drawn position to its cell: a built cell answers with its
+stored point nearest the draw, a built cell with no point (a *dead* cell) and
+an unvalidated one fall back to the node path (the unvalidated one enters the
+bounded build queue first). The queue (512 requested cells, nearest-first) and
+the cache (1024 built cells, the farthest evicted) are bounded, the pump
+spends two builds a frame, and every world query stays on the main thread:
+the planner worker reads the store's plain answers only.
 
 ## Stray (off-network pedestrian)
 

@@ -31,6 +31,7 @@
 #include "WaterLevel.h"
 #include "TrafficRings.h"
 #include "FillBurst.h"
+#include "PedSites.h"
 
 // The pedestrian ring comes from the one table (TrafficRings.h): the creation
 // ring, the off-screen band and the removal distances scale with it. The
@@ -38,25 +39,21 @@
 // spawn rate come from the cap table (PopulationBudget.h, VICE-123).
 #define PED_AREA_DENSITY_SCALE	3.0f // scale the zone density budget for dense on-foot crowds
 
-// The off-network spawns (VICE-122). A bounded fraction of the pedestrian
-// spawns skips the node path and takes a free position in the creation ring,
-// and the existing wander state walks the pedestrian to the closest ped node
-// from there. A node is ground a pedestrian can stand on; a free position needs
-// the checks below, and the walk to the network needs a bound and a backstop.
-// The constants are the one place the fraction and the checks are tuned.
+// The off-network spawns (VICE-122), on the standable cells (VICE-154). A
+// target share of the created pedestrians stands on a validated point of the
+// cell cache (src/peds/PedSites.h) and the existing wander state walks the
+// pedestrian to the closest ped node from there; the rest keeps the node path.
+// The cell module owns the placement's rules (ground, water, clearance, slope)
+// and its bounded build; the constants here are the share and the stray watch.
 //
-// The fraction of zero is special: no random number is drawn, so the node path
-// stays bit-exact with the behaviour before this change.
-#define PED_OFF_NETWORK_FRACTION	0.15f	// the fraction of the spawns that tries a free position
-#define PED_OFF_NETWORK_ATTEMPTS	5	// free positions tried for one spawn
-#define PED_OFF_NETWORK_LEVEL_MARGIN	3.0f	// the ground-to-position tolerance the node path itself allows
-#define PED_OFF_NETWORK_ROOF_CAST	50.0f	// the surface cast starts this far above the position
-#define PED_OFF_NETWORK_STEP		0.5f	// the surface may stand this far above the ground: a step, not a roof
-#define PED_OFF_NETWORK_PROBE_HEIGHT	0.9f	// the clearance probe sits this far above the ground
-#define PED_OFF_NETWORK_PROBE_RADIUS	0.5f	// and is this wide: static geometry inside it rejects the spot
-#define PED_OFF_NETWORK_WATER_MARGIN	0.1f	// the ground must stand this far above the water line
-#define PED_OFF_NETWORK_NODE_RANGE	150.0f	// the closest ped node may not be farther: the walk bound
-#define PED_OFF_NETWORK_NODE_LEVEL	5.0f	// and it may not sit on another level: the ground is a roof
+// The share is held near the target, not pinned to it: the share is a share of
+// the created pedestrians, and a gang (3..5) or a couple (2) that a spawn
+// creates counts every member, so one group can overshoot the line; the share
+// only falls short while the cells cannot answer (the validation bound).
+//
+// The target share of zero is special: no cell is asked, so the node path
+// stays bit-exact with the behaviour before the off-network work.
+#define PED_OFF_NETWORK_TARGET_RATIO	0.15f	// the target share of the created pedestrians that stand off the network
 #define PED_OFF_NETWORK_JOIN_DISTANCE	8.0f	// a stray this near a node has reached the network
 #define PED_OFF_NETWORK_PROGRESS	0.25f	// metres of approach that count for the stray
 #define PED_OFF_NETWORK_STALL_TIME	20000	// ms of walking without progress before the stray cull
@@ -100,6 +97,7 @@ CEntity *gSunbatheObstacles[2];
 CEntity *gCoupleObstacles[3];
 
 uint32 CPopulation::ms_nOffNetworkSpawns;
+uint32 CPopulation::ms_nNetworkSpawns;
 uint32 CPopulation::ms_nOffNetworkStuck;
 uint32 CPopulation::ms_nOffNetworkDrowned;
 
@@ -218,15 +216,17 @@ GetWaterLine(const CVector &pos, float *pLevel)
 	return CWaterLevel::GetWaterLevelNoWaves(pos.x, pos.y, pos.z, pLevel);
 }
 
-/* The ground at (x, y) stands above the water line: a free position and the
- * member of a group both need this, or the pedestrian ends up in the water. */
+/* The ground at (x, y) stands above the water line: a member of a group needs
+ * this, or the pedestrian ends up in the water. The rule itself is the cell
+ * predicate's (PedSites.h), so the placement, the groups and the stray cull
+ * cannot drift apart on the line or the margin. */
 static bool
 GroundIsClearOfWater(float x, float y, float groundZ)
 {
 	float waterLevel;
 	if (!GetWaterLine(CVector(x, y, groundZ), &waterLevel))
 		return true;
-	return groundZ > waterLevel + PED_OFF_NETWORK_WATER_MARGIN;
+	return PedSiteGroundIsClearOfWater(true, waterLevel, groundZ);
 }
 
 // The pedestrian stands under the water line: the stray reached the water.
@@ -236,7 +236,7 @@ PositionIsInWater(const CVector &pos)
 	float waterLevel;
 	if (!GetWaterLine(pos, &waterLevel))
 		return false;
-	return pos.z < waterLevel - PED_OFF_NETWORK_WATER_MARGIN;
+	return pos.z < waterLevel - PED_SITE_WATER_MARGIN;
 }
 
 // Stop watching a stray: free the entry and its reference.
@@ -281,14 +281,22 @@ TrackOffNetworkPed(CPed *ped)
 }
 
 // A pedestrian the placement created on a free position: count it and watch it
-// until it reaches the network (VICE-122).
+// until it reaches the network (VICE-122). The population's own pedestrians
+// count both ways, so the share the target ratio is held against is the
+// realised one (VICE-154); a gang or a couple counts every member it creates
+// (before the group's own rules can drop one), which is why the share can
+// overshoot the target by one group. The mall groups and the scripted
+// pedestrians never pass here.
 static void
 AddOffNetworkPed(CPed *ped, bool offNetwork)
 {
-	if (!offNetwork || ped == nil)
+	if (ped == nil)
 		return;
-	CPopulation::ms_nOffNetworkSpawns++;
-	TrackOffNetworkPed(ped);
+	if (offNetwork) {
+		CPopulation::ms_nOffNetworkSpawns++;
+		TrackOffNetworkPed(ped);
+	} else
+		CPopulation::ms_nNetworkSpawns++;
 }
 
 // Remove a stray out of sight. A pedestrian in view stays: the cull never takes
@@ -427,8 +435,13 @@ CPopulation::Initialise()
 	memset(aOffNetworkStrays, 0, sizeof(aOffNetworkStrays));
 	nOffNetworkStrayCursor = 0;
 	ms_nOffNetworkSpawns = 0;
+	ms_nNetworkSpawns = 0;
 	ms_nOffNetworkStuck = 0;
 	ms_nOffNetworkDrowned = 0;
+
+	// The standable cells belong to the game too (VICE-154): the next map load
+	// validates its own ground, level by level.
+	CPedSites::Reset();
 
 	m_AllRandomPedsThisType = -1;
 	PedDensityMultiplier = 1.0f;
@@ -703,6 +716,14 @@ CPopulation::Update(bool addPeds)
 	ManagePopulation();
 	RemovePedsIfThePoolGetsFull();
 	MoveCarsAndPedsOutOfAbandonedZones();
+	/* The standable cells' frame slice (VICE-154): the cells the spawn calls
+	 * have asked for, nearest first, on this thread. Interiors place no
+	 * off-network pedestrian (the mall keeps its own path), and a cutscene
+	 * builds nothing: the spawn calls themselves wait it out, the camera
+	 * there is not the game view, and the biggest cutscenes replace the
+	 * world a probe would read. */
+	if (!CGame::IsInInterior() && !CCutsceneMgr::IsRunning())
+		CPedSites::Pump();
 	// The strays wait out a cutscene: the camera there is not the game view.
 	if (!CCutsceneMgr::IsRunning())
 		ProcessOffNetworkStrays();
@@ -966,80 +987,20 @@ CPopulation::AddPed(ePedType pedType, uint32 miOrCopType, CVector const &coors, 
 	}
 }
 
-/* A free position for a pedestrian spawn (VICE-122): a random point in the
- * creation ring, then the checks the node path does not need, because a node is
- * ground a pedestrian can stand on. The wander state walks the pedestrian to
- * the closest node from here, so the position must sit on the pedestrian level,
- * on land and clear of other pedestrians, and the network must be within the
- * walk bound and on the same level: a node far below the position means the
- * position is a roof.
- *
- * What the checks cannot tell: a surface the casts find is a surface, so a low
- * platform whose top is within the level margin of the ring and within the node
- * level of a node (a roof garden, a hillside ledge) still passes. The stray
- * cull takes the pedestrian that cannot leave such a spot, and the group's own
- * level checks keep its members within a step of the seed. */
+/* The off-network share of the created pedestrians is below the target ratio:
+ * the next placement asks the cell cache for a standable point (VICE-154).
+ * The share is the realised one - the pedestrians the cells placed against the
+ * whole population the trickle created - so it falls short of the target only
+ * while the cells cannot answer (the validation bound), and a group's members
+ * can carry it a little past the line (a share of pedestrians, not of spawn
+ * calls). No random number is drawn for the decision: a target of zero asks
+ * for nothing, and the node path keeps the stream it had. */
 static bool
-FindFreePedCreationCoors(const CVector &centre, float minDist, float maxDist, float minDistOffScreen, float maxDistOffScreen, CVector *pPosition)
+OffNetworkSpawnIsWanted(void)
 {
-	bool found;
-	for (int attempt = 0; attempt < PED_OFF_NETWORK_ATTEMPTS; attempt++) {
-		// The bands of GeneratePedCreationCoors: a position in view takes the
-		// creation ring, one out of view takes the off-screen band.
-		float angle = CGeneral::GetRandomNumberInRange(0.0f, TWOPI);
-		float dist = CGeneral::GetRandomNumberInRange(minDistOffScreen, maxDist);
-		CVector pos(centre.x + dist * Sin(angle), centre.y + dist * Cos(angle), centre.z);
-		bool visible = TheCamera.IsSphereVisible(pos, 2.0f);
-		if (visible && !(minDist < dist && dist < maxDist))
-			continue;
-		if (!visible && !(minDistOffScreen < dist && dist < maxDistOffScreen))
-			continue;
-
-		// The ground. The cast starts on the level itself, so anything above
-		// the level is missed and the position lands at or below it.
-		float groundZ = CWorld::FindGroundZFor3DCoord(pos.x, pos.y, pos.z, &found);
-		if (!found)
-			continue;
-		if (Abs(groundZ - pos.z) > PED_OFF_NETWORK_LEVEL_MARGIN)
-			continue;
-		pos.z = groundZ;
-
-		// The surface: the top surface over the position may stand no more than
-		// a step above the ground. A roof, a canopy or a bridge deck stands
-		// higher, and a pedestrian there cannot leave it.
-		float surfaceZ = CWorld::FindGroundZFor3DCoord(pos.x, pos.y, pos.z + PED_OFF_NETWORK_ROOF_CAST, &found);
-		if (!found || surfaceZ > pos.z + PED_OFF_NETWORK_STEP)
-			continue;
-
-		// The water: the ground must stand above the water line. The line is the
-		// level without the waves, so the shoreline does not move with the wave
-		// phase.
-		if (!GroundIsClearOfWater(pos.x, pos.y, pos.z))
-			continue;
-
-		// The clearance over the feet: a sphere against the static world. The
-		// pedestrian position check below reads vehicles and pedestrians only,
-		// so this is what catches a spot inside a wall, a fence or a low roof.
-		if (CWorld::TestSphereAgainstWorld(pos + CVector(0.0f, 0.0f, PED_OFF_NETWORK_PROBE_HEIGHT), PED_OFF_NETWORK_PROBE_RADIUS,
-			nil, true, false, false, false, false, false))
-			continue;
-
-		// The spot must be free for a pedestrian.
-		if (!CPedPlacement::IsPositionClearForPed(pos))
-			continue;
-
-		// The network: the walk to it is bounded, and it must be on the level of
-		// the ground, or the ground is a roof above the network.
-		int32 node = ThePaths.FindNodeClosestToCoors(pos, PATH_PED, PED_OFF_NETWORK_NODE_RANGE);
-		if (node < 0)
-			continue;
-		if (Abs(ThePaths.m_pathNodes[node].GetPosition().z - pos.z) > PED_OFF_NETWORK_NODE_LEVEL)
-			continue;
-
-		*pPosition = pos;
-		return true;
-	}
-	return false;
+	uint32 off = CPopulation::ms_nOffNetworkSpawns;
+	uint32 all = off + CPopulation::ms_nNetworkSpawns;
+	return all == 0 || (float)off < PED_OFF_NETWORK_TARGET_RATIO * (float)all;
 }
 
 void
@@ -1143,15 +1104,24 @@ CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScree
 			pedAmount = 1;
 
 		CVector generatedCoors;
-		/* Off the network (VICE-122): a bounded fraction of the spawns takes a
-		 * free position in the creation ring instead of a node pair. On-network
-		 * spawning is untouched: the fraction is small, a free position that
-		 * fails a check falls back to the node path below, and a fraction of
-		 * zero draws no random number at all, so the node path is bit-exact. */
+		/* Off the network (VICE-122; the standable cells of VICE-154): while
+		 * the realised share is below the target ratio, the placement asks
+		 * the cell cache for a validated standable point. A request the cache
+		 * cannot answer falls back to the node path below, so the share falls
+		 * short of the target only when the cells have nothing and never runs
+		 * far past it (a group's members can overshoot by the group's size).
+		 * Interiors (the mall) keep the node path. */
 		bool offNetwork = false;
-		if (!CGame::IsInInterior() && PED_OFF_NETWORK_FRACTION > 0.0f &&
-			CGeneral::GetRandomNumberInRange(0.0f, 1.0f) < PED_OFF_NETWORK_FRACTION)
-			offNetwork = FindFreePedCreationCoors(playerCentreOfWorld, minDist, maxDist, minDistOffScreen, maxDistOffScreen, &generatedCoors);
+		if (!CGame::IsInInterior() && PED_OFF_NETWORK_TARGET_RATIO > 0.0f && OffNetworkSpawnIsWanted()) {
+			SPedSitePoint centre;
+			SPedSitePoint position;
+			centre.x = playerCentreOfWorld.x;
+			centre.y = playerCentreOfWorld.y;
+			centre.z = playerCentreOfWorld.z;
+			offNetwork = CPedSites::FindOffNetworkCoors(centre, minDist, maxDist, minDistOffScreen, maxDistOffScreen, &position);
+			if (offNetwork)
+				generatedCoors = CVector(position.x, position.y, position.z);
+		}
 
 		if (!offNetwork) {
 			int node1, node2;
