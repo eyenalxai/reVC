@@ -170,7 +170,7 @@ CPlayerMoveSolver::GetStateName(eMoveStateId state)
 }
 
 const char *
-CPlayerMoveSolver::GetStanceName(eMoveStance stance)
+CPlayerMoveSolver::GetStanceName(eStance stance)
 {
 	if (stance < 0 || stance >= STANCE_NUM)
 		return "?";

@@ -41,7 +41,7 @@
 // and Tick refreshes them from the snapshot. They live with the module that
 // fills them, the way the drift readout lives with the drift layer.
 int32 gMovementDebugState;	// eMoveStateId
-int32 gMovementDebugStance;	// eMoveStance
+int32 gMovementDebugStance;	// eStance
 int32 gMovementDebugTier;	// eMoveTier
 float gMovementDebugSpeed;	// units per second
 float gMovementDebugTarget;	// units per second

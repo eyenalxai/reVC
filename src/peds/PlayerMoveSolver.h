@@ -142,7 +142,7 @@ public:
 	// The tokens of the enums, for the debug readout and the telemetry rows
 	// (MovementTelemetry.cpp). The harness prints them too.
 	static const char *GetStateName(eMoveStateId state);
-	static const char *GetStanceName(eMoveStance stance);
+	static const char *GetStanceName(eStance stance);
 	static const char *GetTierName(eMoveTier tier);
 
 private:

@@ -152,15 +152,18 @@ MakeIntent(void)
 	intent.surfaceSpeed = RngChance(25)
 		? SMoveVec2{ RngFloat(-0.5f, 0.5f), RngFloat(-0.5f, 0.5f) }
 		: SMoveVec2{ 0.0f, 0.0f };
-	intent.slopeNormal = SMoveVec2{ 0.0f, 0.0f };
+	intent.slopeNormal = SMoveVec3{ 0.0f, 0.0f, 0.0f };
 	intent.moveHeading = RngFloat(-3.2f, 3.2f);
 	intent.targetSpeed = RngChance(80) ? RngFloat(0.0f, 1.0f) : 0.0f;
+	intent.facing = RngFloat(-3.2f, 3.2f);
+	// the header's numbers: SURFACE_TARMAC and SURFACE_PED (SurfaceTable.h)
+	intent.surface = RngChance(50) ? 1 : 17;
 	intent.onGround = RngChance(65);
 	intent.steepCliff = RngChance(intent.onGround ? 12 : 4);
 	if (intent.steepCliff)
-		intent.slopeNormal = SMoveVec2{ RngFloat(-1.0f, 1.0f), RngFloat(-1.0f, 1.0f) };
+		intent.slopeNormal = SMoveVec3{ RngFloat(-1.0f, 1.0f), RngFloat(-1.0f, 1.0f), 0.0f };
 	intent.hasInput = RngChance(80);
-	intent.sprint = RngChance(40);
+	intent.tier = !RngChance(40) ? TIER_WALK : RngChance(50) ? TIER_RUN : TIER_SPRINT;
 	intent.faceCamera = RngChance(50);
 	intent.jumpRequested = RngChance(10);
 	intent.diveRequested = RngChance(10);
@@ -177,13 +180,15 @@ WalkIntent(float heading, float targetSpeed)
 	intent.dt = 1.0f / 50.0f;
 	intent.vel = SMoveVec2{ 0.0f, 0.0f };
 	intent.surfaceSpeed = SMoveVec2{ 0.0f, 0.0f };
-	intent.slopeNormal = SMoveVec2{ 0.0f, 0.0f };
+	intent.slopeNormal = SMoveVec3{ 0.0f, 0.0f, 0.0f };
 	intent.moveHeading = heading;
 	intent.targetSpeed = targetSpeed;
+	intent.facing = heading;
+	intent.surface = 1;	// SURFACE_TARMAC (SurfaceTable.h)
 	intent.onGround = true;
 	intent.steepCliff = false;
 	intent.hasInput = true;
-	intent.sprint = false;
+	intent.tier = TIER_WALK;
 	intent.faceCamera = false;
 	intent.jumpRequested = false;
 	intent.diveRequested = false;
@@ -387,7 +392,7 @@ PrintIntent(const SMoveIntent &intent)
 		intent.moveHeading, intent.targetSpeed);
 	printf("      ground %d steep %d input %d sprint %d faceCamera %d jump %d dive %d\n",
 		intent.onGround, intent.steepCliff, intent.hasInput,
-		intent.sprint, intent.faceCamera, intent.jumpRequested, intent.diveRequested);
+		intent.tier, intent.faceCamera, intent.jumpRequested, intent.diveRequested);
 }
 
 static void
@@ -557,7 +562,7 @@ CheckParityTargeted(void)
 		SMoveVec2 pushed = { -0.31f, 0.87f };
 
 		intent.steepCliff = true;
-		intent.slopeNormal = SMoveVec2{ 0.6f, -0.8f };
+		intent.slopeNormal = SMoveVec3{ 0.6f, -0.8f, 0.0f };
 		intent.vel = pushed;
 		if (!StepParity(&solver, &ref, intent, &got))
 			mismatches++;
