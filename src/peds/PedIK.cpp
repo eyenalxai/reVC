@@ -63,11 +63,12 @@ CPedIK::RotateTorso(AnimBlendFrameData *node, LimbOrientation *limb, bool change
 LimbMovementInfo &
 CPedIK::TorsoInfo(void)
 {
-	return m_ped->IsPlayer() && m_ped->InVehicle() ? ms_seatTorsoInfo : ms_torsoInfo;
+	return SeatedInCar() ? ms_seatTorsoInfo : ms_torsoInfo;
 }
 
+// The player at the wheel of a car. A bike rider keeps the stock torso limits.
 bool
-CPedIK::LeansOutOfCar(void)
+CPedIK::SeatedInCar(void)
 {
 	return m_ped->IsPlayer() && m_ped->InVehicle() && m_ped->m_pMyVehicle->IsCar();
 }
@@ -225,7 +226,7 @@ CPedIK::PointGunInDirection(float targetYaw, float targetPitch)
 	bool armPointedToGun = false;
 	targetYaw = CGeneral::LimitRadianAngle(targetYaw - m_ped->GetForward().Heading());
 	// The lean goes toward the side the aim is on, and stays level when the aim is behind
-	float leanTarget = LeansOutOfCar() ? Sin(targetYaw) * ms_leanInfo.maxYaw : 0.0f;
+	float leanTarget = SeatedInCar() ? Sin(targetYaw) * ms_leanInfo.maxYaw : 0.0f;
 	MoveLimb(m_leanOrient, leanTarget, 0.0f, ms_leanInfo);
 	m_flags &= ~GUN_POINTED_SUCCESSFULLY;
 	m_flags |= LOOKAROUND_HEAD_ONLY;
