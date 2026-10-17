@@ -144,7 +144,7 @@ CAnimBlendAssociation::MakeUpperBodyOnly(bool seated)
 {
 	int i;
 	for(i = 0; i < numNodes; i++)
-		if(nodes[i].sequence && (IsLowerBodyBone(nodes[i].sequence->boneTag) || seated && nodes[i].sequence->boneTag == BONE_spine))
+		if(nodes[i].sequence && (IsLowerBodyBone(nodes[i].sequence->boneTag) || (seated && nodes[i].sequence->boneTag == BONE_spine)))
 			nodes[i].sequence = nil;
 }
 

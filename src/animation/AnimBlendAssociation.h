@@ -66,7 +66,7 @@ public:
 	// (VICE-141). A seated rider also keeps the seat's spine, so the spine
 	// sequence is dropped too. A no-op when the association is upper body only
 	// already.
-	void MakeUpperBodyOnly(bool seated = false);
+	void MakeUpperBodyOnly(bool seated);
 
 	float GetBlendAmount(float weight) { return IsPartial() ? blendAmount : blendAmount*weight; }
 	CAnimBlendNode *GetNode(int i) { return &nodes[i]; }
