@@ -45,7 +45,13 @@ enum Config {
 	NUMCUTSCENEOBJECTS = 50,	// not a pool in VC
 
 	NUMANIMBLOCKS = 35,
-	NUMANIMATIONS = 450,
+	// The animation slots. The shipped content loads 410 of them (ped.ifp holds
+	// 234 and the 28 blocks of gta3.img hold 176), the cutscene of the moment
+	// adds at most 20, and the crouch block of VICE-186 adds 17 with the prone
+	// block of VICE-187 to come, so 450 leaves the movement content no room. The
+	// blocks are cached per model and only the cutscene pops one (RemoveLastAnimFile),
+	// so the peak is the sum and the cap has to hold it.
+	NUMANIMATIONS = 512,
 
 	NUMTEMPOBJECTS = 40,
 

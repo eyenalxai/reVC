@@ -293,6 +293,32 @@ AnimAssocDesc aStdAnimDescsSide[] = {
 	{ ANIM_STD_IDLE, ASSOC_REPEAT },
 	{ ANIM_STD_STARTWALK, ASSOC_HAS_TRANSLATION | ASSOC_HAS_X_TRANSLATION },
 };
+// The crawl sets of the prone block (VICE-187): the same five slots as the std
+// movement sets, with the crawl's own ids. The left and right sets carry the
+// lateral translation flag so the side crawl drives the ped sideways the way
+// the strafe groups do, and the aim, dive and landing poses are partials over
+// the crawl that is playing.
+AnimAssocDesc aProneAnimDescs[] = {
+	{ ANIM_PRONE_WALK, ASSOC_REPEAT | ASSOC_MOVEMENT | ASSOC_HAS_TRANSLATION | ASSOC_WALK },
+	{ ANIM_PRONE_RUN, ASSOC_REPEAT | ASSOC_MOVEMENT | ASSOC_HAS_TRANSLATION | ASSOC_WALK },
+	{ ANIM_PRONE_RUNFAST, ASSOC_REPEAT | ASSOC_MOVEMENT | ASSOC_HAS_TRANSLATION | ASSOC_WALK },
+	{ ANIM_PRONE_IDLE, ASSOC_REPEAT },
+	{ ANIM_PRONE_STARTWALK, ASSOC_HAS_TRANSLATION },
+};
+AnimAssocDesc aProneAnimDescsSide[] = {
+	{ ANIM_PRONE_WALK, ASSOC_REPEAT | ASSOC_MOVEMENT | ASSOC_HAS_TRANSLATION | ASSOC_HAS_X_TRANSLATION | ASSOC_WALK },
+	{ ANIM_PRONE_RUN, ASSOC_REPEAT | ASSOC_MOVEMENT | ASSOC_HAS_TRANSLATION | ASSOC_HAS_X_TRANSLATION | ASSOC_WALK },
+	{ ANIM_PRONE_RUNFAST, ASSOC_REPEAT | ASSOC_MOVEMENT | ASSOC_HAS_TRANSLATION | ASSOC_HAS_X_TRANSLATION | ASSOC_WALK },
+	{ ANIM_PRONE_IDLE, ASSOC_REPEAT },
+	{ ANIM_PRONE_STARTWALK, ASSOC_HAS_TRANSLATION | ASSOC_HAS_X_TRANSLATION },
+};
+AnimAssocDesc aProneAimAnimDescs[] = {
+	{ ANIM_PRONE_AIM_FRONT, ASSOC_REPEAT | ASSOC_PARTIAL },
+	{ ANIM_PRONE_AIM_SIDE, ASSOC_REPEAT | ASSOC_PARTIAL },
+	{ ANIM_PRONE_AIM_BACK, ASSOC_REPEAT | ASSOC_PARTIAL },
+	{ ANIM_PRONE_DIVE, ASSOC_FADEOUTWHENDONE | ASSOC_PARTIAL },
+	{ ANIM_PRONE_LAND, ASSOC_FADEOUTWHENDONE | ASSOC_PARTIAL },
+};
 #endif
 char const* aStdAnimations[] = {
 	"walk_civi",
@@ -908,6 +934,83 @@ char const* aChainsawStrafeRightAnimations[] = {
 	"idle_csaw",
 	"walkst_csaw_right",
 };
+
+// The crouch movement sets (VICE-186): the shipped standing cycles with the
+// crouch pose, the crouch body height and the crouch stride (the transform and
+// its tables are tools/ifp/crouch.cpp, the block is gamefiles/anim/crouch.ifp).
+// Every direction carries its own three cycles; the idle is one cycle the four
+// sets share, because the stance does not distinguish the direction it stands
+// still in. A name here must be in the block: the association lookup binds by
+// name and a missing one has no hierarchy to run.
+char const* aCrouchAnimations[] = {
+	"walk_crouch",
+	"run_crouch",
+	"sprint_crouch",
+	"IDLE_crouch",
+	"walk_start_crouch",
+};
+char const* aCrouchBackAnimations[] = {
+	"walk_back_crouch",
+	"run_back_crouch",
+	"sprint_back_crouch",
+	"IDLE_crouch",
+	"walk_start_back_crouch",
+};
+char const* aCrouchLeftAnimations[] = {
+	"walk_left_crouch",
+	"run_left_crouch",
+	"sprint_left_crouch",
+	"IDLE_crouch",
+	"walk_start_left_crouch",
+};
+char const* aCrouchRightAnimations[] = {
+	"walk_right_crouch",
+	"run_right_crouch",
+	"sprint_right_crouch",
+	"IDLE_crouch",
+	"walk_start_right_crouch",
+};
+
+// The prone movement sets (VICE-187): the entries are here before the block is,
+// so the prone ticket only drops anim/prone.ifp in and the groups load. The
+// block is missing until then, so CreateAnimAssocGroups skips every one of
+// them; the crawl sets name the crawl and the idle of their direction, and the
+// dive and landing poses are the aim group's.
+char const* aProneAnimations[] = {
+	"crawl_fwd",
+	"crawl_fwd",
+	"crawl_fwd",
+	"prone_idle",
+	"crawl_start",
+};
+char const* aProneBackAnimations[] = {
+	"crawl_back",
+	"crawl_back",
+	"crawl_back",
+	"prone_idle",
+	"crawl_start",
+};
+char const* aProneLeftAnimations[] = {
+	"crawl_left",
+	"crawl_left",
+	"crawl_left",
+	"prone_idle",
+	"crawl_start",
+};
+char const* aProneRightAnimations[] = {
+	"crawl_right",
+	"crawl_right",
+	"crawl_right",
+	"prone_idle",
+	"crawl_start",
+};
+char const* aProneAimAnimations[] = {
+	"prone_aim_front",
+	"prone_aim_side",
+	"prone_aim_back",
+	"prone_dive",
+	"prone_land",
+};
 #endif
 
 #define awc(a) ARRAY_SIZE(a), a
@@ -974,6 +1077,20 @@ const AnimAssocDefinition CAnimManager::ms_aAnimAssocDefinitions[NUM_ANIM_ASSOC_
 	{ "csawback", "ped", MI_COP, awc(aChainsawStrafeBackAnimations), aStdAnimDescs },
 	{ "csawleft", "ped", MI_COP, awc(aChainsawStrafeLeftAnimations), aStdAnimDescsSide },
 	{ "csawright", "ped", MI_COP, awc(aChainsawStrafeRightAnimations), aStdAnimDescsSide },
+	// The crouch and prone movement sets (VICE-186, VICE-187): the forward and
+	// back sets move the ped along y, the side sets along x, so the side sets
+	// carry aStdAnimDescsSide's lateral translation flag, exactly as the strafe
+	// groups above do. The prone block does not exist until VICE-187 ships it,
+	// so those five groups stay unloaded until then.
+	{ "crouch", "crouch", MI_COP, awc(aCrouchAnimations), aStdAnimDescs },
+	{ "crouchback", "crouch", MI_COP, awc(aCrouchBackAnimations), aStdAnimDescs },
+	{ "crouchleft", "crouch", MI_COP, awc(aCrouchLeftAnimations), aStdAnimDescsSide },
+	{ "crouchright", "crouch", MI_COP, awc(aCrouchRightAnimations), aStdAnimDescsSide },
+	{ "prone", "prone", MI_COP, awc(aProneAnimations), aProneAnimDescs },
+	{ "proneaim", "prone", MI_COP, awc(aProneAimAnimations), aProneAimAnimDescs },
+	{ "proneback", "prone", MI_COP, awc(aProneBackAnimations), aProneAnimDescs },
+	{ "proneleft", "prone", MI_COP, awc(aProneLeftAnimations), aProneAnimDescsSide },
+	{ "proneright", "prone", MI_COP, awc(aProneRightAnimations), aProneAnimDescsSide },
 #endif
 };
 #undef awc
@@ -1241,10 +1358,42 @@ CAnimManager::BlendAnimation(RpClump *clump, AssocGroupId groupId, AnimationId a
 	return found;
 }
 
+// The blocks the game loads on top of the shipped PED.IFP. The engine opens
+// ANIM\PED.IFP by name and never scans the anim folder, so a loose block is
+// listed here (its file stem must equal the name in its INFO body, and the
+// install copies gamefiles/ with the binary). A file that is not there is
+// skipped: the prone block ships with VICE-187, and its groups stay unloaded
+// until the file exists. NUMANIMBLOCKS holds the whole list: the 28 blocks of
+// gta3.img, the shipped ped block and the two movement blocks are 31 of 35.
+static const char *aExtraAnimFiles[] = {
+	"ANIM\\CROUCH.IFP",
+	"ANIM\\PRONE.IFP",
+};
+
+// LoadAnimFile asserts on a file that is not there, which is right for the
+// shipped PED.IFP and wrong for a block a later ticket ships: the file is only
+// loaded when it is present.
+static bool
+LoadAnimFileIfPresent(const char *filename)
+{
+	RwStream *stream = RwStreamOpen(rwSTREAMFILENAME, rwSTREAMREAD, filename);
+	if(stream == nil)
+		return false;
+	CAnimManager::LoadAnimFile(stream, true);
+	RwStreamClose(stream, nil);
+	return true;
+}
+
 void
 CAnimManager::LoadAnimFiles(void)
 {
 	LoadAnimFile("ANIM\\PED.IFP");
+	// The movement blocks the install ships loose. They must load before the
+	// assoc groups are built, because CreateAnimAssocGroups only fills a group
+	// whose block is already loaded.
+	for(int i = 0; i < ARRAY_SIZE(aExtraAnimFiles); i++)
+		if(!LoadAnimFileIfPresent(aExtraAnimFiles[i]))
+			debug("no %s: the block stays unloaded\n", aExtraAnimFiles[i]);
 	ms_aAnimAssocGroups = new CAnimBlendAssocGroup[NUM_ANIM_ASSOC_GROUPS];
 	CreateAnimAssocGroups();
 }
