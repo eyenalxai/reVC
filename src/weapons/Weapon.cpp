@@ -117,6 +117,7 @@ GetShotStart(CVehicle *shooter, CVector const &muzzle, CVector const &target)
 	Invert(shooter->GetMatrix(), invMat);
 
 	CVector local = invMat * muzzle;
+	ASSERT(shooter->GetColModel()!=nil);
 	CBox &box = shooter->GetColModel()->boundingBox;
 	if (local.x < box.min.x || local.x > box.max.x ||
 		local.y < box.min.y || local.y > box.max.y ||
@@ -135,12 +136,31 @@ GetShotStart(CVehicle *shooter, CVector const &muzzle, CVector const &target)
 	return muzzle + (tExit + AIM_HULL_MARGIN / ray.Magnitude()) * ray;
 }
 
-// True when the segment p0-p1 crosses a glass surface of the car's collision
-// model.
+// The windscreen is the glass whose face looks forward and whose centre sits in
+// the front half of the collision box, in the car's local frame. A side window
+// faces sideways and a rear window faces back, so both fail the test. The
+// collision data has no other mark, and the model has no side-window panel.
 static bool
-SegmentCrossesCarGlass(CVehicle *veh, CVector const &p0, CVector const &p1)
+IsWindscreenTriangle(CColModel *colModel, int32 i)
+{
+	CVector normal;
+	colModel->trianglePlanes[i].GetNormal(normal);
+	if (Abs(normal.y) <= Abs(normal.x))
+		return false;
+
+	CColTriangle &tri = colModel->triangles[i];
+	CompressedVector *v = colModel->vertices;
+	float centreY = (v[tri.a].Get().y + v[tri.b].Get().y + v[tri.c].Get().y) / 3.0f;
+	return centreY > (colModel->boundingBox.min.y + colModel->boundingBox.max.y) * 0.5f;
+}
+
+// True when the segment p0-p1 crosses the windscreen of the car's collision
+// model. Side glass does not count.
+static bool
+SegmentCrossesWindscreen(CVehicle *veh, CVector const &p0, CVector const &p1)
 {
 	CColModel *colModel = veh->GetColModel();
+	ASSERT(colModel!=nil);
 	if (colModel->numTriangles <= 0)
 		return false;
 
@@ -149,7 +169,7 @@ SegmentCrossesCarGlass(CVehicle *veh, CVector const &p0, CVector const &p1)
 	CColLine line(invVehMat * p0, invVehMat * p1);
 	CCollision::CalculateTrianglePlanes(colModel);
 	for (int i = 0; i < colModel->numTriangles; i++) {
-		if (colModel->triangles[i].surface == SURFACE_GLASS &&
+		if (colModel->triangles[i].surface == SURFACE_GLASS && IsWindscreenTriangle(colModel, i) &&
 			CCollision::TestLineTriangle(line, colModel->vertices, colModel->triangles[i], colModel->trianglePlanes[i]))
 			return true;
 	}
@@ -175,16 +195,16 @@ BreakWindscreen(CVehicle *veh)
 	}
 }
 
-// A shot from the cabin of a car breaks the glass it crosses on the way out
-// of the car body. The damage model has one glass panel, the windscreen, so
-// any glass the shot crosses is that panel.
+// A shot from the cabin of a car breaks the windscreen when it crosses it on
+// the way out of the car body. Side glass has no panel, so a shot through a
+// side window breaks nothing.
 static void
 BreakOwnCarGlass(CVehicle *shooter, CVector const &muzzle, CVector const &shotStart)
 {
 	if (!shooter->IsCar() || muzzle == shotStart)
 		return;
 
-	if (SegmentCrossesCarGlass(shooter, muzzle, shotStart))
+	if (SegmentCrossesWindscreen(shooter, muzzle, shotStart))
 		BreakWindscreen(shooter);
 }
 
@@ -3554,7 +3574,7 @@ CWeapon::CheckForShootingVehicleOccupant(CEntity **victim, CColPoint *point, eWe
 	if (veh->IsCar()) {
 		CVector distVec = target - source;
 		if (DotProduct(distVec, veh->GetForward()) < 0.0f && DotProduct(distVec, veh->GetUp()) <= 0.0f &&
-			SegmentCrossesCarGlass(veh, source, target))
+			SegmentCrossesWindscreen(veh, source, target))
 			BreakWindscreen(veh);
 	}
 

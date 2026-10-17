@@ -92,7 +92,9 @@ CPedIK::GetTorsoBendAxis(RwV3d &axis)
 }
 
 // The lean turns the spine about the axis across the bend, so the upper body
-// leans sideways while the torso pitch still bends it forward
+// leans sideways while the torso pitch still bends it forward. The axis runs
+// along the body's forward direction. A positive lean yaw (aim to the left)
+// is a negative roll about it, which tilts the upper body to the left.
 void
 CPedIK::RotateLean(RtQuat *q, const RwV3d &bendAxis)
 {
@@ -264,9 +266,9 @@ CPedIK::PointGunInDirection(float targetYaw, float targetPitch)
 
 	// this was RotateTorso
 	RtQuat *q = &m_ped->m_pFrames[PED_MID]->hanimFrame->q;
-	RotateLean(q, axis);
 	RtQuatRotate(q, &axis, RADTODEG(m_torsoOrient.pitch), rwCOMBINEPOSTCONCAT);
 	RtQuatRotate(q, &XaxisIK, RADTODEG(m_torsoOrient.yaw), rwCOMBINEPOSTCONCAT);
+	RotateLean(q, axis);
 	m_ped->bDontAcceptIKLookAts = true;
 
 	return result;
@@ -378,10 +380,14 @@ CPedIK::RestoreLookAt(void)
 	RtQuatRotate(q, &ZaxisIK, RADTODEG(m_headOrient.pitch), rwCOMBINEPRECONCAT);
 	m_ped->bDontAcceptIKLookAts = true;
 
-	if (!(m_flags & LOOKAROUND_HEAD_ONLY))
+	if (!(m_flags & LOOKAROUND_HEAD_ONLY)) {
 		MoveLimb(m_torsoOrient, 0.0f, 0.0f, TorsoInfo());
-	if (!(m_flags & LOOKAROUND_HEAD_ONLY))
+		MoveLimb(m_leanOrient, 0.0f, 0.0f, ms_leanInfo);
 		RotateTorso(m_ped->m_pFrames[PED_MID], &m_torsoOrient, false);
+		RwV3d axis;
+		GetTorsoBendAxis(axis);
+		RotateLean(&m_ped->m_pFrames[PED_MID]->hanimFrame->q, axis);
+	}
 	return result;
 }
 
