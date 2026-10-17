@@ -4,10 +4,14 @@
 #include "Camera.h"
 #include "PedIK.h"
 #include "Ped.h"
+#include "Vehicle.h"
 #include "General.h"
 #include "RwHelper.h"
 
 LimbMovementInfo CPedIK::ms_torsoInfo = { DEGTORAD(50.0f), DEGTORAD(-50.0f), DEGTORAD(8.0f), DEGTORAD(45.0f), DEGTORAD(-45.0f), DEGTORAD(5.0f) };
+// The seated player turns the torso further: the body heading is pinned to the seat
+LimbMovementInfo CPedIK::ms_seatTorsoInfo = { DEGTORAD(90.0f), DEGTORAD(-90.0f), DEGTORAD(8.0f), DEGTORAD(45.0f), DEGTORAD(-45.0f), DEGTORAD(5.0f) };
+LimbMovementInfo CPedIK::ms_leanInfo = { DEGTORAD(20.0f), DEGTORAD(-20.0f), DEGTORAD(3.0f), 0.0f, 0.0f, DEGTORAD(1.0f) };
 LimbMovementInfo CPedIK::ms_headInfo = { DEGTORAD(90.0f), DEGTORAD(-90.0f), DEGTORAD(15.0f), DEGTORAD(45.0f), DEGTORAD(-45.0f), DEGTORAD(8.0f) };
 LimbMovementInfo CPedIK::ms_headRestoreInfo = { DEGTORAD(90.0f), DEGTORAD(-90.0f), DEGTORAD(10.0f), DEGTORAD(45.0f), DEGTORAD(-45.0f), DEGTORAD(5.0f) };
 LimbMovementInfo CPedIK::ms_upperArmInfo = { DEGTORAD(5.0f), DEGTORAD(-120.0f), DEGTORAD(20.0f), DEGTORAD(70.0f), DEGTORAD(-70.0f), DEGTORAD(20.0f) };
@@ -29,6 +33,8 @@ CPedIK::CPedIK(CPed *ped) : m_ped(ped)
 	m_upperArmOrient.pitch = 0.0f;
 	m_lowerArmOrient.yaw = 0.0f;
 	m_lowerArmOrient.pitch = 0.0f;
+	m_leanOrient.yaw = 0.0f;
+	m_leanOrient.pitch = 0.0f;
 }
 
 inline RwMatrix*
@@ -52,6 +58,48 @@ CPedIK::RotateTorso(AnimBlendFrameData *node, LimbOrientation *limb, bool change
 	RtQuatRotate(q, &XaxisIK, RADTODEG(limb->yaw), rwCOMBINEREPLACE);
 	RtQuatRotate(q, &ZaxisIK, RADTODEG(limb->pitch), rwCOMBINEPRECONCAT);
 	m_ped->bDontAcceptIKLookAts = true;
+}
+
+LimbMovementInfo &
+CPedIK::TorsoInfo(void)
+{
+	return SeatedInCar() ? ms_seatTorsoInfo : ms_torsoInfo;
+}
+
+// The player at the wheel of a car. A bike rider keeps the stock torso limits.
+bool
+CPedIK::SeatedInCar(void)
+{
+	return m_ped->IsPlayer() && m_ped->InVehicle() && m_ped->m_pMyVehicle->IsCar();
+}
+
+// The axis the torso pitches about, in the spine's frame
+void
+CPedIK::GetTorsoBendAxis(RwV3d &axis)
+{
+	// Game uses index 2 directly, which happens to be identical to BONE_spine
+#ifdef FIX_BUGS
+	RwMatrix *m = GetBoneMatrix(m_ped, BONE_spine);
+#else
+	RpHAnimHierarchy* hier = GetAnimHierarchyFromSkinClump(m_ped->GetClump());
+	RwMatrix *mats = RpHAnimHierarchyGetMatrixArray(hier);
+	RwMatrix *m = &mats[2];
+#endif
+	float axisangle = -CGeneral::LimitRadianAngle(Atan2(-m->at.y, -m->at.x) - m_ped->m_fRotationCur);
+	axis.x = 0.0f;
+	axis.y = -Sin(axisangle);
+	axis.z = Cos(axisangle);
+}
+
+// The lean turns the spine about the axis across the bend, so the upper body
+// leans sideways while the torso pitch still bends it forward. The axis runs
+// along the body's forward direction. A positive lean yaw (aim to the left)
+// is a negative roll about it, which tilts the upper body to the left.
+void
+CPedIK::RotateLean(RtQuat *q, const RwV3d &bendAxis)
+{
+	RwV3d leanAxis = { 0.0f, bendAxis.z, -bendAxis.y };
+	RtQuatRotate(q, &leanAxis, -RADTODEG(m_leanOrient.yaw), rwCOMBINEPOSTCONCAT);
 }
 
 void
@@ -106,9 +154,13 @@ CPedIK::MoveLimb(LimbOrientation &limb, float targetYaw, float targetPitch, Limb
 bool
 CPedIK::RestoreGunPosn(void)
 {
-	LimbMoveStatus limbStatus = MoveLimb(m_torsoOrient, 0.0f, 0.0f, ms_torsoInfo);
+	LimbMoveStatus limbStatus = MoveLimb(m_torsoOrient, 0.0f, 0.0f, TorsoInfo());
+	LimbMoveStatus leanStatus = MoveLimb(m_leanOrient, 0.0f, 0.0f, ms_leanInfo);
 	RotateTorso(m_ped->m_pFrames[PED_MID], &m_torsoOrient, false);
-	return limbStatus == ANGLES_SET_EXACTLY;
+	RwV3d axis;
+	GetTorsoBendAxis(axis);
+	RotateLean(&m_ped->m_pFrames[PED_MID]->hanimFrame->q, axis);
+	return limbStatus == ANGLES_SET_EXACTLY && leanStatus == ANGLES_SET_EXACTLY;
 }
 
 bool
@@ -139,7 +191,7 @@ CPedIK::LookInDirection(float targetYaw, float targetPitch)
 		success = false;
 
 	if (headStatus != ANGLES_SET_EXACTLY && !(m_flags & LOOKAROUND_HEAD_ONLY))
-		if (MoveLimb(m_torsoOrient, CGeneral::LimitRadianAngle(targetYaw-m_ped->m_fRotationCur), targetPitch, ms_torsoInfo))
+		if (MoveLimb(m_torsoOrient, CGeneral::LimitRadianAngle(targetYaw-m_ped->m_fRotationCur), targetPitch, TorsoInfo()))
 			success = true;
 
 	// This was RotateHead
@@ -175,6 +227,9 @@ CPedIK::PointGunInDirection(float targetYaw, float targetPitch)
 	bool result = true;
 	bool armPointedToGun = false;
 	targetYaw = CGeneral::LimitRadianAngle(targetYaw - m_ped->GetForward().Heading());
+	// The lean goes toward the side the aim is on, and stays level when the aim is behind
+	float leanTarget = SeatedInCar() ? Sin(targetYaw) * ms_leanInfo.maxYaw : 0.0f;
+	MoveLimb(m_leanOrient, leanTarget, 0.0f, ms_leanInfo);
 	m_flags &= ~GUN_POINTED_SUCCESSFULLY;
 	m_flags |= LOOKAROUND_HEAD_ONLY;
 	if (m_flags & AIMS_WITH_ARM) {
@@ -183,7 +238,7 @@ CPedIK::PointGunInDirection(float targetYaw, float targetPitch)
 	}
 	if (armPointedToGun) {
 		if (m_flags & AIMS_WITH_ARM && m_torsoOrient.yaw * m_upperArmOrient.yaw < 0.0f)
-			MoveLimb(m_torsoOrient, 0.0f, m_torsoOrient.pitch, ms_torsoInfo);
+			MoveLimb(m_torsoOrient, 0.0f, m_torsoOrient.pitch, TorsoInfo());
 	} else {
 		// Unused code
 		RwMatrix *matrix;
@@ -199,30 +254,21 @@ CPedIK::PointGunInDirection(float targetYaw, float targetPitch)
 			else
 				targetPitch = Min(targetPitch + Abs(targetYaw), 0.0f);
 		}
-		LimbMoveStatus status = MoveLimb(m_torsoOrient, targetYaw, targetPitch, ms_torsoInfo);
+		LimbMoveStatus status = MoveLimb(m_torsoOrient, targetYaw, targetPitch, TorsoInfo());
 		if (status == ANGLES_SET_TO_MAX)
 			result = false;
 		else if (status == ANGLES_SET_EXACTLY)
 			m_flags |= GUN_POINTED_SUCCESSFULLY;
 	}
 
-	// Game uses index 2 directly, which happens to be identical to BONE_spine
-#ifdef FIX_BUGS
-	RwMatrix *m = GetBoneMatrix(m_ped, BONE_spine);
-#else
-	RpHAnimHierarchy* hier = GetAnimHierarchyFromSkinClump(m_ped->GetClump());
-	RwMatrix *mats = RpHAnimHierarchyGetMatrixArray(hier);
-	RwMatrix *m = &mats[2];
-#endif
-	RwV3d axis = { 0.0f, 0.0f, 0.0f };
-	float axisangle = -CGeneral::LimitRadianAngle(Atan2(-m->at.y, -m->at.x) - m_ped->m_fRotationCur);
-	axis.y = -Sin(axisangle);
-	axis.z = Cos(axisangle);
+	RwV3d axis;
+	GetTorsoBendAxis(axis);
 
 	// this was RotateTorso
 	RtQuat *q = &m_ped->m_pFrames[PED_MID]->hanimFrame->q;
 	RtQuatRotate(q, &axis, RADTODEG(m_torsoOrient.pitch), rwCOMBINEPOSTCONCAT);
 	RtQuatRotate(q, &XaxisIK, RADTODEG(m_torsoOrient.yaw), rwCOMBINEPOSTCONCAT);
+	RotateLean(q, axis);
 	m_ped->bDontAcceptIKLookAts = true;
 
 	return result;
@@ -334,10 +380,14 @@ CPedIK::RestoreLookAt(void)
 	RtQuatRotate(q, &ZaxisIK, RADTODEG(m_headOrient.pitch), rwCOMBINEPRECONCAT);
 	m_ped->bDontAcceptIKLookAts = true;
 
-	if (!(m_flags & LOOKAROUND_HEAD_ONLY))
-		MoveLimb(m_torsoOrient, 0.0f, 0.0f, ms_torsoInfo);
-	if (!(m_flags & LOOKAROUND_HEAD_ONLY))
+	if (!(m_flags & LOOKAROUND_HEAD_ONLY)) {
+		MoveLimb(m_torsoOrient, 0.0f, 0.0f, TorsoInfo());
+		MoveLimb(m_leanOrient, 0.0f, 0.0f, ms_leanInfo);
 		RotateTorso(m_ped->m_pFrames[PED_MID], &m_torsoOrient, false);
+		RwV3d axis;
+		GetTorsoBendAxis(axis);
+		RotateLean(&m_ped->m_pFrames[PED_MID]->hanimFrame->q, axis);
+	}
 	return result;
 }
 

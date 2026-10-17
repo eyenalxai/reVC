@@ -7925,6 +7925,12 @@ CPed::IsPointerValid(void)
 	return false;
 }
 
+bool
+CPed::RidesBike(void)
+{
+	return InVehicle() && m_pMyVehicle->IsBike();
+}
+
 void
 CPed::SetPedPositionInCar(void)
 {

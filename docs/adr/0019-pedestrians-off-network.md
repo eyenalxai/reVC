@@ -1,8 +1,8 @@
 # ADR 0019: Pedestrians off the node network, with a stray cull
 
 Date: 2026-10-16
-Status: Accepted
-Relates to: VICE-122 (the implementation), VICE-119 (the program), ADR 0013 (the ped ring comes from the table)
+Status: Accepted (the placement superseded by ADR 0028: the off-network positions come from validated standable cells now, and the node reach bound is gone; the stray cull and the counters stand)
+Relates to: VICE-122 (the implementation), VICE-119 (the program), ADR 0013 (the ped ring comes from the table), ADR 0028 (the cell placement)
 
 ## Context
 

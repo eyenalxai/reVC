@@ -2342,7 +2342,7 @@ int8 CRunningScript::ProcessCommands100To199(int32 command)
 			if (m_bIsMissionScript)
 				boat->bIsStaticWaitingForCollision = true;
 			CWorld::Add(boat);
-			CCarCtrl::NearBubbleCountOtherCreation(boat->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
+			CSpawnService::CountOtherCreation(boat->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 			handle = CPools::GetVehiclePool()->GetIndex(boat);
 		}
 		else {
@@ -2374,7 +2374,7 @@ int8 CRunningScript::ProcessCommands100To199(int32 command)
 			if (m_bIsMissionScript)
 				car->bIsStaticWaitingForCollision = true;
 			CWorld::Add(car);
-			CCarCtrl::NearBubbleCountOtherCreation(car->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
+			CSpawnService::CountOtherCreation(car->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 			handle = CPools::GetVehiclePool()->GetIndex(car);
 		}
 		ScriptParams[0] = handle;

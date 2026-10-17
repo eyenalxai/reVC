@@ -28,6 +28,7 @@ public:
 	int16 NetworkTalk;
 	int16 Reload;
 	int16 Prone;
+	int16 VehicleCycleWeaponLeft, VehicleCycleWeaponRight;
 	float GetLeftStickX(void) { return LeftStickX/32767.0f; };
 	float GetLeftStickY(void) { return LeftStickY/32767.0f; };
 	float GetRightStickX(void) { return RightStickX/32767.0f; };
@@ -43,10 +44,11 @@ public:
 			Start || Select ||
 			LeftShoulder1 || LeftShoulder2 ||
 			RightShoulder1 || RightShoulder2 ||
-			LeftShock || RightShock || Reload || Prone;
+			LeftShock || RightShock || Reload || Prone ||
+			VehicleCycleWeaponLeft || VehicleCycleWeaponRight;
 	}
 };
-VALIDATE_SIZE(CControllerState, 0x2E);
+VALIDATE_SIZE(CControllerState, 0x32);
 
 class CMouseControllerState
 {
@@ -260,8 +262,8 @@ public:
 	int16 GetAccelerate(void);
 	bool CameraViewToggleJustDown(void);
 	bool ChangeStationJustDown(void);
-	bool CycleWeaponLeftJustDown(void);
-	bool CycleWeaponRightJustDown(void);
+	bool CycleWeaponLeftJustDown(bool inCar);
+	bool CycleWeaponRightJustDown(bool inCar);
 	bool GetTarget(void);
 	bool TargetJustDown(void);
 	bool DuckJustDown(void);

@@ -63,7 +63,7 @@ public:
 	bool FireAreaEffect       (CEntity *shooter, CVector *fireSource);
 	bool LaserScopeDot        (CVector *pOutPos, float *pOutSize);
 	bool FireSniper           (CEntity *shooter, CVector *fireSource);
-	bool TakePhotograph       (CEntity *shooter);
+	bool TakePhotograph       (CEntity *shooter, CVector *fireSource);
 	// The aimed shot of a vehicle: the shot leaves the driver's right hand and
 	// follows the one aim ray, each fire type with its own shot
 	bool FireAimedFromCar     (CVehicle *shooter);
@@ -71,7 +71,7 @@ public:
 	bool FireInstantHitFromCar(CVehicle *shooter);
 	// The shot from a car after the source and the target are known; aimed
 	// picks the weapon's own damage over the stock drive-by damage
-	bool FireFromCarAt        (CVehicle *shooter, CVector &source, CVector &target, bool aimed);
+	bool FireFromCarAt        (CVehicle *shooter, CVector &muzzle, CVector &shotStart, CVector &target, bool aimed);
 	
 	static void DoDoomAiming       (CEntity *shooter, CVector *source,   CVector *target);
 	static void DoTankDoomAiming   (CEntity *shooter, CEntity *driver,   CVector *source, CVector *target);

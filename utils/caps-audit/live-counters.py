@@ -67,6 +67,15 @@ reserve is the layer's own promise to the rest of the game). The "in reach" row
 is the layer's own acceptance gauge and must stay 0. The updates row is the
 stagger's work: about a third of the layer a frame, so it grows by the cap each
 three frames.
+
+The standable cell rows (VICE-154) are the off-network pedestrian placement's
+own counters: the cells the lazy build spent and queued, the queue's and the
+cache's drops (a nearer cell displaced a farther one, or the cache evicted the
+farthest entry), the positions the spawns requested and how they were answered
+(a validated spot, or a built cell with nothing on it), and the probes the
+builds ran with their verdicts - the rejects by reason (no ground, water, the
+level, a roof, the clearance, the slope). The counters are cumulative since the
+boot, so a soak reads the growth of the builds and the mix of the reasons.
 """
 
 import os
@@ -98,6 +107,14 @@ SYMBOLS = [
     ("peds: ms_nNumDummy",           "_ZN11CPopulation12ms_nNumDummyE",                "I"),
     ("peds: ms_nNumCop",             "_ZN11CPopulation10ms_nNumCopE",                  "I"),
     ("peds: ms_nNumCivMale",         "_ZN11CPopulation14ms_nNumCivMaleE",              "I"),
+    # The off-network spawns (VICE-122, the standable cells of VICE-154): the
+    # created pedestrians that stood on a cell and the ones the node path
+    # took (the realised share the target ratio is held against), and the
+    # strays the cull took by their reason.
+    ("peds: off-network spawns",     "_ZN11CPopulation20ms_nOffNetworkSpawnsE",        "I"),
+    ("peds: network spawns",         "_ZN11CPopulation17ms_nNetworkSpawnsE",           "I"),
+    ("peds: off-network stuck",      "_ZN11CPopulation19ms_nOffNetworkStuckE",         "I"),
+    ("peds: off-network drowned",    "_ZN11CPopulation21ms_nOffNetworkDrownedE",       "I"),
     # The fill burst (VICE-126): the countdown that arms the boot burst, the
     # target the last burst frame aimed at, and what the burst has spent so far.
     # The "since boot" pair accumulates over every run of the session; the
@@ -264,6 +281,97 @@ FAR_TRAFFIC = [
     ("far: refused poses (must be 0)", "_ZN11CFarTraffic26ms_nFarTrafficRefusedPosesE", "I"),
 ]
 
+# The pedestrian standable cells (VICE-154). The store holds the truth
+# (CPedSites::ms_cells); the facade mirrors its stats into these plain statics
+# after every pump and every request, so the rig can name them. The rows are
+# cumulative since the last reset (a boot, a restart or a save load:
+# CPopulation::Initialise resets the store): the cells built and queued, the
+# queue's and the cache's drops (the queue gives up its farthest cell for a
+# nearer one; the cache evicts the farthest entry for a nearer build, or
+# drops an entry a request found stale at another level), the positions the
+# off-network spawns requested and how they were answered (a spot, a dead
+# cell), the probes the builds ran and their verdicts - the rejects by their
+# reason, the ticket's telemetry. The off-network counters of the population
+# above them are the other side of the same story: the spawns that stood on a
+# cell (ms_nOffNetworkSpawns) against the ones the node path took
+# (ms_nNetworkSpawns).
+PED_SITES = [
+    ("ped sites: cells built",       "_ZN9CPedSites14ms_nCellsBuiltE",       "I"),
+    ("ped sites: cells queued",      "_ZN9CPedSites15ms_nCellsQueuedE",      "I"),
+    ("ped sites: cells dropped",     "_ZN9CPedSites16ms_nCellsDroppedE",     "I"),
+    ("ped sites: cells evicted",     "_ZN9CPedSites16ms_nCellsEvictedE",     "I"),
+    ("ped sites: requests",          "_ZN9CPedSites12ms_nRequestsE",         "I"),
+    ("ped sites: requests answered", "_ZN9CPedSites20ms_nRequestsAnsweredE", "I"),
+    ("ped sites: requests dead",     "_ZN9CPedSites16ms_nRequestsDeadE",     "I"),
+    ("ped sites: probes",            "_ZN9CPedSites10ms_nProbesE",           "I"),
+    ("ped sites: rejects no ground", "_ZN9CPedSites19ms_nRejectsNoGroundE",  "I"),
+    ("ped sites: rejects water",     "_ZN9CPedSites16ms_nRejectsWaterE",     "I"),
+    ("ped sites: rejects level",     "_ZN9CPedSites16ms_nRejectsLevelE",     "I"),
+    ("ped sites: rejects roof",      "_ZN9CPedSites15ms_nRejectsRoofE",      "I"),
+    ("ped sites: rejects clearance", "_ZN9CPedSites20ms_nRejectsClearanceE", "I"),
+    ("ped sites: rejects slope",     "_ZN9CPedSites16ms_nRejectsSlopeE",     "I"),
+]
+# The spawn service (VICE-150): the one SSpawnServiceTelemetry instance the
+# engine fills. The symbol is the struct; the rows read its fields at the
+# offsets pinned by the static_asserts in SpawnService.cpp, so a field move
+# breaks the build before it can misread a live row. The arrays are in the
+# purpose / kind / reason enumeration order.
+#
+# The requests are the service's intake, by purpose (ambient, parked,
+# responder, police, mission, scenario, special, debug) and by kind (road-site,
+# explicit). The refusals are every refusal event by reason (no site,
+# occupancy, visibility, zone, readiness, budget, pool, reachability): a
+# request's own gate, a candidate the plan dropped, or an attempt the
+# primitive refused - refusals after planning are counted, not hidden. The
+# created and removed rows are the placements by purpose; the covered-fill row
+# is the fade's own creations. The readiness rows are the requests deferred
+# for models and the milliseconds they spent waiting. The plan rows are the
+# planner's cost: the calls, the candidates examined, the placements returned
+# and the total microseconds (us/call is the column to read against a frame's
+# budget; the measured harness rate is about 5 us a call over 197 candidates).
+# The conservation rows are the director's check (the cell target sum against
+# the global target) and its breach row; the defect rows are the primitive's
+# ground casts that found nothing, the air offsets over its 7 m guard and the
+# water casts that failed. The rows are cumulative since CCarCtrl's Init or
+# ReInit (the service restarts its counters with the world).
+SPAWN_SERVICE_STRUCT = "_ZN13CSpawnService12ms_TelemetryE"
+SPAWN_SERVICE = [
+    ("spawn: requests ambient",         0,                          "I"),
+    ("spawn: requests parked",          4,                          "I"),
+    ("spawn: requests responder",       8,                          "I"),
+    ("spawn: requests police",          12,                         "I"),
+    ("spawn: requests mission",         16,                         "I"),
+    ("spawn: requests scenario",        20,                         "I"),
+    ("spawn: requests special",         24,                         "I"),
+    ("spawn: requests debug",           28,                         "I"),
+    ("spawn: requests road-site",       32,                         "I"),
+    ("spawn: requests explicit",        36,                         "I"),
+    ("spawn: refused no site",          40 + 1 * 4,                 "I"),
+    ("spawn: refused occupancy",        40 + 2 * 4,                 "I"),
+    ("spawn: refused visibility",       40 + 3 * 4,                 "I"),
+    ("spawn: refused zone",             40 + 4 * 4,                 "I"),
+    ("spawn: refused readiness",        40 + 5 * 4,                 "I"),
+    ("spawn: refused budget",           40 + 6 * 4,                 "I"),
+    ("spawn: refused pool",             40 + 7 * 4,                 "I"),
+    ("spawn: refused reachability",     40 + 8 * 4,                 "I"),
+    ("spawn: created ambient",          76,                         "I"),
+    ("spawn: created mission",          76 + 4 * 4,                 "I"),
+    ("spawn: removed ambient",          108,                        "I"),
+    ("spawn: covered-fill creations",   140,                        "I"),
+    ("spawn: readiness waits",          144,                        "I"),
+    ("spawn: readiness wait ms",        148,                        "I"),
+    ("spawn: plan calls",               184,                        "I"),
+    ("spawn: plan candidates",          188,                        "I"),
+    ("spawn: plan placements",          192,                        "I"),
+    ("spawn: plan micros total",        200,                        "Q"),
+    ("spawn: conservation cell sum",    208,                        "I"),
+    ("spawn: conservation global",      212,                        "I"),
+    ("spawn: conservation breaches",    216,                        "I"),
+    ("spawn: ground rejections",        220,                        "I"),
+    ("spawn: air offset rejections",    224,                        "I"),
+    ("spawn: water rejections",         228,                        "I"),
+]
+
 CONFIG = "src/core/config.h"
 
 
@@ -345,6 +453,14 @@ def main():
         print(f"  {label:44s} {v}")
 
     print()
+    for label, mangled, fmt in PED_SITES:
+        off = sym.get(mangled)
+        if off is None:
+            print(f"  {label:44s} symbol missing")
+            continue
+        print(f"  {label:44s} {read(off, fmt)}")
+
+    print()
     for label, mangled, fmt in NEAR_BUBBLE:
         off = sym.get(mangled)
         if off is None:
@@ -392,6 +508,20 @@ def main():
             note = f"  {enum_name} = {psize} in config.h"
         print(f"  {label:44s} used {used:6d} / {psize:6d}  free {psize - used}{note}")
 
+    # The spawn service (VICE-150): the one telemetry struct's fields, at the
+    # offsets SpawnService.cpp pins. The counters restart with CCarCtrl's Init
+    # and ReInit, so the rows are the session's own (a save load starts them
+    # over with the world it restores).
+    print()
+    spawn_base = sym.get(SPAWN_SERVICE_STRUCT)
+    if spawn_base is None:
+        print("  the spawn service: symbol missing")
+    else:
+        for label, offset, fmt in SPAWN_SERVICE:
+            v = read(spawn_base + offset, fmt)
+            values["spawn " + label.split(': ')[1]] = v
+            print(f"  {label:44s} {v}")
+
     # The ring scale: ApplyPopulationCaps gives min(45 x the car density x
     # scale^2, 2400), so before the top binds, scale = sqrt(budget / (45 x the
     # density). The traffic uses the same scale, so one derivation covers both.
@@ -404,6 +534,24 @@ def main():
         print(f"  the ring scale: about {(car_budget / (45.0 * density)) ** 0.5:.3f}")
     else:
         print("  the ring scale: not derivable (a symbol is missing)")
+
+    # The spawn service's intake, as one line: what the service was asked for,
+    # what it refused (by reason) and what it placed. The plan rows are the
+    # cost: the last column is the average microseconds a plan call spent.
+    spawn_requests = values.get("spawn requests ambient")
+    spawn_created = values.get("spawn created ambient")
+    spawn_calls = values.get("spawn plan calls")
+    if spawn_requests is None or spawn_created is None or spawn_calls is None:
+        print("  the spawn service: a symbol is missing (the intake cannot be read)")
+    else:
+        refusals = sum(values.get("spawn refused " + r, 0) for r in (
+            "no site", "occupancy", "visibility", "zone", "readiness",
+            "budget", "pool", "reachability"))
+        per_call = (values.get("spawn plan micros total", 0) / spawn_calls) if spawn_calls else 0.0
+        print(f"  the spawn service: ambient requests {spawn_requests}, "
+              f"created {spawn_created}, refusals {refusals}, "
+              f"plan {per_call:.1f} us a call over "
+              f"{values.get('spawn plan candidates', 0)} candidates")
 
     # The acceptance of the near bubble (VICE-127), as one line. The two
     # catchable-zone counters read the zone of VICE-146: in the frustum nearer

@@ -491,7 +491,7 @@ FarTrafficDeleteCar(int32 index)
 {
 	CVehicle *pVehicle = ms_aFarCars[index].pVehicle;
 
-	CCarCtrl::NearBubbleCountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, true);
+	CSpawnService::CountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, true);
 	CWorld::Remove(pVehicle);
 	delete pVehicle;
 	CFarTraffic::ms_nFarTrafficRemovals++;
@@ -510,7 +510,7 @@ FarTrafficRemoveCar(int32 index, const CVector &playerPos)
 {
 	CVehicle *pVehicle = ms_aFarCars[index].pVehicle;
 
-	if (!CCarCtrl::NearBubbleAllowsRemoval(pVehicle, playerPos, 0.0f, false))
+	if (!CSpawnService::AllowsRemoval(pVehicle, playerPos, 0.0f, false))
 		return false;
 	if (pVehicle->GetIsOnScreen() &&
 		CVisibilityPlugins::GetClumpAlpha(pVehicle->GetClump()) > 0) {
@@ -750,8 +750,23 @@ FarTrafficTrySite(const SFarTrafficBand &band, const CVector &playerPos, const C
 			continue;
 		pResult->inBand = true;
 		CVehicle *pCar = nil;
-		if (CCarCtrl::CreateCarFromPlacement(placements[i], carClass, carModel, playerPos,
-				playerSpeed, false, false, true, &pCar) && pCar) {
+		/* The far layer's own placement until VICE-190 (its migration to a
+		 * service request, where it becomes a first-class requester): the
+		 * raw node pair, no planned site, the far tier's birth-cull skip.
+		 * The old primitive's rarity dice is gone with VICE-150 (the
+		 * planner's weight replaces it); the far layer's own rarity weight
+		 * arrives with its request. */
+		SSpawnPlacement placement;
+		placement.site = -1;
+		placement.node1 = placements[i].node1;
+		placement.node2 = placements[i].node2;
+		placement.link = -1;
+		placement.x = placements[i].position.x;
+		placement.y = placements[i].position.y;
+		placement.z = placements[i].position.z;
+		placement.between = placements[i].positionBetweenNodes;
+		if (CCarCtrl::CreateCarFromPlacement(placement, carClass, carModel, playerPos,
+				playerSpeed, false, SPAWN_TIER_FAR, &pCar) == SPAWN_REFUSAL_NONE && pCar) {
 			FarTrafficAddEntry(pCar);
 			CFarTraffic::ms_nFarTrafficCreations++;
 			return true;

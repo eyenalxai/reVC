@@ -1700,8 +1700,8 @@ static const int controllerSetupVehicleFire = PED_FIREWEAPON;
 // from the same table. STANDARD keeps 29 rows and CLASSIC 34.
 static const tControllerSetupRow controllerSetupRowsStandard[] = {
 	{ "FEC_FIR", PED_FIREWEAPON,                     controllerSetupVehicleFire },
-	{ "FEC_NWE", PED_CYCLE_WEAPON_RIGHT,             CONTROLLER_NO_ACTION },
-	{ "FEC_PWE", PED_CYCLE_WEAPON_LEFT,              CONTROLLER_NO_ACTION },
+	{ "FEC_NWE", PED_CYCLE_WEAPON_RIGHT,             VEHICLE_CYCLE_WEAPON_RIGHT },
+	{ "FEC_PWE", PED_CYCLE_WEAPON_LEFT,              VEHICLE_CYCLE_WEAPON_LEFT },
 	{ "FEC_FOR", GO_FORWARD,                         VEHICLE_ACCELERATE },
 	{ "FEC_BAC", GO_BACK,                            VEHICLE_BRAKE },
 	{ "FEC_LEF", GO_LEFT,                            GO_LEFT },

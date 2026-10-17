@@ -136,13 +136,15 @@ IsLowerBodyBone(int16 boneTag)
 // Keep only the sequences that drive the upper body. A partial association
 // whose data covers the whole body otherwise overrides the legs of the
 // movement animation it layers over; dropping the lower body keys leaves the
-// legs to that animation (VICE-141).
+// legs to that animation (VICE-141). A seated rider also keeps the spine of
+// the seat pose: the standing aim pose bends the spine away from the bike seat
+// (VICE-141 follow-up).
 void
-CAnimBlendAssociation::MakeUpperBodyOnly(void)
+CAnimBlendAssociation::MakeUpperBodyOnly(bool seated)
 {
 	int i;
 	for(i = 0; i < numNodes; i++)
-		if(nodes[i].sequence && IsLowerBodyBone(nodes[i].sequence->boneTag))
+		if(nodes[i].sequence && (IsLowerBodyBone(nodes[i].sequence->boneTag) || (seated && nodes[i].sequence->boneTag == BONE_spine)))
 			nodes[i].sequence = nil;
 }
 

@@ -8,8 +8,9 @@
  * The service needs three questions answered cheaply: is the street around
  * this position already crowded, which cells hold the traffic, and has this
  * site just been promised to another request. This module is that memory and
- * nothing else: no placement, no decisions, and no consumer yet - the planner
- * and the director of the later tickets read it.
+ * nothing else: no placement, no decisions. The spawn service's planner
+ * reads it since VICE-150 (the cell counts for the capacity filter and the
+ * site reservations); the director is a later reader.
  *
  * The presence grid
  * -----------------
@@ -89,10 +90,10 @@
  * ----------------
  *
  * The planner promises a site before it creates the actor there, so two
- * requests cannot plan the same connection in the same frame. A reservation
- * is per site id (the site index's directed connection id, VICE-148) and
- * expires after SPAWN_OCCUPANCY_RESERVE_MS: short enough that an abandoned
- * plan frees the street for the next request, long enough to cover a
+ * requests cannot plan the same connection while the plan is outstanding. A
+ * reservation is per site id (the site index's directed connection id,
+ * VICE-148) and expires after SPAWN_OCCUPANCY_RESERVE_MS: short enough that an
+ * abandoned plan frees the street for the next request, long enough to cover a
  * planning batch. An entry carries an in-use flag, and a held entry is one
  * whose remaining lifetime is inside (0, SPAWN_OCCUPANCY_RESERVE_MS]: the
  * signed difference survives the timer's wrap, a clock that jumped backwards
@@ -428,6 +429,11 @@ public:
 	static int32_t CountAtPosition(ESpawnOccupancyClass type, float x, float y);
 	static int32_t CountAtCell(ESpawnOccupancyClass type, int32_t cellX, int32_t cellY);
 	static int32_t TotalCount(ESpawnOccupancyClass type);
+
+	/* The planner's own handle on the store: the capacity reads and the
+	 * reservations run in the engine-free core (SpawnService.h), which takes
+	 * the store itself. */
+	static SSpawnOccupancyStore &Store(void);
 
 	/* The short promise on a site (the planner's reservations). */
 	static bool ReserveSite(int32_t site, uint32_t now);

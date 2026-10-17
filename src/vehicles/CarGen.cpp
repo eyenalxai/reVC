@@ -143,13 +143,13 @@ void CCarGenerator::DoInternalProcessing()
 	 * needs. A spot behind the camera that no occluder covers waits for the
 	 * next look (a refusal does not advance the generator's timer, so
 	 * CCarGenerator::Process retries). */
-	if (!CCarCtrl::NearBubbleAllowsCreation(pos, FindPlayerCentreOfWorld(CWorld::PlayerInFocus), NEAR_BUBBLE_ENTITY_RADIUS, false)) {
+	if (!CSpawnService::AllowsCreation(pos, FindPlayerCentreOfWorld(CWorld::PlayerInFocus), NEAR_BUBBLE_ENTITY_RADIUS, false)) {
 		delete pVehicle;
 		return;
 	}
 	pVehicle->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + NEAR_BUBBLE_GRACE_MS;
 	CWorld::Add(pVehicle);
-	CCarCtrl::NearBubbleCountCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
+	CSpawnService::CountCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 	if (CGeneral::GetRandomNumberInRange(0, 100) < m_nAlarm)
 		pVehicle->m_nAlarmState = -1;
 	if (CGeneral::GetRandomNumberInRange(0, 100) < m_nDoorlock)
