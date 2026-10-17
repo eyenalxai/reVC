@@ -40,9 +40,13 @@ public:
 	LimbOrientation m_torsoOrient;
 	LimbOrientation m_upperArmOrient;
 	LimbOrientation m_lowerArmOrient;
+	// Sideways lean of the upper body out of the car; yaw is the lean angle
+	LimbOrientation m_leanOrient;
 	int32 m_flags;
 
 	static LimbMovementInfo ms_torsoInfo;
+	static LimbMovementInfo ms_seatTorsoInfo;
+	static LimbMovementInfo ms_leanInfo;
 	static LimbMovementInfo ms_headInfo;
 	static LimbMovementInfo ms_headRestoreInfo;
 	static LimbMovementInfo ms_upperArmInfo;
@@ -54,6 +58,10 @@ public:
 	bool PointGunAtPosition(CVector const& position);
 	void GetComponentPosition(RwV3d &pos, uint32 node);
 	void RotateTorso(AnimBlendFrameData* animBlend, LimbOrientation* limb, bool changeRoll);
+	LimbMovementInfo &TorsoInfo(void);
+	bool SeatedInCar(void);
+	void GetTorsoBendAxis(RwV3d &axis);
+	void RotateLean(RtQuat *q, const RwV3d &bendAxis);
 	void ExtractYawAndPitchLocal(RwMatrix *mat, float *yaw, float *pitch);
 	void ExtractYawAndPitchLocalSkinned(AnimBlendFrameData *node, float *yaw, float *pitch);
 	void ExtractYawAndPitchWorld(RwMatrix *mat, float *yaw, float *pitch);
@@ -64,6 +72,6 @@ public:
 	bool RestoreLookAt(void);
 };
 
-VALIDATE_SIZE(CPedIK, 0x28);
+VALIDATE_SIZE(CPedIK, 0x30);
 
 #endif // __GTA_PEDIK_H__

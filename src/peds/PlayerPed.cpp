@@ -973,8 +973,9 @@ CPlayerPed::HoldUpperBodyAimPose(void)
 	}
 
 	// Several fire animations carry a standing leg stance; the lower body keys
-	// must not freeze the movement cycle
-	aimAssoc->MakeUpperBodyOnly();
+	// must not freeze the movement cycle. A rider on a bike keeps the seat's
+	// spine as well.
+	aimAssoc->MakeUpperBodyOnly(RidesBike());
 }
 
 // Fade the held aim pose out again when the sights go down and no attack or

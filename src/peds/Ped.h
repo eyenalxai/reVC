@@ -1011,6 +1011,7 @@ public:
 	
 	bool Driving(void) { return m_nPedState == PED_DRIVING; }
 	bool InVehicle(void) { return bInVehicle && m_pMyVehicle; } // True when ped is sitting/standing in vehicle, not in enter/exit state.
+	bool RidesBike(void);
 	bool EnteringCar(void) { return m_nPedState == PED_ENTER_CAR || m_nPedState == PED_CARJACK; }
 	bool HasAttractor(void);
 	bool IsUseAttractorObjective(eObjective obj) {
