@@ -27,14 +27,16 @@
  * cap (CPopulation::AddToPopulation): a full street does not eat the crowd on
  * the sidewalk. The car budget counts every car of the traffic: the random
  * ones, the parked ones, the mission and script cars, the law enforcers and
- * the emergency services (CCarCtrl::NumCarsInUse). One quirk of the count,
- * documented rather than changed: a law-enforcer random car increments BOTH
- * NumLawEnforcerCars and NumRandomCars (CarCtrl.cpp, UpdateCarCount), so the
- * sum counts it twice and the car budget blocks one car early per live law car
- * (the spawner keeps m_MaximumLawEnforcerVehicles, 3 at the top, and other
- * paths add a few more; measured 5..6 live). The double count is on the safe
- * side: the random traffic stops a little earlier, never later, and the pool
- * margin is untouched.
+ * the emergency services (CCarCtrl::NumCarsInUse). NumLawEnforcerCars follows
+ * the law flag, not the class (CarCtrl.cpp, UpdateCarCount, VICE-166): a car
+ * of any class that carries bIsLawEnforcer counts there while the flag is set.
+ * Every flagged car therefore counts in its class counter and in
+ * NumLawEnforcerCars - a law-enforcer random car always has, a flagged
+ * mission, parked or restored car now does too - so the sum counts it twice
+ * and the car budget blocks one car early per live law car (the spawner keeps
+ * m_MaximumLawEnforcerVehicles, 3 at the top, and other paths add a few more;
+ * measured 5..6 live). The double count is on the safe side: the budget stops
+ * the traffic a little earlier, never later, and the pool margin is untouched.
  *
  * The pools behind the caps
  * -------------------------

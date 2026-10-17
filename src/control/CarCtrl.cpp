@@ -3582,13 +3582,23 @@ bool CCarCtrl::GenerateOneEmergencyServicesCar(uint32 mi, CVector vecPos)
 
 void CCarCtrl::UpdateCarCount(CVehicle* pVehicle, bool remove)
 {
+	/* The far layer's cars are outside every budget (VICE-128): they hold pool
+	 * slots, not car-target slots. */
+	if (pVehicle->VehicleCreatedBy == FAR_TRAFFIC_VEHICLE)
+		return;
+	/* The law flag is counted independently of the class (VICE-166).
+	 * ChangeLawEnforcerState toggles the flag on a car of every class, and a
+	 * car restored from a save carries the flag of a car of any class
+	 * (CPools::LoadVehiclePool, Pools.cpp): a class-bound count misses the
+	 * addition of such a car and leaks its deletion. Only a car that carries
+	 * the flag is counted. */
 	if (remove){
+		if (pVehicle->bIsLawEnforcer) {
+			if (--NumLawEnforcerCars < 0)
+				NumLawEnforcerCars = 0;
+		}
 		switch (pVehicle->VehicleCreatedBy){
 		case RANDOM_VEHICLE:
-			if (pVehicle->bIsLawEnforcer) {
-				if (--NumLawEnforcerCars < 0)
-					NumLawEnforcerCars = 0;
-			}
 			if (--NumRandomCars < 0)
 				NumRandomCars = 0;
 			return;
@@ -3604,17 +3614,13 @@ void CCarCtrl::UpdateCarCount(CVehicle* pVehicle, bool remove)
 			if (--NumPermanentCars < 0)
 				NumPermanentCars = 0;
 			return;
-		case FAR_TRAFFIC_VEHICLE:
-			/* The far layer's cars are outside every budget (VICE-128):
-			 * they hold pool slots, not car-target slots. */
-			return;
 		}
 	}
 	else{
+		if (pVehicle->bIsLawEnforcer)
+			++NumLawEnforcerCars;
 		switch (pVehicle->VehicleCreatedBy){
 		case RANDOM_VEHICLE:
-			if (pVehicle->bIsLawEnforcer)
-				++NumLawEnforcerCars;
 			++NumRandomCars;
 			return;
 		case MISSION_VEHICLE:
@@ -3625,8 +3631,6 @@ void CCarCtrl::UpdateCarCount(CVehicle* pVehicle, bool remove)
 			return;
 		case PERMANENT_VEHICLE:
 			++NumPermanentCars;
-			return;
-		case FAR_TRAFFIC_VEHICLE:
 			return;
 		}
 	}

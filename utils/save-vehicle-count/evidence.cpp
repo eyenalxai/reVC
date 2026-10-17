@@ -55,14 +55,16 @@
  *   - a function body closes with a brace at column 0 (FindBody);
  *   - UpdateCarCount splits at a line that is exactly "else{" into the
  *     remove and the create switch;
+ *   - the count's deltas come from utils/save-vehicle-count/CarCountShape.h,
+ *     the parser shared with utils/spawn-law-counter/evidence.cpp (VICE-166):
+ *     the law count is the op under the pVehicle->bIsLawEnforcer guard in the
+ *     prefix of both sides, so it applies to every class, the class counters
+ *     are the ops of their case, and FAR_TRAFFIC_VEHICLE returns before the
+ *     count (the VICE-128 no-op);
  *   - LoadVehiclePool's branch table is one #ifdef COMPATIBLE_SAVES, one
  *     #else and the body's last #endif; an #if 0 block of a branch is
  *     skipped, and a preprocessor line between the recount and the branch
  *     end fails the check;
- *   - a count op is a line with "++Num" or "--Num"; its guard is the text
- *     between it and the previous op (the law count is the one op under
- *     the pVehicle->bIsLawEnforcer guard, and no op may sit under a class
- *     guard of its own);
  *   - the calls of the transition are recognized by their exact text.
  * A structural edit that does not fit fails the read (a missing function,
  * class, op or counter is reported), never passes silently.
@@ -84,6 +86,8 @@
 #include <string>
 #include <vector>
 
+#include "CarCountShape.h"
+
 static int g_failures = 0;
 
 static void Fail(const char *what)
@@ -98,97 +102,9 @@ static void Check(bool condition, const char *what)
 		Fail(what);
 }
 
-/* --------------------------------------------------------------- the files */
-
-struct SSource
-{
-	std::vector<std::string> lines;
-};
-
-static bool ReadSource(const char *path, SSource &src)
-{
-	FILE *f = fopen(path, "rb");
-	if (!f) {
-		printf("cannot read %s (run the program from the repository root)\n", path);
-		return false;
-	}
-	std::string text;
-	char buf[8192];
-	size_t n;
-	while ((n = fread(buf, 1, sizeof(buf), f)) > 0)
-		text.append(buf, n);
-	fclose(f);
-
-	size_t start = 0;
-	while (start <= text.size()) {
-		size_t nl = text.find('\n', start);
-		std::string line = text.substr(start, nl == std::string::npos ? std::string::npos : nl - start);
-		if (!line.empty() && line[line.size() - 1] == '\r')
-			line.erase(line.size() - 1);
-		src.lines.push_back(line);
-		if (nl == std::string::npos)
-			break;
-		start = nl + 1;
-	}
-	return true;
-}
-
-static bool Contains(const std::string &s, const char *needle)
-{
-	return s.find(needle) != std::string::npos;
-}
-
-static std::string Trim(const std::string &s)
-{
-	size_t a = s.find_first_not_of(" \t");
-	if (a == std::string::npos)
-		return "";
-	size_t b = s.find_last_not_of(" \t");
-	return s.substr(a, b - a + 1);
-}
-
-static bool IsPreprocessorLine(const std::string &line)
-{
-	std::string t = Trim(line);
-	return !t.empty() && t[0] == '#';
-}
-
-static int FindLine(const SSource &src, const char *needle, int from)
-{
-	for (int i = from; i < (int)src.lines.size(); i++)
-		if (Contains(src.lines[i], needle))
-			return i;
-	return -1;
-}
-
-/*
- * The function bodies of this code base close with a brace at column 0, so
- * the end of a body is the first such brace after the signature. The body
- * itself is the lines (begin, end).
- */
-static bool FindBody(const SSource &src, const char *signature, int &begin, int &end)
-{
-	begin = FindLine(src, signature, 0);
-	if (begin < 0)
-		return false;
-	for (int i = begin + 1; i < (int)src.lines.size(); i++) {
-		if (src.lines[i] == "}") {
-			end = i;
-			return true;
-		}
-	}
-	return false;
-}
-
-static int FindInBody(const SSource &src, int begin, int end, const char *needle, int from)
-{
-	if (from < begin + 1)
-		from = begin + 1;
-	for (int i = from; i < end; i++)
-		if (Contains(src.lines[i], needle))
-			return i;
-	return -1;
-}
+/* The line helpers (SSource, ReadSource, FindBody, ...) and the shape of
+ * CCarCtrl::UpdateCarCount come from CarCountShape.h, the parser shared with
+ * utils/spawn-law-counter/evidence.cpp (VICE-166). */
 
 static int CountText(const SSource &src, int first, int last, const char *needle)
 {
@@ -203,102 +119,13 @@ static int CountText(const SSource &src, int first, int last, const char *needle
 	return n;
 }
 
-/* --------------------------------------------- A. the deltas of the count */
-
-/* One counter the count moves, with the line that moves it. */
-struct SCountOp
-{
-	std::string counter;	/* NumRandomCars, NumLawEnforcerCars, ... */
-	int sign;		/* +1 (++) or -1 (--) */
-	bool whenLaw;		/* the op sits under the bIsLawEnforcer guard */
-	bool classGuard;	/* the op sits under a guard on the created-by class */
-	int line;		/* 1-based */
-};
-
-struct SClassOps
-{
-	std::string cls;	/* RANDOM_VEHICLE, ... */
-	std::vector<SCountOp> ops;
-};
-
-/* The five classes of the count, in the order of the enum (Vehicle.h). */
-static const char *aClassNames[] = {
-	"RANDOM_VEHICLE", "MISSION_VEHICLE", "PARKED_VEHICLE",
-	"PERMANENT_VEHICLE", "FAR_TRAFFIC_VEHICLE"
-};
-static const int nClassNames = sizeof(aClassNames) / sizeof(aClassNames[0]);
+/* ---------------------------------------------- the counters of the sum */
 
 /* The four class counters CCarCtrl::NumCarsInUse sums, in the order of its
  * expression; the model's SCounters::InUse holds the same list. */
 static const char *aInUseClass[] = {
 	"NumRandomCars", "NumLawEnforcerCars", "NumMissionCars", "NumParkedCars"
 };
-
-static bool IsCountOpLine(const std::string &line)
-{
-	return Contains(line, "++Num") || Contains(line, "--Num");
-}
-
-static std::vector<SClassOps> ParseSwitch(const SSource &src, int startLine, int endLine)
-{
-	std::vector<SClassOps> classes;
-	for (int i = startLine + 1; i < endLine; i++) {
-		std::string t = Trim(src.lines[i]);
-		if (t.size() > 5 && t.compare(0, 5, "case ") == 0) {
-			SClassOps c;
-			size_t colon = t.find(':');
-			c.cls = t.substr(5, colon - 5);
-			classes.push_back(c);
-			continue;
-		}
-		if (classes.empty())
-			continue;
-		size_t at = src.lines[i].find("++Num");
-		int sign = +1;
-		if (at == std::string::npos) {
-			at = src.lines[i].find("--Num");
-			sign = -1;
-		}
-		if (at == std::string::npos)
-			continue;
-		size_t opStart = at + 2;
-		size_t opEnd = opStart;
-		while (opEnd < src.lines[i].size() &&
-			(isalnum((unsigned char)src.lines[i][opEnd]) || src.lines[i][opEnd] == '_'))
-			opEnd++;
-		SCountOp op;
-		op.counter = src.lines[i].substr(opStart, opEnd - opStart);
-		op.sign = sign;
-		op.line = i + 1;
-		/* The guard of the op: the text between it and the previous count
-		 * op (or the case line). The law count is the one op under the
-		 * bIsLawEnforcer guard; a counter may not sit under a guard on the
-		 * created-by class of its own. */
-		op.whenLaw = false;
-		op.classGuard = false;
-		for (int j = i - 1; j > startLine; j--) {
-			std::string p = Trim(src.lines[j]);
-			if (p.size() > 5 && p.compare(0, 5, "case ") == 0)
-				break;
-			if (IsCountOpLine(src.lines[j]))
-				break;
-			if (Contains(src.lines[j], "bIsLawEnforcer"))
-				op.whenLaw = true;
-			if (Contains(src.lines[j], "VehicleCreatedBy"))
-				op.classGuard = true;
-		}
-		classes.back().ops.push_back(op);
-	}
-	return classes;
-}
-
-static const SClassOps *FindClass(const std::vector<SClassOps> &classes, const char *name)
-{
-	for (size_t i = 0; i < classes.size(); i++)
-		if (classes[i].cls == name)
-			return &classes[i];
-	return NULL;
-}
 
 /* ------------------------------------------- the restore of LoadVehiclePool */
 
@@ -403,6 +230,13 @@ static int LastEvent(const std::vector<SEvent> &events, EEvent kind)
 	return line;
 }
 
+/* A line of the preprocessor (the #if family). */
+static bool IsPreprocessorLine(const std::string &line)
+{
+	std::string t = Trim(line);
+	return !t.empty() && t[0] == '#';
+}
+
 /* A count that must stay unconditional: no #if... between it and the end of
  * the branch that holds it. */
 static bool ConditionalAfter(const SSource &src, int countLine, int last)
@@ -495,31 +329,37 @@ static void CheckDirectBranch(const SSource &src, int first, int last, const std
 	}
 }
 
-/* The guard text of every parsed op (the law count under bIsLawEnforcer, the
- * rest under none), on both sides of the count. */
-static void CheckGuards(const std::vector<SClassOps> &create, const std::vector<SClassOps> &remove)
+/* One op's guard: the law count under bIsLawEnforcer, the rest under none. */
+static void CheckOneGuard(const SCountOp &op, const char *where, const char *side)
+{
+	char msg[220];
+	if (op.counter == "NumLawEnforcerCars") {
+		sprintf(msg, "%s: %s is not under the pVehicle->bIsLawEnforcer guard (%s side)",
+			where, op.counter.c_str(), side);
+		Check(op.whenLaw, msg);
+	} else {
+		sprintf(msg, "%s: %s is under the law guard (%s side)",
+			where, op.counter.c_str(), side);
+		Check(!op.whenLaw, msg);
+		sprintf(msg, "%s: %s is under a class guard of its own (%s side)",
+			where, op.counter.c_str(), side);
+		Check(!op.classGuard, msg);
+	}
+}
+
+/* The guard text of every parsed op, on both sides of the count: the prefix
+ * ops first (the law count of the VICE-166 shape), then the case ops. */
+static void CheckGuards(const SCountShape &shape)
 {
 	static const char *aSide[] = { "create", "remove" };
 	for (int side = 0; side < 2; side++) {
-		const std::vector<SClassOps> &table = side == 0 ? create : remove;
-		for (size_t c = 0; c < table.size(); c++) {
-			for (size_t j = 0; j < table[c].ops.size(); j++) {
-				const SCountOp &op = table[c].ops[j];
-				char msg[200];
-				if (op.counter == "NumLawEnforcerCars") {
-					sprintf(msg, "%s: %s is not under the pVehicle->bIsLawEnforcer guard (%s side)",
-						table[c].cls.c_str(), op.counter.c_str(), aSide[side]);
-					Check(op.whenLaw, msg);
-				} else {
-					sprintf(msg, "%s: %s is under the law guard (%s side)",
-						table[c].cls.c_str(), op.counter.c_str(), aSide[side]);
-					Check(!op.whenLaw, msg);
-					sprintf(msg, "%s: %s is under a class guard of its own (%s side)",
-						table[c].cls.c_str(), op.counter.c_str(), aSide[side]);
-					Check(!op.classGuard, msg);
-				}
-			}
-		}
+		const std::vector<SCountOp> &prefix = side == 0 ? shape.createPrefix : shape.removePrefix;
+		const std::vector<SClassOps> &table = side == 0 ? shape.create : shape.remove;
+		for (size_t j = 0; j < prefix.size(); j++)
+			CheckOneGuard(prefix[j], "the prefix", aSide[side]);
+		for (size_t c = 0; c < table.size(); c++)
+			for (size_t j = 0; j < table[c].ops.size(); j++)
+				CheckOneGuard(table[c].ops[j], table[c].cls.c_str(), aSide[side]);
 	}
 }
 
@@ -563,7 +403,7 @@ static bool HasName(const std::vector<std::string> &names, const char *name)
 }
 
 static bool CheckSources(SSource &pools, SSource &carCtrl, SSource &vehicle, SSource &game, SSource &storage,
-	std::vector<SClassOps> &createOut, std::vector<SClassOps> &removeOut, bool &recountInPlace)
+	SCountShape &shape, bool &recountInPlace)
 {
 	int begin, end, split, endif;
 
@@ -685,81 +525,79 @@ static bool CheckSources(SSource &pools, SSource &carCtrl, SSource &vehicle, SSo
 		Fail("Vehicle.cpp: the CVehicle destructor is not found");
 
 	/* --- CarCtrl: the counters the count moves --- */
-	if (!FindBody(carCtrl, "CCarCtrl::UpdateCarCount(CVehicle* pVehicle, bool remove)", begin, end)) {
-		Fail("CarCtrl.cpp: CCarCtrl::UpdateCarCount is not found");
+	if (!ParseUpdateCarCount(carCtrl, shape)) {
+		Fail("CarCtrl.cpp: CCarCtrl::UpdateCarCount is not found or does not split at else{");
 		return false;
 	}
-	split = -1;
-	for (int i = begin + 1; i < end; i++)
-		if (Trim(carCtrl.lines[i]) == "else{") {
-			split = i;
-			break;
-		}
-	if (split < 0) {
-		Fail("CarCtrl.cpp: the remove/create split of UpdateCarCount is not found");
-		return false;
+	printf("  src/control/CarCtrl.cpp: UpdateCarCount (lines %d..%d), the shape from CarCountShape.h\n",
+		shape.begin + 1, shape.end + 1);
+	printf("    the law count is the prefix op of both sides (VICE-166), the class counter sits in its case\n");
+	printf("    the far layer %s\n",
+		shape.farEarlyReturn ? "returns before the count (the VICE-128 no-op)" : "has no early return");
+
+	const bool fiveCreate = (int)shape.create.size() == nClassNames ||
+		(shape.farEarlyReturn && (int)shape.create.size() == nClassNames - 1);
+	const bool fiveRemove = (int)shape.remove.size() == nClassNames ||
+		(shape.farEarlyReturn && (int)shape.remove.size() == nClassNames - 1);
+	Check(fiveCreate, "UpdateCarCount covers the five classes on the create side (or four and the far early return)");
+	Check(fiveRemove, "UpdateCarCount covers the five classes on the remove side (or four and the far early return)");
+
+	CheckGuards(shape);
+	for (size_t i = 0; i < shape.law.size(); i++) {
+		char lmsg[200];
+		sprintf(lmsg, "the law statement of the %s side is not the guarded if (pVehicle->bIsLawEnforcer) (line %d)",
+			shape.law[i].create ? "create" : "remove", shape.law[i].guardIndex + 1);
+		Check(LawStatementShapeOk(shape.law[i]), lmsg);
 	}
-	std::vector<SClassOps> remove = ParseSwitch(carCtrl, begin, split);
-	std::vector<SClassOps> create = ParseSwitch(carCtrl, split, end);
-	printf("  src/control/CarCtrl.cpp: UpdateCarCount (lines %d..%d)\n", begin + 1, end + 1);
+	Check(shape.law.size() == 2, "the law count is written once per side");
 
-	Check((int)create.size() == nClassNames, "UpdateCarCount covers the five classes on the create side");
-	Check((int)remove.size() == nClassNames, "UpdateCarCount covers the five classes on the remove side");
-
-	CheckGuards(create, remove);
-
-	/* The deltas, class by class, against the table the program runs. */
+	/* The deltas, class by class, against the table the program runs. The law
+	 * count leads every class but the far layer's: it is the prefix op of both
+	 * sides, so it applies to whatever class the flag is set on (VICE-166);
+	 * RANDOM keeps its own NumRandomCars. */
 	static const SClassOps aExpected[] = {
-		/* RANDOM: a law enforcer is counted twice, as the live path counts it. */
-		{ "RANDOM_VEHICLE",      { { "NumLawEnforcerCars", +1, true, false, 0 }, { "NumRandomCars", +1, false, false, 0 } } },
-		{ "MISSION_VEHICLE",     { { "NumMissionCars", +1, false, false, 0 } } },
-		{ "PARKED_VEHICLE",      { { "NumParkedCars", +1, false, false, 0 } } },
-		{ "PERMANENT_VEHICLE",   { { "NumPermanentCars", +1, false, false, 0 } } },
-		{ "FAR_TRAFFIC_VEHICLE", { } },
+		{ "RANDOM_VEHICLE",      { { "NumLawEnforcerCars", +1, true, false, 0 }, { "NumRandomCars", +1, false, false, 0 } }, 0 },
+		{ "MISSION_VEHICLE",     { { "NumLawEnforcerCars", +1, true, false, 0 }, { "NumMissionCars", +1, false, false, 0 } }, 0 },
+		{ "PARKED_VEHICLE",      { { "NumLawEnforcerCars", +1, true, false, 0 }, { "NumParkedCars", +1, false, false, 0 } }, 0 },
+		{ "PERMANENT_VEHICLE",   { { "NumLawEnforcerCars", +1, true, false, 0 }, { "NumPermanentCars", +1, false, false, 0 } }, 0 },
+		{ "FAR_TRAFFIC_VEHICLE", { }, 0 },
 	};
 	char msg[240];
 	for (int i = 0; i < nClassNames; i++) {
-		const SClassOps *got = FindClass(create, aExpected[i].cls.c_str());
-		sprintf(msg, "the create table has no %s class", aExpected[i].cls.c_str());
-		Check(got != NULL, msg);
-		if (got) {
-			sprintf(msg, "%s: the create table has %d deltas, expected %d",
-				aExpected[i].cls.c_str(), (int)got->ops.size(), (int)aExpected[i].ops.size());
-			Check(got->ops.size() == aExpected[i].ops.size(), msg);
-			for (size_t j = 0; j < got->ops.size() && j < aExpected[i].ops.size(); j++) {
-				bool same = got->ops[j].counter == aExpected[i].ops[j].counter &&
-					got->ops[j].sign == aExpected[i].ops[j].sign &&
-					got->ops[j].whenLaw == aExpected[i].ops[j].whenLaw;
-				sprintf(msg, "%s: create delta %d is %s %+d (law %d), expected %s %+d (law %d)",
-					aExpected[i].cls.c_str(), (int)j,
-					got->ops[j].counter.c_str(), got->ops[j].sign, got->ops[j].whenLaw,
-					aExpected[i].ops[j].counter.c_str(), aExpected[i].ops[j].sign,
-					aExpected[i].ops[j].whenLaw);
-				Check(same, msg);
-			}
+		std::vector<SCountOp> got = EffectiveOps(shape, true, aExpected[i].cls.c_str());
+		std::vector<SCountOp> gone = EffectiveOps(shape, false, aExpected[i].cls.c_str());
+		sprintf(msg, "%s: the create table has %d deltas, expected %d",
+			aExpected[i].cls.c_str(), (int)got.size(), (int)aExpected[i].ops.size());
+		Check(got.size() == aExpected[i].ops.size(), msg);
+		for (size_t j = 0; j < got.size() && j < aExpected[i].ops.size(); j++) {
+			bool same = got[j].counter == aExpected[i].ops[j].counter &&
+				got[j].sign == aExpected[i].ops[j].sign &&
+				got[j].whenLaw == aExpected[i].ops[j].whenLaw;
+			sprintf(msg, "%s: create delta %d is %s %+d (law %d), expected %s %+d (law %d)",
+				aExpected[i].cls.c_str(), (int)j,
+				got[j].counter.c_str(), got[j].sign, got[j].whenLaw,
+				aExpected[i].ops[j].counter.c_str(), aExpected[i].ops[j].sign,
+				aExpected[i].ops[j].whenLaw);
+			Check(same, msg);
 		}
-		/* the remove side is the mirror of the create side */
-		const SClassOps *gone = FindClass(remove, aExpected[i].cls.c_str());
-		sprintf(msg, "the remove table has no %s class", aExpected[i].cls.c_str());
-		Check(gone != NULL, msg);
-		if (got && gone) {
-			sprintf(msg, "%s: the remove table has %d deltas, expected %d (the mirror)",
-				aExpected[i].cls.c_str(), (int)gone->ops.size(), (int)got->ops.size());
-			Check(gone->ops.size() == got->ops.size(), msg);
-			for (size_t j = 0; j < gone->ops.size() && j < got->ops.size(); j++) {
-				bool mirror = gone->ops[j].counter == got->ops[j].counter &&
-					gone->ops[j].sign == -got->ops[j].sign &&
-					gone->ops[j].whenLaw == got->ops[j].whenLaw;
-				sprintf(msg, "%s: remove delta %d is %s %+d (law %d), expected %s %+d (law %d)",
-					aExpected[i].cls.c_str(), (int)j,
-					gone->ops[j].counter.c_str(), gone->ops[j].sign, gone->ops[j].whenLaw,
-					got->ops[j].counter.c_str(), -got->ops[j].sign, got->ops[j].whenLaw);
-				Check(mirror, msg);
-			}
+		sprintf(msg, "%s: the remove table has %d deltas, expected %d (the mirror)",
+			aExpected[i].cls.c_str(), (int)gone.size(), (int)got.size());
+		Check(gone.size() == got.size(), msg);
+		for (size_t j = 0; j < gone.size() && j < got.size(); j++) {
+			bool mirror = gone[j].counter == got[j].counter &&
+				gone[j].sign == -got[j].sign &&
+				gone[j].whenLaw == got[j].whenLaw;
+			sprintf(msg, "%s: remove delta %d is %s %+d (law %d), expected %s %+d (law %d)",
+				aExpected[i].cls.c_str(), (int)j,
+				gone[j].counter.c_str(), gone[j].sign, gone[j].whenLaw,
+				got[j].counter.c_str(), -got[j].sign, got[j].whenLaw);
+			Check(mirror, msg);
 		}
 	}
-	printf("    the five classes: RANDOM +1 random (+1 law for a law enforcer), MISSION +1 mission,\n");
-	printf("    PARKED +1 parked, PERMANENT +1 permanent, FAR_TRAFFIC nothing; the remove side mirrors it\n");
+	printf("    the five classes: the law prefix op +1 under the flag, then RANDOM +1 random,\n");
+	printf("    MISSION +1 mission, PARKED +1 parked, PERMANENT +1 permanent, FAR_TRAFFIC nothing;\n");
+	printf("    the remove side mirrors it. A law-flagged car of any class counts in its class counter\n");
+	printf("    and in NumLawEnforcerCars while the flag is set, its documented double count\n");
 
 	/* The load path clears the counters before the restore builds on them. */
 	static const char *aCounters[] = {
@@ -811,8 +649,6 @@ static bool CheckSources(SSource &pools, SSource &carCtrl, SSource &vehicle, SSo
 		Fail("Game.cpp: CGame::ReInitGameObjectVariables is not found");
 	printf("\n");
 
-	createOut = create;
-	removeOut = remove;
 	return true;
 }
 
@@ -850,29 +686,29 @@ static int *CounterSlot(SCounters &c, const std::string &name)
 	return NULL;
 }
 
-static void ApplyOps(SCounters &c, const SClassOps *ops, bool law)
+/* The parsed ops of one class: the prefix ops first (the law count of the
+ * VICE-166 shape rides every class), then the class's own case ops. */
+static void ApplyOps(SCounters &c, const std::vector<SCountOp> &ops, bool law)
 {
-	if (!ops)
-		return;
-	for (size_t i = 0; i < ops->ops.size(); i++) {
-		if (ops->ops[i].whenLaw && !law)
+	for (size_t i = 0; i < ops.size(); i++) {
+		if (ops[i].whenLaw && !law)
 			continue;
-		int *slot = CounterSlot(c, ops->ops[i].counter);
+		int *slot = CounterSlot(c, ops[i].counter);
 		if (slot)
-			*slot += ops->ops[i].sign;
+			*slot += ops[i].sign;
 	}
 }
 
 /* The create count of one class, the way CCarCtrl::UpdateCarCount applies it. */
-static void ApplyCreate(SCounters &c, const std::vector<SClassOps> &create, const char *cls, bool law)
+static void ApplyCreate(SCounters &c, const SCountShape &shape, const char *cls, bool law)
 {
-	ApplyOps(c, FindClass(create, cls), law);
+	ApplyOps(c, EffectiveOps(shape, true, cls), law);
 }
 
 /* The remove count of one class, the destructor's CCarCtrl::UpdateCarCount. */
-static void ApplyRemove(SCounters &c, const std::vector<SClassOps> &remove, const char *cls, bool law)
+static void ApplyRemove(SCounters &c, const SCountShape &shape, const char *cls, bool law)
 {
-	ApplyOps(c, FindClass(remove, cls), law);
+	ApplyOps(c, EffectiveOps(shape, false, cls), law);
 }
 
 static void AddInto(SCounters &into, const SCounters &one)
@@ -891,13 +727,13 @@ static void AddInto(SCounters &into, const SCounters &one)
  * branch), and the branch counts the vehicle again - or does not, on the
  * pre-fix code (`recount` false), which is the defect of the ticket.
  */
-static SCounters RestoreOne(const std::vector<SClassOps> &create, const char *cls, bool law, bool recount)
+static SCounters RestoreOne(const SCountShape &shape, const char *cls, bool law, bool recount)
 {
-	SCounters c;	/* CCarCtrl::ReInit: every counter starts at zero */
-	ApplyCreate(c, create, "RANDOM_VEHICLE", false);	/* the constructor */
-	c.random--;						/* --CCarCtrl::NumRandomCars */
+	SCounters c;    /* CCarCtrl::ReInit: every counter starts at zero */
+	ApplyCreate(c, shape, "RANDOM_VEHICLE", false);    /* the constructor */
+	c.random--;                        /* --CCarCtrl::NumRandomCars */
 	if (recount)
-		ApplyCreate(c, create, cls, law);		/* CCarCtrl::UpdateCarCount(pVehicle, false) */
+		ApplyCreate(c, shape, cls, law);        /* CCarCtrl::UpdateCarCount(pVehicle, false) */
 	return c;
 }
 
@@ -908,8 +744,7 @@ struct SSavedCar
 	bool law;
 };
 
-static void RunTransition(const std::vector<SClassOps> &create, const std::vector<SClassOps> &remove,
-	bool recountInPlace)
+static void RunTransition(const SCountShape &shape, bool recountInPlace)
 {
 	printf("B. the transition itself, run with the deltas parsed above\n\n");
 
@@ -921,9 +756,9 @@ static void RunTransition(const std::vector<SClassOps> &create, const std::vecto
 			const bool law = l == 1;
 			if (strcmp(aClassNames[i], "RANDOM_VEHICLE") != 0 && law)
 				continue;
-			SCounters got = RestoreOne(create, aClassNames[i], law, recountInPlace);
+			SCounters got = RestoreOne(shape, aClassNames[i], law, recountInPlace);
 			SCounters want;
-			ApplyCreate(want, create, aClassNames[i], law);
+			ApplyCreate(want, shape, aClassNames[i], law);
 			char after[40], wanted[40];
 			sprintf(after, "%d/%d/%d/%d/%d", got.random, got.law, got.mission, got.parked, got.permanent);
 			sprintf(wanted, "%d/%d/%d/%d/%d", want.random, want.law, want.mission, want.parked, want.permanent);
@@ -944,8 +779,8 @@ static void RunTransition(const std::vector<SClassOps> &create, const std::vecto
 	const int nMixed = sizeof(aMixed) / sizeof(aMixed[0]);
 	SCounters wantMixed, gotMixed;
 	for (int i = 0; i < nMixed; i++) {
-		ApplyCreate(wantMixed, create, aMixed[i].cls, aMixed[i].law);
-		SCounters one = RestoreOne(create, aMixed[i].cls, aMixed[i].law, recountInPlace);
+		ApplyCreate(wantMixed, shape, aMixed[i].cls, aMixed[i].law);
+		SCounters one = RestoreOne(shape, aMixed[i].cls, aMixed[i].law, recountInPlace);
 		AddInto(gotMixed, one);
 	}
 	printf("  the mixed set: 3 mission + 1 parked + 1 random law car\n");
@@ -959,7 +794,7 @@ static void RunTransition(const std::vector<SClassOps> &create, const std::vecto
 	Check(SameCounters(gotMixed, wantMixed), "the mixed set does not hold the sum of its create deltas");
 	SCounters destroyed = gotMixed;
 	for (int i = 0; i < nMixed; i++)
-		ApplyRemove(destroyed, remove, aMixed[i].cls, aMixed[i].law);
+		ApplyRemove(destroyed, shape, aMixed[i].cls, aMixed[i].law);
 	printf("    destroyed           %d/%d/%d/%d/%d\n", destroyed.random, destroyed.law, destroyed.mission,
 		destroyed.parked, destroyed.permanent);
 	Check(IsZero(destroyed), "the destroyed mixed set does not return the counters to zero");
@@ -974,7 +809,7 @@ static void RunTransition(const std::vector<SClassOps> &create, const std::vecto
 	const int savedMission = 7;
 	SCounters live;
 	for (int i = 0; i < savedMission; i++)
-		ApplyCreate(live, create, "MISSION_VEHICLE", false);
+		ApplyCreate(live, shape, "MISSION_VEHICLE", false);
 	printf("  the carried soak: %d rounds of save -> CCarCtrl::ReInit -> restore -> save again,\n",
 		rounds);
 	printf("  %d saved mission cars\n", savedMission);
@@ -984,7 +819,7 @@ static void RunTransition(const std::vector<SClassOps> &create, const std::vecto
 	for (int r = 0; r < rounds; r++) {
 		SCounters after;
 		for (int i = 0; i < savedMission; i++) {
-			SCounters one = RestoreOne(create, "MISSION_VEHICLE", false, recountInPlace);
+			SCounters one = RestoreOne(shape, "MISSION_VEHICLE", false, recountInPlace);
 			AddInto(after, one);
 		}
 		if (!SameCounters(after, live))
@@ -1006,10 +841,10 @@ static void RunTransition(const std::vector<SClassOps> &create, const std::vecto
 	 * no recount lose the whole restored set on the first load. */
 	SCounters preBefore;
 	for (int i = 0; i < savedMission; i++)
-		ApplyCreate(preBefore, create, "MISSION_VEHICLE", false);
+		ApplyCreate(preBefore, shape, "MISSION_VEHICLE", false);
 	SCounters preAfter;
 	for (int i = 0; i < savedMission; i++) {
-		SCounters one = RestoreOne(create, "MISSION_VEHICLE", false, false);
+		SCounters one = RestoreOne(shape, "MISSION_VEHICLE", false, false);
 		AddInto(preAfter, one);
 	}
 	printf("  the pre-fix sequence: before the first save mission %d, after the load mission %d,\n",
@@ -1036,7 +871,7 @@ int main(void)
 	printf("that own the transition and runs it as they write it.\n\n");
 
 	SSource pools, carCtrl, vehicle, game, storage;
-	std::vector<SClassOps> create, remove;
+	SCountShape shape;
 	bool recountInPlace = false;
 	if (!ReadSource("src/core/Pools.cpp", pools) ||
 	    !ReadSource("src/control/CarCtrl.cpp", carCtrl) ||
@@ -1044,8 +879,8 @@ int main(void)
 	    !ReadSource("src/core/Game.cpp", game) ||
 	    !ReadSource("src/save/GenericGameStorage.cpp", storage)) {
 		Fail("the sources cannot be read (run the program from the repository root)");
-	} else if (CheckSources(pools, carCtrl, vehicle, game, storage, create, remove, recountInPlace)) {
-		RunTransition(create, remove, recountInPlace);
+	} else if (CheckSources(pools, carCtrl, vehicle, game, storage, shape, recountInPlace)) {
+		RunTransition(shape, recountInPlace);
 	}
 
 	printf("== result\n\n");
