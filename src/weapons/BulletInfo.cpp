@@ -110,6 +110,17 @@ void CBulletInfo::Update(void)
 			bulletInfoInUse--;
 #endif
 		}
+		// The driver of the firing vehicle is never a victim of its own
+		// gunfire: the shot leaves the driver's hand, and the bullet starts
+		// inside the vehicle. The event names them as the criminal too.
+		CPed *pShooter = nil;
+		if (pBullet->m_pSource) {
+			if (pBullet->m_pSource->IsPed())
+				pShooter = (CPed*)pBullet->m_pSource;
+			else if (pBullet->m_pSource->IsVehicle())
+				pShooter = ((CVehicle*)pBullet->m_pSource)->pDriver;
+		}
+
 		CVector vecOldPos = pBullet->m_vecPosition;
 		CVector vecNewPos = pBullet->m_vecPosition + pBullet->m_vecSpeed * CTimer::GetTimeStep() * 0.5f;
 
@@ -126,7 +137,7 @@ void CBulletInfo::Update(void)
 		if (CWorld::ProcessLineOfSight(vecOldPos, vecNewPos, point, pHitEntity, true, true, true, true, true, false, false, true)) {
 
 			CWeapon::CheckForShootingVehicleOccupant(&pHitEntity, &point, pBullet->m_eWeaponType, vecOldPos, vecNewPos);
-			if (pHitEntity->IsPed()) {
+			if (pHitEntity->IsPed() && pHitEntity != (CEntity*)pShooter) {
 				CPed* pPed = (CPed*)pHitEntity;
 				if (!pPed->DyingOrDead() && pPed != pBullet->m_pSource) {
 					if (pPed->IsPedInControl() && !pPed->bIsDucking) {
@@ -135,7 +146,7 @@ void CBulletInfo::Update(void)
 						pAnim->SetBlend(0.0f, 8.0f);
 					}
 					pPed->InflictDamage(pBullet->m_pSource, pBullet->m_eWeaponType, pBullet->m_nDamage, (ePedPieceTypes)point.pieceB, pPed->GetLocalDirection(pPed->GetPosition() - point.point));
-					CEventList::RegisterEvent(pPed->m_nPedType == PEDTYPE_COP ? EVENT_SHOOT_COP : EVENT_SHOOT_PED, EVENT_ENTITY_PED, pPed, (CPed*)pBullet->m_pSource, 1000);
+					CEventList::RegisterEvent(pPed->m_nPedType == PEDTYPE_COP ? EVENT_SHOOT_COP : EVENT_SHOOT_PED, EVENT_ENTITY_PED, pPed, pShooter, 1000);
 					pBullet->m_bInUse = false;
 #ifdef SQUEEZE_PERFORMANCE
 					bulletInfoInUse--;

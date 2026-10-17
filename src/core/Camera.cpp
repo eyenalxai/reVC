@@ -3286,14 +3286,6 @@ CCamera::Using1stPersonView(void)
 }
 
 bool
-CCamera::UsingThirdPersonAds(void)
-{
-	// The third person aim down the sights pull is gone: the aim does not move
-	// or zoom the camera. The weapon code must drop this call.
-	return false;
-}
-
-bool
 CCamera::InFirstPersonCarView(void)
 {
 	// The first person camera serves the vehicle too: the player's own vehicle

@@ -672,9 +672,6 @@ public:
 	// keeps the player FOV and the shot follows the aim ray.
 	bool UsingFirstPersonSights(void);
 	bool Using1stPersonView(void);
-	// The third person aim down the sights pull is gone: the camera does not
-	// move or zoom while a gun aims. The weapon code must drop this call.
-	bool UsingThirdPersonAds(void);
 	// The first person mode with the player's own vehicle as the target
 	bool InFirstPersonCarView(void);
 	// The car aim: the driver holds the one aim state and the camera serves the
