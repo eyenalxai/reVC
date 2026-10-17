@@ -71,7 +71,7 @@ public:
 	bool FireInstantHitFromCar(CVehicle *shooter);
 	// The shot from a car after the source and the target are known; aimed
 	// picks the weapon's own damage over the stock drive-by damage
-	bool FireFromCarAt        (CVehicle *shooter, CVector &source, CVector &target, bool aimed);
+	bool FireFromCarAt        (CVehicle *shooter, CVector &muzzle, CVector &shotStart, CVector &target, bool aimed);
 	
 	static void DoDoomAiming       (CEntity *shooter, CVector *source,   CVector *target);
 	static void DoTankDoomAiming   (CEntity *shooter, CEntity *driver,   CVector *source, CVector *target);
