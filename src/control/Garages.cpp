@@ -17,6 +17,7 @@
 #include "Particle.h"
 #include "PlayerPed.h"
 #include "Replay.h"
+#include "SpawnOccupancy.h"
 #include "Stats.h"
 #include "Streaming.h"
 #include "Text.h"
@@ -2145,6 +2146,9 @@ void CGarage::CenterCarInGarage(CVehicle* pVehicle)
 	}
 	if (!IsEntityEntirelyInside3D(pVehicle, 0.3f))
 		pVehicle->SetPosition(pos);
+	/* The respray centring is the garage's own placement of the car
+	 * (VICE-149): the matrix writes above carry no hook of their own. */
+	CSpawnOccupancy::EntityMoved(pVehicle);
 }
 
 void CGarages::CloseHideOutGaragesBeforeSave()

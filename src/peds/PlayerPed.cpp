@@ -102,7 +102,7 @@ SteerVelocityTowards(const CVector2D &velocity, const CVector2D &target, float m
 }
 
 // The player's aim pose aims at a point this far along the aim ray
-#define PLAYER_AIM_DISTANCE 30.0f
+#define PLAYER_AIM_DISTANCE AIM_RAY_DISTANCE
 
 bool CPlayerPed::bDontAllowWeaponChange;
 #ifndef MASTER
@@ -1005,6 +1005,13 @@ CPlayerPed::AimAtPosition(const CVector &position)
 	m_fFPSMoveHeading = CGeneral::GetRadianAngleBetweenPoints(position.z,
 		Distance2D(GetPosition(), position.x, position.y), armPos.z, 0.0f);
 
+	// The rocket launcher's data has no fire animation to hold: the arm IK
+	// raises the launcher to the aim instead of the held upper body pose. The
+	// scope and the viewfinder do not show the pose at all.
+	if (!UsesScopeZoom(GetWeapon()->m_eWeaponType) && !IsPhotoCamera(GetWeapon()->m_eWeaponType) &&
+	    GetWeapon()->GetInfo()->m_AnimToPlay == ASSOCGRP_STD)
+		m_pedIK.m_flags |= CPedIK::AIMS_WITH_ARM;
+
 	HoldUpperBodyAimPose();
 }
 
@@ -1026,31 +1033,49 @@ CPlayerPed::AimWeapon(CPad *padUsed)
 		return;
 	}
 
-	if (!m_bWeaponAimActive) {
-		// An aiming weapon never lock-ons: the stock lock-on belongs to the
-		// melee, the thrown weapons and the detonator
-		if (m_pPointGunAt || m_bHasLockOnTarget)
-			ClearWeaponTarget();
-		m_bWeaponAimActive = true;
-	}
+	if (!m_bWeaponAimActive)
+		StartWeaponAim();
+	else
+		// The weapon switched under the held aim: the scope or the viewfinder
+		// follows the new weapon
+		UpdateAimCameraMode();
 
-	// The scope and the viewfinder own the camera; the viewfinder keeps its
-	// mode because the photograph reads it. No other weapon changes the camera.
+	CVector source, target;
+	TheCamera.GetPlayerAimRay(PLAYER_AIM_DISTANCE, GetPosition(), source, target);
+	AimAtPosition(target);
+}
+
+// The start of the aim: the state, the end of any lock-on and the camera mode
+// of the scope or the viewfinder. It is the one start, on foot and in a
+// vehicle alike.
+void
+CPlayerPed::StartWeaponAim(void)
+{
+	// An aiming weapon never lock-ons: the stock lock-on belongs to the
+	// melee, the thrown weapons and the detonator
+	if (m_pPointGunAt || m_bHasLockOnTarget)
+		ClearWeaponTarget();
+	m_bWeaponAimActive = true;
+	UpdateAimCameraMode();
+}
+
+// The camera mode of the held aim: the scope and the viewfinder own the
+// camera, and every other gun aims through the view it has. A mode the aim
+// never sets (the syphon, the heli cannon) stays.
+void
+CPlayerPed::UpdateAimCameraMode(void)
+{
+	eWeaponType weapon = GetWeapon()->m_eWeaponType;
+
 	if (UsesScopeZoom(weapon)) {
 		if (TheCamera.PlayerWeaponMode.Mode != CCam::MODE_SNIPER)
 			TheCamera.SetNewPlayerWeaponMode(CCam::MODE_SNIPER, 0, 0);
 	} else if (IsPhotoCamera(weapon)) {
 		if (TheCamera.PlayerWeaponMode.Mode != CCam::MODE_CAMERA)
 			TheCamera.SetNewPlayerWeaponMode(CCam::MODE_CAMERA, 0, 0);
-	} else if (TheCamera.PlayerWeaponMode.Mode == CCam::MODE_SNIPER
-		|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_CAMERA) {
-		// The weapon switched under the aim: the scope or the viewfinder goes
+	} else if (TheCamera.IsSightCameraMode(TheCamera.PlayerWeaponMode.Mode)) {
 		TheCamera.ClearPlayerWeaponMode();
 	}
-
-	CVector source, target;
-	TheCamera.GetPlayerAimRay(PLAYER_AIM_DISTANCE, GetPosition(), source, target);
-	AimAtPosition(target);
 }
 
 // The end of the aim: the stock release puts the pose down, and the scope or
@@ -1069,8 +1094,7 @@ CPlayerPed::StopWeaponAim(void)
 void
 CPlayerPed::ClearAimCameraMode(void)
 {
-	if (TheCamera.PlayerWeaponMode.Mode == CCam::MODE_SNIPER
-		|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_CAMERA)
+	if (TheCamera.IsSightCameraMode(TheCamera.PlayerWeaponMode.Mode))
 		TheCamera.ClearPlayerWeaponMode();
 }
 
@@ -2080,7 +2104,8 @@ CPlayerPed::ProcessControl(void)
 		return;
 	}
 	if (m_nPedState == PED_DRIVING && m_objective != OBJECTIVE_LEAVE_CAR) {
-		StopWeaponAim();
+		// The seat owns the aim: the vehicle branch starts and stops it, so
+		// this path must not clear the state the vehicle just set.
 		if (!CReplay::IsPlayingBack() || m_pMyVehicle) {
 			if (m_pMyVehicle->IsCar() && ((CAutomobile*)m_pMyVehicle)->Damage.GetDoorStatus(DOOR_FRONT_LEFT) == DOOR_STATUS_SWINGING) {
 				CAnimBlendAssociation *rollDoorAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_CAR_CLOSE_DOOR_ROLLING_LHS);
@@ -2141,8 +2166,7 @@ CPlayerPed::ProcessControl(void)
 					// keeps moving), then the fight stance and the classic
 					// walk.
 					if (TheCamera.Using1stPersonView()
-						|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_SNIPER
-						|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_CAMERA
+						|| TheCamera.IsSightCameraMode(TheCamera.PlayerWeaponMode.Mode)
 #ifdef FREE_CAM
 						|| TheCamera.Cams[0].Using3rdPersonMouseCam() && !CCamera::bFreeCam
 #else

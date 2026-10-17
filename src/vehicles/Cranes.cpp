@@ -10,6 +10,7 @@
 #include "ModelIndices.h"
 #include "Replay.h"
 #include "Object.h"
+#include "SpawnOccupancy.h"
 #include "World.h"
 #include "SaveBuf.h"
 
@@ -347,6 +348,9 @@ void CCrane::Update(void)
 				m_pVehiclePickedUp->GetRight() = CrossProduct(m_pVehiclePickedUp->GetForward(), up);
 				m_pVehiclePickedUp->GetForward() = CrossProduct(up, m_pVehiclePickedUp->GetRight());
 				m_pVehiclePickedUp->GetUp() = up;
+				/* The carried car is the crane's to move (VICE-149): the
+				 * physics step does not carry it here. */
+				CSpawnOccupancy::EntityMoved(m_pVehiclePickedUp);
 			}
 			break;
 		default:

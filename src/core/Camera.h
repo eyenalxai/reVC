@@ -673,6 +673,10 @@ public:
 	// vehicle, so the third person mouse camera or the first person car view
 	// aims freely. The handbrake suppression reads this.
 	bool UsingCarAds(void);
+	// The two camera modes the sight views run: the scope of the sniper and the
+	// laser scope, and the viewfinder of the photo camera. Every other view is
+	// the plain view of the aim.
+	static bool IsSightCameraMode(int16 mode) { return mode == CCam::MODE_SNIPER || mode == CCam::MODE_CAMERA; }
 	// The sight overlay the current view draws: the scope of the sniper and the
 	// laser scope, the viewfinder of the photo camera, or MODE_NONE so the HUD
 	// draws its own one reticle for a normal gun. The HUD asks this.

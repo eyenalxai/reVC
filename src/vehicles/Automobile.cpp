@@ -3750,31 +3750,15 @@ CAutomobile::ProcessBuoyancy(void)
 void
 CAutomobile::DoDriveByShootings(void)
 {
-	// The aim state comes first: it follows the gun and the aim input, and it
-	// must clear even when the stock gates stop the rest of the drive-by.
-	bool aiming = UpdateDriverWeaponAim();
-
-	// The stock drive-by gate: a script can forbid the drive-by to the player.
-	if (pDriver->IsPlayer() && !((CPlayerPed*)pDriver)->GetPlayerInfoForThisPlayerPed()->m_bDriveByAllowed)
+	CWeapon *weapon;
+	bool aiming;
+	if (!PrepareDriverShooting(&weapon, &aiming))
 		return;
 
-	CWeapon *weapon = pDriver->GetWeapon();
-	if(!IsGunWeapon(weapon->m_eWeaponType))
-		return;
-
-	weapon->Update(pDriver->m_audioEntityId, nil);
-
-	// The drive-by reload uses the same input as the on-foot path: the
-	// player starts a reload or judges the running one (VICE-90).
-	if (pDriver->IsPlayer())
-		((CPlayerPed*)pDriver)->ProcessActiveReloadInput(CPad::GetPad(0));
-
-	// The car ADS aims and fires every gun with the one held pose: the shot
-	// follows the camera ray. The weapon owns the fire type and the firing
-	// rate.
+	// The car aim fires every aiming weapon with the one held pose: the shot
+	// follows the camera ray. The weapon owns the fire type and the rate.
 	if(aiming){
-		if(CPad::GetPad(0)->GetCarGunFired() && CTimer::GetTimeInMilliseconds() > weapon->m_nTimer)
-			weapon->FireFromCarWithCadence(this, true);
+		FireDriverAimedWeapon(weapon);
 	}else{
 		// The stock code refills the clip while the player does not aim.
 		// With the active reload on the clip is a magazine and refills only

@@ -12,6 +12,7 @@ class CPed;
 class CPlayerPed;
 class CCopPed;
 class CFire;
+class CWeapon;
 
 enum {
 	RANDOM_VEHICLE = 1,
@@ -419,9 +420,17 @@ public:
 	void ActivateBomb(void);
 	void ActivateBombWhenEntered(void);
 	void KillPedsInVehicle(void);
-	// The aim state of the player driver: the car ADS aims every gun with one
-	// held pose. Sets or clears the state and answers whether the driver aims.
+	// The aim state of the player driver: the car aim aims every weapon with
+	// one held pose. Sets or clears the state and answers whether the driver
+	// aims.
 	bool UpdateDriverWeaponAim(void);
+	// The shared start of the three drive-by paths: the aim state, the script
+	// gate, the aiming weapon, its update and the reload input. Answers
+	// whether the path continues, with the weapon and whether it aims.
+	bool PrepareDriverShooting(CWeapon **weaponOut, bool *aimingOut);
+	// The aimed shot of every drive-by vehicle: the fire button and the
+	// weapon's own timer in one place. The weapon picks its fire type.
+	bool FireDriverAimedWeapon(CWeapon *weapon);
 
 	void SetComponentAtomicAlpha(RpAtomic *atomic, int32 alpha);
 	void UpdateClumpAlpha(void);

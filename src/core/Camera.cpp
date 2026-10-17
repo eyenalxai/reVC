@@ -764,6 +764,13 @@ CCamera::CamControl(void)
 				// same as on foot. The garage below can still ask for MODE_FIXED.
 				ReqMode = CCam::MODE_FOLLOWPED;
 
+				// The scope and the viewfinder serve the driver too: the aim
+				// sets the mode and the camera follows the driver's head, so
+				// the zoom and the overlay work from the seat (the sniper
+				// camera reads the driver of the vehicle target)
+				if(IsSightCameraMode(PlayerWeaponMode.Mode))
+					ReqMode = PlayerWeaponMode.Mode;
+
 				int vehType = ((CVehicle*)pTargetEntity)->m_vehType;
 				if(((CVehicle*)pTargetEntity)->IsBoat() && pTargetEntity->GetModelIndex() == MI_SKIMMER)
 					vehType = VEHICLE_TYPE_CAR;
@@ -933,14 +940,18 @@ CCamera::CamControl(void)
 				if(vehType == VEHICLE_TYPE_CAR && !m_bPlayerIsInGarage){
 					if(CCullZones::Cam1stPersonForPlayer() && 
 					   pTargetEntity->GetColModel()->boundingBox.GetSize().z >= 3.026f &&
-					   pToGarageWeAreInForHackAvoidFirstPerson == nil){
+					   pToGarageWeAreInForHackAvoidFirstPerson == nil &&
+					   !IsSightCameraMode(PlayerWeaponMode.Mode)){
 						ReqMode = CCam::MODE_1STPERSON;
 						m_bInATunnelAndABigVehicle = true;
 					}
 				}
 
-				// The first person view serves the vehicle too
-				if(!m_bPlayerIsInGarage && UpdateFirstPersonView(false))
+				// The first person view serves the vehicle too. The scope and
+				// the viewfinder keep their own camera in the first person
+				// setting as well.
+				if(!m_bPlayerIsInGarage && UpdateFirstPersonView(false) &&
+				   !IsSightCameraMode(PlayerWeaponMode.Mode))
 					ReqMode = CCam::MODE_1STPERSON;
 
 				// Fallen into water
@@ -1188,8 +1199,7 @@ CCamera::CamControl(void)
 				// first and third person. The hunter cannon keeps its own
 				// camera too. Every other aim keeps the plain view: the camera
 				// does not move or zoom for a normal gun.
-				if(PlayerWeaponMode.Mode == CCam::MODE_SNIPER ||
-				   PlayerWeaponMode.Mode == CCam::MODE_CAMERA ||
+				if(IsSightCameraMode(PlayerWeaponMode.Mode) ||
 				   PlayerWeaponMode.Mode == CCam::MODE_HELICANNON_1STPERSON ||
 				   Cams[ActiveCam].GetWeaponFirstPersonOn()){
 					if(PLAYER->GetPedState() == PED_SEEK_CAR){
@@ -3312,11 +3322,10 @@ CCamera::UsingCarAds(void)
 	if(playerInfo && !playerInfo->m_bDriveByAllowed)
 		return false;
 
-	if(InFirstPersonCarView())
-		return pTargetEntity == (CEntity*)vehicle;
-
-	return Cams[ActiveCam].Using3rdPersonMouseCam() &&
-	       Cams[ActiveCam].CamTargetEntity == (CEntity*)vehicle;
+	// The aim state is the rule: the camera that serves the vehicle (the
+	// follow camera, the first person car view, the scope or the viewfinder)
+	// carries the aim. The handbrake suppression and the audio read this.
+	return true;
 }
 
 int16

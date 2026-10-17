@@ -2737,7 +2737,15 @@ float fCameraNearClipMult = 0.15f;
 void
 CCam::Process_Sniper(const CVector &CameraTarget, float TargetOrientation, float, float)
 {
-	if(!CamTargetEntity->IsPed())
+	// The scope looks through the driver's eyes in a vehicle too: the vehicle
+	// target hands its driver over, so the head bone, the seat and the body
+	// heading of the driver carry the scope from the seat.
+	CPed *target = nil;
+	if(CamTargetEntity->IsPed())
+		target = (CPed*)CamTargetEntity;
+	else if(CamTargetEntity->IsVehicle())
+		target = ((CVehicle*)CamTargetEntity)->pDriver;
+	if(target == nil)
 		return;
 
 	float BackOffset = 0.19f;
@@ -2749,9 +2757,9 @@ CCam::Process_Sniper(const CVector &CameraTarget, float TargetOrientation, float
 	static float TargetFOV = 0.0f;
 
 	if(ResetStatics){
-		Beta = ((CPed*)CamTargetEntity)->m_fRotationCur + HALFPI;
+		Beta = target->m_fRotationCur + HALFPI;
 		Alpha = 0.0f;
-		m_fInitialPlayerOrientation = ((CPed*)CamTargetEntity)->m_fRotationCur + HALFPI;
+		m_fInitialPlayerOrientation = target->m_fRotationCur + HALFPI;
 		FailedTestTwelveFramesAgo = false;
 		// static DPadVertical unused
 		// static DPadHorizontal unused
@@ -2761,22 +2769,22 @@ CCam::Process_Sniper(const CVector &CameraTarget, float TargetOrientation, float
 		ResetStatics = false;
 	}
 
-	if(((CPed*)CamTargetEntity)->bIsDucking)
+	if(target->bIsDucking)
 		BackOffset = 0.8f;
-	CamTargetEntity->GetMatrix().UpdateRW();
-	CamTargetEntity->UpdateRwFrame();
-	CamTargetEntity->UpdateRpHAnim();
-	((CPed*)CamTargetEntity)->m_pedIK.GetComponentPosition(HeadPos, PED_HEAD);
+	target->GetMatrix().UpdateRW();
+	target->UpdateRwFrame();
+	target->UpdateRpHAnim();
+	target->m_pedIK.GetComponentPosition(HeadPos, PED_HEAD);
 	Source = HeadPos;
 	Source.z += 0.1f;
-	if(((CPed*)CamTargetEntity)->bIsDucking){
-		Source.x -= fDuckingBackOffset*CamTargetEntity->GetForward().x;
-		Source.y -= fDuckingBackOffset*CamTargetEntity->GetForward().y;
-		Source.x -= fDuckingRightOffset*CamTargetEntity->GetRight().x;
-		Source.y -= fDuckingRightOffset*CamTargetEntity->GetRight().y;
+	if(target->bIsDucking){
+		Source.x -= fDuckingBackOffset*target->GetForward().x;
+		Source.y -= fDuckingBackOffset*target->GetForward().y;
+		Source.x -= fDuckingRightOffset*target->GetRight().x;
+		Source.y -= fDuckingRightOffset*target->GetRight().y;
 	}else{
-		Source.x -= BackOffset*CamTargetEntity->GetForward().x;
-		Source.y -= BackOffset*CamTargetEntity->GetForward().y;
+		Source.x -= BackOffset*target->GetForward().x;
+		Source.y -= BackOffset*target->GetForward().y;
 	}
 
 	// Look around

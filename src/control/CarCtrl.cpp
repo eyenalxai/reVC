@@ -31,6 +31,7 @@
 #include "TrafficLights.h"
 #include "TrafficRings.h"
 #include "FillBurst.h"
+#include "SpawnOccupancy.h"
 #include "Streaming.h"
 #include "VisibilityPlugins.h"
 #include "Vehicle.h"
@@ -2937,6 +2938,9 @@ void CCarCtrl::SteerAIHeliTowardsTargetCoors(CAutomobile* pHeli)
 			pHeli->AddToMoveSpeed(0.0f, 0.0f, 1.5f * ZSpeedChangeMax);
 	}
 	pHeli->GetMatrix().Translate(0.0f, 0.0f, CTimer::GetTimeStep() * pHeli->GetMoveSpeed().z);
+	/* The script heli moves its matrix directly; the physics step does not
+	 * carry it. The occupancy store follows both (VICE-149). */
+	CSpawnOccupancy::EntityMoved(pHeli);
 	pHeli->m_vecTurnSpeed.z *= Pow(0.99f, CTimer::GetTimeStep());
 	float ZTurnSpeedTarget;
 	if (distanceToTarget < 8.0f && pHeli->m_fHeliOrientation < 0.0f)

@@ -27,6 +27,7 @@
 #include "Object.h"
 #include "HandlingMgr.h"
 #include "Ropes.h"
+#include "SpawnOccupancy.h"
 #include "Heli.h"
 #ifdef FIX_BUGS
 #include "Replay.h"
@@ -396,6 +397,9 @@ CHeli::ProcessControl(void)
 	else
 		m_vecMoveSpeed.z += speedIncZ*1.5f;
 	GetMatrix().GetPosition().z += m_vecMoveSpeed.z*CTimer::GetTimeStep();
+	/* The aircraft moves its matrix directly; the physics step does not
+	 * carry it. The occupancy store follows both (VICE-149). */
+	CSpawnOccupancy::EntityMoved(this);
 
 	// Find angular speed
 	float targetAngularSpeed;

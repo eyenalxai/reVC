@@ -82,9 +82,19 @@ CProjectileInfo::AddProjectile(CEntity *entity, eWeaponType weapon, CVector pos,
 				vy += Max(0.0f, DotProduct(vecSpeed, entity->GetForward())) + Max(0.0f, DotProduct(vecSpeed, entity->GetUp()));
 			} else {
 				if (ped->IsPlayer()) {
-					matrix.GetForward() = TheCamera.Cams[TheCamera.ActiveCam].Front;
-					matrix.GetUp() = TheCamera.Cams[TheCamera.ActiveCam].Up;
-					matrix.GetRight() = CrossProduct(TheCamera.Cams[TheCamera.ActiveCam].Up, TheCamera.Cams[TheCamera.ActiveCam].Front);
+					// The rocket leaves along the one aim ray: the aimed shot
+					// follows the pose and the reticle, not the camera axis
+					CVector raySource, rayTarget;
+					TheCamera.GetPlayerAimRay(1.0f, ped->GetPosition(), raySource, rayTarget);
+					CVector forward = rayTarget - raySource;
+					forward.Normalise();
+					CVector right = CrossProduct(CVector(0.0f, 0.0f, 1.0f), forward);
+					if (right.MagnitudeSqr() < 0.001f)
+						right = CrossProduct(CVector(0.0f, 1.0f, 0.0f), forward);
+					right.Normalise();
+					matrix.GetForward() = forward;
+					matrix.GetRight() = right;
+					matrix.GetUp() = CrossProduct(forward, right);
 					matrix.GetPosition() = pos;
 				} else if (ped->m_pSeekTarget != nil) {
 					float ry = CGeneral::GetRadianAngleBetweenPoints(1.0f, ped->m_pSeekTarget->GetPosition().z, 1.0f, pos.z);

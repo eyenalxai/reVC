@@ -14,6 +14,7 @@
 #include "CarCtrl.h"
 #include "FillBurst.h"
 #include "Population.h"
+#include "SpawnOccupancy.h"
 #include "ModelIndices.h"
 #include "World.h"
 #include "Lights.h"
@@ -92,6 +93,7 @@ CVehicle::CVehicle(uint8 CreatedBy)
 	bIsHandbrakeOn = false;
 #endif
 	CCarCtrl::UpdateCarCount(this, false);
+	CSpawnOccupancy::VehicleRegistered(this);
 	m_fHealth = 1000.0f;
 	bEngineOn = true;
 	bFreebies = true;
@@ -212,6 +214,7 @@ CVehicle::~CVehicle()
 	if (m_pCarFire)
 		m_pCarFire->Extinguish();
 	CCarCtrl::UpdateCarCount(this, true);
+	CSpawnOccupancy::VehicleRemoved(this);
 	if (bIsAmbulanceOnDuty){
 		CCarCtrl::NumAmbulancesOnDuty--;
 		bIsAmbulanceOnDuty = false;
@@ -1950,9 +1953,9 @@ void
 CVehicle::RemoveDriver(void)
 {
 	// The held aim belongs to the seat: the player who leaves the vehicle drops
-	// the aim state, the held pose and the aim flag with it.
+	// the aim state, the held pose and the aim camera mode with it.
 	if(pDriver && pDriver->IsPlayer() && ((CPlayerPed*)pDriver)->IsAimingWeapon())
-		pDriver->ClearAimFlag();
+		((CPlayerPed*)pDriver)->StopWeaponAim();
 
 #ifdef FIX_BUGS
 	if (GetStatus() != STATUS_WRECKED)
@@ -2550,19 +2553,14 @@ CVehicle::GetVehicleAppearance(void)
 	return VEHICLE_APPEARANCE_NONE;
 }
 
-// The aim distance of the driver's gun: the same 30 units the on-foot aim ray
-// uses, so the car, the bike and the boat aim exactly as far as the player
-// aims on foot.
-#define DRIVER_AIM_DISTANCE (30.0f)
-
-// The aim of the player driver. While the car ADS is on and the driver holds a
-// gun, the camera ray is the one aim the held weapon pose and the shot follow.
-// One pose serves every gun and every direction: the arms and the torso follow
-// the ray through the ped IK, while the vehicle heading and the driver's body
-// turn stay the driving ones. The Hunter, the Sea Sparrow and the planes keep
-// their own fixed guns, so they never take the aim. The state clears when the
-// aim input goes, the weapon cannot aim or a script forbids the drive-by, and
-// RemoveDriver clears it when the player leaves the seat.
+// The aim of the player driver. While the car aim is on and the driver holds
+// a gun, the camera ray is the one aim the held weapon pose and the shot
+// follow. One pose serves every gun and every direction: the arms and the
+// torso follow the ray through the ped IK, while the vehicle heading and the
+// driver's body turn stay the driving ones. The Hunter, the Sea Sparrow and
+// the planes keep their own fixed guns, so they never take the aim. The state
+// clears when the aim input goes, the weapon cannot aim or a script forbids
+// the drive-by, and RemoveDriver clears it when the player leaves the seat.
 bool
 CVehicle::UpdateDriverWeaponAim(void)
 {
@@ -2575,28 +2573,68 @@ CVehicle::UpdateDriverWeaponAim(void)
 	bool aiming = player->m_nPedState == PED_DRIVING &&
 		(playerInfo == nil || playerInfo->m_bDriveByAllowed) &&
 		!IsRealHeli() && !IsRealPlane() &&
-		IsGunWeapon(player->GetWeapon()->m_eWeaponType) &&
+		IsAimableWeapon(player->GetWeapon()->m_eWeaponType) &&
 		(TheCamera.UsingCarAds() || CPad::GetPad(0)->GetCarAim());
 
 	if (!aiming) {
 		if (player->IsAimingWeapon())
-			player->ClearAimFlag();
+			player->StopWeaponAim();
 		return false;
 	}
 
 	CVector source, target;
-	TheCamera.GetPlayerAimRay(DRIVER_AIM_DISTANCE, player->GetPosition(), source, target);
+	TheCamera.GetPlayerAimRay(AIM_RAY_DISTANCE, player->GetPosition(), source, target);
 
-	// The pitch hangs on the upper arm, like the on-foot aim pose
-	RwV3d armPos;
-	player->m_pedIK.GetComponentPosition(armPos, PED_UPPERARMR);
+	player->StartWeaponAim();
+	player->AimAtPosition(target);
 
-	player->m_bWeaponAimActive = true;
-	player->SetAimFlag(CGeneral::GetRadianAngleBetweenPoints(target.x, target.y, player->GetPosition().x, player->GetPosition().y));
-	player->m_fFPSMoveHeading = CGeneral::GetRadianAngleBetweenPoints(target.z,
-		Distance2D(player->GetPosition(), target.x, target.y), armPos.z, 0.0f);
-	player->HoldUpperBodyAimPose();
+	return true;
+}
 
+// The aimed shot of every drive-by vehicle: the fire button and the weapon's
+// own timer in one place. The weapon picks its fire type and its rate.
+bool
+CVehicle::FireDriverAimedWeapon(CWeapon *weapon)
+{
+	if (!CPad::GetPad(0)->GetCarGunFired() || CTimer::GetTimeInMilliseconds() <= weapon->m_nTimer)
+		return false;
+
+	weapon->FireFromCarWithCadence(this, true);
+	return true;
+}
+
+// The shared start of the three drive-by paths. The aim state comes first, so
+// it clears even when a gate stops the rest; then the script gate, the aiming
+// weapon, the weapon update and the reload input. It answers whether the path
+// continues, with the driver's weapon and whether the driver aims.
+bool
+CVehicle::PrepareDriverShooting(CWeapon **weaponOut, bool *aimingOut)
+{
+	*weaponOut = nil;
+	*aimingOut = UpdateDriverWeaponAim();
+
+	if (pDriver == nil)
+		return false;
+
+	// The stock drive-by gate: a script can forbid the drive-by to the player.
+	if (pDriver->IsPlayer()) {
+		CPlayerInfo *playerInfo = ((CPlayerPed*)pDriver)->GetPlayerInfoForThisPlayerPed();
+		if (playerInfo && !playerInfo->m_bDriveByAllowed)
+			return false;
+	}
+
+	CWeapon *weapon = pDriver->GetWeapon();
+	if (!IsAimableWeapon(weapon->m_eWeaponType))
+		return false;
+
+	weapon->Update(pDriver->m_audioEntityId, nil);
+
+	// The drive-by reload uses the same input as the on-foot path: the player
+	// starts a reload or judges the running one (VICE-90).
+	if (pDriver->IsPlayer())
+		((CPlayerPed*)pDriver)->ProcessActiveReloadInput(CPad::GetPad(0));
+
+	*weaponOut = weapon;
 	return true;
 }
 
