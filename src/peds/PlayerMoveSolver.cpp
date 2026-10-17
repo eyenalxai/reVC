@@ -89,11 +89,14 @@ static constexpr tMoveLadderRow moveLadder[] = {
 
 // One row per eStance: what the stance scales. The stand row carries the
 // phase-0 values (the turn scale 1.0 and the capsule 0.0 the snapshot
-// reported); the crouch and the prone rows arrive with VICE-176 and VICE-177.
-// The solver reports the capsule height and owns no collision (VICE-178).
+// reported). The crouch row is the slow shuffle: half the walk - the stride
+// share the crouch content is authored at - the turn a quarter tighter than the
+// stand, and the capsule at the top of VICE-178's crouch set (its head sphere:
+// 0.55 - 0.2 - 0.2 + 0.35). The prone row arrives with VICE-177. The solver
+// reports the capsule height and owns no collision (VICE-178).
 static constexpr tMoveStanceRow moveStanceRows[] = {
 	{ 1.0f, 1.0f, 0.0f },	// STANCE_STAND
-	{ 0.0f, 0.0f, 0.0f },	// STANCE_CROUCH: the row arrives with VICE-176
+	{ 0.5f, 1.25f, 0.5f },	// STANCE_CROUCH
 	{ 0.0f, 0.0f, 0.0f },	// STANCE_PRONE: the row arrives with VICE-177
 };
 
@@ -150,13 +153,42 @@ static constexpr tMoveTransitionRow moveTransitions[] = {
 	{ MOVE_SLIDE,	TRIGGER_LAND,		MOVE_GROUND,	0, GUARD_SPEED_BELOW, MOVE_SLIDE_EXIT_SPEED },
 };
 
+// The stance transition table (VICE-176), in priority order like the state
+// one: the same trigger mask, the first row whose stance and trigger match
+// fires. The stance is the solver's, so its moves are rows: the Duck edge
+// crouches the ped and stands him up again, the sprint, the jump press and the
+// exit-vehicle press stand him up, and every one of those stand-ups is held
+// back while the body cannot rise - VICE-178's headroom test sits on top of
+// the stand-up rows, so a crouch under a low ceiling stays crouched. The
+// sprints's own gate is a row too: the sprint holds the stance standing, so a
+// Duck edge inside a sprint does not crouch. The prone moves arrive with
+// VICE-177.
+static constexpr tMoveStanceTransitionRow moveStanceTransitions[] = {
+	// STANCE_STAND: the sprint owns the body, so a Duck edge inside a sprint
+	// does not crouch the ped (the stock gate), and otherwise the Duck edge
+	// crouches him
+	{ STANCE_STAND,		TRIGGER_SPRINT,			STANCE_STAND },
+	{ STANCE_STAND,		TRIGGER_CROUCH,			STANCE_CROUCH },
+	// STANCE_CROUCH: no headroom, the crouch holds; with it, the exits stand
+	// the ped up
+	{ STANCE_CROUCH,	TRIGGER_HEADROOM_BLOCKED,	STANCE_CROUCH },
+	{ STANCE_CROUCH,	TRIGGER_CROUCH,			STANCE_STAND },
+	{ STANCE_CROUCH,	TRIGGER_SPRINT,			STANCE_STAND },
+	{ STANCE_CROUCH,	TRIGGER_JUMP,			STANCE_STAND },
+	{ STANCE_CROUCH,	TRIGGER_EXIT_VEHICLE,		STANCE_STAND },
+};
+
 // The row counts and the masks the check reads.
 static constexpr int MOVE_STATE_ROW_COUNT = sizeof(moveStateRows) / sizeof(moveStateRows[0]);
 static constexpr int MOVE_LADDER_ROW_COUNT = sizeof(moveLadder) / sizeof(moveLadder[0]);
 static constexpr int MOVE_STANCE_ROW_COUNT = sizeof(moveStanceRows) / sizeof(moveStanceRows[0]);
 static constexpr int MOVE_TRANSITION_ROW_COUNT = sizeof(moveTransitions) / sizeof(moveTransitions[0]);
+static constexpr int MOVE_STANCE_TRANSITION_ROW_COUNT =
+	sizeof(moveStanceTransitions) / sizeof(moveStanceTransitions[0]);
 static constexpr uint32_t MOVE_TRIGGER_ALL = TRIGGER_JUMP | TRIGGER_DIVE | TRIGGER_SLIDE | TRIGGER_LAND
-	| TRIGGER_AIRBORNE | TRIGGER_WALL_CONTACT | TRIGGER_WALL_LEFT | TRIGGER_HEAD_HIT | TRIGGER_PRONE;
+	| TRIGGER_AIRBORNE | TRIGGER_WALL_CONTACT | TRIGGER_WALL_LEFT | TRIGGER_HEAD_HIT
+	| TRIGGER_CROUCH | TRIGGER_SPRINT | TRIGGER_EXIT_VEHICLE | TRIGGER_HEADROOM_BLOCKED
+	| TRIGGER_PRONE;
 
 // Every transition of the table names a state and a trigger in range, and its
 // guard is one of the guards: an unguarded row carries no threshold and a
@@ -183,6 +215,22 @@ MoveTransitionsInRange(const tMoveTransitionRow *rows, int count)
 	return true;
 }
 
+// Every stance move names a stance and a trigger in range (VICE-176); the same
+// rule runs at run time over a planted table.
+static constexpr bool
+MoveStanceTransitionsInRange(const tMoveStanceTransitionRow *rows, int count)
+{
+	for (int i = 0; i < count; i++) {
+		int from = (int)rows[i].from;
+		int to = (int)rows[i].to;
+		if (from < 0 || from >= STANCE_NUM || to < 0 || to >= STANCE_NUM)
+			return false;
+		if (rows[i].trigger == 0 || (rows[i].trigger & ~MOVE_TRIGGER_ALL) != 0)
+			return false;
+	}
+	return true;
+}
+
 // The compile-time half of the table check: the row counts, the ids in range
 // and the ladder's order fail the build here when a row is wrong.
 static_assert(MOVE_STATE_ROW_COUNT == MOVE_NUMSTATES, "one state row per eMoveStateId");
@@ -200,6 +248,8 @@ static_assert(moveLadder[TIER_WALK].speedScale < moveLadder[TIER_RUN].speedScale
 	"the ladder must strictly ascend: walk < run < sprint < the slide's entry < the slide jump");
 static_assert(MoveTransitionsInRange(moveTransitions, MOVE_TRANSITION_ROW_COUNT),
 	"every transition must name a state, a trigger and a guard in range, with a threshold when it is guarded");
+static_assert(MoveStanceTransitionsInRange(moveStanceTransitions, MOVE_STANCE_TRANSITION_ROW_COUNT),
+	"every stance move must name a stance and a trigger in range");
 
 // The slide's own compile-time rules (VICE-180): the exit speed below the entry
 // speed (the hysteresis the design asks for) and the slide's rungs above the
@@ -326,6 +376,20 @@ MoveTransitionFor(eMoveStateId from, uint32_t triggers, float ownSpeed)
 	return NULL;
 }
 
+// The stance move of one step: the first row of the stance transition table
+// whose stance is the current one and whose trigger is in the step's mask. The
+// rule is the state one, over its own rows (VICE-176); null when no row fires.
+static const tMoveStanceTransitionRow *
+MoveStanceTransitionFor(eStance from, uint32_t triggers)
+{
+	for (int i = 0; i < MOVE_STANCE_TRANSITION_ROW_COUNT; i++) {
+		const tMoveStanceTransitionRow &row = moveStanceTransitions[i];
+		if (row.from == from && (row.trigger & triggers) != 0)
+			return &row;
+	}
+	return NULL;
+}
+
 // The rung of the step. The slide moves at its entry rung whatever the pad
 // asks: the ladder names the slide's own speed, not the sprint that fed it, and
 // there is no sprint tier inside the slide (VICE-180). Every other state keeps
@@ -401,10 +465,28 @@ CPlayerMoveSolver::Step(const SMoveIntent &intent)
 		triggers |= TRIGGER_JUMP;
 	if (intent.diveRequested)
 		triggers |= TRIGGER_DIVE;
+	// The stance triggers (VICE-176): the Duck edge, the sprint and the
+	// exit-vehicle press are the stance's own, and the headroom is the one
+	// world fact of the step - the adapter asked VICE-178's test, so the
+	// solver reads a fact and never the world.
+	if (intent.crouchRequested)
+		triggers |= TRIGGER_CROUCH;
+	if (intent.sprintRequested)
+		triggers |= TRIGGER_SPRINT;
+	if (intent.exitVehiclePressed)
+		triggers |= TRIGGER_EXIT_VEHICLE;
+	if (!intent.headroomClear)
+		triggers |= TRIGGER_HEADROOM_BLOCKED;
 	if (intent.crouchRequested && intent.tier == TIER_SPRINT)
 		triggers |= TRIGGER_SLIDE;
 	if (intent.proneRequested)
 		triggers |= TRIGGER_PRONE;
+
+	// The slide's entry consumes the crouch edge: the one press cannot both
+	// start the slide and toggle the crouch stance (the slide is a state of its
+	// own, and its exit below the exit speed is what puts the ped in the crouch)
+	if ((triggers & TRIGGER_SLIDE) != 0)
+		triggers &= ~TRIGGER_CROUCH;
 
 	// The move: the first transition row whose state, trigger and guard match
 	// fires, so the table's order is the priority and the thresholds live in the
@@ -421,6 +503,14 @@ CPlayerMoveSolver::Step(const SMoveIntent &intent)
 		events = transition->onEntryEvent;
 	}
 	m_fStateTime += intent.dt;
+
+	// The stance move: the same scan over the stance's own rows, on the same
+	// mask, before the rows are read, so a stance the step enters already
+	// scales the step. Nothing else is touched: the stance carries no event and
+	// the movement state's own timer is not the stance's.
+	const tMoveStanceTransitionRow *stanceMove = MoveStanceTransitionFor(m_Stance, triggers);
+	if (stanceMove != NULL)
+		m_Stance = stanceMove->to;
 
 	const tMoveStateRow &stateRow = moveStateRows[m_State];
 	const tMoveStanceRow &stanceRow = moveStanceRows[m_Stance];
@@ -701,6 +791,19 @@ PlayerMoveTablesCheck(const SMoveTables &tables, const char **why)
 		}
 	}
 
+	// Every stance move names a stance and a trigger in range (VICE-176)
+	for (int i = 0; i < tables.numStanceTransitions; i++) {
+		const tMoveStanceTransitionRow &row = tables.stanceTransitions[i];
+		int from = (int)row.from;
+		int to = (int)row.to;
+		if (from < 0 || from >= STANCE_NUM)
+			return MoveTablesFail(why, "a stance move from a stance out of range");
+		if (to < 0 || to >= STANCE_NUM)
+			return MoveTablesFail(why, "a stance move to a stance out of range");
+		if (row.trigger == 0 || (row.trigger & ~MOVE_TRIGGER_ALL) != 0)
+			return MoveTablesFail(why, "a stance move trigger out of range");
+	}
+
 	return true;
 }
 
@@ -713,6 +816,7 @@ PlayerMoveTablesCheck(const char **why)
 		moveLadder, MOVE_LADDER_ROW_COUNT,
 		moveStanceRows, MOVE_STANCE_ROW_COUNT,
 		moveTransitions, MOVE_TRANSITION_ROW_COUNT,
+		moveStanceTransitions, MOVE_STANCE_TRANSITION_ROW_COUNT,
 	};
 	return PlayerMoveTablesCheck(tables, why);
 }

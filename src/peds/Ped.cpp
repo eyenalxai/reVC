@@ -2595,7 +2595,11 @@ CPed::ProcessControl(void)
 			}
 		}
 
-		if (bIsDucking)
+		// The stance owns the player's crouch (VICE-176): bIsDucking is the
+		// report the movement adapter writes from the solver's snapshot, so
+		// the stock upkeep must not clear it or fade the duck partials behind
+		// the stance. The AI peds keep their own duck timer.
+		if (bIsDucking && !IsPlayer())
 			Duck();
 
 		if (bStartWanderPathOnFoot) {

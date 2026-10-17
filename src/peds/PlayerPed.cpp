@@ -16,6 +16,7 @@
 #include "World.h"
 #include "RpAnimBlend.h"
 #include "AnimBlendAssociation.h"
+#include "AnimBlendAssocGroup.h"
 #include "General.h"
 #include "Pools.h"
 #include "Darkel.h"
@@ -338,6 +339,11 @@ CPlayerPed::SetInitialState(void)
 	m_fWalkAngle = 0.0f;
 	m_fMoveHeading = 0.0f;
 	m_MoveSolver.Reset();
+	// The stance mirror goes with the solver: the fresh solver stands, and the
+	// next step of the adapter writes both from its snapshot
+	bIsDucking = false;
+	bCrouchWhenShooting = false;
+	SetStance(STANCE_STAND);
 	if (m_attachedTo && !bUsesCollision)
 		bUsesCollision = true;
 
@@ -383,6 +389,13 @@ CPlayerPed::SetRealMoveAnim(void)
 	CAnimBlendAssociation *curIdleAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_IDLE);
 	CAnimBlendAssociation *curRunStopAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_RUNSTOP1);
 	CAnimBlendAssociation *curRunStopRAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_RUNSTOP2);
+	// The stance is the solver's (VICE-176), read from the snapshot like every
+	// other presentation value. A crouch plays the walk slot alone, whatever
+	// the pad ramp says: it never runs or sprints (the sprint stands the ped
+	// up), and its idle is the movement group's own idle slot, which is the
+	// stance idle while the group is the crouch set.
+	bool crouched = m_MoveSolver.GetSnapshot().stance == STANCE_CROUCH;
+
 	if (bResetWalkAnims) {
 		if (curWalkAssoc)
 			curWalkAssoc->SetCurrentTime(0.0f);
@@ -415,7 +428,10 @@ CPlayerPed::SetRealMoveAnim(void)
 			
 			RestoreHeadingRate();
 			if (!curIdleAssoc) {
-				if (m_fCurrentStamina < 0.0f && !bIsAimingGun && !CWorld::TestSphereAgainstWorld(GetPosition(), 0.5f,
+				// The stance idle owns the idle slot of a crouch: the tired
+				// standing idle is the standard group's and would stand the
+				// body up out of the stance
+				if (m_fCurrentStamina < 0.0f && !bIsAimingGun && !crouched && !CWorld::TestSphereAgainstWorld(GetPosition(), 0.5f,
 						nil, true, false, false, false, false, false)) {
 					curIdleAssoc = CAnimManager::BlendAnimation(GetClump(), ASSOCGRP_STD, ANIM_STD_IDLE_TIRED, 8.0f);
 
@@ -429,7 +445,7 @@ CPlayerPed::SetRealMoveAnim(void)
 
 		} else if (m_fMoveSpeed == 0.0f && !curSprintAssoc) {
 			if (!curIdleAssoc) {
-				if (m_fCurrentStamina < 0.0f && !bIsAimingGun && !CWorld::TestSphereAgainstWorld(GetPosition(), 0.5f,
+				if (m_fCurrentStamina < 0.0f && !bIsAimingGun && !crouched && !CWorld::TestSphereAgainstWorld(GetPosition(), 0.5f,
 						nil, true, false, false, false, false, false)) {
 					curIdleAssoc = CAnimManager::BlendAnimation(GetClump(), ASSOCGRP_STD, ANIM_STD_IDLE_TIRED, 4.0f);
 					
@@ -444,7 +460,7 @@ CPlayerPed::SetRealMoveAnim(void)
 				CAnimManager::BlendAnimation(GetClump(), m_animGroup, ANIM_STD_IDLE, 4.0f);
 
 			} else if (m_nPedState != PED_FIGHT) {
-				if (m_fCurrentStamina < 0.0f && !bIsAimingGun && curIdleAssoc->animId != ANIM_STD_IDLE_TIRED
+				if (m_fCurrentStamina < 0.0f && !bIsAimingGun && !crouched && curIdleAssoc->animId != ANIM_STD_IDLE_TIRED
 					&& !CWorld::TestSphereAgainstWorld(GetPosition(), 0.5f, nil, true, false, false, false, false, false)) {
 					CAnimManager::BlendAnimation(GetClump(), ASSOCGRP_STD, ANIM_STD_IDLE_TIRED, 4.0f);
 
@@ -552,7 +568,7 @@ CPlayerPed::SetRealMoveAnim(void)
 				curWalkAssoc->blendAmount = 0.0f;
 				curRunAssoc->blendAmount = 0.0f;
 
-			} else if (m_nMoveState == PEDMOVE_SPRINT) {
+			} else if (m_nMoveState == PEDMOVE_SPRINT && !crouched) {
 				if (curSprintAssoc) {
 					// We have anim, do it
 					if (curSprintAssoc->blendDelta < 0.0f) {
@@ -567,7 +583,12 @@ CPlayerPed::SetRealMoveAnim(void)
 				}
 				UseSprintEnergy();
 			} else {
-				if (m_fMoveSpeed < 1.0f) {
+				// The stance splits the blend: a crouch plays the walk slot
+				// alone - the crouch is a shuffle, and the run and the sprint
+				// slots belong to the standing blend - so the pad ramp picks
+				// nothing but the walk while the stance is crouched. The stand
+				// is the ramp, exactly as before.
+				if (crouched || m_fMoveSpeed < 1.0f) {
 					curWalkAssoc->blendAmount = 1.0f;
 					curRunAssoc->blendAmount = 0.0f;
 					m_nMoveState = PEDMOVE_WALK;
@@ -866,8 +887,10 @@ CPlayerPed::HoldUpperBodyAimPose(void)
 	if (weaponInfo->m_AnimToPlay == ASSOCGRP_STD)
 		return;
 
-	// The crouch pose owns the upper body while the player ducks, and the
-	// reload owns it while it plays, with or without an animation
+	// The crouch stance owns the upper body while the player ducks (VICE-176:
+	// its own aim pose is the crouch one, seated from the crouch fire
+	// animation), and the reload owns it while it plays, with or without an
+	// animation
 	if (bIsDucking || GetWeapon()->m_eWeaponState == WEAPONSTATE_RELOADING)
 		return;
 
@@ -1407,17 +1430,86 @@ CPlayerPed::BodyFacesCamera(void)
 	return TheCamera.Cams[0].Using3rdPersonMouseCam() || TheCamera.Using1stPersonView();
 }
 
+// The crouch movement set (VICE-176): the animation groups of the crouch
+// stance. The set is a block of its own, whose groups carry the direction in
+// their name the way the standing set carries ASSOCGRP_PLAYERLEFT/RIGHT/BACK.
+// The block, the groups and their entries are VICE-186's content, so this
+// lookup is by name and refuses to guess: a group is usable only while its
+// block is registered and loaded, its associations are built and its movement
+// slots are inside the built list. A group that fails any gate is refused, the
+// caller keeps the standing group, and a crouch without its content moves on
+// the standing cycles (see ProcessAnimGroups).
+#define CROUCH_ANIM_BLOCK	"crouch"
+
+static AssocGroupId
+FindCrouchAnimGroup(const char *groupName)
+{
+	CAnimBlock *block = CAnimManager::GetAnimationBlock(CROUCH_ANIM_BLOCK);
+	CAnimBlendAssocGroup *groups = CAnimManager::GetAnimAssocGroups();
+
+	if (block == nil || !block->isLoaded || groups == nil)
+		return (AssocGroupId)-1;
+
+	for (int i = 0; i < NUM_ANIM_ASSOC_GROUPS; i++) {
+		CAnimBlendAssocGroup &group = groups[i];
+		if (group.assocList == nil)
+			continue;
+		if (strcmp(CAnimManager::GetAnimGroupName((AssocGroupId)i), groupName) != 0)
+			continue;
+		// The list starts at ANIM_STD_WALK in every shipped table, and the
+		// chooser looks the movement slots up by animation id: a list that
+		// stops short is not a movement set and is refused
+		if (group.numAssociations < ANIM_STD_STARTWALK + 1)
+			return (AssocGroupId)-1;
+		return (AssocGroupId)i;
+	}
+	return (AssocGroupId)-1;
+}
+
+// The crouch group of one walk angle, in the standing selection's own sectors:
+// forward below 50 degrees, the side sector up to 130, the back sector beyond
+// it. The angle is 0 unless the camera faces the body (UpdatePlayerMovement
+// writes it), so the classic camera turns the body toward the movement and
+// always lands in the forward group. -1 when the content is not in the game.
+static AssocGroupId
+CrouchAnimGroupForWalkAngle(float walkAngle)
+{
+	if (walkAngle >= -DEGTORAD(50.0f) && walkAngle <= DEGTORAD(50.0f))
+		return FindCrouchAnimGroup("crouch");
+	if (walkAngle >= -DEGTORAD(130.0f) && walkAngle <= DEGTORAD(130.0f))
+		return FindCrouchAnimGroup(walkAngle > 0.0f ? "crouchleft" : "crouchright");
+	return FindCrouchAnimGroup("crouchback");
+}
+
 void
 CPlayerPed::ProcessAnimGroups(void)
 {
 	AssocGroupId groupToSet;
+
+	// The stance picks the movement set while the crouch holds (VICE-176): the
+	// direction picks the crouch group, the way the standing case below picks
+	// its strafe and back groups. The set is VICE-186's content; while it is
+	// not in the game the lookup refuses and the standing selection stands in,
+	// so a crouch without content moves on the standing cycles.
+	if (m_MoveSolver.GetSnapshot().stance == STANCE_CROUCH) {
+		AssocGroupId crouchGroup = CrouchAnimGroupForWalkAngle(m_fWalkAngle);
+
+		if (crouchGroup != (AssocGroupId)-1) {
+			if (m_animGroup != crouchGroup) {
+				m_animGroup = crouchGroup;
+				ReApplyMoveAnims();
+			}
+			return;
+		}
+	}
+
 #ifdef PC_PLAYER_CONTROLS
 	// The strafe and back groups cover every camera-facing view, the first
 	// person view included: the forward cycle would leave the legs walking
 	// forward while the ped moves sideways. The thresholds split the walk angle
 	// into the side sector (50 to 130 degrees) and the back sector (beyond 130
-	// degrees); the crouch and prone stances extend this selection later
-	// (VICE-176, VICE-177).
+	// degrees); the crouch set has its own selection above (VICE-176), and the
+	// prone stance extends this selection later (VICE-177).
 	if (BodyFacesCamera() && CanStrafeOrMouseControl()
 		&& (m_fWalkAngle <= -DEGTORAD(50.0f) || m_fWalkAngle >= DEGTORAD(50.0f))) {
 
@@ -1501,25 +1593,15 @@ CPlayerPed::ProcessPlayerWeapon(CPad *padUsed)
 		ClearPointGunAt();
 	}
 
-	if (padUsed->DuckJustDown() && !bIsDucking && m_nMoveState != PEDMOVE_SPRINT) {
-#ifdef FIX_BUGS
-		// fix tommy being locked into looking at the same spot if you duck just after starting to shoot
-		if(!m_pPointGunAt)
-			ClearPointGunAt();
-#endif
-		bCrouchWhenShooting = true;
-		SetDuck(60000, true);
-	} else if (bIsDucking && (padUsed->DuckJustDown() || m_nMoveState == PEDMOVE_SPRINT ||
-		padUsed->GetSprint() || padUsed->JumpJustDown() || padUsed->ExitVehicleJustDown())) {
-
-#ifdef FIX_BUGS
-		// same fix as above except for standing up
-		if(!m_pPointGunAt)
-			ClearPointGunAt();
-#endif
-		ClearDuck(true);
-		bCrouchWhenShooting = false;
-	}
+	// The crouch is the movement solver's stance now (VICE-176): the Duck edge
+	// and the sprint, the jump and the exit-vehicle presses go to the intent
+	// (UpdatePlayerMovement) and the stance table owns the toggles, so the
+	// stock SetDuck/ClearDuck branch that stood here - and its sixty second
+	// duck timer - is gone. bIsDucking is the stance's report. What belongs to
+	// the weapon stays: the Duck edge drops the classic lock-on, so the eye
+	// does not stay locked on the spot the shot started from (FIX_BUGS).
+	if (padUsed->DuckJustDown() && !m_pPointGunAt)
+		ClearPointGunAt();
 
 	if(weaponInfo->IsFlagSet(WEAPONFLAG_CANAIM))
 		m_wepAccuracy = 95;
@@ -1813,16 +1895,29 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 	intent.steepCliff = bSteepCliff;
 	intent.hasInput = bMoving;
 	intent.faceCamera = BodyFacesCamera();
-	// The jump and the dive gate on more than the pad (PlayerJumpOrDive), so
-	// their edges arrive with VICE-182 and VICE-181.
-	intent.jumpRequested = false;
+	// The jump press is the jump's action edge and the crouch's stand-up
+	// trigger alike: the state rows have no row on it yet - the gates, the
+	// impulse and the state are VICE-182's, and the dive's edge arrives with
+	// VICE-181 - and the stance table reads it (VICE-176).
+	intent.jumpRequested = padUsed->JumpJustDown();
 	intent.diveRequested = false;
 	// The crouch press is the momentary duck action, the same edge the stock
-	// duck reads (ProcessPlayerWeapon); with the sprint tier it is the slide's
-	// entry pair in this one frame (VICE-180). The crouch stance the press also
-	// asks for arrives with its own ticket (VICE-176), so the solver leaves the
-	// stance alone.
+	// duck reads (ProcessPlayerWeapon); it toggles the crouch stance (VICE-176)
+	// and, with the sprint tier, it is the slide's entry pair in this one frame
+	// (VICE-180).
 	intent.crouchRequested = padUsed->DuckJustDown();
+	// The rest of the stance request: the sprint, the exit-vehicle press and
+	// the jump stand the ped up - the stock toggle rules of ProcessPlayerWeapon,
+	// now rows of the solver's stance table. The headroom is the one world fact
+	// the exits need: VICE-178's test, asked here and only where a low stance
+	// can use it, because the test casts a line into the world and the solver
+	// never touches it.
+	intent.sprintRequested = padUsed->GetSprint();
+	intent.exitVehiclePressed = padUsed->ExitVehicleJustDown();
+	intent.headroomClear = (m_MoveSolver.GetSnapshot().stance != STANCE_STAND
+		&& (intent.crouchRequested || intent.sprintRequested || intent.jumpRequested || intent.exitVehiclePressed))
+		? IsHeadroomClear()
+		: true;
 	// The prone action (PED_PRONE, V by default): the slide ends on it; the
 	// prone stance is the stance row of VICE-177.
 	intent.proneRequested = padUsed->ProneJustDown();
@@ -1830,6 +1925,21 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 	const SMoveSnapshot &snapshot = m_MoveSolver.Step(intent);
 	// The slide has no shipped cycle yet: its stand-in pose (VICE-180)
 	UpdateMoveStandInAnim(snapshot);
+
+	// The mirror for the engine. The camera (Cam.cpp), the aim pose
+	// (HoldUpperBodyAimPose), the weapon spread (Weapon.cpp) and the idle
+	// suppression (PlayIdleAnimations) read bIsDucking, and the crouch fire
+	// animations read bCrouchWhenShooting. The flags are written straight from
+	// the snapshot and not through SetDuck/ClearDuck: those add the DUCK_DOWN
+	// and DUCK_WEAPON partials, whose keys cover the legs, and a crouch that
+	// moves must leave its legs to the movement cycle - the crouch look is the
+	// stance's own animation group (ProcessAnimGroups, SetRealMoveAnim). The
+	// flag is a report of the stance; the stock duck upkeep is off for the
+	// player (CPed::ProcessControl), so nothing else writes it.
+	bIsDucking = snapshot.stance == STANCE_CROUCH;
+	bCrouchWhenShooting = bIsDucking;
+	// The stance the collision and the headroom test read (VICE-178)
+	SetStance(snapshot.stance);
 
 	// The movement debug readout and the telemetry record (see
 	// MovementTelemetry.h); both are inert while the flag is off.

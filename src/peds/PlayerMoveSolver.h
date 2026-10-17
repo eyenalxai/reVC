@@ -36,8 +36,10 @@ enum eMoveStateId
 };
 
 // The stance axis is eStance (Stance.h): the solver owns the player's stance.
-// The stand row carries the phase-0 values; the crouch and the prone arrive
-// with their stance rows (VICE-176, VICE-177).
+// The stand and the crouch rows carry their values; the prone row arrives with
+// VICE-177. The stance rows scale the step (moveStanceRows) and the stance
+// moves are rows of their own table (moveStanceTransitions), scanned like the
+// state ones.
 
 // The rungs of the speed ladder (GLOSSARY.md), the explicit order of the
 // strides: walk < run < sprint < the slide's entry boost < the slide jump. One
@@ -72,9 +74,10 @@ enum eMoveReport
 };
 
 // The triggers of the transition table: the bits one step collects once and
-// the rows then scan in their priority order. The ground and the air facts and
-// the action edges the states move on are here; the wall triggers have no state
-// to move to yet (the wall run arrives later).
+// the rows then scan in their priority order. The ground and the air facts, the
+// action edges the states move on, and the stance's own edges (the crouch, the
+// sprint and the exit-vehicle press, and the headroom refusal) are here; the
+// wall triggers have no state to move to yet (the wall run arrives later).
 enum eMoveTrigger
 {
 	TRIGGER_JUMP = 1,		// the jump action edge
@@ -85,7 +88,11 @@ enum eMoveTrigger
 	TRIGGER_WALL_CONTACT = 32,	// the wall contact edge
 	TRIGGER_WALL_LEFT = 64,		// the wall left edge
 	TRIGGER_HEAD_HIT = 128,		// the head hit edge
-	TRIGGER_PRONE = 256,		// the prone action edge: the slide ends on it (VICE-180; the prone stance is VICE-177's)
+	TRIGGER_CROUCH = 256,		// the Duck action edge: the crouch stance toggles
+	TRIGGER_SPRINT = 512,		// the pad's sprint: the sprint stands the crouch up
+	TRIGGER_EXIT_VEHICLE = 1024,	// the exit-vehicle press: it stands the crouch up
+	TRIGGER_HEADROOM_BLOCKED = 2048,	// the body cannot rise here: every stand-up holds (VICE-178's test)
+	TRIGGER_PRONE = 4096,		// the prone action edge: the slide ends on it (the prone stance is VICE-177's)
 };
 
 // The flags of one state row: what the shared step does for the state.
@@ -146,10 +153,10 @@ struct tMoveLadderRow
 	eMoveReport reportMoveState;	// the eMoveState value the rung reports
 };
 
-// The row of the stance table: what one eStance scales. The stand row carries
-// the phase-0 values; the crouch and the prone rows arrive with VICE-176 and
-// VICE-177. The capsule height is what the snapshot reports only: the collision
-// stays the engine's, and VICE-178 fills the heights.
+// The row of the stance table: what one eStance scales. The stand and crouch
+// rows carry their values; the prone row arrives with VICE-177. The capsule
+// height is what the snapshot reports only: the collision stays the engine's,
+// and VICE-178 fills the heights.
 struct tMoveStanceRow
 {
 	float speedScale;	// scales the step's target speed
@@ -186,7 +193,19 @@ struct tMoveTransitionRow
 	float guardSpeed;	// the guard's threshold, engine units (MOVE_ENGINE_UNITS_PER_SECOND)
 };
 
-// One table set: the four tables the check reads. The module's own set lives in
+// The row of the stance transition table (VICE-176): one move of the stance
+// axis. The shape and the rules are the state row's - the same trigger mask,
+// scanned in the row order, so a stance move is a row and never a branch - and
+// a stance move carries no event: the stance is reported in every snapshot
+// instead (see SMoveSnapshot).
+struct tMoveStanceTransitionRow
+{
+	eStance from;		// the stance the move leaves
+	uint32_t trigger;	// the eMoveTrigger bit that fires it
+	eStance to;		// the stance the move enters
+};
+
+// One table set: the five tables the check reads. The module's own set lives in
 // PlayerMoveSolver.cpp; the harness (VICE-172) builds one of its own to prove a
 // rejection.
 struct SMoveTables
@@ -199,6 +218,8 @@ struct SMoveTables
 	int numStances;
 	const tMoveTransitionRow *transitions;
 	int numTransitions;
+	const tMoveStanceTransitionRow *stanceTransitions;
+	int numStanceTransitions;
 };
 
 struct SMoveVec2
@@ -229,13 +250,18 @@ struct SMoveIntent
 	bool hasInput;		// the pad moves the ped this frame (the controller's bMoving)
 	eMoveTier tier;		// the rung of the ladder the pad asks for
 	bool faceCamera;	// the body faces the camera; no reader in phase 0
-	bool jumpRequested;	// no reader in phase 0; VICE-182
+	bool jumpRequested;	// the jump press: the jump action edge (VICE-182) and the stance's stand-up (VICE-176)
 	bool diveRequested;	// no reader in phase 0; VICE-181
 	// The crouch action edge (the pad's momentary duck press, CPad::DuckJustDown).
-	// With the sprint tier it is the slide's entry pair - the sprint press and
-	// the crouch press in one frame (VICE-180); the crouch stance the press also
-	// asks for is the stance row of VICE-176.
+	// It toggles the crouch stance (VICE-176) and, with the sprint tier, it is
+	// the slide's entry pair: the sprint press and the crouch press in one
+	// frame (VICE-180).
 	bool crouchRequested;
+	// The rest of the stance request and the one world fact the stance exits
+	// need (VICE-176). The adapter reads them; the solver never touches the world.
+	bool sprintRequested;	// the pad's sprint: the sprint stands the crouch up
+	bool exitVehiclePressed;	// the exit-vehicle press: it stands the crouch up (the stock toggle rule)
+	bool headroomClear;	// CPed::IsHeadroomClear (VICE-178): the body can rise here
 	// The prone action edge (PED_PRONE, V by default; VICE-175). The slide ends
 	// on it; the prone stance itself is the stance row of VICE-177.
 	bool proneRequested;
@@ -299,12 +325,12 @@ private:
 // The table check (VICE-171, PlayerMoveSolver.cpp): every state has a row,
 // every transition names a state in range and carries an in-range guard, the
 // ladder ascends with the slide's rungs above the sprint's, the slide has an
-// entry row and its exit guard names the exit speed, and the stance rows are in
-// range (VICE-180 grows the slide's rules). `why` names the broken rule when
-// the check fails and may be null; true means every table holds. The first
-// reads the module's own tables (the harness's entry point, VICE-172), the
-// second the set the caller passes, so the harness can drive each rejection
-// with a planted row.
+// entry row and its exit guard names the exit speed, the stance rows are in
+// range and every stance move names a stance and a trigger. `why` names the
+// broken rule when the check fails and may be null; true means every table
+// holds. The first reads the module's own tables (the harness's entry point,
+// VICE-172), the second the set the caller passes, so the harness can drive
+// each rejection with a planted row.
 bool PlayerMoveTablesCheck(const char **why);
 bool PlayerMoveTablesCheck(const SMoveTables &tables, const char **why);
 

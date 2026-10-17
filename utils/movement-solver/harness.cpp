@@ -64,6 +64,15 @@
  *	   takes the slide's speed and keeps it), and the two other exits the
  *	   design names (a prone request, the feet leaving the surface).
  *
+ *	H. The stance (VICE-176). The crouch row scales the target speed and the
+ *	   turn rate, the stance moves are the table's rows and fire on the
+ *	   edges (the Duck toggle, the sprint, the jump, the exit-vehicle press,
+ *	   with the sprint's own gate on the entry), a crouch that is never
+ *	   cancelled holds for a minute of steps, and VICE-178's headroom holds
+ *	   every stand-up back until the body can rise. The parity stream keeps
+ *	   the stance out of it: the reference maths has no stance row, so no
+ *	   new edge is fed to it.
+ *
  * Build and run (from the repository root; the structural check drives the
  * compiler and nm itself and writes its scratch files under /tmp/opencode):
  *
@@ -177,12 +186,16 @@ MakeIntent(void)
 	intent.faceCamera = RngChance(50);
 	intent.jumpRequested = RngChance(10);
 	intent.diveRequested = RngChance(10);
-	/* The slide's entry pair and the prone request stay off: the parity
-	 * reference of VICE-172 has no slide, so a stream that entered it could
-	 * not be compared. The slide's own checks drive the pair by hand (H,
-	 * VICE-180), and the finiteness sweep sets it for its own slice. */
+	/* The slide's entry pair, the prone request and the stance's edges stay off:
+	 * the parity reference of VICE-172 has no slide and no stance row, so a
+	 * stream that entered either could not be compared. The slide's own checks
+	 * drive the pair by hand (7, VICE-180), the stance has its own section (8,
+	 * VICE-176), and the finiteness sweep sets them for its own slice. */
 	intent.crouchRequested = false;
 	intent.proneRequested = false;
+	intent.sprintRequested = false;
+	intent.exitVehiclePressed = false;
+	intent.headroomClear = true;
 	return intent;
 }
 
@@ -210,6 +223,19 @@ WalkIntent(float heading, float targetSpeed)
 	intent.diveRequested = false;
 	intent.crouchRequested = false;
 	intent.proneRequested = false;
+	intent.sprintRequested = false;
+	intent.exitVehiclePressed = false;
+	intent.headroomClear = true;
+	return intent;
+}
+
+/* The crouch walk step of the stance section: the walk intent with the Duck
+ * edge, the edge that enters the crouch (the table's row fires on it). */
+static SMoveIntent
+CrouchIntent(float heading, float targetSpeed)
+{
+	SMoveIntent intent = WalkIntent(heading, targetSpeed);
+	intent.crouchRequested = true;
 	return intent;
 }
 
@@ -987,6 +1013,7 @@ static tMoveStateRow g_plantStates[MOVE_NUMSTATES];
 static tMoveLadderRow g_plantLadder[TIER_NUM];
 static tMoveStanceRow g_plantStances[STANCE_NUM];
 static tMoveTransitionRow g_plantTransitions[7];
+static tMoveStanceTransitionRow g_plantStanceTransitions[7];
 
 /* The module's own slide numbers (PlayerMoveSolver.cpp), so the planted set is
  * a copy of the real one: the two speeds the guards name. */
@@ -1052,10 +1079,28 @@ PlantSet(void)
 	g_plantTransitions[6].to = MOVE_GROUND; g_plantTransitions[6].onEntryEvent = 0;
 	g_plantTransitions[6].guard = GUARD_SPEED_BELOW; g_plantTransitions[6].guardSpeed = PLANT_SLIDE_EXIT_SPEED;
 
+	/* the stance moves of the module's own table (VICE-176), the sprint's own
+	 * gate row included */
+	g_plantStanceTransitions[0].from = STANCE_STAND; g_plantStanceTransitions[0].trigger = TRIGGER_SPRINT;
+	g_plantStanceTransitions[0].to = STANCE_STAND;
+	g_plantStanceTransitions[1].from = STANCE_STAND; g_plantStanceTransitions[1].trigger = TRIGGER_CROUCH;
+	g_plantStanceTransitions[1].to = STANCE_CROUCH;
+	g_plantStanceTransitions[2].from = STANCE_CROUCH; g_plantStanceTransitions[2].trigger = TRIGGER_HEADROOM_BLOCKED;
+	g_plantStanceTransitions[2].to = STANCE_CROUCH;
+	g_plantStanceTransitions[3].from = STANCE_CROUCH; g_plantStanceTransitions[3].trigger = TRIGGER_CROUCH;
+	g_plantStanceTransitions[3].to = STANCE_STAND;
+	g_plantStanceTransitions[4].from = STANCE_CROUCH; g_plantStanceTransitions[4].trigger = TRIGGER_SPRINT;
+	g_plantStanceTransitions[4].to = STANCE_STAND;
+	g_plantStanceTransitions[5].from = STANCE_CROUCH; g_plantStanceTransitions[5].trigger = TRIGGER_JUMP;
+	g_plantStanceTransitions[5].to = STANCE_STAND;
+	g_plantStanceTransitions[6].from = STANCE_CROUCH; g_plantStanceTransitions[6].trigger = TRIGGER_EXIT_VEHICLE;
+	g_plantStanceTransitions[6].to = STANCE_STAND;
+
 	t.states = g_plantStates; t.numStates = MOVE_NUMSTATES;
 	t.ladder = g_plantLadder; t.numLadder = TIER_NUM;
 	t.stances = g_plantStances; t.numStances = STANCE_NUM;
 	t.transitions = g_plantTransitions; t.numTransitions = 7;
+	t.stanceTransitions = g_plantStanceTransitions; t.numStanceTransitions = 7;
 	return t;
 }
 
@@ -1145,6 +1190,10 @@ CheckTables(void)
 			"a slide exit without the exit speed is refused");
 		REJECTS(g_plantTransitions[6].guardSpeed = PLANT_SLIDE_ENTRY_SPEED,
 			"a slide exit speed at or above its entry speed is refused");
+		REJECTS(g_plantStanceTransitions[2].to = STANCE_NUM,
+			"a stance move to a stance out of range is refused");
+		REJECTS(g_plantStanceTransitions[2].trigger = 0,
+			"a stance move trigger out of range is refused");
 	}
 }
 
@@ -1555,6 +1604,240 @@ CheckSlide(void)
 }
 
 /* ---------------------------------------------------------------------- *
+ * 7. the stance (VICE-176)
+ * ---------------------------------------------------------------------- */
+
+/*
+ * The stance is the solver's axis with its own rows: the crouch row scales the
+ * step (the target speed and the turn rate), the stance moves are rows of the
+ * stance transition table and fire on the edges, and the headroom - VICE-178's
+ * test, which the adapter runs and the solver only reads - holds the stand-ups
+ * back. The digits below are the module's crouch row and the ground state row
+ * (PlayerMoveSolver.cpp, moveStanceRows and moveStateRows); the harness pins
+ * them so a table edit cannot pass unnoticed.
+ */
+
+#define CROUCH_SPEED_SCALE	0.5f	/* the crouch row: half the walk, the content's own stride share */
+#define CROUCH_TURN_SCALE	1.25f	/* the crouch row: a quarter tighter than the stand */
+#define CROUCH_CAPSULE_HEIGHT	0.5f	/* VICE-178's crouch set: 0.55 - 0.2 - 0.2 + 0.35, the head sphere's top */
+#define GROUND_TURN_RATE	12.0f	/* the ground state row */
+#define GROUND_ACCEL		20.0f / 50.0f	/* the ground state row */
+
+/* The crouch hold of the acceptance: a crouch that is never cancelled must not
+ * time out. Sixty seconds of the pad's own step. */
+#define CROUCH_HOLD_STEPS	3000
+
+/* The crouch row's values and the scaled target, one step after the edge. */
+static void
+CheckStanceRow(void)
+{
+	CPlayerMoveSolver standSolver, crouchSolver;
+	SMoveIntent stand = WalkIntent(0.0f, 0.30f);
+	SMoveIntent crouch = CrouchIntent(0.0f, 0.30f);
+	const SMoveSnapshot &standSnap = standSolver.Step(stand);
+	const SMoveSnapshot &crouchSnap = crouchSolver.Step(crouch);
+
+	Check(standSnap.stance == STANCE_STAND, "the walk of phase 0 stands the ped");
+	Check(crouchSnap.stance == STANCE_CROUCH, "the Duck edge crouches the ped in the step that reads it");
+	Check(crouchSnap.turnScale == CROUCH_TURN_SCALE,
+		"the crouch row's turn scale is the snapshot's turn scale");
+	Check(crouchSnap.capsuleHeight == CROUCH_CAPSULE_HEIGHT,
+		"the crouch row reports VICE-178's crouch capsule top");
+	Check(crouchSnap.targetSpeed == CROUCH_SPEED_SCALE * standSnap.targetSpeed,
+		"the crouch row scales the target speed by half");
+	Check(crouchSnap.targetSpeed < standSnap.targetSpeed,
+		"the crouch is slower than the stand at the same intent");
+
+	/* the crouch walks its scaled target exactly, like the stand walks its own */
+	{
+		SMoveVec2 live = { 0.0f, 0.0f };
+		SMoveIntent intent = WalkIntent(0.0f, 0.30f);
+		const SMoveSnapshot *snap = &crouchSnap;
+
+		for (int i = 0; i < 240; i++) {
+			intent.vel = live;
+			snap = &crouchSolver.Step(intent);
+			live = snap->moved;
+		}
+		Check(snap->stance == STANCE_CROUCH, "the crouch holds over the walk");
+		Check(snap->moved.x == 0.0f && snap->moved.y == CROUCH_SPEED_SCALE * 0.30f,
+			"the crouch walk reaches the scaled target exactly");
+	}
+
+	printf("  the crouch row: speed scale %.9g, turn scale %.9g, capsule %.9g\n",
+		CROUCH_SPEED_SCALE, CROUCH_TURN_SCALE, CROUCH_CAPSULE_HEIGHT);
+}
+
+/* The crouch row's turn rate, behaviourally: one step of the crouch is the
+ * reference maths with the crouch row's rate (12 * 1.25) and its scaled target,
+ * the same step of the stand is that maths with 12 and the unscaled target, and
+ * the crouch's direction settles tighter. */
+static void
+CheckStanceTurn(void)
+{
+	const float dt = 1.0f / 50.0f;
+	const float targetSpeed = 0.30f;
+	/* the velocity points at +y; the input asks for +x: a quarter turn */
+	const float heading = -1.5707963267948966f;	/* -PI / 2: the move direction is (1, 0) */
+	SMoveVec2 velocity = { 0.0f, 1.0f };
+	SMoveVec2 moveDirection = { -sinf(heading), cosf(heading) };
+	SMoveIntent stand = WalkIntent(heading, targetSpeed);
+	SMoveIntent crouch = CrouchIntent(heading, targetSpeed);
+	CPlayerMoveSolver standSolver, crouchSolver;
+	SMoveVec2 standGot, crouchGot, steered, standWant, crouchWant;
+
+	stand.vel = velocity;
+	crouch.vel = velocity;
+	standGot = standSolver.Step(stand).moved;
+	crouchGot = crouchSolver.Step(crouch).moved;
+
+	steered = RefSteerVelocityTowards(velocity, moveDirection, GROUND_TURN_RATE * dt);
+	standWant = RefMoveVelocityTowards(steered, SMoveVec2{ moveDirection.x * targetSpeed, moveDirection.y * targetSpeed },
+		GROUND_ACCEL * dt);
+	steered = RefSteerVelocityTowards(velocity, moveDirection, GROUND_TURN_RATE * CROUCH_TURN_SCALE * dt);
+	crouchWant = RefMoveVelocityTowards(steered,
+		SMoveVec2{ moveDirection.x * CROUCH_SPEED_SCALE * targetSpeed, moveDirection.y * CROUCH_SPEED_SCALE * targetSpeed },
+		GROUND_ACCEL * dt);
+
+	Check(standGot.x == standWant.x && standGot.y == standWant.y,
+		"the standing step turns at the state row's own rate, bit for bit");
+	Check(crouchGot.x == crouchWant.x && crouchGot.y == crouchWant.y,
+		"the crouch step turns at the crouch row's rate, bit for bit");
+
+	/* the crouch's direction is the tighter one: closer to the input after one
+	 * step (both start a quarter turn away) */
+	{
+		float standAngle = atan2f(standGot.y, standGot.x);
+		float crouchAngle = atan2f(crouchGot.y, crouchGot.x);
+		float targetAngle = atan2f(moveDirection.y, moveDirection.x);
+		float standGap = fabsf(RefLimitRadianAngle(targetAngle - standAngle));
+		float crouchGap = fabsf(RefLimitRadianAngle(targetAngle - crouchAngle));
+
+		Check(crouchGap < standGap, "the crouch turns tighter than the stand: its direction is closer to the input");
+	}
+}
+
+/* The stance moves: the Duck edge toggles both ways, the sprint holds the
+ * stance standing and stands a crouch up, the jump and the exit-vehicle press
+ * stand it up, and nothing else moves the stance. */
+static void
+CheckStanceEdges(void)
+{
+	/* (a) the Duck toggle, both ways, with the holds between */
+	{
+		CPlayerMoveSolver solver;
+		SMoveIntent intent = WalkIntent(0.0f, 0.3f);
+
+		Check(solver.Step(intent).stance == STANCE_STAND, "the stance starts standing");
+		Check(solver.Step(CrouchIntent(0.0f, 0.3f)).stance == STANCE_CROUCH, "the Duck edge crouches the ped");
+		Check(solver.Step(intent).stance == STANCE_CROUCH, "the crouch holds without an edge");
+		Check(solver.Step(CrouchIntent(0.0f, 0.3f)).stance == STANCE_STAND, "the Duck edge stands the ped up again");
+		Check(solver.Step(intent).stance == STANCE_STAND, "the stand holds without an edge");
+	}
+
+	/* (b) the sprint gates the entry and stands the crouch up */
+	{
+		CPlayerMoveSolver solver;
+		SMoveIntent intent = WalkIntent(0.0f, 0.3f);
+
+		intent.sprintRequested = true;
+		intent.crouchRequested = true;
+		Check(solver.Step(intent).stance == STANCE_STAND,
+			"the Duck edge inside a sprint does not crouch the ped (the sprint holds the stance standing)");
+		Check(solver.Step(intent).stance == STANCE_STAND, "the stance holds standing while the sprint holds");
+	}
+
+	/* (c) the sprint, the jump and the exit-vehicle press, each from a crouch */
+	{
+		static const char *const names[3] = { "the sprint", "the jump", "the exit-vehicle press" };
+		CPlayerMoveSolver solver;
+		SMoveIntent intent = WalkIntent(0.0f, 0.3f);
+
+		for (int i = 0; i < 3; i++) {
+			Check(solver.Step(CrouchIntent(0.0f, 0.3f)).stance == STANCE_CROUCH, "the Duck edge crouches the ped");
+			if (i == 0)
+				intent.sprintRequested = true;
+			else if (i == 1)
+				intent.jumpRequested = true;
+			else
+				intent.exitVehiclePressed = true;
+			Check(solver.Step(intent).stance == STANCE_STAND, names[i]);
+			Check(solver.Step(intent).stance == STANCE_STAND, names[i]);
+			intent.sprintRequested = false;
+			intent.jumpRequested = false;
+			intent.exitVehiclePressed = false;
+		}
+	}
+
+	/* (d) the crouch that is never cancelled: a minute of steps, no timeout */
+	{
+		CPlayerMoveSolver solver;
+		SMoveIntent intent = WalkIntent(0.0f, 0.3f);
+		int standsAfter = 0;
+
+		(void)solver.Step(CrouchIntent(0.0f, 0.3f));
+		for (int i = 0; i < CROUCH_HOLD_STEPS; i++) {
+			if (solver.Step(intent).stance != STANCE_CROUCH)
+				standsAfter++;
+			intent.hasInput = (i % 3) != 2;
+			intent.vel = solver.GetSnapshot().moved;
+		}
+		Check(standsAfter == 0, "a crouch that is never cancelled holds: no duck timer, sixty seconds of steps");
+		printf("  %d steps (%g s) in one crouch, no edge: the stance never moves by itself\n",
+			CROUCH_HOLD_STEPS, CROUCH_HOLD_STEPS / 50.0);
+	}
+}
+
+/* VICE-178's headroom: the adapter passes the world's answer in the intent, so
+ * the solver never touches the world, and every stand-up the crouch has is held
+ * back while the body cannot rise. */
+static void
+CheckStanceHeadroom(void)
+{
+	CPlayerMoveSolver solver;
+	SMoveIntent intent = WalkIntent(0.0f, 0.3f);
+
+	(void)solver.Step(CrouchIntent(0.0f, 0.3f));
+	Check(solver.GetSnapshot().stance == STANCE_CROUCH, "the ped crouches under the ceiling");
+
+	intent.headroomClear = false;	/* the world above the ped refuses the stand */
+
+	intent.crouchRequested = true;
+	Check(solver.Step(intent).stance == STANCE_CROUCH, "the Duck edge is refused: the crouch holds with no headroom");
+	intent.crouchRequested = false;
+	Check(solver.Step(intent).stance == STANCE_CROUCH, "the refusal holds over the steps after it");
+
+	intent.sprintRequested = true;
+	Check(solver.Step(intent).stance == STANCE_CROUCH, "the sprint is refused: the crouch holds with no headroom");
+	intent.sprintRequested = false;
+
+	intent.jumpRequested = true;
+	Check(solver.Step(intent).stance == STANCE_CROUCH, "the jump is refused: the crouch holds with no headroom");
+	intent.jumpRequested = false;
+
+	intent.exitVehiclePressed = true;
+	Check(solver.Step(intent).stance == STANCE_CROUCH, "the exit-vehicle press is refused with no headroom");
+	intent.exitVehiclePressed = false;
+
+	/* the ped walks out from under it: the same edge stands him up */
+	intent.headroomClear = true;
+	intent.crouchRequested = true;
+	Check(solver.Step(intent).stance == STANCE_STAND, "the same Duck edge stands the ped up with the headroom clear");
+
+	printf("  no headroom: the Duck edge, the sprint, the jump and the exit-vehicle press all hold the crouch\n");
+	printf("  the headroom clear again: the same edge stands the ped up\n");
+}
+
+static void
+CheckStance(void)
+{
+	CheckStanceRow();
+	CheckStanceTurn();
+	CheckStanceEdges();
+	CheckStanceHeadroom();
+}
+
+/* ---------------------------------------------------------------------- *
  * main
  * ---------------------------------------------------------------------- */
 
@@ -1585,6 +1868,8 @@ main(void)
 
 	printf("\n== 7. the slide (VICE-180): the entry, the curve, the exits and the jump\n");
 	CheckSlide();
+	printf("\n== 8. the stance (VICE-176): the crouch row, the stance moves and the headroom\n");
+	CheckStance();
 
 	printf("\nRESULT: %s (%d checks, %d failures)\n",
 		g_failures == 0 ? "every check passed" : "FAILURES", g_checks, g_failures);
