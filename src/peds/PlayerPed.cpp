@@ -1419,14 +1419,30 @@ CPlayerPed::FindWeaponLockOnTarget(void)
 	return true;
 }
 
+// The views in which the body keeps facing the camera: the first person view
+// and the mouse third person camera. The pad moves the ped sideways and
+// backwards there, so the strafe and back animation groups are the correct ones
+// and the legs follow the movement direction. The classic camera turns the body
+// toward the movement direction, so the forward cycle holds there.
+bool
+CPlayerPed::BodyFacesCamera(void)
+{
+	return TheCamera.Cams[0].Using3rdPersonMouseCam() || TheCamera.Using1stPersonView();
+}
+
 void
 CPlayerPed::ProcessAnimGroups(void)
 {
 	AssocGroupId groupToSet;
 #ifdef PC_PLAYER_CONTROLS
-	if ((m_fWalkAngle <= -DEGTORAD(50.0f) || m_fWalkAngle >= DEGTORAD(50.0f))
-		&& TheCamera.Cams[TheCamera.ActiveCam].Using3rdPersonMouseCam()
-		&& CanStrafeOrMouseControl()) {
+	// The strafe and back groups cover every camera facing view, the first
+	// person view included: the forward cycle would leave the legs walking
+	// forward while the ped moves sideways. The thresholds split the walk angle
+	// into the side sector (50 to 130 degrees) and the back sector (beyond 130
+	// degrees); the crouch and prone stances extend this selection later
+	// (VICE-176, VICE-177).
+	if (BodyFacesCamera() && CanStrafeOrMouseControl()
+		&& (m_fWalkAngle <= -DEGTORAD(50.0f) || m_fWalkAngle >= DEGTORAD(50.0f))) {
 
 		if (m_fWalkAngle >= -DEGTORAD(130.0f) && m_fWalkAngle <= DEGTORAD(130.0f)) {
 			if (m_fWalkAngle > 0.0f) {
@@ -1755,9 +1771,7 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 	// The free camera cases (the first person view and the mouse third person
 	// camera) keep the body facing the camera; the classic camera turns the body
 	// toward the movement direction.
-	bool bFacingCamera = TheCamera.Cams[0].Using3rdPersonMouseCam()
-		|| TheCamera.Using1stPersonView()
-		;
+	bool bFacingCamera = BodyFacesCamera();
 
 	// The classic camera holds the ped in place while a smooth spray turns it
 	if (!bFacingCamera && smoothSprayRate > 0.0f && upDown > 0.0f) {

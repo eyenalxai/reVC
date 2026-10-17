@@ -204,6 +204,16 @@ carry their own speeds, so the reference follows the direction the legs move in
 and the weapon the ped holds. The solver targets it and scales the animation
 playback by (real speed / reference speed), so the legs stay planted while the
 speed changes.
+
+## Camera-facing view
+
+A view in which the body keeps facing the camera while the pad moves the ped:
+the first person view and the mouse third person camera
+(`CPlayerPed::BodyFacesCamera`). The ped walks sideways and backwards there, so
+it plays the strafe and back animation groups and the legs follow the movement
+direction. The classic camera is not one: the body turns toward the movement
+direction, so the forward cycle is correct there.
+
 ## Magazine weapon
 
 A weapon that fires instant hits and has a clip of two or more rounds. The
