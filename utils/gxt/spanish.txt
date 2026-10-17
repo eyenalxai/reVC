@@ -5192,6 +5192,9 @@ Agacharse
 [FEC_CR3]
 Agacharse (Botón L3)
 
+[FEC_PRN]
+Echarse
+
 [FEC_SMT]
 Sub-misión
 

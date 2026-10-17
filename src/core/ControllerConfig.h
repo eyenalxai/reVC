@@ -62,7 +62,9 @@ enum e_ControllerAction
 	NETWORK_TALK,
 	PED_1RST_PERSON_LOOK_UP,
 	PED_1RST_PERSON_LOOK_DOWN,
-	_CONTROLLERACTION_36,					// Unused
+	// PED_PRONE takes the slot the stock action list left unused (the old
+	// _CONTROLLERACTION_36): no other action moves, gta_vc.set keeps its layout.
+	PED_PRONE,
 	TOGGLE_DPAD,
 	SWITCH_DEBUG_CAM_ON,
 	TAKE_SCREEN_SHOT,

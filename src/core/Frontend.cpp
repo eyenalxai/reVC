@@ -1712,8 +1712,7 @@ static const int controllerSetupVehicleFire = PED_FIREWEAPON;
 
 // The rows of the setup screen, one table line per row, in screen order. A new
 // row is one line here: the row count, the labels and both action columns come
-// from the same table. STANDARD keeps 28 rows and CLASSIC 33; row 27 is FEC_RLD
-// for STANDARD and FEC_LUD for CLASSIC.
+// from the same table. STANDARD keeps 29 rows and CLASSIC 34.
 static const tControllerSetupRow controllerSetupRowsStandard[] = {
 	{ "FEC_FIR", PED_FIREWEAPON,                     controllerSetupVehicleFire },
 	{ "FEC_NWE", PED_CYCLE_WEAPON_RIGHT,             CONTROLLER_NO_ACTION },
@@ -1734,6 +1733,7 @@ static const tControllerSetupRow controllerSetupRowsStandard[] = {
 	{ "FEC_HND", CONTROLLER_NO_ACTION,               VEHICLE_HANDBRAKE },
 	{ "FEC_TAR", PED_LOCK_TARGET,                    CONTROLLER_NO_ACTION },
 	{ "FEC_CRO", PED_DUCK,                           CONTROLLER_NO_ACTION },
+	{ "FEC_PRN", PED_PRONE,                          CONTROLLER_NO_ACTION },
 	{ "FEC_ANS", PED_ANSWER_PHONE,                   CONTROLLER_NO_ACTION },
 	{ "FEC_TFL", CONTROLLER_NO_ACTION,               VEHICLE_TURRETLEFT },
 	{ "FEC_TFR", CONTROLLER_NO_ACTION,               VEHICLE_TURRETRIGHT },
@@ -1765,6 +1765,7 @@ static const tControllerSetupRow controllerSetupRowsClassic[] = {
 	{ "FEC_HND", CONTROLLER_NO_ACTION,               VEHICLE_HANDBRAKE },
 	{ "FEC_TAR", PED_LOCK_TARGET,                    CONTROLLER_NO_ACTION },
 	{ "FEC_CRO", PED_DUCK,                           CONTROLLER_NO_ACTION },
+	{ "FEC_PRN", PED_PRONE,                          CONTROLLER_NO_ACTION },
 	{ "FEC_ANS", PED_ANSWER_PHONE,                   CONTROLLER_NO_ACTION },
 	{ "FEC_TFL", CONTROLLER_NO_ACTION,               VEHICLE_TURRETLEFT },
 	{ "FEC_TFR", CONTROLLER_NO_ACTION,               VEHICLE_TURRETRIGHT },

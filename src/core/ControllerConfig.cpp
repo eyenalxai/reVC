@@ -286,6 +286,7 @@ void CControllerConfigManager::InitDefaultControlConfiguration()
 	SetControllerKeyAssociatedWithAction    (PED_LOOKBEHIND,                      rsCAPSLK,   OPTIONAL_EXTRA);
 
 	SetControllerKeyAssociatedWithAction    (PED_DUCK,                            'C',        KEYBOARD);
+	SetControllerKeyAssociatedWithAction    (PED_PRONE,                           'V',        KEYBOARD);
 	SetControllerKeyAssociatedWithAction    (PED_RELOAD,                          'R',        KEYBOARD);
 
 	SetControllerKeyAssociatedWithAction    (PED_FIREWEAPON,                      rsPADINS,   KEYBOARD);
@@ -416,6 +417,10 @@ void CControllerConfigManager::InitDefaultControlConfigJoyPad(uint32 buttons)
 
 	m_bFirstCapture = true;
 
+	// PED_PRONE gets no default pad button. The stock list binds every button
+	// of the 16: 12 is the pad's Start button (REGISTER_START_BUTTON turns it
+	// into the pause), and 1-11 and 13-16 carry the other actions. The player
+	// binds the action on the controls screen.
 	uint32 btn = buttons;
 	if (buttons > 16)
 		btn = 16;
@@ -558,9 +563,9 @@ void CControllerConfigManager::InitDefaultControlConfigJoyPad(uint32 buttons)
 #endif
 
 // Every action that gets a name, one NAME(action) per action, in the order the
-// names are filled in. The two unused actions of the list (_CONTROLLERACTION_36
-// and UNKNOWN_ACTION) have no name, so the count stays two short of
-// MAX_CONTROLLERACTIONS; the static_assert below keeps it that way.
+// names are filled in. The one unused action of the list (UNKNOWN_ACTION) has
+// no name, so the count stays one short of MAX_CONTROLLERACTIONS; the
+// static_assert below keeps it that way.
 #define CONTROLLER_ACTION_NAMES(NAME) \
 	NAME(PED_LOOKBEHIND) \
 	NAME(PED_CYCLE_WEAPON_LEFT) \
@@ -573,6 +578,7 @@ void CControllerConfigManager::InitDefaultControlConfigJoyPad(uint32 buttons)
 	NAME(PED_CENTER_CAMERA_BEHIND_PLAYER) \
 	NAME(VEHICLE_LOOKBEHIND) \
 	NAME(PED_DUCK) \
+	NAME(PED_PRONE) \
 	NAME(PED_ANSWER_PHONE) \
 	NAME(VEHICLE_LOOKLEFT) \
 	NAME(VEHICLE_LOOKRIGHT) \
@@ -611,12 +617,12 @@ void CControllerConfigManager::InitialiseControllerActionNameArray()
 {
 	wchar buf[ACTIONNAME_LENGTH + 2];
 
-	// The names count two short of the action list: the unused
-	// _CONTROLLERACTION_36 and UNKNOWN_ACTION never get one.
+	// The names count one short of the action list: the unused UNKNOWN_ACTION
+	// never gets one.
 #define COUNT_ACTION_NAME(name) + 1
 	enum { numActionNames = 0 CONTROLLER_ACTION_NAMES(COUNT_ACTION_NAME) };
 #undef COUNT_ACTION_NAME
-	static_assert(numActionNames == MAX_CONTROLLERACTIONS - 2, "Every named controller action needs a name");
+	static_assert(numActionNames == MAX_CONTROLLERACTIONS - 1, "Every named controller action needs a name");
 
 #define SETACTIONNAME(name) AsciiToUnicode(#name, buf); CMessages::WideStringCopy(m_aActionNames[name], buf, ACTIONNAME_LENGTH);
 	CONTROLLER_ACTION_NAMES(SETACTIONNAME)
@@ -952,6 +958,8 @@ void CControllerConfigManager::AffectControllerStateOn_ButtonDown_FirstPersonOnl
 		state.Cross = 255;
 	if (button == GetControllerKeyAssociatedWithAction(PED_DUCK, type))
 		state.LeftShock = 255;
+	if (button == GetControllerKeyAssociatedWithAction(PED_PRONE, type))
+		state.Prone = 255;
 }
 
 void CControllerConfigManager::AffectControllerStateOn_ButtonDown_ThirdPersonOnly(int32 button, eControllerType type, CControllerState &state)
@@ -970,6 +978,8 @@ void CControllerConfigManager::AffectControllerStateOn_ButtonDown_ThirdPersonOnl
 		state.Cross = 255;
 	if (button == GetControllerKeyAssociatedWithAction(PED_DUCK, type))
 		state.LeftShock = 255;
+	if (button == GetControllerKeyAssociatedWithAction(PED_PRONE, type))
+		state.Prone = 255;
 	
 	if (FrontEndMenuManager.m_ControlMethod == CONTROL_CLASSIC)
 	{
@@ -1829,6 +1839,7 @@ void CControllerConfigManager::DeleteMatching3rdPersonControls(e_ControllerActio
 		CLEAR_ACTION_IF_NEEDED(PED_SPRINT);
 		CLEAR_ACTION_IF_NEEDED(PED_LOOKBEHIND);
 		CLEAR_ACTION_IF_NEEDED(PED_DUCK);
+		CLEAR_ACTION_IF_NEEDED(PED_PRONE);
 		CLEAR_ACTION_IF_NEEDED(PED_ANSWER_PHONE);
 		CLEAR_ACTION_IF_NEEDED(PED_RELOAD);
 
@@ -2046,6 +2057,7 @@ e_ControllerActionType CControllerConfigManager::GetActionType(e_ControllerActio
 	case PED_SPRINT:
 	case PED_LOOKBEHIND:
 	case PED_DUCK:
+	case PED_PRONE:
 	case PED_ANSWER_PHONE:
 	case PED_CYCLE_TARGET_LEFT:
 	case PED_CYCLE_TARGET_RIGHT:
@@ -2597,7 +2609,7 @@ int32 CControllerConfigManager::GetNumOfSettingsForAction(e_ControllerAction act
 	     nil,    /* NETWORK_TALK */                                                                                                                            \
 	     nil,    /* PED_1RST_PERSON_LOOK_UP */                                                                                                                 \
 	     nil,    /* PED_1RST_PERSON_LOOK_DOWN */                                                                                                               \
-	     nil,    /* _CONTROLLERACTION_36 */                                                                                                                    \
+	     nil,    /* PED_PRONE */                                                                                                                               \
 	     nil,    /* TOGGLE_DPAD */                                                                                                                             \
 	     nil,    /* SWITCH_DEBUG_CAM_ON */                                                                                                                     \
 	     nil,    /* TAKE_SCREEN_SHOT */                                                                                                                        \
@@ -2645,7 +2657,7 @@ int32 CControllerConfigManager::GetNumOfSettingsForAction(e_ControllerAction act
 	     nil,    /* NETWORK_TALK */                                                                                                                            \
 	     nil,    /* PED_1RST_PERSON_LOOK_UP */                                                                                                                 \
 	     nil,    /* PED_1RST_PERSON_LOOK_DOWN */                                                                                                               \
-	     nil,    /* _CONTROLLERACTION_36 */                                                                                                                    \
+	     nil,    /* PED_PRONE */                                                                                                                               \
 	     nil,    /* TOGGLE_DPAD */                                                                                                                             \
 	     nil,    /* SWITCH_DEBUG_CAM_ON */                                                                                                                     \
 	     nil,    /* TAKE_SCREEN_SHOT */                                                                                                                        \
@@ -2693,7 +2705,7 @@ int32 CControllerConfigManager::GetNumOfSettingsForAction(e_ControllerAction act
 	     nil,    /* NETWORK_TALK */                                                                                                                            \
 	     nil,    /* PED_1RST_PERSON_LOOK_UP */                                                                                                                 \
 	     nil,    /* PED_1RST_PERSON_LOOK_DOWN */                                                                                                               \
-	     nil,    /* _CONTROLLERACTION_36 */                                                                                                                    \
+	     nil,    /* PED_PRONE */                                                                                                                               \
 	     nil,    /* TOGGLE_DPAD */                                                                                                                             \
 	     nil,    /* SWITCH_DEBUG_CAM_ON */                                                                                                                     \
 	     nil,    /* TAKE_SCREEN_SHOT */                                                                                                                        \
@@ -2741,7 +2753,7 @@ int32 CControllerConfigManager::GetNumOfSettingsForAction(e_ControllerAction act
 	     nil,    /* NETWORK_TALK */                                                                                                                            \
 	     nil,    /* PED_1RST_PERSON_LOOK_UP */                                                                                                                 \
 	     nil,    /* PED_1RST_PERSON_LOOK_DOWN */                                                                                                               \
-	     nil,    /* _CONTROLLERACTION_36 */                                                                                                                    \
+	     nil,    /* PED_PRONE */                                                                                                                               \
 	     nil,    /* TOGGLE_DPAD */                                                                                                                             \
 	     nil,    /* SWITCH_DEBUG_CAM_ON */                                                                                                                     \
 	     nil,    /* TAKE_SCREEN_SHOT */                                                                                                                        \

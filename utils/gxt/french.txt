@@ -5510,6 +5510,9 @@ S'accroupir
 [FEC_CR3]
 S'accroupir (touche L3)
 
+[FEC_PRN]
+S'allonger
+
 [FEC_SMT]
 Sous-mission
 

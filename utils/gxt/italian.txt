@@ -5303,6 +5303,9 @@ Abbassarsi
 [FEC_CR3]
 Abbassarsi (tasto L3)
 
+[FEC_PRN]
+Sdraiarsi
+
 [FEC_SMT]
 Sottomissione
 
