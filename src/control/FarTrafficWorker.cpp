@@ -153,8 +153,10 @@ FarTrafficSimUpdateCar(const SFarTrafficWorld *pWorld, SFarSimCar *pCar, uint32_
 	 * ground cast (which would be two collision queries per update, the one
 	 * thing the layer must not spend). The node z is the far layer's own rule
 	 * (the near rails drag the car onto the ground instead), so it is not part
-	 * of the shared pose. */
-	float between = c.CurveProgress();
+	 * of the shared pose. The progress is the curve's own span, as the pose
+	 * reads it (CarRailsClampCurveProgress): a stale clock must not
+	 * extrapolate the height either. */
+	float between = CarRailsClampCurveProgress(c.CurveProgress());
 	float z = pWorld->nodes[pCar->currentRouteNode].z * (1.0f - between)
 		+ pWorld->nodes[pCar->nextRouteNode].z * between;
 	z += pCar->heightAboveRoad;
@@ -178,6 +180,14 @@ FarTrafficSimUpdateCar(const SFarTrafficWorld *pWorld, SFarSimCar *pCar, uint32_
 	pPose->slot = pCar->slot;
 	pPose->bUTurn = pCar->bUTurn;
 	pPose->bShortCurve = shortCurves > 0;
+	/* The world's own rule over the pose (VICE-168), one predicate shared with
+	 * the applicator (FarTraffic.h): a position or a direction that is not
+	 * finite, or x/y outside the sector grid, is refused. The pose still
+	 * carries the arithmetic's numbers - the evidence program compares them -
+	 * but the applicator will not write it: the car keeps its last good
+	 * position and leaves the layer, so the sector insert of
+	 * CPhysical::RemoveAndAdd can never see the point. */
+	pPose->bRefused = !FarTrafficPoseIsInWorld(pWorld->bounds, x, y, z, dirX, dirY);
 	pPose->x = x;
 	pPose->y = y;
 	pPose->z = z;
@@ -196,6 +206,7 @@ FarTrafficSimRunCycle(const SFarTrafficWorld *pWorld, SFarSimCar *pCars, int32_t
 	pOutput->cycle = pInput->cycle;
 	pOutput->numPoses = 0;
 	pOutput->numShortCurves = 0;
+	pOutput->numRefused = 0;
 	pOutput->numLost = 0;
 
 	/* The commands of every frame since the last cycle, in the order the
@@ -240,6 +251,8 @@ FarTrafficSimRunCycle(const SFarTrafficWorld *pWorld, SFarSimCar *pCars, int32_t
 		pPose->index = (uint16_t)i;
 		if (pPose->bShortCurve)
 			pOutput->numShortCurves++;
+		if (pPose->bRefused)
+			pOutput->numRefused++;
 		pOutput->numPoses++;
 	}
 
@@ -496,6 +509,20 @@ const SFarTrafficOutput *
 CFarTrafficWorker::Published(void)
 {
 	return &g_aOutput[g_active.load()];
+}
+
+bool
+CFarTrafficWorker::ExportCar(int32_t index, SFarSimCar &out)
+{
+	/* The contract's window (FarTrafficWorker.h): the caller is the applicator
+	 * on the main thread, the worker is joined, and no cycle is handed over
+	 * before the end of the frame (Run). The sim array is quiescent, so the
+	 * copy is the whole of it. */
+	AssertIdle();
+	if (index < 0 || index >= g_numCars)
+		return false;
+	out = g_aCars[index];
+	return true;
 }
 
 void

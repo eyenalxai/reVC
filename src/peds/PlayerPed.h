@@ -58,14 +58,9 @@ public:
 	unsigned int m_nPadDownPressedInMilliseconds;
 	unsigned int m_nLastBusFareCollected;
 	// The player holds the aim: one state for every aiming weapon, in both
-	// views, in every movement state and in a vehicle.
+	// views and in every movement state. The on-foot control paths start,
+	// update and stop it through AimWeapon (PlayerPed.cpp).
 	bool m_bWeaponAimActive;
-#ifdef FREE_CAM
-	CVector m_cachedCamSource;
-	CVector m_cachedCamFront;
-	CVector m_cachedCamUp;
-#endif
-	bool m_bFirstPersonAimActive; // the first person aim pose holds the aim flag
 
 	static bool bDontAllowWeaponChange;
 #ifndef MASTER
@@ -90,10 +85,13 @@ public:
 	void UseSprintEnergy(void);
 	void UpdatePlayerMovement(CPad *padUsed);
 	bool IsAimingWeapon(void) const { return m_bWeaponAimActive; }
+	// The one aim of the on-foot player: the aim button raises the weapon and
+	// every control path runs this each frame while the player can aim
+	void AimWeapon(CPad *padUsed);
+	void StopWeaponAim(void);
+	void ClearAimCameraMode(void);
+	void AimAtPosition(const CVector &position);
 	bool IsMoveControllerInCharge(void);
-	bool UsingFirstPersonWeaponSight(void);
-	bool CanMoveInWeaponSight(void);
-	bool StartWeaponSight(CPad *padUsed, bool airborne);
 	float GetMoveAnimPlayback(AnimationId animId) const;
 	float GetMoveAnimReferenceSpeed(void);
 	class CPlayerInfo *GetPlayerInfoForThisPlayerPed();
@@ -104,8 +102,6 @@ public:
 	bool DoesTargetHaveToBeBroken(CVector, CWeapon*);
 	void RunningLand(CPad*);
 	bool IsThisPedAnAimingPriority(CPed*);
-	void PlayerControlSniper(CPad*);
-	void PlayerControlM16(CPad*);
 	void FireWeaponWhenHeld(CPad*);
 	void ProcessAirborneWeapon(CPad*);
 	void PlayerControlFighter(CPad*);
@@ -124,11 +120,13 @@ public:
 	// rides on the upper body only while the legs keep the movement animation.
 	void HoldUpperBodyAimPose(void);
 	void ReleaseHeldAimPose(void);
-#ifdef FIRST_PERSON
-	void AimAtPosition(const CVector &position);
-	void UpdateFirstPersonAim(CPad *padUsed);
-#endif
 	void PlayerControlZelda(CPad*);
+	// The jump and the evade dive of the on-foot player, shared by the
+	// camera-facing and the classic walk controls.
+	void PlayerJumpOrDive(CPad *padUsed);
+	// Whether the on-foot player's sprint request is accepted: the heavy
+	// weapons refuse it, unless the aim is up.
+	bool PlayerWantsSprint(CPad *padUsed);
 	bool DoesPlayerWantNewWeapon(eWeaponType, bool);
 	void PlayIdleAnimations(CPad*);
 	void RemovePedFromMeleeList(CPed*);

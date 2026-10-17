@@ -65,6 +65,33 @@
  * owner's long sight lines. When the weather closes the band (a storm's far clip
  * below the despawn) the whole layer goes, and the fog hides every removal.
  *
+ * The world's hold
+ * ----------------
+ *
+ * The world's sector grid is a bounded rectangle (World.h: x [-2400, 1600),
+ * y [-2000, 2000)), and `CPhysical::RemoveAndAdd` walks `CWorld::ms_aSectors`
+ * with the pose it is given; the grid's own guard covers only the upper side,
+ * so a point outside the rectangle - or one that is not finite - ends in a
+ * null list write. The snapshot the worker reads therefore carries the grid's
+ * bounds (SFarTrafficWorld::bounds, filled from the engine's macros by
+ * BuildWorldSnapshot), and one engine-free predicate (FarTrafficPoseIsInWorld,
+ * this header) is the layer's rule for a pose the world can hold: the
+ * simulation refuses a pose the predicate rejects, and the applicator refuses
+ * one again whatever producer wrote it (the inline mode, a stale block, the
+ * catch-up path). A refused pose is never written into a car; the car leaves
+ * the layer by the no-driver promotion and the near side owns it from there.
+ *
+ * The switch hands the state over, not only the car: while a car is far the
+ * simulation owns its route state (the two links of the curve, the lanes, the
+ * directions, the curve times), so the promotion writes that state - the
+ * simulation's, read from the worker in the applicator's window - back into
+ * the car's AutoPilot before the entry is dropped. The curve clock is part of
+ * it: the simulation's clock is CTimer::GetTimeInMilliseconds, the same domain
+ * the near rails' CurveProgress reads, so a promoted car's curve starts where
+ * the simulation left it rather than at the clock the car was seeded with when
+ * it became far (a stale clock reads a progress in the hundreds and
+ * CCarCtrl::DragCarToPoint drags the car out of the world).
+ *
  * The count
  * ---------
  *
@@ -221,6 +248,11 @@
  *					stay 0
  *	ms_nFarTrafficShortCurves	the pick's clamped curves (the engine's
  *					"fout" case, counted instead of printed)
+ *	ms_nFarTrafficRefusedPoses	the poses the world could not hold (the
+ *					simulation's refusals, and any pose the
+ *					apply refused that the simulation published):
+ *					the pose is never written and the car leaves
+ *					the layer, without a driver
  *	ms_nFarTrafficCatchUps		the applicator's catch-ups (a pending cycle
  *					run inline because the window between two
  *					cycles grew the command ring; 0 in normal
@@ -244,6 +276,8 @@
  * alone; the engine calls (the rings, the paths, the pool, the streaming) live
  * in FarTraffic.cpp.
  */
+
+#include <float.h>
 
 #include "PopulationBudget.h"
 #include "TrafficRings.h"
@@ -468,6 +502,39 @@ FarTrafficUpdatesThisFrame(unsigned int frameCounter, int index)
 	return ((int)(frameCounter % FAR_TRAFFIC_STAGGER)) == (index % FAR_TRAFFIC_STAGGER);
 }
 
+/* The bounds of the world's sector grid (World.h: WORLD_MIN_X/WORLD_MIN_Y and
+ * WORLD_MAX_X/WORLD_MAX_Y). The snapshot carries them (SFarTrafficWorld::bounds,
+ * filled by CFarTraffic::BuildWorldSnapshot from the engine's own macros), so
+ * the worker and the applicator can test a pose without including an engine
+ * header. The grid is half-open: the minimum edge is a sector of the grid, the
+ * maximum edge is one past it (CWorld::GetSector's own index). */
+struct SFarTrafficWorldBounds
+{
+	float minX, maxX;
+	float minY, maxY;
+};
+
+/* The layer's one pose rule: true when the world can hold the pose - the
+ * position (x, y, z) and the directions finite, and x/y inside the sector grid.
+ * The comparisons are the finite test and need no math.h: a NaN fails every
+ * comparison, an infinity fails a bound (FLT_MAX is the largest finite float),
+ * and the bounds of x/y reject the infinities with the grid's own edges. The
+ * grid test is what keeps the pose out of the sector walk of
+ * CPhysical::RemoveAndAdd. The simulation and the applicator share this
+ * predicate, so there is no second copy of the test to drift: the simulation
+ * marks a rejected pose (SFarSimPose::bRefused) and the applicator refuses it
+ * again, whatever producer wrote it. */
+static inline bool
+FarTrafficPoseIsInWorld(const SFarTrafficWorldBounds &bounds,
+	float x, float y, float z, float dirX, float dirY)
+{
+	return x >= bounds.minX && x < bounds.maxX &&
+		y >= bounds.minY && y < bounds.maxY &&
+		z >= -FLT_MAX && z <= FLT_MAX &&
+		dirX >= -FLT_MAX && dirX <= FLT_MAX &&
+		dirY >= -FLT_MAX && dirY <= FLT_MAX;
+}
+
 /* The promotion distance is the near traffic's own despawn (RING_CAR_DESPAWN at
  * the lowest FOV factor; TrafficRings.h never takes the scale below it), which
  * sits well outside the near bubble and its reserve: a far car is never left
@@ -581,6 +648,14 @@ public:
 	static unsigned int ms_nFarTrafficWorkerLost;
 	static unsigned int ms_nFarTrafficShortCurves;
 	static unsigned int ms_nFarTrafficCatchUps;
+
+	/* The poses the world could not hold (VICE-168): the simulation's
+	 * refusals, and any pose the apply refused that the simulation published.
+	 * The pose is never written into the car and the car leaves the layer by
+	 * the no-driver promotion, so a broken producer cannot reach the sector
+	 * insert of CPhysical::RemoveAndAdd. It is not a normal-play row: a
+	 * healthy layer reads 0. */
+	static unsigned int ms_nFarTrafficRefusedPoses;
 };
 
 #endif // __GTA_FARTRAFFIC_H__

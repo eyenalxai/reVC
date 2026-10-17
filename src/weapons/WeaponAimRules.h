@@ -25,11 +25,19 @@ IsGunFire(eWeaponFire fire, eWeaponType type)
 	}
 }
 
-// The sniper and the laser scope keep their zoom. No other sight zooms.
+// The sniper and the laser scope: the two scope rifles. They fire a
+// travelling bullet of their own and they are the only weapons that keep the
+// zoom of their sight. No other sight zooms.
+inline bool
+IsScopeRifle(eWeaponType type)
+{
+	return type == WEAPONTYPE_SNIPERRIFLE || type == WEAPONTYPE_LASERSCOPE;
+}
+
 inline bool
 UsesScopeZoom(eWeaponType type)
 {
-	return type == WEAPONTYPE_SNIPERRIFLE || type == WEAPONTYPE_LASERSCOPE;
+	return IsScopeRifle(type);
 }
 
 // The photo camera keeps its viewfinder.

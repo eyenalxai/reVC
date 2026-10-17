@@ -3269,28 +3269,11 @@ CCamera::ToggleFirstPersonView(void)
 }
 
 bool
-CCamera::UsingFirstPersonSights(void)
-{
-	// The first person view holds the weapon at the sights while the player
-	// aims: the pose follows the view and the shot follows the aim ray. There
-	// is no sight camera and no sight FOV; the view keeps the player FOV.
-	return Using1stPersonView() && FindPlayerPed() && FindPlayerPed()->IsAimingWeapon();
-}
-
-bool
 CCamera::Using1stPersonView(void)
 {
 	// First person view: the plain on-foot view, on foot and in a vehicle
 	return FirstPersonViewEnabled() &&
 		(Cams[ActiveCam].Mode == CCam::MODE_1STPERSON || Cams[ActiveCam].Mode == CCam::MODE_M16_1STPERSON);
-}
-
-bool
-CCamera::UsingThirdPersonAds(void)
-{
-	// The third person aim down the sights pull is gone: the aim does not move
-	// or zoom the camera. The weapon code must drop this call.
-	return false;
 }
 
 bool
@@ -3334,16 +3317,6 @@ CCamera::UsingCarAds(void)
 
 	return Cams[ActiveCam].Using3rdPersonMouseCam() &&
 	       Cams[ActiveCam].CamTargetEntity == (CEntity*)vehicle;
-}
-
-int16
-CCamera::GetSightCameraMode(void)
-{
-	// The one camera mode of the view. The scope and the viewfinder run their
-	// own modes in every view, and the first person player camera no longer
-	// stands in for a sight camera. The weapon fire must read GetPlayerAimRay,
-	// the one aim ray, instead of the sight mode.
-	return Cams[ActiveCam].Mode;
 }
 
 int16

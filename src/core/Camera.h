@@ -666,25 +666,13 @@ public:
 	// The camera toggle: flip the persistent first person choice, the state the
 	// Display setting and the settings file use (VICE-139)
 	void ToggleFirstPersonView(void);
-	// Whether the first person view holds the weapon at the sights this frame:
-	// the plain first person view aims with the weapon while the player holds
-	// the aim. There is no sight camera and no sight zoom any more; the view
-	// keeps the player FOV and the shot follows the aim ray.
-	bool UsingFirstPersonSights(void);
 	bool Using1stPersonView(void);
-	// The third person aim down the sights pull is gone: the camera does not
-	// move or zoom while a gun aims. The weapon code must drop this call.
-	bool UsingThirdPersonAds(void);
 	// The first person mode with the player's own vehicle as the target
 	bool InFirstPersonCarView(void);
 	// The car aim: the driver holds the one aim state and the camera serves the
 	// vehicle, so the third person mouse camera or the first person car view
 	// aims freely. The handbrake suppression reads this.
 	bool UsingCarAds(void);
-	// The camera mode the weapon fire reads: the scope and the viewfinder run
-	// their own modes, and every other view reports its own mode. The weapon
-	// paths must move to GetPlayerAimRay, which is the one aim ray.
-	int16 GetSightCameraMode(void);
 	// The sight overlay the current view draws: the scope of the sniper and the
 	// laser scope, the viewfinder of the photo camera, or MODE_NONE so the HUD
 	// draws its own one reticle for a normal gun. The HUD asks this.

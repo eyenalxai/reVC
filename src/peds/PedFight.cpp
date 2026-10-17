@@ -360,11 +360,9 @@ CPed::SetAttack(CEntity *victim)
 
 		if (m_pLookTarget) {
 			SetAimFlag(m_pLookTarget);
-#ifdef FREE_CAM
 		} else if (this != FindPlayerPed() || !((CPlayerPed*)this)->m_bWeaponAimActive) {
-#else
-		} else {
-#endif
+			// The one aim owns the aim flag while it holds; the lock-on and
+			// the AI keep the stock flag
 			if (this == FindPlayerPed() && TheCamera.Cams[0].Using3rdPersonMouseCam()) {
 				SetAimFlag(m_fRotationCur);
 				((CPlayerPed*)this)->m_fFPSMoveHeading = TheCamera.Find3rdPersonQuickAimPitch();
@@ -917,10 +915,7 @@ CPed::Attack(void)
 	if (weaponAnimTime > animStart && weaponAnimTime - weaponAnimAssoc->timeStep <= animStart) {
 		if (!bIsDucking && !GetFireAnimNotDucking(ourWeapon) && ourWeapon->IsFlagSet(WEAPONFLAG_CANAIM_WITHARM))
 			m_pedIK.m_flags |= CPedIK::AIMS_WITH_ARM;
-		else
-#ifdef FREE_CAM
-			if (!IsPlayer() || !((CPlayerPed*)this)->m_bWeaponAimActive)
-#endif
+		else if (!IsPlayer() || !((CPlayerPed*)this)->m_bWeaponAimActive)
 			m_pedIK.m_flags &= ~CPedIK::AIMS_WITH_ARM;
 	}
 
@@ -1103,15 +1098,15 @@ CPed::Attack(void)
 			weaponAnimAssoc->SetCurrentTime(animLoopEnd);
 			weaponAnimAssoc->flags &= ~ASSOC_RUNNING;
 			SetPointGunAt(m_pPointGunAt);
-#ifdef FREE_CAM
 		} else if (IsPlayer() && ((CPlayerPed*)this)->m_bWeaponAimActive && GetWeapon()->m_eWeaponState != WEAPONSTATE_RELOADING) {
-			float limitedCam = CGeneral::LimitRadianAngle(-TheCamera.Orientation);
-			SetLookFlag(limitedCam, true, true);
-			SetAimFlag(limitedCam);
-			SetLookTimer(INT32_MAX);
-			SetPointGunAt(nil);
-			((CPlayerPed*)this)->m_fFPSMoveHeading = TheCamera.Find3rdPersonQuickAimPitch();
-#endif
+			// The one aim owns the pose between the bursts: the flag, the pose
+			// and the pitch stay where AimWeapon put them, only the animation
+			// must stop
+			if (GetWeapon()->m_eWeaponType == WEAPONTYPE_FLAMETHROWER && weaponAnimAssoc->IsRunning()) {
+				weaponAnimAssoc->flags |= ASSOC_DELETEFADEDOUT;
+				weaponAnimAssoc->flags &= ~ASSOC_RUNNING;
+				weaponAnimAssoc->blendDelta = -4.0f;
+			}
 		} else {
 			ClearAimFlag();
 

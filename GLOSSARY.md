@@ -484,6 +484,19 @@ fog site's own segment that lands inside the fade is allowed by the in-view band
 the same band's fade-out. A refused attempt is counted by the stage it reached
 (`ms_nFarTrafficRefusedNoSite` / `...RefusedBand` / `...RefusedGate`).
 
+## Refused pose
+
+A pose of the far traffic layer the world cannot hold (VICE-168): the position
+or a direction is not finite, or the x/y fall outside the sector grid of the
+world (`World.h`: x [-2400, 1600), y [-2000, 2000)). The grid's guard covers
+only the upper side, so writing such a pose and calling
+`CPhysical::RemoveAndAdd` walks out of the sector array. One rule
+(`FarTrafficPoseIsInWorld`, `src/control/FarTraffic.h`) serves the simulation
+and the applicator: the simulation marks the refusal in its published pose and
+the applicator refuses the pose again whatever producer wrote it, counts it
+(`ms_nFarTrafficRefusedPoses`), never writes it, and hands the car to the near
+side by the no-driver promotion. A healthy layer reads 0.
+
 ## Promotion
 
 The switch of a far car into a full traffic car when it reaches the far band's

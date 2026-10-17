@@ -236,7 +236,10 @@ NEAR_BUBBLE = [
 # old "fout" case, which the worker counts instead of printing), and the
 # catch-ups row counts the pending cycles the applicator had to run inline
 # because many frames in a row never handed their cycle over (the command ring's
-# water mark): 0 in normal play.
+# water mark): 0 in normal play. The refused poses row counts the poses the
+# world's own rule rejected (a position or a direction that is not finite, or an
+# x/y outside the sector grid; VICE-168): the pose is never written and the car
+# leaves the layer, so a healthy layer reads 0.
 FAR_TRAFFIC = [
     ("far: cars",                    "_ZN11CFarTraffic18ms_nFarTrafficCarsE",           "I"),
     ("far: cap",                     "_ZN11CFarTraffic17ms_nFarTrafficCapE",            "I"),
@@ -258,6 +261,7 @@ FAR_TRAFFIC = [
     ("far: worker lost (must be 0)", "_ZN11CFarTraffic24ms_nFarTrafficWorkerLostE",     "I"),
     ("far: short curves",            "_ZN11CFarTraffic25ms_nFarTrafficShortCurvesE",    "I"),
     ("far: worker catch-ups",        "_ZN11CFarTraffic22ms_nFarTrafficCatchUpsE",       "I"),
+    ("far: refused poses (must be 0)", "_ZN11CFarTraffic26ms_nFarTrafficRefusedPosesE", "I"),
 ]
 
 CONFIG = "src/core/config.h"
