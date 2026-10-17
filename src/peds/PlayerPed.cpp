@@ -1435,7 +1435,7 @@ CPlayerPed::ProcessAnimGroups(void)
 {
 	AssocGroupId groupToSet;
 #ifdef PC_PLAYER_CONTROLS
-	// The strafe and back groups cover every camera facing view, the first
+	// The strafe and back groups cover every camera-facing view, the first
 	// person view included: the forward cycle would leave the legs walking
 	// forward while the ped moves sideways. The thresholds split the walk angle
 	// into the side sector (50 to 130 degrees) and the back sector (beyond 130
