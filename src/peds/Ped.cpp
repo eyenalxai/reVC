@@ -1257,7 +1257,13 @@ CPed::AimGun(void)
 {
 	CVector vector;
 
-	if (IsPlayer() && bIsDucking)
+	// The crouch's pose and the prone's pose own the arms for the player: the
+	// arm IK reads the clavicle and the spine against an upright body and its
+	// clamps are anchored to the standing bind pose, so on a body that lies
+	// down its references are noise and its limits saturate (the aim would
+	// drop GUN_POINTED_SUCCESSFULLY). The torso and the head keep their own
+	// correction on top of the pose (CPedIK::PointGunInDirection).
+	if (IsPlayer() && (bIsDucking || GetStance() == STANCE_PRONE))
 		m_pedIK.m_flags &= ~CPedIK::AIMS_WITH_ARM;
 
 	if (m_pSeekTarget) {

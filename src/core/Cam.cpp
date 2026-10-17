@@ -920,7 +920,10 @@ static const CColModel *const StanceCamColModels[STANCE_NUM] = {
 // top the same box is, so the eye drops with it. The one drop is read under the
 // two names their readers use (FollowCamStanceHeight and StanceEyeHeight); the
 // columns are separate because a later stance that carries its head differently
-// moves the eye row alone.
+// moves the eye row alone. The prone is that stance: its pose puts the head on
+// the ground, so the eye rides the posed head bone and the stance adds nothing
+// to it - the box-top drop stays the body column, which is the follow camera's
+// target.
 static tStanceCamOffset
 StanceCamOffset(eStance stance)
 {
@@ -931,6 +934,8 @@ StanceCamOffset(eStance stance)
 	tStanceCamOffset offset;
 	offset.bodyHeight = drop;
 	offset.eyeHeight = drop;
+	if (stance == STANCE_PRONE)
+		offset.eyeHeight = 0.0f;
 	return offset;
 }
 
