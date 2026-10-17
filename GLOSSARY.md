@@ -163,6 +163,58 @@ and the weapon the ped holds. The controller targets it and scales the animation
 playback by (real speed / reference speed), so the legs stay planted while the
 speed changes.
 
+## IFP
+
+The animation block file format (`anim/ped.ifp` is the shipped one). This
+engine reads the ANPK form only: `CAnimManager::LoadAnimFile` in
+`src/animation/AnimManager.cpp`. A block is a chunk tree (`ANPK` -> `INFO`,
+then one `NAME` and one `DGAN` per animation, then one `CPAN` per bone), every
+chunk is a 4-byte identity and a byte size whose body is padded to 4 bytes, and
+the loader reads the rounded size. The block name equals the file stem; the
+engine loads and streams the block by that name.
+
+## Keyframe chunk
+
+The per-bone payload of an IFP animation: `KR00` (rotation and time), `KRT0`
+(rotation, translation and time) or `KRTS` (rotation, translation, scale and
+time). A bone with no keys has no keyframe chunk at all, and the loader skips
+it. The file stores the conjugate of every rotation and absolute key times in
+seconds; the loader negates x, y and z and turns the times into deltas.
+
+## Bone tag
+
+The `Bones.h` number that binds an IFP bone sequence to a ped frame: 0 is
+`Root`, 5 is `Head`, and so on. The 44-byte `ANIM` form carries the tag and the
+loader binds by it; the 48-byte form carries none, so the loader binds that
+sequence by name. The loader reads a tag only from the 44-byte form.
+
+## Root sequence
+
+The bone sequence of an IFP animation that carries the ground motion: the
+loader finds it by bone tag 0, or, when the sequence is untagged, by the exact
+name `Root` (`CAnimBlendHierarchy::IsRootSequence`). Its translation is +Y
+forward, and one loop of a walk, run or sprint cycle ends where the next one
+begins in every direction but the one the ped walks: a residual sideways or
+vertical displacement makes the ped crab or sink a little every loop.
+
+## Root speed
+
+The ground speed of one root cycle: the net ground displacement of the root
+over the cycle divided by the cycle time
+(`CAnimBlendHierarchy::RootCycleSpeed`), in units per second at association
+speed 1.0. The reference speed is built from it. A movement cycle with a root
+speed of 0 moves the ped nowhere.
+
+## Movement set
+
+The animations of one movement block, in the engine's slot order: `walk`,
+`run`, `sprint`, `idle`, `startwalk`. The slots are the AnimationId 0..4 of the
+engine's `aStdAnimDescs`, and the name array and the description array of a
+group are index-aligned, so a file whose animations are out of order gives a
+slot the wrong behaviour. The walk, run and sprint slots are repeating cycles
+with an increasing root speed, the idle is a pose and does not translate, and
+the startwalk is a one-shot.
+
 ## Magazine weapon
 
 A weapon that fires instant hits and has a clip of two or more rounds. The
