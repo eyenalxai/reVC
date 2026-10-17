@@ -8,6 +8,9 @@
 // vehicle.
 #define AIM_RAY_DISTANCE (30.0f)
 
+// The gap between the car body and the start of a shot from the cabin.
+#define AIM_HULL_MARGIN (0.1f)
+
 // The one classification of the aiming weapons, as pure rules over the weapon
 // data. WeaponAim.h wraps them with the loaded CWeaponInfo, and the aim matrix
 // harness checks them against weapon.dat without the engine.
