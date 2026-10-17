@@ -151,6 +151,16 @@ static void
 BuildWorld(void)
 {
 	memset(&g_world, 0, sizeof(g_world));
+	/* The world's own sector grid (VICE-168): the simulation asks the pose
+	 * rule against these bounds, so the harness fills them the way
+	 * CFarTraffic::BuildWorldSnapshot fills them from World.h. A zeroed
+	 * bounds block would refuse every synthetic pose (fail-closed on a
+	 * harness that never reads them is the layer's own behaviour, not the
+	 * graph's). */
+	g_world.bounds.minX = WORLD_MIN_X;
+	g_world.bounds.maxX = WORLD_MAX_X;
+	g_world.bounds.minY = WORLD_MIN_Y;
+	g_world.bounds.maxY = WORLD_MAX_Y;
 	g_world.numNodes = NUM_NODES;
 	g_world.numLinks = NUM_CONNECTIONS;
 	g_world.numConnections = NUM_CONNECTIONS;
