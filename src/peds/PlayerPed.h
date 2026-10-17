@@ -8,17 +8,6 @@ class CPad;
 class CCopPed;
 class CWanted;
 
-// The movement state the controller reports (PlayerPed.cpp). The solver owns
-// the real state (eMoveStateId, PlayerMoveSolver.h), which grows past these two
-// with the state table (VICE-171); this field keeps the value the controller
-// used to expose.
-enum ePlayerMovementState
-{
-	PLAYERMOVE_GROUND,	// the feet are on a surface
-	PLAYERMOVE_AIR,		// in the air: keep the momentum, steer a little
-	PLAYERMOVE_NUMSTATES,
-};
-
 class CPlayerPed : public CPed
 {
 public:
@@ -53,7 +42,6 @@ public:
 	float m_fWalkAngle; //angle between heading and walking direction
 	float m_fFPSMoveHeading;
 	float m_fMoveHeading; // world heading of the controller's movement direction
-	ePlayerMovementState m_nMovementState;
 	// The movement solver owns the player's horizontal velocity
 	// (PlayerMoveSolver.h); the controller only builds the intent, steps it and
 	// writes the snapshot back.

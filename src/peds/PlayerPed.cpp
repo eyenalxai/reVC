@@ -53,17 +53,6 @@
 // DoWeaponSmoothSpray returns this when no smooth spray runs
 #define PLAYER_NO_SMOOTH_SPRAY		(-1.0f)
 
-// The movement state the controller reports from the solver's snapshot
-// (PlayerPed.h). The solver owns the real state and grows past these two with
-// the state table (VICE-171); until then the report mirrors the two states.
-static ePlayerMovementState
-PlayerMovementStateOf(eMoveStateId state)
-{
-	if (state == MOVE_AIR)
-		return PLAYERMOVE_AIR;
-	return PLAYERMOVE_GROUND;
-}
-
 // The player's aim pose aims at a point this far along the aim ray
 #define PLAYER_AIM_DISTANCE AIM_RAY_DISTANCE
 
@@ -346,7 +335,6 @@ CPlayerPed::SetInitialState(void)
 	m_pedStats->m_temper = 50;
 	m_fWalkAngle = 0.0f;
 	m_fMoveHeading = 0.0f;
-	m_nMovementState = PLAYERMOVE_GROUND;
 	m_MoveSolver.Reset();
 	if (m_attachedTo && !bUsesCollision)
 		bUsesCollision = true;
@@ -1858,7 +1846,6 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 	m_vecMoveSpeed.x = snapshot.velocity.x;
 	m_vecMoveSpeed.y = snapshot.velocity.y;
 	m_moved = CVector2D(snapshot.moved.x, snapshot.moved.y);
-	m_nMovementState = PlayerMovementStateOf(snapshot.state);
 }
 
 void
