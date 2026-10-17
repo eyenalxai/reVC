@@ -765,3 +765,26 @@ instead of scanning every node of the type: rings of cells around the query
 point, stopped when no farther node can tie or beat the closest one found.
 Built once after `PreparePathData`, 53 KB inside `ThePaths`; the plain scan
 stays as the fallback for a map the grid cannot hold. See ADR 0024.
+
+## Mission car (mission vehicle)
+
+A vehicle the game created for a script, a mission or a set piece:
+`VehicleCreatedBy == MISSION_VEHICLE` (Vehicle.h). It counts in the car budget
+as `NumMissionCars`, and it is the only class a save carries: the pool save
+writes a vehicle out only when `IsVehicleSaved` reads it as a mission car
+(Pools.cpp), because the traffic and the parked cars are rebuilt around the
+player after a load. A loaded mission car is counted once in `NumMissionCars`
+(VICE-163).
+
+## Vehicle counter
+
+One of the car classes' live counters in `CCarCtrl`: `NumRandomCars`,
+`NumLawEnforcerCars`, `NumMissionCars`, `NumParkedCars` and `NumPermanentCars`.
+A creation counts once in the class the vehicle carries (the `CVehicle`
+constructor) and a deletion takes the count back (the destructor); a class
+switch moves it (`CCarCtrl::UpdateCarCount`). `NumCarsInUse` sums the four
+classes the budget counts and the two emergency counters; the permanent class
+and the far traffic stay outside it. `CCarCtrl::ReInit` zeroes every counter,
+and the save load calls it before the vehicle pool restore; each restored
+vehicle counts once in the class the save carries (VICE-163). The offline check
+is `utils/save-vehicle-count`.

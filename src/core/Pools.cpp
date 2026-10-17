@@ -169,6 +169,11 @@ INITSAVEBUF
 		 * the random class restored from a save is the traffic's own again,
 		 * so it does not hide in the "other fill" after a load. */
 		pVehicle->bIsTrafficCar = pVehicle->VehicleCreatedBy == RANDOM_VEHICLE;
+		/* The constructor counted the vehicle as a random car and the
+		 * decrement above took that count back; Load has set the saved
+		 * class, so the vehicle's one count goes to that class here, as in
+		 * the direct branch below (VICE-163). */
+		CCarCtrl::UpdateCarCount(pVehicle, false);
 		CWorld::Add(pVehicle);
 #else
 		char* vbuf = new char[Max(CBike::nSaveStructSize, Max(CAutomobile::nSaveStructSize, CBoat::nSaveStructSize))];
