@@ -1666,7 +1666,7 @@ CPlayerPed::HoldProneAimPose(void)
 	}
 
 	// The crawl keeps the legs: the pose drives the upper body alone
-	aimAssoc->MakeUpperBodyOnly();
+	aimAssoc->MakeUpperBodyOnly(RidesBike());
 }
 
 // Fade the prone aim pose out: the body stood up again, or the aim went down.
