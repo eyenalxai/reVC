@@ -166,6 +166,14 @@ the friction. The air state keeps the momentum and steers with a smaller
 authority. The slide state adds its entry boost and its friction curve. The dive
 state is the air state with the prone stance.
 
+## Movement trigger
+
+The bit one step collects for the transition table: a fact of the step (the feet
+are on a surface, the feet left it) or an action edge (jump, dive, slide). The
+wall contact, the wall left and the head hit wait for the states that move on
+them. The step collects its bits once and the transition rows are scanned in
+their priority order over that one mask, so a move is a row and never a branch.
+
 ## Stance
 
 The player's body attitude, an axis of its own beside the movement state: stand,
