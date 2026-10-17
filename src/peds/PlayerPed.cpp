@@ -1164,6 +1164,10 @@ CPlayerPed::PlayerControl1stPersonRunAround(CPad *padUsed)
 		return;
 	}
 
+	// The one aim runs before the sprint and the jump: the aim gates the heavy
+	// weapon controls (VICE-137)
+	AimWeapon(padUsed);
+
 	if (PlayerWantsSprint(padUsed))
 		m_nMoveState = PEDMOVE_SPRINT;
 	if (m_nPedState != PED_FIGHT)
@@ -1176,8 +1180,6 @@ CPlayerPed::PlayerControl1stPersonRunAround(CPad *padUsed)
 	if (m_nPedState != PED_FIGHT)
 		PlayIdleAnimations(padUsed);
 #endif
-
-	AimWeapon(padUsed);
 }
 
 // The jump and the evade dive of the on-foot player, shared by the two walk
@@ -1195,6 +1197,8 @@ CPlayerPed::PlayerJumpOrDive(CPad *padUsed)
 
 	ClearAttack();
 	if (m_nEvadeAmount != 0 && m_pEvadingFrom) {
+		// The dive owns the whole body: the aim and the lock-on go with it
+		StopWeaponAim();
 		ClearWeaponTarget();
 		SetEvasiveDive((CPhysical*)m_pEvadingFrom, 1);
 		m_nEvadeAmount = 0;
@@ -1882,6 +1886,10 @@ CPlayerPed::PlayerControlZelda(CPad *padUsed)
 		return;
 	}
 
+	// The one aim runs before the sprint and the jump: the aim gates the heavy
+	// weapon controls (VICE-137)
+	AimWeapon(padUsed);
+
 	if (PlayerWantsSprint(padUsed)) {
 		if (!m_pCurrentPhysSurface || (!m_pCurrentPhysSurface->bInfiniteMass || m_pCurrentPhysSurface->m_phy_flagA08))
 			m_nMoveState = PEDMOVE_SPRINT;
@@ -1891,7 +1899,6 @@ CPlayerPed::PlayerControlZelda(CPad *padUsed)
 		SetRealMoveAnim();
 
 	PlayerJumpOrDive(padUsed);
-	AimWeapon(padUsed);
 	PlayIdleAnimations(padUsed);
 }
 
