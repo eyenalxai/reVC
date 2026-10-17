@@ -348,6 +348,34 @@ CPlayerPed::SetInitialState(void)
 	m_attachWepAmmo = 0;
 }
 
+// The stand-in look of the slide (VICE-180). The shipped anim/ped.ifp carries
+// no slide cycle, so the slide plays a shipped pose instead: the low crouch the
+// duck holds, the body low over the legs while it goes along the ground. The
+// pose is held for the slide and faded out with it. No other path plays
+// ANIM_STD_DUCK_LOW (the stock duck plays ANIM_STD_DUCK_DOWN and the crouch
+// fire ANIM_STD_DUCK_WEAPON), so the stand-in lives here alone - the authored
+// slide cycle replaces this one call and nothing else blends the pose. The
+// stock duck's own clear still fades whatever crouch pose it finds, which only
+// ends a slide's stand-in a moment early. The solver state is all this reads,
+// and animation is all it writes.
+void
+CPlayerPed::UpdateMoveStandInAnim(const SMoveSnapshot &snapshot)
+{
+	CAnimBlendAssociation *assoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_DUCK_LOW);
+
+	if (snapshot.state == MOVE_SLIDE) {
+		if (assoc == nil || assoc->blendDelta < 0.0f)
+			CAnimManager::BlendAnimation(GetClump(), ASSOCGRP_STD, ANIM_STD_DUCK_LOW, 8.0f);
+		return;
+	}
+	// The state the pose stood in for is over: fade the pose out. A fade that
+	// is already running is left alone.
+	if (assoc != nil && assoc->blendDelta >= 0.0f) {
+		assoc->flags |= ASSOC_DELETEFADEDOUT;
+		assoc->blendDelta = -8.0f;
+	}
+}
+
 void
 CPlayerPed::SetRealMoveAnim(void)
 {
@@ -1873,8 +1901,19 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 	// their edges arrive with VICE-182 and VICE-181.
 	intent.jumpRequested = false;
 	intent.diveRequested = false;
+	// The crouch press is the momentary duck action, the same edge the stock
+	// duck reads (ProcessPlayerWeapon); with the sprint tier it is the slide's
+	// entry pair in this one frame (VICE-180). The crouch stance the press also
+	// asks for arrives with its own ticket (VICE-176), so the solver leaves the
+	// stance alone.
+	intent.crouchRequested = padUsed->DuckJustDown();
+	// The prone action (PED_PRONE, V by default): the slide ends on it; the
+	// prone stance is the stance row of VICE-177.
+	intent.proneRequested = padUsed->ProneJustDown();
 
 	const SMoveSnapshot &snapshot = m_MoveSolver.Step(intent);
+	// The slide has no shipped cycle yet: its stand-in pose (VICE-180)
+	UpdateMoveStandInAnim(snapshot);
 
 	// The movement debug readout and the telemetry record (see
 	// MovementTelemetry.h); both are inert while the flag is off.
