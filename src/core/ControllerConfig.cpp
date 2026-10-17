@@ -346,8 +346,9 @@ void CControllerConfigManager::InitDefaultControlConfiguration()
 
 	SetControllerKeyAssociatedWithAction    (VEHICLE_TURRETDOWN,                  rsPADRIGHT, KEYBOARD);
 										    
+	// Home is the one camera toggle key: the stock extra on 'V' would collide
+	// with the prone action (VICE-175), and one press must set one edge
 	SetControllerKeyAssociatedWithAction    (CAMERA_CHANGE_VIEW_ALL_SITUATIONS,   rsHOME,     KEYBOARD);
-	SetControllerKeyAssociatedWithAction    (CAMERA_CHANGE_VIEW_ALL_SITUATIONS,   'V',        OPTIONAL_EXTRA);
 
 	for (int32 i = 0; i < MAX_SIMS; i++)
 	{
