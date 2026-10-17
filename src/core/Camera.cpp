@@ -3230,6 +3230,21 @@ CCamera::Find3rdPersonQuickAimPitch(void)
 	return -(DEGTORAD(((0.5f - m_f3rdPersonCHairMultY) * 1.8f * 0.5f * Cams[ActiveCam].FOV)) + rot);
 }
 
+// The one aim ray of the player. The third person mouse view aims through its
+// crosshair, so the shot and the pose go where the pointer points. Every other
+// view (the first person view, the scopes and the viewfinder) aims along its
+// own camera.
+bool
+CCamera::GetPlayerAimRay(float range, const CVector &pos, CVector &source, CVector &target)
+{
+	if (Cams[ActiveCam].Using3rdPersonMouseCam() && !Using1stPersonView() && !Using1stPersonWeaponMode())
+		return Find3rdPersonCamTargetVector(range, pos, source, target);
+
+	source = Cams[ActiveCam].Source;
+	target = Cams[ActiveCam].Front * range + source;
+	return true;
+}
+
 bool
 CCamera::Using1stPersonWeaponMode(void)
 {

@@ -174,9 +174,7 @@ CPlayerPed::CPlayerPed(void) : CPed(PEDTYPE_PLAYER1)
 	m_nAttackDirToCheck = 0;
 	m_nLastBusFareCollected = 0;
 	idleAnimBlockIndex = CAnimManager::GetAnimationBlockIndex("playidles");
-#ifdef FREE_CAM
-	m_bFreeAimActive = false;
-#endif
+	m_bWeaponAimActive = false;
 	m_bFirstPersonAimActive = false;
 }
 
@@ -1735,7 +1733,7 @@ CPlayerPed::ProcessPlayerWeapon(CPad *padUsed)
 				// On this one we can rotate arm.
 				if (CAN_AIM_WITH_ARM) {
 					pointedGun = 2;
-					m_bFreeAimActive = true;
+					m_bWeaponAimActive = true;
 					SetLookFlag(limitedCam, true, true);
 					SetAimFlag(limitedCam);
 					SetLookTimer(INT32_MAX);
@@ -1778,7 +1776,7 @@ CPlayerPed::ProcessPlayerWeapon(CPad *padUsed)
 
 				SetAimFlag(limitedCam);
 				((CPlayerPed*)this)->m_fFPSMoveHeading = TheCamera.Find3rdPersonQuickAimPitch();
-				m_bFreeAimActive = true;
+				m_bWeaponAimActive = true;
 			}
 		} else {
 			pointedGun = 0;

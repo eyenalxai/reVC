@@ -671,6 +671,11 @@ public:
 	void UpdateAimingCoors(CVector const &coors);
 	bool Find3rdPersonCamTargetVector(float dist, CVector pos, CVector &source, CVector &target);
 	float Find3rdPersonQuickAimPitch(void);
+	// The one aim ray of the player: the point the gun pose and the shot
+	// follow. The first person view and the weapon sight views aim along their
+	// camera; the third person mouse view aims through its crosshair, so the
+	// shot goes where the pointer points.
+	bool GetPlayerAimRay(float range, const CVector &pos, CVector &source, CVector &target);
 	bool Using1stPersonWeaponMode(void);
 	bool FirstPersonViewEnabled(void);
 	// The camera toggle: flip the persistent first person choice, the state the
