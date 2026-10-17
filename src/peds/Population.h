@@ -48,10 +48,13 @@ public:
 	static uint32 ms_nTotalCarPassengerPeds;
 	static uint32 NumMiamiViceCops;
 
-	/* The off-network pedestrian spawns (VICE-122): the pedestrians created on
-	 * a free position off the node network, and the strays the cull took. The
-	 * counters are live for the measurement rig. */
+	/* The off-network pedestrian spawns (VICE-122, the standable cells of
+	 * VICE-154): the pedestrians created on a validated cell point, the ones
+	 * created on the node path (the realised share the target ratio is held
+	 * against), and the strays the cull took. The counters are live for the
+	 * measurement rig. */
 	static uint32 ms_nOffNetworkSpawns;
+	static uint32 ms_nNetworkSpawns;
 	static uint32 ms_nOffNetworkStuck;
 	static uint32 ms_nOffNetworkDrowned;
 

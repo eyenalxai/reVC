@@ -463,8 +463,7 @@ bool CGame::Initialise(const char* datFile)
 	 * built here with the graph prepared and the zones created above
 	 * (PostZoneCreation) and with the collision world not resident yet - a
 	 * site starts unvalidated and the ground is validated lazily per site.
-	 * Nothing consumes the index yet; the spawn service and its planner are
-	 * the next tickets. */
+	 * The spawn service's planner reads it since VICE-150. */
 	CSpawnSites::Build();
 	for (int i = 0; i < NUMPLAYERS; i++)
 		CWorld::Players[i].Clear();

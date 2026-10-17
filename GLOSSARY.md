@@ -552,15 +552,32 @@ an area without nodes stays empty: nothing spawns there before VICE-122.
 
 ## Off-network spawn
 
-A pedestrian created off the pedestrian node network. The population picks a
-random point in the creation ring and takes it only if it is free: ground at
-the level of the ring, no surface more than a step above it (no roof or
-canopy), ground above the water line, a clearance sphere clear of the static
-world, clear of other pedestrians, and a ped node inside the walk bound and on
-the same level. The wander state walks the pedestrian to the closest node from
-there. A bounded fraction of the spawns takes this path
-(`PED_OFF_NETWORK_FRACTION`, a fraction of zero draws no random number); the
-rest keeps the node path (VICE-122).
+A pedestrian created off the pedestrian node network. The population holds the
+share of these spawns at a target ratio (`PED_OFF_NETWORK_TARGET_RATIO`, 0.15;
+a target of zero asks for nothing and keeps the node path bit-exact) and takes
+the position from a validated standable cell (VICE-154); a request the cells
+cannot answer falls back to the node path for that spawn. The wander state
+walks the pedestrian to the closest node from there, and the stray cull
+watches it (ADR 0019, which VICE-154 replaces in part).
+
+## Standable cell
+
+One 16 m cell of the world grid the off-network pedestrian spawns stand on
+(VICE-154, `src/peds/PedSites.h`): 250 x 250 cells over the world, a cell
+unvalidated until its build. The build probes a 4 x 4 lattice of the cell on
+the main thread and keeps up to four spread points that pass the predicate:
+the ground cast down from the level of the request (3 m of tolerance), no
+water (the ground above the line plus 0.1 m), the top surface over the point
+no more than a step (0.5 m) above the ground the point stands on (a roof, a
+canopy or a bridge deck rejects), a free clearance sphere over the feet, and a
+ground not steeper than the walk limit (cos 45, the new slope predicate). A
+request maps the drawn position to its cell: a built cell answers with its
+stored point nearest the draw, a built cell with no point (a *dead* cell) and
+an unvalidated one fall back to the node path (the unvalidated one enters the
+bounded build queue first). The queue (512 requested cells, nearest-first) and
+the cache (1024 built cells, the farthest evicted) are bounded, the pump
+spends two builds a frame, and every world query stays on the main thread:
+the planner worker reads the store's plain answers only.
 
 ## Stray (off-network pedestrian)
 
@@ -685,6 +702,14 @@ it: the arms and the torso follow the aim while the vehicle heading stays the
 drive heading, so the body never turns sideways. The bullets ignore the
 player's own car. The stock sideways drive-by of the look keys is gone
 (VICE-138); a bike keeps its stock forward drive-by on the plain fire button.
+
+## Car weapon cycle
+
+The driver's switch to the next or the previous aimable weapon with the car
+cycle keys (`VEHICLE_CYCLE_WEAPON_LEFT` and `VEHICLE_CYCLE_WEAPON_RIGHT`). Only
+the guns and the photo camera with ammo count (`IsAimableWeapon`). When the seat
+stored the weapon of the foot, the choice replaces the stored weapon, so the
+exit brings back the weapon the driver last chose.
 
 ## Aim state
 
@@ -861,7 +886,9 @@ leave no phantom. A constructor only registers the handle (it must not read the
 unplaced matrix); the first placement counts it. Each handle remembers the cell
 it was counted in, so a removal is exact whatever the entity did in between.
 `CReplay::RestoreStuffFromMem` and the boot call `CSpawnOccupancy::Resync`, the
-one true rebuild, and `CWorld::ClearForRestart` calls `Reset`.
+one true rebuild, and `CWorld::ClearForRestart` calls `Reset`. The spawn
+service's planner reads the cell counts (the capacity filter) and the site
+reservations since VICE-150; the director is a later reader.
 
 ## Presence grid
 
@@ -875,11 +902,13 @@ the final collision query at creation stays the true guard.
 
 The occupancy store's short promise on a site (VICE-149): the planner reserves
 a site id - the site index's directed connection - before it creates the actor
-there, so two requests cannot plan the same connection in the same frame. The
-reservation expires after two seconds (`SPAWN_OCCUPANCY_RESERVE_MS`), so an
-abandoned plan frees the site by itself. A held entry is one whose remaining
-lifetime is inside the reserve window: a clock that moved backwards (a load)
-reads the site free, and a stale entry cannot read held.
+there, so two requests cannot plan the same connection at the same time. The
+run releases a created site's own reservation at once (the created car's
+presence in the store is the guard from then on); the reservation expires
+after two seconds (`SPAWN_OCCUPANCY_RESERVE_MS`), so an abandoned plan frees
+the site by itself. A held entry is one whose remaining lifetime is inside the
+reserve window: a clock that moved backwards (a load) reads the site free, and
+a stale entry cannot read held.
 ## Spawn site
 
 A place a vehicle may be created on the car path graph, one per **directed**
@@ -967,3 +996,82 @@ tracker slots to load the cars it needs and a pin never starves the loader; a
 pin request that does not fit is counted deferred and not made. The shipped
 sets fit with room: the class catalogue's 56 models plus the widest zone set
 are 61 vehicle pins against the budget of 82.
+(the engine side), and `utils/spawn-service` is the evidence program. The
+spawn service's planner reads it (VICE-150); the far layer's migration is a
+later requester.
+
+## Spawn service
+
+The one writer of spawn intent (`src/control/SpawnService.h` and
+`SpawnService.cpp`, VICE-150): a producer requests, the service decides where
+the actor may legally appear and creates it there. The request envelope
+carries two creation kinds: a **road-site placement** (the planner: candidates
+from the site index, filtered by purpose, the live zone, the occupancy store
+and the visibility ladder, ranked, reserved, then created by the primitive)
+and an **explicit** creation (the exact position, model and lifetime given by
+a script or a mission: synchronous, no visibility and no ring, with a force
+bypass over the budgets and the reserves). Both kinds are counted. The
+refusal reasons are the ticket's own - no site, occupancy, visibility, zone,
+readiness, budget, pool, reachability - and every refusal event (a request's
+gate, a plan drop or an attempt's refusal) is counted, so refusals after
+planning are measured, not hidden. The service's telemetry is one static
+`SSpawnServiceTelemetry` instance, `CSpawnService::ms_Telemetry`, read live by
+`utils/caps-audit/live-counters.py`; the near bubble's gates and counters sit
+behind the service's ladder API (`CSpawnService::AllowsCreation`,
+`AllowsRemoval` and the counter notes), so no spawn decision outside
+`SpawnService.cpp` asks them directly. The ambient traffic is the first
+requester (`CCarCtrl::GenerateOneRandomCar`).
+
+The service states its deltas from the old spawner, rather than hiding them:
+the plan's candidates are the sites whose **midpoint** is in the ring band,
+not the node pairs that bracket the ring (the index carries no per-node
+positions, and the rank's nearest-to-the-ring keeps the placement on the
+ring); the ped pool's reserve is checked once per request as well as once per
+frame and once per car; the top-down camera's bypass arm allows a creation
+the old birth cull's top-down disjunct refused (the ladder owns the view);
+and the RNG stream shifts, because the removed rarity draw and the moved
+budget gate consume the shared dice differently (the fill burst's own shift,
+ADR 0021). The plan's catchable-midpoint conservatism and the rarity weight
+are stated in the planner's entry below.
+
+## Spawn planner
+
+The road-site half of the spawn service (VICE-150): `SpawnOfferSites` takes
+the candidates of the request's ring band from the site index's hash (the old
+collector's outer distance and cone, the purpose's water policy and the
+disabled flag), the frame resolves the cheap facts of each candidate (the
+ladder's candidate for the site's midpoint, without a ray) and the ranked
+prefix's deep facts (the site's live zone and `CPathFind::
+TestCoorsCloseness`, the path search the primitive used to pay per creation),
+and `SpawnPlanSites` filters by reason, ranks - hidden arms first, then the
+emptier presence cell (spread), then the nearest to the request's ring, then
+the rarity weight, then the site id - and reserves the returned placements in
+the occupancy store while the plan is outstanding, so two requests cannot plan
+the same connection at the same time. The rarity is the rank's last key by
+decision: it is the weight the old dice became, so the order's own keys decide
+first and the rate only breaks their ties (not a filter - that would be the
+dice again; the dump path prints the shipped rates). A candidate whose
+midpoint arm is catchable is dropped (VISIBILITY) and never reaches the
+primitive - the plan's stated conservatism: the old path attempted it and a
+final-position occluded hint could allow it by ray. `SpawnRunPlan` tries the
+plan's sites in order through the primitive and counts every post-plan
+refusal. The rank keeps the first `SPAWN_SERVICE_DEEP_CANDIDATES` (8)
+candidates for the deep facts, and the plan returns at most
+`SPAWN_PLAN_MAX_PLACEMENTS` (4).
+
+## Creation primitive (spawn)
+
+`CCarCtrl::CreateCarFromPlacement` after VICE-150: the one car creation of the
+spawn service and the far layer. It keeps the route and lane state (the lane
+draw on the travelled side, the direction sign, the current and next link,
+the curve), the ground and water height, the physics and status, the occupants
+with the pool caps and reserves, the final ground and collision validation and
+the counters. It no longer rolls the rarity dice (the planner's weight
+replaced it) or makes the camera decisions, and the reachability test moved to
+the planner. An `ESpawnTier` passes in: the near tier creates with
+`RANDOM_VEHICLE` and runs the near ring's birth cull and the occupants; the
+far tier skips the cull, leaves the car in the far state and skips the
+occupants. The driver contract: `SetUpDriver` needs `RANDOM_VEHICLE`, so a
+kind that wants occupants creates with the random tag (the far promotion sets
+the tag before its own call). The return is an `ESpawnRefusal`, so the service
+counts the primitive's refusals by reason.

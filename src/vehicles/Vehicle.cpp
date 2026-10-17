@@ -2603,14 +2603,17 @@ CVehicle::FireDriverAimedWeapon(CWeapon *weapon)
 	return true;
 }
 
-// The shared start of the three drive-by paths. The aim state comes first, so
-// it clears even when a gate stops the rest; then the script gate, the aiming
+// The shared start of the three drive-by paths. The car cycle comes first, so
+// the aim and the shot follow the new weapon. The aim state comes next, so it
+// clears even when a gate stops the rest; then the script gate, the aiming
 // weapon, the weapon update and the reload input. It answers whether the path
 // continues, with the driver's weapon and whether the driver aims.
 bool
 CVehicle::PrepareDriverShooting(CWeapon **weaponOut, bool *aimingOut)
 {
 	*weaponOut = nil;
+	if (pDriver && pDriver->IsPlayer())
+		((CPlayerPed*)pDriver)->ProcessVehicleWeaponSwitch(CPad::GetPad(0));
 	*aimingOut = UpdateDriverWeaponAim();
 
 	if (pDriver == nil)

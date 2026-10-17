@@ -764,6 +764,112 @@ CPlayerPed::IsThisPedAnAimingPriority(CPed *suspect)
 	return suspect->m_nPedState == PED_ABSEIL;
 }
 
+// The cycle keys pick the next or the previous weapon slot. It answers false
+// when no cycle key went down or the camera forbids the cycle; the caller then
+// checks the empty weapon.
+bool
+CPlayerPed::CycleWeaponInput(CPad *padUsed, bool inCar)
+{
+	if (m_pPointGunAt || bDontAllowWeaponChange || GetWeapon()->m_eWeaponType == WEAPONTYPE_DETONATOR)
+		return false;
+
+	if (padUsed->CycleWeaponRightJustDown(inCar)) {
+		if (TheCamera.PlayerWeaponMode.Mode == CCam::MODE_M16_1STPERSON
+			|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_M16_1STPERSON_RUNABOUT
+			|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_SNIPER
+			|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_SNIPER_RUNABOUT
+			|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_ROCKETLAUNCHER
+			|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_ROCKETLAUNCHER_RUNABOUT
+			|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_CAMERA)
+			return false;
+
+		SelectCycledWeaponSlot(true, inCar);
+		return true;
+	}
+
+	if (padUsed->CycleWeaponLeftJustDown(inCar)) {
+		if (TheCamera.PlayerWeaponMode.Mode == CCam::MODE_M16_1STPERSON
+			|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_SNIPER
+			|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_ROCKETLAUNCHER
+			|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_CAMERA)
+			return false;
+
+		SelectCycledWeaponSlot(false, inCar);
+		return true;
+	}
+
+	return false;
+}
+
+// The forward cycle stops at the last slot and falls back to unarmed; the
+// backward cycle wraps round. With inCar only the aimable weapons count,
+// and the held weapon stays when no other one is left.
+void
+CPlayerPed::SelectCycledWeaponSlot(bool forward, bool inCar)
+{
+	if (forward) {
+		for (m_nSelectedWepSlot = m_currentWeapon + 1;
+			m_nSelectedWepSlot < TOTAL_WEAPON_SLOTS && !CanCycleToWeaponSlot(m_nSelectedWepSlot, inCar);
+			++m_nSelectedWepSlot)
+			;
+		if (m_nSelectedWepSlot == TOTAL_WEAPON_SLOTS)
+			m_nSelectedWepSlot = WEAPONSLOT_UNARMED;
+	} else {
+		// I don't know what kind of loop that was
+		m_nSelectedWepSlot = m_currentWeapon - 1;
+		do {
+			if (m_nSelectedWepSlot < 0)
+				m_nSelectedWepSlot = TOTAL_WEAPON_SLOTS - 1;
+
+			if (m_nSelectedWepSlot == WEAPONSLOT_UNARMED)
+				break;
+
+			if (CanCycleToWeaponSlot(m_nSelectedWepSlot, inCar))
+				break;
+
+			--m_nSelectedWepSlot;
+		} while (m_nSelectedWepSlot != WEAPONSLOT_UNARMED);
+	}
+
+	if (inCar && m_nSelectedWepSlot == WEAPONSLOT_UNARMED)
+		m_nSelectedWepSlot = m_currentWeapon;
+}
+
+bool
+CPlayerPed::CanCycleToWeaponSlot(int32 slot, bool inCar)
+{
+	if (!HasWeaponSlot(slot) || !GetWeapon(slot).HasWeaponAmmoToBeUsed())
+		return false;
+
+	return !inCar || IsAimableWeapon(GetWeapon(slot).m_eWeaponType);
+}
+
+// Makes the weapon of the selected slot the held one.
+void
+CPlayerPed::ApplySelectedWeaponSlot(void)
+{
+	if (m_nSelectedWepSlot != m_currentWeapon) {
+		if (m_nPedState != PED_ATTACK && m_nPedState != PED_AIM_GUN && m_nPedState != PED_FIGHT) {
+			RemoveWeaponAnims(m_currentWeapon, -1000.0f);
+			MakeChangesForNewWeapon(m_nSelectedWepSlot);
+		}
+	}
+}
+
+// The driver cycles the aimable weapons with the car cycle keys. The weapon
+// that comes back on the exit follows the choice, as the seat stored it.
+void
+CPlayerPed::ProcessVehicleWeaponSwitch(CPad *padUsed)
+{
+	if (m_nPedState != PED_DRIVING || !CycleWeaponInput(padUsed, true))
+		return;
+
+	if (m_nSelectedWepSlot != m_currentWeapon && m_storedWeapon != WEAPONTYPE_UNIDENTIFIED)
+		m_storedWeapon = GetWeapon(m_nSelectedWepSlot).m_eWeaponType;
+
+	ApplySelectedWeaponSlot();
+}
+
 // I think R* also used goto in here.
 void
 CPlayerPed::ProcessWeaponSwitch(CPad *padUsed)
@@ -771,60 +877,9 @@ CPlayerPed::ProcessWeaponSwitch(CPad *padUsed)
 	if (CDarkel::FrenzyOnGoing() || m_attachedTo)
 		goto switchDetectDone;
 
-	if (!m_pPointGunAt && !bDontAllowWeaponChange && GetWeapon()->m_eWeaponType != WEAPONTYPE_DETONATOR) {
-		if (padUsed->CycleWeaponRightJustDown()) {
+	if (CycleWeaponInput(padUsed, false))
+		goto switchDetectDone;
 
-			if (TheCamera.PlayerWeaponMode.Mode != CCam::MODE_M16_1STPERSON
-				&& TheCamera.PlayerWeaponMode.Mode != CCam::MODE_M16_1STPERSON_RUNABOUT
-				&& TheCamera.PlayerWeaponMode.Mode != CCam::MODE_SNIPER
-				&& TheCamera.PlayerWeaponMode.Mode != CCam::MODE_SNIPER_RUNABOUT
-				&& TheCamera.PlayerWeaponMode.Mode != CCam::MODE_ROCKETLAUNCHER
-				&& TheCamera.PlayerWeaponMode.Mode != CCam::MODE_ROCKETLAUNCHER_RUNABOUT
-				&& TheCamera.PlayerWeaponMode.Mode != CCam::MODE_CAMERA) {
-
-				for (m_nSelectedWepSlot = m_currentWeapon + 1; m_nSelectedWepSlot < TOTAL_WEAPON_SLOTS; ++m_nSelectedWepSlot) {
-					if (HasWeaponSlot(m_nSelectedWepSlot) && GetWeapon(m_nSelectedWepSlot).HasWeaponAmmoToBeUsed()) {
-#ifdef FIX_BUGS
-						goto switchDetectDone;
-#else
-						goto spentAmmoCheck;
-#endif
-					}
-				}
-				m_nSelectedWepSlot = 0;
-#ifdef FIX_BUGS
-				goto switchDetectDone;
-#endif
-			}
-		} else if (padUsed->CycleWeaponLeftJustDown()) {
-			if (TheCamera.PlayerWeaponMode.Mode != CCam::MODE_M16_1STPERSON
-				&& TheCamera.PlayerWeaponMode.Mode != CCam::MODE_SNIPER
-				&& TheCamera.PlayerWeaponMode.Mode != CCam::MODE_ROCKETLAUNCHER
-				&& TheCamera.PlayerWeaponMode.Mode != CCam::MODE_CAMERA) {
-
-				// I don't know what kind of loop that was
-				m_nSelectedWepSlot = m_currentWeapon - 1;
-				do {
-					if (m_nSelectedWepSlot < 0)
-						m_nSelectedWepSlot = TOTAL_WEAPON_SLOTS - 1;
-
-					if (m_nSelectedWepSlot == WEAPONSLOT_UNARMED)
-						break;
-
-					if (HasWeaponSlot(m_nSelectedWepSlot) && GetWeapon(m_nSelectedWepSlot).HasWeaponAmmoToBeUsed())
-						break;
-					
-					--m_nSelectedWepSlot;
-				} while (m_nSelectedWepSlot != WEAPONSLOT_UNARMED);
-#ifdef FIX_BUGS
-				goto switchDetectDone;
-#endif
-
-			}
-		}
-	}
-	
-spentAmmoCheck:
 	if (CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->m_eWeaponFire != WEAPON_FIRE_MELEE
 		&& (!padUsed->GetWeapon() || GetWeapon()->m_eWeaponType != WEAPONTYPE_MINIGUN)) {
 		if (GetWeapon()->m_nAmmoTotal <= 0) {
@@ -858,12 +913,7 @@ spentAmmoCheck:
 	}
 
 switchDetectDone:
-	if (m_nSelectedWepSlot != m_currentWeapon) {
-		if (m_nPedState != PED_ATTACK && m_nPedState != PED_AIM_GUN && m_nPedState != PED_FIGHT) {
-			RemoveWeaponAnims(m_currentWeapon, -1000.0f);
-			MakeChangesForNewWeapon(m_nSelectedWepSlot);
-		}
-	}
+	ApplySelectedWeaponSlot();
 }
 
 // The shared active reload input of the player: the reload key starts a
@@ -973,8 +1023,9 @@ CPlayerPed::HoldUpperBodyAimPose(void)
 	}
 
 	// Several fire animations carry a standing leg stance; the lower body keys
-	// must not freeze the movement cycle
-	aimAssoc->MakeUpperBodyOnly();
+	// must not freeze the movement cycle. A rider on a bike keeps the seat's
+	// spine as well.
+	aimAssoc->MakeUpperBodyOnly(RidesBike());
 }
 
 // Fade the held aim pose out again when the sights go down and no attack or

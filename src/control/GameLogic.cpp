@@ -487,7 +487,7 @@ CGameLogic::UpdateShortCut()
 		--CCarCtrl::NumRandomCars;
 		CTheScripts::ClearSpaceForMissionEntity(ShortCutStart, pShortCutTaxi);
 		CWorld::Add(pShortCutTaxi);
-		CCarCtrl::NearBubbleCountOtherCreation(pShortCutTaxi->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
+		CSpawnService::CountOtherCreation(pShortCutTaxi->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 		CRadar::SetEntityBlip(BLIP_CAR, CPools::GetVehiclePool()->GetIndex(pShortCutTaxi), 0, BLIP_DISPLAY_MARKER_ONLY);
 		ShortCutState = SHORTCUT_IDLE;
 		break;

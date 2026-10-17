@@ -1,5 +1,7 @@
 #include "common.h"
 
+#include <float.h>
+
 #include "main.h"
 #include "Weapon.h"
 #include "AnimBlendAssociation.h"
@@ -49,6 +51,9 @@ float fPlayerAimScale = 2.5f;
 
 bool CWeapon::bPhotographHasBeenTaken;
 
+// The reach of the photo camera along the aim ray
+#define PHOTO_RANGE (125.0f)
+
 #ifdef SECUROM
 int32 sniperPirateCheck = 0x00797743; // 'Cwy\0' ???
 #endif
@@ -89,11 +94,115 @@ IsPlayerAiming(CEntity *shooter)
 	return shooter == FindPlayerPed() && ((CPlayerPed*)shooter)->IsAimingWeapon();
 }
 
+// Clips the ray from p along d to the slab lo..hi of one axis. p lies in the
+// slab; tExit keeps the last parameter of the ray inside it.
+static void
+ClipRayToSlab(float p, float d, float lo, float hi, float &tExit)
+{
+	if (d > 0.0f)
+		tExit = Min(tExit, (hi - p) / d);
+	else if (d < 0.0f)
+		tExit = Min(tExit, (lo - p) / d);
+}
+
+// The point where a shot from the cabin starts. The muzzle sits in the hull
+// box of the shooting car, so the start moves along the aim ray to the point
+// where the ray leaves the box, plus a small margin: no car body lies between
+// the start and the target. Only the direction of the ray is used, so a near
+// target still gives the exit. A muzzle outside the box keeps its place.
+static CVector
+GetShotStart(CVehicle *shooter, CVector const &muzzle, CVector const &target)
+{
+	CMatrix invMat;
+	Invert(shooter->GetMatrix(), invMat);
+
+	CVector local = invMat * muzzle;
+	CBox &box = shooter->GetColModel()->boundingBox;
+	if (local.x < box.min.x || local.x > box.max.x ||
+		local.y < box.min.y || local.y > box.max.y ||
+		local.z < box.min.z || local.z > box.max.z)
+		return muzzle;
+
+	// The ray parameter runs from the muzzle (0) to the target (1). The car
+	// matrix is rigid, so the parameter is the same in local and world space.
+	CVector dir = invMat * target - local;
+	float tExit = FLT_MAX;
+	ClipRayToSlab(local.x, dir.x, box.min.x, box.max.x, tExit);
+	ClipRayToSlab(local.y, dir.y, box.min.y, box.max.y, tExit);
+	ClipRayToSlab(local.z, dir.z, box.min.z, box.max.z, tExit);
+
+	CVector ray = target - muzzle;
+	return muzzle + (tExit + AIM_HULL_MARGIN / ray.Magnitude()) * ray;
+}
+
+// True when the segment p0-p1 crosses a glass surface of the car's collision
+// model.
+static bool
+SegmentCrossesCarGlass(CVehicle *veh, CVector const &p0, CVector const &p1)
+{
+	CColModel *colModel = veh->GetColModel();
+	if (colModel->numTriangles <= 0)
+		return false;
+
+	CMatrix invVehMat;
+	Invert(veh->GetMatrix(), invVehMat);
+	CColLine line(invVehMat * p0, invVehMat * p1);
+	CCollision::CalculateTrianglePlanes(colModel);
+	for (int i = 0; i < colModel->numTriangles; i++) {
+		if (colModel->triangles[i].surface == SURFACE_GLASS &&
+			CCollision::TestLineTriangle(line, colModel->vertices, colModel->triangles[i], colModel->trianglePlanes[i]))
+			return true;
+	}
+	return false;
+}
+
+// The windscreen takes the damage of a glass hit. A car without a windscreen
+// node has none to break; a second hit on a smashed windscreen removes it.
+static void
+BreakWindscreen(CVehicle *veh)
+{
+	CAutomobile *car = (CAutomobile*)veh;
+
+	if (!car->m_aCarNodes[CAR_WINDSCREEN])
+		return;
+
+	if (car->Damage.ProgressPanelDamage(VEHPANEL_WINDSCREEN)) {
+		if (car->Damage.GetPanelStatus(VEHPANEL_WINDSCREEN) == PANEL_STATUS_SMASHED2)
+			car->Damage.ProgressPanelDamage(VEHPANEL_WINDSCREEN);
+
+		car->SetPanelDamage(CAR_WINDSCREEN, VEHPANEL_WINDSCREEN, true);
+		DMAudio.PlayOneShot(veh->m_audioEntityId, SOUND_CAR_WINDSHIELD_CRACK, 0.f);
+	}
+}
+
+// A shot from the cabin of a car breaks the glass it crosses on the way out
+// of the car body. The damage model has one glass panel, the windscreen, so
+// any glass the shot crosses is that panel.
+static void
+BreakOwnCarGlass(CVehicle *shooter, CVector const &muzzle, CVector const &shotStart)
+{
+	if (!shooter->IsCar() || muzzle == shotStart)
+		return;
+
+	if (SegmentCrossesCarGlass(shooter, muzzle, shotStart))
+		BreakWindscreen(shooter);
+}
+
+// The point the aim ray of a shot runs from: the muzzle for a vehicle, the
+// camera source on foot. A vehicle's shot starts further along the ray, so the
+// spread and the speed of a shot measure from here, not from its start.
+static CVector
+GetShotOrigin(CEntity *shooter, CVector *fireSource, CVector const &source)
+{
+	return shooter->IsVehicle() ? *fireSource : source;
+}
+
 // The one ray of a shot. The player follows the aim ray of the view: the
 // first person camera axis, the sight view and the third person crosshair
 // are one ray, and the shot, the pose and the reticle all follow it. A
-// vehicle's shot leaves the driver's right hand along the same ray, so the
-// muzzle never fires from the camera behind the car. left, when not nil,
+// vehicle's shot leaves the driver's right hand along the same ray and starts
+// where the ray leaves the car body, so the muzzle never fires from the
+// camera behind the car. fireSource is the muzzle. left, when not nil,
 // receives the lateral axis of the view for the shotgun spread.
 static void
 GetShotRay(CEntity *shooter, float range, CVector *fireSource, CVector &source, CVector &target, CVector *left = nil)
@@ -101,11 +210,10 @@ GetShotRay(CEntity *shooter, float range, CVector *fireSource, CVector &source, 
 	ASSERT(IsPlayerShot(shooter));
 
 	if (shooter->IsVehicle()) {
-		// The shot starts at the driver's hand; the ray through the muzzle
-		// gives the aim direction the camera solved
+		// The ray through the muzzle gives the aim direction the camera solved
 		CVector raySource;
 		TheCamera.GetPlayerAimRay(range, *fireSource, raySource, target);
-		source = *fireSource;
+		source = GetShotStart((CVehicle*)shooter, *fireSource, target);
 	} else {
 		TheCamera.GetPlayerAimRay(range, *fireSource, source, target);
 	}
@@ -114,6 +222,20 @@ GetShotRay(CEntity *shooter, float range, CVector *fireSource, CVector &source, 
 		CCam *cam = &TheCamera.Cams[TheCamera.ActiveCam];
 		*left = CrossProduct(cam->Front, cam->Up);
 	}
+}
+
+// The launch direction of a shot that leaves the muzzle for the aim point. The
+// muzzle sits off the ray, so the shot aims from the muzzle at the point the
+// ray reaches, and its reach is measured from the same muzzle.
+static CVector
+GetMuzzleAimDir(CEntity *shooter, float range, CVector *fireSource)
+{
+	CVector source, aimPoint;
+	GetShotRay(shooter, range, fireSource, source, aimPoint);
+
+	CVector dir = aimPoint - *fireSource;
+	dir.Normalise();
+	return dir;
 }
 
 // One particle of a gunflash chain: the step from the flash before it and
@@ -385,7 +507,7 @@ CWeapon::Fire(CEntity *shooter, CVector *fireSource)
 			
 			case WEAPONTYPE_CAMERA:
 			{
-				fired = TakePhotograph(shooter);
+				fired = TakePhotograph(shooter, source);
 
 				break;
 			}
@@ -1919,7 +2041,7 @@ CWeapon::FireShotgun(CEntity *shooter, CVector *fireSource)
 			GetShotRay(shooter, 1.0f, fireSource, source, target, &Left);
 
 			float f = (i - (shootsAtOnce / 2)) * angleBetweenTwoShot;
-			target  = f * Left + target - source;
+			target  = f * Left + target - GetShotOrigin(shooter, fireSource, source);
 			target *= info->m_fRange;
 			target += source;
 			CWorld::bIncludeCarTyres = true;
@@ -2259,6 +2381,12 @@ CWeapon::FireProjectile(CEntity *shooter, CVector *fireSource, float power)
 	bool playerShot = IsPlayerShot(shooter);
 	CEntity *owner = (playerShot && shooter->IsVehicle()) ? (CEntity*)((CVehicle*)shooter)->pDriver : shooter;
 
+	// The player's projectiles, the rocket and the throws, fly from the muzzle
+	// to the aim point. The throws aim with the stock power.
+	CVector aimDir;
+	if ( playerShot )
+		aimDir = GetMuzzleAimDir(shooter, GetInfo()->m_fRange, fireSource);
+
 	if ( m_eWeaponType == WEAPONTYPE_ROCKETLAUNCHER )
 	{
 		source = *fireSource;
@@ -2266,17 +2394,9 @@ CWeapon::FireProjectile(CEntity *shooter, CVector *fireSource, float power)
 
 		if ( playerShot )
 		{
-			// The rocket leaves along the one aim ray: the aim the pose and
-			// the reticle follow
-			CVector raySource, rayTarget;
-			GetShotRay(shooter, GetInfo()->m_fRange, fireSource, raySource, rayTarget);
-
-			CVector dir = rayTarget - raySource;
-			dir.Normalise();
-
 			// A vehicle rocket starts clear of the hull that carries the
 			// muzzle, or it would explode in the driver's hand
-			*fireSource += (shooter->IsVehicle() ? shooter->GetBoundRadius() : 1.0f) * dir;
+			*fireSource += (shooter->IsVehicle() ? shooter->GetBoundRadius() : 1.0f) * aimDir;
 		}
 		else
 			*fireSource += shooter->GetForward();
@@ -2316,14 +2436,14 @@ CWeapon::FireProjectile(CEntity *shooter, CVector *fireSource, float power)
 				source.z -= 0.4f;
 
 				if ( !CWorld::TestSphereAgainstWorld(source, 0.5f, nil, false, false, true, false, false, false) )
-					CProjectileInfo::AddProjectile(shooter, WEAPONTYPE_GRENADE, source, 0.0f);
+					CProjectileInfo::AddProjectile(shooter, WEAPONTYPE_GRENADE, source, 0.0f, nil);
 				else
 					CProjectileInfo::RemoveNotAdd(shooter, WEAPONTYPE_GRENADE, *fireSource);
 			}
 		}
 	}
 	else
-		CProjectileInfo::AddProjectile(owner, projectileType, *fireSource, power);
+		CProjectileInfo::AddProjectile(owner, projectileType, *fireSource, power, playerShot ? &aimDir : nil);
 	
 			
 	CWorld::pIgnoreEntity = nil;
@@ -2365,17 +2485,15 @@ CWeapon::FireAreaEffect(CEntity *shooter, CVector *fireSource)
 
 	float heading = RADTODEG(shooter->GetForward().Heading());
 
-	CVector source;
 	CVector target;
 	CVector dir;
 
 	if ( IsPlayerShot(shooter) )
 	{
-		// The flame leaves along the one aim ray of the view; a vehicle flame
-		// leaves the driver's hand along the same ray
-		GetShotRay(shooter, info->m_fRange, fireSource, source, target);
-		float norm = (1.0f / info->m_fRange);
-		dir = (target - source) * norm;
+		// The flame leaves the muzzle for the aim point, and its reach is
+		// the weapon range from that same muzzle
+		dir    = GetMuzzleAimDir(shooter, info->m_fRange, fireSource);
+		target = *fireSource + info->m_fRange * dir;
 	}
 	else
 	{
@@ -2494,60 +2612,33 @@ CWeapon::FireSniper(CEntity *shooter, CVector *fireSource)
 }
 
 bool
-CWeapon::TakePhotograph(CEntity *shooter)
+CWeapon::TakePhotograph(CEntity *shooter, CVector *fireSource)
 {
-	// The photo camera aims through its own viewfinder. A camera fired from a
-	// vehicle has no viewfinder mode of its own: the aimed shot takes the
-	// photograph from the aim the player holds.
-	if ( TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_CAMERA || shooter->IsVehicle() )
-	{
-		CSpecialFX::bSnapShotActive = true;
-		CSpecialFX::SnapShotFrames = 0;
-		CStats::PhotosTaken++;
-		bPhotographHasBeenTaken = true;
-		
-		for ( int32 i = CPools::GetPedPool()->GetSize() - 1; i >= 0; i--)
-		{
-			CPed *ped = CPools::GetPedPool()->GetSlot(i);
-			if ( ped )
-			{
-				if ( (ped->GetPosition() - TheCamera.GetPosition()).Magnitude() < 125.0f )
-				{
-					CVector pedPos = ped->GetPosition();
-					pedPos.z += 0.8f;
-					
-					CVector pos;
-					float w, h;
-					
-					if ( CSprite::CalcScreenCoors(pedPos, &pos, &w, &h, false) )
-					{
-						if (   SCREEN_WIDTH  * 0.1f < pos.x && SCREEN_WIDTH  * 0.9f > pos.x
-							&& SCREEN_HEIGHT * 0.1f < pos.y && SCREEN_HEIGHT * 0.9f > pos.y )
-						{
-							CVector source, target;
-							CEntity *foundEnt = nil;
-							CColPoint foundCol;
-	
-							target = pedPos;
-							source = TheCamera.GetForward() * 2.0f + TheCamera.GetPosition();
-							
-							if ( CWorld::ProcessLineOfSight(source, target, foundCol, foundEnt, true, true, true, true, true, true, false) )
-							{
-								if ( foundEnt != (CEntity*)ped )
-									continue;
-							}
-							
-							ped->bHasBeenPhotographed = true;
-						}
-					}
-				}
-			}
-		}
-		
-		return true;
-	}
-	
-	return false;
+	// The photo camera takes the photograph on the one aim ray: the ray the
+	// viewfinder and the pose share. A camera fired from a vehicle takes it
+	// from the driver's aim the same way.
+	if ( !IsPlayerShot(shooter) || (TheCamera.Cams[TheCamera.ActiveCam].Mode != CCam::MODE_CAMERA && !shooter->IsVehicle()) )
+		return false;
+
+	CSpecialFX::bSnapShotActive = true;
+	CSpecialFX::SnapShotFrames = 0;
+	CStats::PhotosTaken++;
+	bPhotographHasBeenTaken = true;
+
+	CVector source, target;
+	CEntity *foundEnt = nil;
+	CColPoint foundCol;
+
+	GetShotRay(shooter, PHOTO_RANGE, fireSource, source, target);
+
+	CWorld::pIgnoreEntity = shooter;
+	bool hit = CWorld::ProcessLineOfSight(source, target, foundCol, foundEnt, true, true, true, true, true, true, false);
+	CWorld::pIgnoreEntity = nil;
+
+	if ( hit && foundEnt && foundEnt->IsPed() )
+		((CPed*)foundEnt)->bHasBeenPhotographed = true;
+
+	return true;
 }
 
 // The drive-by shot of a vehicle that fires without the car ADS (a bike): the
@@ -2604,7 +2695,7 @@ CWeapon::FireInstantHitFromCar(CVehicle *shooter)
 
 	DoDriveByAutoAiming(FindPlayerPed(), shooter, &source, &target);
 
-	return FireFromCarAt(shooter, source, target, false);
+	return FireFromCarAt(shooter, source, source, target, false);
 }
 
 // The aimed shot of a vehicle: every aiming weapon fires through here. The
@@ -2623,28 +2714,31 @@ CWeapon::FireAimedFromCar(CVehicle *shooter)
 	shooter->pDriver->TransformToNode(source, PED_HANDR);
 	source += CTimer::GetTimeStep() * shooter->m_vecMoveSpeed;
 
+	if (IsPhotoCamera(m_eWeaponType))
+		return TakePhotograph(shooter, &source);
+
+	// Every other aimed shot leaves the cabin along the aim ray: the glass
+	// it crosses breaks once, whatever the fire type
+	CVector shotSource, target;
+	GetShotRay(shooter, info->m_fRange, &source, shotSource, target);
+	BreakOwnCarGlass(shooter, source, shotSource);
+
 	// Each weapon fires the shot of its own fire type: the shotguns spread,
 	// the scope rifles shoot their bullet, the rocket leaves as a projectile,
-	// the flamethrower as a flame and the camera takes its photograph.
+	// the flamethrower as a flame.
 	if (IsShotgun(m_eWeaponType))
 		return FireShotgun(shooter, &source);
 	if (IsScopeRifle(m_eWeaponType))
 		return FireSniper(shooter, &source);
 	if (m_eWeaponType == WEAPONTYPE_ROCKETLAUNCHER)
 		return FireProjectile(shooter, &source, 0.0f);
-	if (IsPhotoCamera(m_eWeaponType))
-		return TakePhotograph(shooter);
 	if (info->m_eWeaponFire == WEAPON_FIRE_AREA_EFFECT)
 		return FireAreaEffect(shooter, &source);
 	if (info->m_eWeaponFire != WEAPON_FIRE_INSTANT_HIT)
 		return false;
 
-	// The instant hit: the shot leaves the hand along the aim ray and the hit
-	// is the weapon's own, not the drive-by one
-	CVector shotSource, target;
-	GetShotRay(shooter, info->m_fRange, &source, shotSource, target);
-
-	return FireFromCarAt(shooter, shotSource, target, true);
+	// The instant hit: the hit is the weapon's own, not the drive-by one
+	return FireFromCarAt(shooter, source, shotSource, target, true);
 }
 
 // The shot from a car once the source and the target are known: the events,
@@ -2652,7 +2746,7 @@ CWeapon::FireAimedFromCar(CVehicle *shooter)
 // stock drive-by and the aimed shot. The aimed shot deals the weapon's own
 // damage; the drive-by keeps the shipped UZI_DRIVEBY damage.
 bool
-CWeapon::FireFromCarAt(CVehicle *shooter, CVector &source, CVector &target, bool aimed)
+CWeapon::FireFromCarAt(CVehicle *shooter, CVector &muzzle, CVector &shotStart, CVector &target, bool aimed)
 {
 	CWeaponInfo *info = GetInfo();
 
@@ -2664,16 +2758,16 @@ CWeapon::FireFromCarAt(CVehicle *shooter, CVector &source, CVector &target, bool
 	if ( !TheCamera.GetLookingLRBFirstPerson() )
 	{
 		if ( !shooter->IsBike() )
-			CParticle::AddParticle(PARTICLE_GUNFLASH, source, CVector(0.0f, 0.0f, 0.0f));
+			CParticle::AddParticle(PARTICLE_GUNFLASH, muzzle, CVector(0.0f, 0.0f, 0.0f));
 		else
-			CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, source, 1.4f*shooter->m_vecMoveSpeed);
+			CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, muzzle, 1.4f*shooter->m_vecMoveSpeed);
 	}
 	else
-		CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, source, 1.6f*shooter->m_vecMoveSpeed, nil, 0.18f);
+		CParticle::AddParticle(PARTICLE_GUNFLASH_NOANIM, muzzle, 1.6f*shooter->m_vecMoveSpeed, nil, 0.18f);
 
 	CEventList::RegisterEvent(EVENT_GUNSHOT, EVENT_ENTITY_VEHICLE, shooter, FindPlayerPed(), 1000);
 
-	CPointLights::AddLight(CPointLights::LIGHT_POINT, source, CVector(0.0f, 0.0f, 0.0f), 5.0f,
+	CPointLights::AddLight(CPointLights::LIGHT_POINT, muzzle, CVector(0.0f, 0.0f, 0.0f), 5.0f,
 		1.0f, 0.8f, 0.0f, CPointLights::FOG_NONE, false);
 
 	CColPoint point;
@@ -2681,7 +2775,7 @@ CWeapon::FireFromCarAt(CVehicle *shooter, CVector &source, CVector &target, bool
 	
 	CWorld::bIncludeBikers = true;
 	CWorld::pIgnoreEntity = shooter;  
-	ProcessLineOfSight(source, target, point, victim, m_eWeaponType, shooter, true, true, true, true, true, true, false);
+	ProcessLineOfSight(shotStart, target, point, victim, m_eWeaponType, shooter, true, true, true, true, true, true, false);
 	CWorld::pIgnoreEntity = NULL;
 	CWorld::bIncludeBikers = false;
 
@@ -2692,12 +2786,12 @@ CWeapon::FireFromCarAt(CVehicle *shooter, CVector &source, CVector &target, bool
 		victim = nil;
 
 	if ( !(CTimer::GetFrameCounter() & 3) )
-		MakePedsJumpAtShot(shooter, &source, &target);
+		MakePedsJumpAtShot(shooter, &shotStart, &target);
 
 	if ( victim )
 	{
 		CVector traceTarget = point.point;
-		CBulletTraces::AddTrace(&source, &traceTarget, m_eWeaponType, shooter);
+		CBulletTraces::AddTrace(&muzzle, &traceTarget, m_eWeaponType, shooter);
 
 		if ( victim->IsPed() )
 		{
@@ -2707,7 +2801,7 @@ CWeapon::FireFromCarAt(CVehicle *shooter, CVector &source, CVector &target, bool
 			{
 				CVector pos = victimPed->GetPosition();
 
-				CVector2D posOffset(source.x-pos.x, source.y-pos.y);
+				CVector2D posOffset(shotStart.x-pos.x, shotStart.y-pos.y);
 				int32 localDir = victimPed->GetLocalDirection(posOffset);
 
 				victimPed->ReactToAttack(FindPlayerPed());
@@ -2783,8 +2877,8 @@ CWeapon::FireFromCarAt(CVehicle *shooter, CVector &source, CVector &target, bool
 	else
 	{
 		float norm = 30.0f/info->m_fRange;
-		CVector traceTarget = (target-source)*norm + source;
-		CBulletTraces::AddTrace(&source, &traceTarget, m_eWeaponType, shooter);
+		CVector traceTarget = (target-muzzle)*norm + muzzle;
+		CBulletTraces::AddTrace(&muzzle, &traceTarget, m_eWeaponType, shooter);
 	}
 
 	if ( shooter == FindPlayerVehicle() )
@@ -3459,34 +3553,9 @@ CWeapon::CheckForShootingVehicleOccupant(CEntity **victim, CColPoint *point, eWe
 	}
 	if (veh->IsCar()) {
 		CVector distVec = target - source;
-		if (DotProduct(distVec, veh->GetForward()) < 0.0f && DotProduct(distVec, veh->GetUp()) <= 0.0f) {
-			CColModel *colModel = veh->GetColModel();
-			if (colModel->numTriangles > 0) {
-				bool passesGlass = false;
-				CMatrix invVehMat;
-				Invert(veh->GetMatrix(), invVehMat);
-				shootLine.p0 = invVehMat * shootLine.p0;
-				shootLine.p1 = invVehMat * shootLine.p1;
-				CCollision::CalculateTrianglePlanes(colModel);
-				for (int i = 0; i < colModel->numTriangles; i++) {
-					if (colModel->triangles[i].surface == SURFACE_GLASS &&
-						CCollision::TestLineTriangle(shootLine, colModel->vertices, colModel->triangles[i], colModel->trianglePlanes[i])) {
-						passesGlass = true;
-						break;
-					}
-				}
-				CAutomobile *car = (CAutomobile*)veh;
-
-				// No need to damage windscreen if there isn't one.
-				if (passesGlass && car->Damage.ProgressPanelDamage(VEHPANEL_WINDSCREEN)) {
-					if (car->Damage.GetPanelStatus(VEHPANEL_WINDSCREEN) == PANEL_STATUS_SMASHED2)
-						car->Damage.ProgressPanelDamage(VEHPANEL_WINDSCREEN);
-
-					car->SetPanelDamage(CAR_WINDSCREEN, VEHPANEL_WINDSCREEN, true);
-					DMAudio.PlayOneShot(veh->m_audioEntityId, SOUND_CAR_WINDSHIELD_CRACK, 0.f);
-				}
-			}
-		}
+		if (DotProduct(distVec, veh->GetForward()) < 0.0f && DotProduct(distVec, veh->GetUp()) <= 0.0f &&
+			SegmentCrossesCarGlass(veh, source, target))
+			BreakWindscreen(veh);
 	}
 
 	if (!found) {
