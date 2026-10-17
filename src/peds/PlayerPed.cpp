@@ -47,9 +47,6 @@
 #define PLAYER_ANIM_SPEED_MIN		0.4f
 #define PLAYER_ANIM_SPEED_MAX		2.0f
 
-// DoWeaponSmoothSpray returns this when no smooth spray runs
-#define PLAYER_NO_SMOOTH_SPRAY		(-1.0f)
-
 // The player's aim pose aims at a point this far along the aim ray
 #define PLAYER_AIM_DISTANCE AIM_RAY_DISTANCE
 
@@ -608,59 +605,6 @@ CPlayerPed::RestoreSprintEnergy(float restoreSpeed)
 {
 	if (m_fCurrentStamina < m_fMaxStamina)
 		m_fCurrentStamina += restoreSpeed * CTimer::GetTimeStep() * 0.5f;
-}
-
-float
-CPlayerPed::DoWeaponSmoothSpray(void)
-{
-	if (m_nPedState == PED_ATTACK && !m_pPointGunAt) {
-		CWeaponInfo *weaponInfo = CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType);
-		switch (GetWeapon()->m_eWeaponType) {
-			case WEAPONTYPE_GOLFCLUB:
-			case WEAPONTYPE_NIGHTSTICK:
-			case WEAPONTYPE_BASEBALLBAT:
-				if (GetFireAnimGround(weaponInfo, false) && RpAnimBlendClumpGetAssociation(GetClump(), GetFireAnimGround(weaponInfo, false)))
-					return PI / 176.f;
-				else
-					return PLAYER_NO_SMOOTH_SPRAY;
-
-			case WEAPONTYPE_CHAINSAW:
-				if (GetMeleeStartAnim(weaponInfo) && RpAnimBlendClumpGetAssociation(GetClump(), GetMeleeStartAnim(weaponInfo))) {
-#ifdef FREE_CAM
-					if (TheCamera.Cams[0].Using3rdPersonMouseCam()) return PLAYER_NO_SMOOTH_SPRAY;
-#endif
-					return PI / 128.0f;
-				}
-				else if (GetFireAnimGround(weaponInfo, false) && RpAnimBlendClumpGetAssociation(GetClump(), GetFireAnimGround(weaponInfo, false)))
-					return PI / 176.f;
-				else
-					return PI / 80.f;
-
-			case WEAPONTYPE_PYTHON:
-				return PI / 112.f;
-			case WEAPONTYPE_SHOTGUN:
-			case WEAPONTYPE_SPAS12_SHOTGUN:
-			case WEAPONTYPE_STUBBY_SHOTGUN:
-				return PI / 112.f;
-			case WEAPONTYPE_UZI:
-			case WEAPONTYPE_MP5:
-				return PI / 112.f;
-			case WEAPONTYPE_M4:
-			case WEAPONTYPE_RUGER:
-				return PI / 112.f;
-			case WEAPONTYPE_FLAMETHROWER:
-				return PI / 80.f;
-			case WEAPONTYPE_M60:
-			case WEAPONTYPE_MINIGUN:
-			case WEAPONTYPE_HELICANNON:
-				return PI / 176.f;
-			default:
-				return PLAYER_NO_SMOOTH_SPRAY;
-		}
-	} else if (bIsDucking)
-		return PI / 112.f;
-	else
-		return PLAYER_NO_SMOOTH_SPRAY;
 }
 
 void
@@ -1759,12 +1703,6 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 {
 	float leftRight = padUsed->GetPedWalkLeftRight();
 	float upDown = padUsed->GetPedWalkUpDown();
-	// The smooth spray is a weapon behaviour; the fight stance has its own moves
-	float smoothSprayRate = m_nPedState == PED_FIGHT ? -1.0f : DoWeaponSmoothSpray();
-	// The aim owns the movement while it is up: the spray must not hold the
-	// ped in place or turn the body under the aim (VICE-137)
-	if (m_bWeaponAimActive)
-		smoothSprayRate = -1.0f;
 	if (MovementDisabledBecauseOfTargeting()) {
 		leftRight = 0.0f;
 		upDown = 0.0f;
@@ -1772,30 +1710,17 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 
 	float padMoveInGameUnit = CVector2D(leftRight, upDown).Magnitude() / PAD_MOVE_TO_GAME_WORLD_MOVE;
 
-	// The free camera cases (the first person view and the mouse third person
-	// camera) keep the body facing the camera; the classic camera turns the body
-	// toward the movement direction.
-	bool bFacingCamera = BodyFacesCamera();
-
-	// The pad always moves the ped, in every view, in every state (ADR 0028:
-	// no presentation or weapon state gates the input response). A smooth spray
-	// is a weapon behaviour and it turns the body below; it no longer holds the
-	// ped in place, and the duck no longer reads as "spray without move", which
-	// is what used to freeze a crouched walk in the classic camera.
+	// The pad always moves the ped, in every view, in every state: no weapon or
+	// presentation state gates the input response (ADR 0028)
 	bool bHasInput = padMoveInGameUnit > 0.0f;
 	if (bHasInput) {
 		float padHeading = CGeneral::GetRadianAngleBetweenPoints(0.0f, 0.0f, -leftRight, upDown);
 		m_fMoveHeading = CGeneral::LimitRadianAngle(padHeading - TheCamera.Orientation);
 
-		if (!bFacingCamera && smoothSprayRate > 0.0f)
-			m_fRotationDest = m_fRotationCur - leftRight / 128.0f * smoothSprayRate * CTimer::GetTimeStep();
-		else if (bFacingCamera)
-			m_fRotationDest = CGeneral::LimitRadianAngle(TheCamera.Orientation);
-		else
-			m_fRotationDest = m_fMoveHeading;
-
-		// The walk angle picks the strafe animation groups
-		m_fWalkAngle = bFacingCamera ? padHeading : 0.0f;
+		// One movement rule for every view (VICE-191): the body faces the
+		// camera, and the walk angle always picks the strafe animation groups
+		m_fRotationDest = CGeneral::LimitRadianAngle(TheCamera.Orientation);
+		m_fWalkAngle = padHeading;
 
 		// m_fMoveSpeed stays the pad ramp: it picks the walk/run/sprint blend,
 		// and SetRealMoveAnim scales the animation playback to the real speed
@@ -1859,7 +1784,7 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 	intent.onGround = bIsStanding;
 	intent.steepCliff = bSteepCliff;
 	intent.hasInput = bMoving;
-	intent.faceCamera = bFacingCamera;
+	intent.faceCamera = BodyFacesCamera();
 	// The jump and the dive gate on more than the pad (PlayerJumpOrDive), so
 	// their edges arrive with VICE-182 and VICE-181.
 	intent.jumpRequested = false;

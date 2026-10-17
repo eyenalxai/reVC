@@ -68,7 +68,6 @@ static const tSettingsEntry aSettings[] = {
 #endif
 	{ "Graphics", "FrameLimiter", SETTINGS_INT8, SETTINGS_NO_BOUND, sizeof(int8), &FrontEndMenuManager.m_PrefsFrameLimiter },
 	{ "General", "SkinFile", SETTINGS_STRING, SETTINGS_NO_BOUND, 256, FrontEndMenuManager.m_PrefsSkinFile },
-	{ "Controller", "Method", SETTINGS_INT8, SETTINGS_NO_BOUND, sizeof(int8), &FrontEndMenuManager.m_ControlMethod },
 	{ "General", "Language", SETTINGS_INT32, SETTINGS_NO_BOUND, sizeof(int32), &FrontEndMenuManager.m_PrefsLanguage },
 	{ "Display", "ShowHud", SETTINGS_BOOL, SETTINGS_NO_BOUND, sizeof(bool), &FrontEndMenuManager.m_PrefsShowHud },
 	{ "Display", "RadarMode", SETTINGS_INT32, 0, 2, sizeof(int32), &FrontEndMenuManager.m_PrefsRadarMode },

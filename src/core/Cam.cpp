@@ -3644,7 +3644,7 @@ CCam::Process_Fixed(const CVector &CameraTarget, float, float, float)
 	}
 
 #ifdef PC_PLAYER_CONTROLS
-	if(FrontEndMenuManager.m_ControlMethod == CONTROL_STANDARD && Using3rdPersonMouseCam()){
+	if(Using3rdPersonMouseCam()){
 		CPed *player = FindPlayerPed();
 		if(player && player->CanStrafeOrMouseControl()){
 			float Heading = Front.Heading();

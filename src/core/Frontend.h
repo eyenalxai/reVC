@@ -369,6 +369,8 @@ enum
 
 enum eControlMethod
 {
+	// The one control method (VICE-191). The classic value stays as a
+	// hole: a settings file that carries it loads as the standard one
 	CONTROL_STANDARD = 0,
 	CONTROL_CLASSIC,
 };

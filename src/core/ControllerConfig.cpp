@@ -982,15 +982,6 @@ void CControllerConfigManager::AffectControllerStateOn_ButtonDown_ThirdPersonOnl
 	if (button == GetControllerKeyAssociatedWithAction(PED_PRONE, type))
 		state.Prone = 255;
 	
-	if (FrontEndMenuManager.m_ControlMethod == CONTROL_CLASSIC)
-	{
-		if (button == GetControllerKeyAssociatedWithAction(PED_CYCLE_TARGET_LEFT, type))
-			state.LeftShoulder2 = 255;
-		if (button == GetControllerKeyAssociatedWithAction(PED_CYCLE_TARGET_RIGHT, type))
-			state.RightShoulder2 = 255;
-		if (button == GetControllerKeyAssociatedWithAction(PED_CENTER_CAMERA_BEHIND_PLAYER, type))
-			state.LeftShoulder1 = 255;
-	}
 }
 
 void CControllerConfigManager::AffectControllerStateOn_ButtonDown_FirstAndThirdPersonOnly(int32 button, eControllerType type, CControllerState &state)
@@ -1052,30 +1043,6 @@ void CControllerConfigManager::AffectControllerStateOn_ButtonDown_FirstAndThirdP
 			state.RightStickX = 128;
 	}
 
-	if (FrontEndMenuManager.m_ControlMethod == CONTROL_CLASSIC)
-	{
-		if (button == GetControllerKeyAssociatedWithAction(PED_1RST_PERSON_LOOK_UP, type))
-		{
-			if (state.RightStickY == -128 || m_aSimCheckers[SIM_Y2][type])
-			{
-				state.RightStickY = 0;
-				m_aSimCheckers[SIM_Y2][type] = true;
-			}
-			else
-				state.RightStickY = 128;
-		}
-
-		if (button == GetControllerKeyAssociatedWithAction(PED_1RST_PERSON_LOOK_DOWN, type))
-		{
-			if (state.RightStickY == 128 || m_aSimCheckers[SIM_Y2][type])
-			{
-				state.RightStickY = 0;
-				m_aSimCheckers[SIM_Y2][type] = true;
-			}
-			else
-				state.RightStickY = -128;
-		}
-	}
 }
 
 void CControllerConfigManager::AffectControllerStateOn_ButtonDown_AllStates(int32 button, eControllerType type, CControllerState &state)
@@ -1844,12 +1811,6 @@ void CControllerConfigManager::DeleteMatching3rdPersonControls(e_ControllerActio
 		CLEAR_ACTION_IF_NEEDED(PED_ANSWER_PHONE);
 		CLEAR_ACTION_IF_NEEDED(PED_RELOAD);
 
-		if (FrontEndMenuManager.m_ControlMethod == CONTROL_CLASSIC)
-		{
-			CLEAR_ACTION_IF_NEEDED(PED_CYCLE_TARGET_LEFT);
-			CLEAR_ACTION_IF_NEEDED(PED_CYCLE_TARGET_RIGHT);
-			CLEAR_ACTION_IF_NEEDED(PED_CENTER_CAMERA_BEHIND_PLAYER);
-		}
 	}
 }
 
@@ -1864,13 +1825,6 @@ void CControllerConfigManager::DeleteMatching1rst3rdPersonControls(e_ControllerA
 		CLEAR_ACTION_IF_NEEDED(GO_FORWARD);
 		CLEAR_ACTION_IF_NEEDED(GO_BACK);
 
-		if (FrontEndMenuManager.m_ControlMethod == CONTROL_CLASSIC)
-		{
-			CLEAR_ACTION_IF_NEEDED(PED_1RST_PERSON_LOOK_LEFT);
-			CLEAR_ACTION_IF_NEEDED(PED_1RST_PERSON_LOOK_RIGHT);
-			CLEAR_ACTION_IF_NEEDED(PED_1RST_PERSON_LOOK_DOWN);
-			CLEAR_ACTION_IF_NEEDED(PED_1RST_PERSON_LOOK_UP);
-		}
 	}
 }
 

@@ -103,7 +103,6 @@ public:
 	class CPlayerInfo *GetPlayerInfoForThisPlayerPed();
 	void SetRealMoveAnim(void);
 	void RestoreSprintEnergy(float);
-	float DoWeaponSmoothSpray(void);
 	void DoStuffToGoOnFire(void);
 	bool DoesTargetHaveToBeBroken(CVector, CWeapon*);
 	void RunningLand(CPad*);

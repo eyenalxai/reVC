@@ -1350,25 +1350,11 @@ CMenuManager::DrawStandardMenus(bool activeScreen)
 					}
 					break;
 				}
-				case MENUACTION_CTRLMETHOD: {
-					switch (m_ControlMethod) {
-					case CONTROL_STANDARD:
-						leftText = TheText.Get("FET_STI");
-						break;
-					case CONTROL_CLASSIC:
-						leftText = TheText.Get("FET_CTI");
-						break;
-					}
-					break;
-				}
 				case MENUACTION_DYNAMICACOUSTIC:
 					rightText = TheText.Get(m_PrefsDMA ? "FEM_ON" : "FEM_OFF");
 					break;
 				case MENUACTION_MOUSESTEER:
 					rightText = TheText.Get(CVehicle::m_bDisableMouseSteering ? "FEM_OFF" : "FEM_ON");
-					if (m_ControlMethod == CONTROL_CLASSIC) {
-						CFont::SetColor(CRGBA(DARKMENUOPTION_COLOR.r, DARKMENUOPTION_COLOR.g, DARKMENUOPTION_COLOR.b, FadeIn(255)));
-					}
 					break;
 				case MENUACTION_MP3VOLUMEBOOST:
 					if (!DMAudio.IsMP3RadioChannelAvailable()) {
@@ -1745,42 +1731,6 @@ static const tControllerSetupRow controllerSetupRowsStandard[] = {
 	{ "FEC_RLD", PED_RELOAD,                         CONTROLLER_NO_ACTION },
 };
 
-static const tControllerSetupRow controllerSetupRowsClassic[] = {
-	{ "FEC_FIR", PED_FIREWEAPON,                     controllerSetupVehicleFire },
-	{ "FEC_NWE", PED_CYCLE_WEAPON_RIGHT,             CONTROLLER_NO_ACTION },
-	{ "FEC_PWE", PED_CYCLE_WEAPON_LEFT,              CONTROLLER_NO_ACTION },
-	{ "FEC_FOR", GO_FORWARD,                         VEHICLE_ACCELERATE },
-	{ "FEC_BAC", GO_BACK,                            VEHICLE_BRAKE },
-	{ "FEC_LEF", GO_LEFT,                            GO_LEFT },
-	{ "FEC_RIG", GO_RIGHT,                           GO_RIGHT },
-	{ "FEC_ZIN", PED_SNIPER_ZOOM_IN,                 CONTROLLER_NO_ACTION },
-	{ "FEC_ZOT", PED_SNIPER_ZOOM_OUT,                CONTROLLER_NO_ACTION },
-	{ "FEC_EEX", VEHICLE_ENTER_EXIT,                 VEHICLE_ENTER_EXIT },
-	{ "FEC_RAD", CONTROLLER_NO_ACTION,               VEHICLE_CHANGE_RADIO_STATION },
-	{ "FEC_HRN", CONTROLLER_NO_ACTION,               VEHICLE_HORN },
-	{ "FEC_SUB", CONTROLLER_NO_ACTION,               TOGGLE_SUBMISSIONS },
-	{ "FEC_CMR", CAMERA_CHANGE_VIEW_ALL_SITUATIONS,  CAMERA_CHANGE_VIEW_ALL_SITUATIONS },
-	{ "FEC_JMP", PED_JUMPING,                        CONTROLLER_NO_ACTION },
-	{ "FEC_SPN", PED_SPRINT,                         CONTROLLER_NO_ACTION },
-	{ "FEC_HND", CONTROLLER_NO_ACTION,               VEHICLE_HANDBRAKE },
-	{ "FEC_TAR", PED_LOCK_TARGET,                    CONTROLLER_NO_ACTION },
-	{ "FEC_CRO", PED_DUCK,                           CONTROLLER_NO_ACTION },
-	{ "FEC_PRN", PED_PRONE,                          CONTROLLER_NO_ACTION },
-	{ "FEC_ANS", PED_ANSWER_PHONE,                   CONTROLLER_NO_ACTION },
-	{ "FEC_TFL", CONTROLLER_NO_ACTION,               VEHICLE_TURRETLEFT },
-	{ "FEC_TFR", CONTROLLER_NO_ACTION,               VEHICLE_TURRETRIGHT },
-	{ "FEC_TFU", CONTROLLER_NO_ACTION,               VEHICLE_TURRETUP },
-	{ "FEC_TFD", CONTROLLER_NO_ACTION,               VEHICLE_TURRETDOWN },
-	{ "FEC_LBA", PED_LOOKBEHIND,                     CONTROLLER_COMBO_TEXT },
-	{ "FEC_LOL", PED_1RST_PERSON_LOOK_LEFT,          VEHICLE_LOOKLEFT },
-	{ "FEC_LOR", PED_1RST_PERSON_LOOK_RIGHT,         VEHICLE_LOOKRIGHT },
-	{ "FEC_LUD", PED_1RST_PERSON_LOOK_UP,            CONTROLLER_NO_ACTION },
-	{ "FEC_LDU", PED_1RST_PERSON_LOOK_DOWN,          CONTROLLER_NO_ACTION },
-	{ "FEC_NTR", PED_CYCLE_TARGET_LEFT,              CONTROLLER_NO_ACTION },
-	{ "FEC_PTT", PED_CYCLE_TARGET_RIGHT,             CONTROLLER_NO_ACTION },
-	{ "FEC_CEN", PED_CENTER_CAMERA_BEHIND_PLAYER,    CONTROLLER_NO_ACTION },
-	{ "FEC_RLD", PED_RELOAD,                         CONTROLLER_NO_ACTION },
-};
 
 // The rows of one control method and their count.
 struct tControllerSetup
@@ -1790,14 +1740,14 @@ struct tControllerSetup
 };
 
 static const tControllerSetup controllerSetupStandard = { controllerSetupRowsStandard, ARRAY_SIZE(controllerSetupRowsStandard) };
-static const tControllerSetup controllerSetupClassic = { controllerSetupRowsClassic, ARRAY_SIZE(controllerSetupRowsClassic) };
 
 // The rows of a control method. Any other value keeps the STANDARD rows, and a
 // third method is one case here.
+// The one control setup (VICE-191)
 static const tControllerSetup *
-GetControllerSetup(int8 method)
+GetControllerSetup(void)
 {
-	return method == CONTROL_CLASSIC ? &controllerSetupClassic : &controllerSetupStandard;
+	return &controllerSetupStandard;
 }
 
 int
@@ -1814,7 +1764,7 @@ CMenuManager::GetNumOptionsCntrlConfigScreens(void)
 			break;
 #endif
 		case MENUPAGE_KEYBOARD_CONTROLS:
-			number = GetControllerSetup(m_ControlMethod)->numRows;
+			number = GetControllerSetup()->numRows;
 			break;
 	}
 	return number;
@@ -1825,21 +1775,12 @@ CMenuManager::DrawControllerBound(int32 yStart, int32 xStart, int32 unused, int8
 {
 	int controllerAction = PED_FIREWEAPON;
 	// GetStartOptionsCntrlConfigScreens();
-	const tControllerSetup *setup = GetControllerSetup(m_ControlMethod);
+	const tControllerSetup *setup = GetControllerSetup();
 	int numOptions = GetNumOptionsCntrlConfigScreens();
 	int nextY = MENU_Y(yStart);
 	int bindingMargin = MENU_X(3.0f);
 	float rowHeight;
-	switch (m_ControlMethod) {
-		case CONTROL_STANDARD:
-			rowHeight = CONTSETUP_STANDARD_ROW_HEIGHT;
-			break;
-		case CONTROL_CLASSIC:
-			rowHeight = CONTSETUP_CLASSIC_ROW_HEIGHT;
-			break;
-		default:
-			break;
-	}
+	rowHeight = CONTSETUP_STANDARD_ROW_HEIGHT;
 
 	for (int optionIdx = 0; optionIdx < numOptions; nextY = MENU_Y(++optionIdx * rowHeight + yStart)) {
 		int nextX = xStart;
@@ -2038,36 +1979,21 @@ void
 CMenuManager::DrawControllerSetupScreen()
 {
 	float rowHeight;
-	switch (m_ControlMethod) {
-		case CONTROL_STANDARD:
-			rowHeight = CONTSETUP_STANDARD_ROW_HEIGHT;
-			break;
-		case CONTROL_CLASSIC:
-			rowHeight = CONTSETUP_CLASSIC_ROW_HEIGHT;
-			break;
-		default:
-			break;
-	}
+	rowHeight = CONTSETUP_STANDARD_ROW_HEIGHT;
 	RESET_FONT_FOR_NEW_PAGE
 	SET_FONT_FOR_MENU_HEADER
 
 	// Shadow
 	CFont::SetColor(CRGBA(30, 30, 30, FadeIn(255)));
 
-	if (m_ControlMethod == CONTROL_STANDARD)
-		CFont::PrintString(SCREEN_STRETCH_FROM_RIGHT(MENUHEADER_POS_X) - MENU_X(7.f), SCREEN_SCALE_Y(MENUHEADER_POS_Y + 7.f), TheText.Get("FET_STI"));
-	else if (m_ControlMethod == CONTROL_CLASSIC)
-		CFont::PrintString(SCREEN_STRETCH_FROM_RIGHT(MENUHEADER_POS_X) - MENU_X(7.f), SCREEN_SCALE_Y(MENUHEADER_POS_Y + 7.f), TheText.Get("FET_CTI"));
+	CFont::PrintString(SCREEN_STRETCH_FROM_RIGHT(MENUHEADER_POS_X) - MENU_X(7.f), SCREEN_SCALE_Y(MENUHEADER_POS_Y + 7.f), TheText.Get("FET_STI"));
 
 	// Real header
 	CFont::SetColor(CRGBA(HEADER_COLOR.r, HEADER_COLOR.g, HEADER_COLOR.b, FadeIn(255)));
 
-	if (m_ControlMethod == CONTROL_STANDARD)
-		CFont::PrintString(SCREEN_STRETCH_FROM_RIGHT(MENUHEADER_POS_X), SCREEN_SCALE_Y(MENUHEADER_POS_Y), TheText.Get("FET_STI"));
-	else if (m_ControlMethod == CONTROL_CLASSIC)
-		CFont::PrintString(SCREEN_STRETCH_FROM_RIGHT(MENUHEADER_POS_X), SCREEN_SCALE_Y(MENUHEADER_POS_Y), TheText.Get("FET_CTI"));
+	CFont::PrintString(SCREEN_STRETCH_FROM_RIGHT(MENUHEADER_POS_X), SCREEN_SCALE_Y(MENUHEADER_POS_Y), TheText.Get("FET_STI"));
 
-	const tControllerSetup *setup = GetControllerSetup(m_ControlMethod);
+	const tControllerSetup *setup = GetControllerSetup();
 
 	// Blue panel background
 	CSprite2d::DrawRect(CRect(MENU_X_LEFT_ALIGNED(CONTSETUP_LIST_LEFT), MENU_Y(CONTSETUP_LIST_TOP),
@@ -2090,11 +2016,7 @@ CMenuManager::DrawControllerSetupScreen()
 	CFont::SetDropShadowPosition(0);
 	SET_FONT_FOR_LIST_ITEM
 
-	int yStart;
-	if (m_ControlMethod == CONTROL_CLASSIC)
-		yStart = CONTSETUP_LIST_TOP + 18;
-	else
-		yStart = CONTSETUP_LIST_TOP + 21;
+	int yStart = CONTSETUP_LIST_TOP + 21;
 
 	float optionYBottom = yStart + rowHeight;
 	for (int i = 0; i < setup->numRows; ++i) {
@@ -3069,6 +2991,9 @@ CMenuManager::LoadSettings()
 			CFileMgr::Read(fileHandle, (char*)&m_nDisplayVideoMode, 1);
 			CFileMgr::Read(fileHandle, m_PrefsSkinFile, 256);
 			CFileMgr::Read(fileHandle, (char*)&m_ControlMethod, 1);
+			// The classic scheme is gone (VICE-191): a file that carries it
+			// loads as the standard one
+			m_ControlMethod = CONTROL_STANDARD;
 			CFileMgr::Read(fileHandle, (char*)&m_PrefsLanguage, 1);
 			CFileMgr::Read(fileHandle, (char*)&m_PrefsShowHud, 1);
 			CFileMgr::Read(fileHandle, (char*)&m_PrefsRadarMode, 1);
@@ -3089,7 +3014,6 @@ CMenuManager::LoadSettings()
 	TheCamera.m_fMouseAccelVertical = TheCamera.m_fMouseAccelHorzntl + 0.0005f;
 #endif
 #ifdef PC_PLAYER_CONTROLS
-	CCamera::m_bUseMouse3rdPerson = m_ControlMethod == CONTROL_STANDARD;
 #endif
 #ifdef LEGACY_MENU_OPTIONS
 	m_PrefsVsync = m_PrefsVsyncDisp;
@@ -3963,7 +3887,7 @@ CMenuManager::ProcessList(bool &optionSelected, bool &goBack)
 		m_nTotalListRow = m_nSkinsTotal;
 	}
 	if (m_nCurrScreen == MENUPAGE_KEYBOARD_CONTROLS) {
-		m_nTotalListRow = GetControllerSetup(m_ControlMethod)->numRows;
+		m_nTotalListRow = GetControllerSetup()->numRows;
 		if (m_nSelectedListRow > m_nTotalListRow)
 			m_nSelectedListRow = m_nTotalListRow - 1;
 	}
@@ -4894,16 +4818,6 @@ CMenuManager::ProcessUserInput(uint8 goDown, uint8 goUp, uint8 optionSelected, u
 				}
 				SetHelperText(2);
 				break;
-			case MENUACTION_CTRLMETHOD:
-				if (m_ControlMethod == CONTROL_CLASSIC) {
-					CCamera::m_bUseMouse3rdPerson = true;
-					m_ControlMethod = CONTROL_STANDARD;
-				} else {
-					CCamera::m_bUseMouse3rdPerson = false;
-					m_ControlMethod = CONTROL_CLASSIC;
-				}
-				SaveSettings();
-				break;
 #ifdef CUSTOM_FRONTEND_OPTIONS
 			case MENUACTION_CFO_SELECT:
 			case MENUACTION_CFO_DYNAMIC:
@@ -5061,11 +4975,6 @@ CMenuManager::ProcessUserInput(uint8 goDown, uint8 goUp, uint8 optionSelected, u
 					SaveSettings();
 				}
 				break;
-			case MENUACTION_CTRLMETHOD:
-				m_ControlMethod = !m_ControlMethod;
-				CCamera::m_bUseMouse3rdPerson = !m_ControlMethod;
-				SaveSettings();
-				break;
 #ifdef CUSTOM_FRONTEND_OPTIONS
 			case MENUACTION_CFO_SELECT:
 			case MENUACTION_CFO_DYNAMIC:
@@ -5188,10 +5097,8 @@ CMenuManager::ProcessOnOffMenuOptions()
 		SaveSettings();
 		break;
 	case MENUACTION_MOUSESTEER:
-		if (m_ControlMethod == CONTROL_STANDARD) {
-			CVehicle::m_bDisableMouseSteering = !CVehicle::m_bDisableMouseSteering;
-			SaveSettings();
-		}
+		CVehicle::m_bDisableMouseSteering = !CVehicle::m_bDisableMouseSteering;
+		SaveSettings();
 		break;
 	}
 }
