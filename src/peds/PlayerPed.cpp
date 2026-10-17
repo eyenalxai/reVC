@@ -1765,8 +1765,6 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 	// ped in place or turn the body under the aim (VICE-137)
 	if (m_bWeaponAimActive)
 		smoothSprayRate = -1.0f;
-	bool smoothSprayWithoutMove = false;
-
 	if (MovementDisabledBecauseOfTargeting()) {
 		leftRight = 0.0f;
 		upDown = 0.0f;
@@ -1779,19 +1777,12 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 	// toward the movement direction.
 	bool bFacingCamera = BodyFacesCamera();
 
-	// The classic camera holds the ped in place while a smooth spray turns it
-	if (!bFacingCamera && smoothSprayRate > 0.0f && upDown > 0.0f) {
-		padMoveInGameUnit = 0.0f;
-		smoothSprayWithoutMove = true;
-	}
-#ifdef FREE_CAM
-	if (TheCamera.Cams[0].Using3rdPersonMouseCam() && smoothSprayRate > 0.0f) {
-		padMoveInGameUnit = 0.0f;
-		smoothSprayWithoutMove = false;
-	}
-#endif
-
-	bool bHasInput = padMoveInGameUnit > 0.0f || smoothSprayWithoutMove;
+	// The pad always moves the ped, in every view, in every state (ADR 0028:
+	// no presentation or weapon state gates the input response). A smooth spray
+	// is a weapon behaviour and it turns the body below; it no longer holds the
+	// ped in place, and the duck no longer reads as "spray without move", which
+	// is what used to freeze a crouched walk in the classic camera.
+	bool bHasInput = padMoveInGameUnit > 0.0f;
 	if (bHasInput) {
 		float padHeading = CGeneral::GetRadianAngleBetweenPoints(0.0f, 0.0f, -leftRight, upDown);
 		m_fMoveHeading = CGeneral::LimitRadianAngle(padHeading - TheCamera.Orientation);
