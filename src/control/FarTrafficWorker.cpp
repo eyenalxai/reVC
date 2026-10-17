@@ -153,8 +153,10 @@ FarTrafficSimUpdateCar(const SFarTrafficWorld *pWorld, SFarSimCar *pCar, uint32_
 	 * ground cast (which would be two collision queries per update, the one
 	 * thing the layer must not spend). The node z is the far layer's own rule
 	 * (the near rails drag the car onto the ground instead), so it is not part
-	 * of the shared pose. */
-	float between = c.CurveProgress();
+	 * of the shared pose. The progress is the curve's own span, as the pose
+	 * reads it (CarRailsClampCurveProgress): a stale clock must not
+	 * extrapolate the height either. */
+	float between = CarRailsClampCurveProgress(c.CurveProgress());
 	float z = pWorld->nodes[pCar->currentRouteNode].z * (1.0f - between)
 		+ pWorld->nodes[pCar->nextRouteNode].z * between;
 	z += pCar->heightAboveRoad;

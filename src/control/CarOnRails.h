@@ -110,6 +110,24 @@ CarRailsCurveSpeedScaleFactor(float p1x, float p1y, float p2x, float p2y,
 		return ((1.0f - dp) * 0.25f + 1.0f) * distance;
 }
 
+/* The curve's own span: 0 is the current link's lane point and 1 the next
+ * link's. The pick always sets a fresh curve, whose progress is inside the
+ * span; a clock the pick never reset (a placement's seed, a car promoted with
+ * its curve long spent) can read outside it, and the shipped curve arithmetic
+ * then extrapolates the car along the link direction, across the map. A reader
+ * of the progress maps a value outside the span to the span's nearer end; NaN
+ * (a curve time of zero with a zero clock: a curve with no scale) maps to the
+ * start. */
+static inline float
+CarRailsClampCurveProgress(float between)
+{
+	if (!(between > 0.0f))
+		return 0.0f;
+	if (between > 1.0f)
+		return 1.0f;
+	return between;
+}
+
 /* The point of the curve between two lane positions and its tangent. The
  * tangent is per millisecond of the curve's time. */
 static inline void
@@ -126,7 +144,16 @@ CarRailsCurvePoint(float p1x, float p1y, float p2x, float p2y,
 	float t1 = fabsf((p2x - p1x) * d1x + (p2y - p1y) * d1y);
 	float t2 = fabsf((p1x - p2x) * d2x + (p1y - p2y) * d2y);
 	float curveCoef;
-	if (t1 > t2) {
+	if (t1 == 0.0f && t2 == 0.0f) {
+		/* Both projections are zero: the two lane points coincide, or the
+		 * chord is square to both directions. The shipped branch divides
+		 * 0/0 and its cosine takes NaN, so the curve takes the shipped
+		 * blend of equal projections - the limit of its t1 == t2 case,
+		 * which runs from the current link to the next over the span -
+		 * and stays finite. */
+		curveCoef = between >= 1.0f ? 1.0f : 0.5f - 0.5f * cosf(3.1415f * between);
+	}
+	else if (t1 > t2) {
 		float coef = (t1 - t2) / (t1 + t2);
 #ifdef FIX_BUGS
 		if (between <= coef)
@@ -134,6 +161,11 @@ CarRailsCurvePoint(float p1x, float p1y, float p2x, float p2y,
 		if (between < coef)
 #endif
 			curveCoef = 0.0f;
+		else if (t2 == 0.0f)
+			/* t2 == 0 puts the blend's end at coef == 1: past the span
+			 * there is no second projection to blend along, so the curve
+			 * is spent (the shipped arithmetic divides by 2 * t2 there). */
+			curveCoef = 1.0f;
 		else
 			curveCoef = 0.5f - 0.5f * cosf(3.1415f * (between - coef) * (t1 + t2) / (2 * t2));
 	}
@@ -145,13 +177,25 @@ CarRailsCurvePoint(float p1x, float p1y, float p2x, float p2y,
 		if (coef < between)
 #endif
 			curveCoef = 1.0f;
+		else if (t1 == 0.0f)
+			/* t1 == 0 puts the blend's start at coef == 0: before the
+			 * span there is no first projection to blend along, so the
+			 * curve has not started (the shipped arithmetic divides by
+			 * 2 * t1 there). */
+			curveCoef = 0.0f;
 		else
 			curveCoef = 0.5f - 0.5f * cosf(3.1415f * between * (t1 + t2) / (2 * t1));
 	}
+	/* The tangent is per millisecond of the curve; the pick's own floor is
+	 * 10 ms (CarRailsPickNextNode stores it as the shortest curve). A curve
+	 * time under the floor - only a placement's seed can carry one
+	 * (CCarCtrl::CreateCarFromPlacement computes the time without the clamp)
+	 * is read at the floor, never divided by zero. */
+	float curveMs = timeOnCurve > 10 ? (float)timeOnCurve : 10.0f;
 	*pOutX = (p1x + between * d1x) * (1.0f - curveCoef) + (p2x - (1 - between) * d2x) * curveCoef;
 	*pOutY = (p1y + between * d1y) * (1.0f - curveCoef) + (p2y - (1 - between) * d2y) * curveCoef;
-	*pOutDirX = (d1x * (1.0f - curveCoef) + d2x * curveCoef) / (timeOnCurve * 0.001f);
-	*pOutDirY = (d1y * (1.0f - curveCoef) + d2y * curveCoef) / (timeOnCurve * 0.001f);
+	*pOutDirX = (d1x * (1.0f - curveCoef) + d2x * curveCoef) / (curveMs * 0.001f);
+	*pOutDirY = (d1y * (1.0f - curveCoef) + d2y * curveCoef) / (curveMs * 0.001f);
 }
 
 /*
@@ -238,7 +282,11 @@ CarRailsPose(G &g, C &c, float *pOutX, float *pOutY, float *pOutDirX, float *pOu
 	}
 	CarRailsCurvePoint(
 		posCurX, posCurY, posNextX, posNextY, dirCurX, dirCurY, dirNextX, dirNextY,
-		c.CurveProgress(), c.TimeOnCurve(),
+		/* The curve's own span (CarRailsClampCurveProgress): the pick always
+		 * sets a fresh curve inside it, and the progress a stale clock reads
+		 * outside it (a promoted car's, a seed's) must not extrapolate the
+		 * car across the map along the link direction. */
+		CarRailsClampCurveProgress(c.CurveProgress()), c.TimeOnCurve(),
 		pOutX, pOutY, pOutDirX, pOutDirY
 	);
 }
@@ -257,6 +305,16 @@ CarRailsPickNextNode(G &g, C &c)
 	int32_t prevNode = c.CurrentRouteNode();
 	int32_t curNode = c.NextRouteNode();
 	uint8_t totalLinks = (uint8_t)g.NumLinks(curNode);
+	if (totalLinks == 0) {
+		/* A node with no connections at all (a state the map data should
+		 * never hold, but a graph the pick must not divide by): the pick
+		 * cannot move the car. Keep its route and its link as they are and
+		 * flag the u-turn - the near side leaves the rails, the far
+		 * applicator turns the car around - instead of drawing
+		 * Random() % 0. */
+		c.UTurn();
+		return;
+	}
 	int32_t curLink = c.NextPathNodeInfo();
 	uint8_t lanesOnCurrentPath;
 	bool isOnOneWayRoad;
@@ -328,22 +386,47 @@ CarRailsPickNextNode(G &g, C &c)
 		}
 	}
 	if (attempt >= ATTEMPTS_TO_FIND_NEXT_NODE) {
-		/* If we failed again, remove no U-turn limitation and remove randomness */
-		for (nextLink = 0; nextLink < totalLinks; nextLink++) {
-			c.SetNextRouteNode(g.ConnectedNode(nextLink + g.NodeFirstLink(curNode)));
-			int32_t candidateLink = g.LinkOfConnection(nextLink + g.NodeFirstLink(curNode));
+		/* If we failed again, remove no U-turn limitation and remove
+		 * randomness. The round walks the node's own connections from 0 and
+		 * takes the first one the two relaxed tests allow; the index of that
+		 * connection is what the link read below must use. (The shipped code
+		 * marked the acceptance with a 1000 sentinel and the loop's own
+		 * increment turned it into 1001, so the link read indexed the
+		 * connection arrays one past everything the node owns.) */
+		int32_t acceptedConnection = -1;
+		for (int32_t connection = 0; connection < totalLinks; connection++) {
+			c.SetNextRouteNode(g.ConnectedNode(connection + g.NodeFirstLink(curNode)));
+			int32_t candidateLink = g.LinkOfConnection(connection + g.NodeFirstLink(curNode));
 			goingAgainstOneWayRoad = g.LinkPathNode(candidateLink) == curNode ? g.LinkRightLanes(candidateLink) == 0 : g.LinkLeftLanes(candidateLink) == 0;
 			if (!goingAgainstOneWayRoad) {
 				int32_t candidate = c.NextRouteNode();
 				if ((!g.NodeDisabled(candidate) || g.NodeDisabled(prevNode)) &&
-					(!g.NodeBetweenLevels(candidate) || g.NodeBetweenLevels(prevNode) || !c.StayInCurrentLevel()))
-					/* Nice way to exit loop but this will fail because this is used for indexing! */
-					nextLink = 1000;
+					(!g.NodeBetweenLevels(candidate) || g.NodeBetweenLevels(prevNode) || !c.StayInCurrentLevel())) {
+					acceptedConnection = connection;
+					break;
+				}
 			}
 		}
-		if (nextLink < 999)
-			/* If everything else failed, turn vehicle around */
+		if (acceptedConnection >= 0) {
+			nextLink = acceptedConnection;
+		} else {
+			/* If everything else failed, turn the vehicle around. The link
+			 * of the u-turn is the connection that leads back to the
+			 * previous node: that is the road the car turns onto. */
 			c.SetNextRouteNode(prevNode);
+			nextLink = -1;
+			for (int32_t connection = 0; connection < totalLinks; connection++) {
+				if (g.ConnectedNode(connection + g.NodeFirstLink(curNode)) == prevNode) {
+					nextLink = connection;
+					break;
+				}
+			}
+			if (nextLink < 0)
+				/* No connection leads back (a one-way stub the car arrived
+				 * on): any connection of the node's own is a defined link,
+				 * and the turn itself does not read it. */
+				nextLink = 0;
+		}
 	}
 	int32_t nextRouteNode = c.NextRouteNode();
 	int32_t nextLinkOfChoice = g.LinkOfConnection(nextLink + g.NodeFirstLink(curNode));
