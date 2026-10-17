@@ -106,6 +106,10 @@ public:
 	static int16 FindAudioZone(CVector *pos);
 	static CZone *GetPointerForNavigationZoneIndex(ssize_t i) { return i == -1 ? nil : &NavigationZoneArray[i]; }
 	static ssize_t GetIndexForNavigationZonePointer(CZone *zone) { return zone == nil ? -1 : zone - NavigationZoneArray; }
+	/* VICE-148: the spawn sites store the information zone's index, never a
+	 * CZoneInfo (the script fills the info records after boot and a save load
+	 * replaces them), so a position's zone is kept as its index. */
+	static int16 GetIndexForInfoZonePointer(CZone *zone) { return zone == nil ? -1 : zone - InfoZoneArray; }
 	static void AddZoneToAudioZoneArray(CZone *zone);
 	static void InitialiseAudioZoneArray(void);
 	static void SaveAllZones(uint8 *buffer, uint32 *length);

@@ -68,6 +68,7 @@
 #include "Skidmarks.h"
 #include "SetPieces.h"
 #include "SpecialFX.h"
+#include "SpawnSites.h"
 #include "Stats.h"
 #include "Streaming.h"
 #include "SurfaceTable.h"
@@ -452,6 +453,13 @@ bool CGame::Initialise(const char* datFile)
 	 * The worker thread itself is created here, once. */
 	ThePaths.BuildNodeGrid();
 	CFarTraffic::BuildWorldSnapshot();
+	/* The spawn sites (VICE-148): the index over the car path connections,
+	 * built here with the graph prepared and the zones created above
+	 * (PostZoneCreation) and with the collision world not resident yet - a
+	 * site starts unvalidated and the ground is validated lazily per site.
+	 * Nothing consumes the index yet; the spawn service and its planner are
+	 * the next tickets. */
+	CSpawnSites::Build();
 	for (int i = 0; i < NUMPLAYERS; i++)
 		CWorld::Players[i].Clear();
 	CWorld::Players[0].LoadPlayerSkin();
@@ -965,6 +973,11 @@ void CGame::Process(void)
 			 * its own cheap cars, promotes what the player has come near and
 			 * takes over what the cull has just handed it. */
 			CFarTraffic::Process();
+			/* The spawn sites' flags (VICE-148): the script's road toggles
+			 * and a save load move the graph's node flags, so the sites
+			 * re-derive their own flags here - never a rebuild. The version
+			 * check makes a frame with no toggle one comparison. */
+			CSpawnSites::RefreshFlags();
 			POP_MEMID();
 		}
 	}
