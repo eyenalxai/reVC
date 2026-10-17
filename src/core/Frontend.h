@@ -297,7 +297,6 @@ enum eMenuAction
 	MENUACTION_SPEAKERCONF,
 	MENUACTION_PLAYERSETUP,
 	MENUACTION_RESTOREDEF,
-	MENUACTION_CTRLMETHOD,
 	MENUACTION_DYNAMICACOUSTIC,
 	MENUACTION_MOUSESTEER,
 	MENUACTION_DRAWDIST,
@@ -369,10 +368,6 @@ enum
 
 enum eControlMethod
 {
-	// The one control method (VICE-191). The classic value stays as a
-	// hole: a settings file that carries it loads as the standard one
-	CONTROL_STANDARD = 0,
-	CONTROL_CLASSIC,
 };
 
 // Why??
@@ -655,7 +650,6 @@ public:
 	int8 m_bLanguageLoaded;
 	uint8 m_PrefsAllowNastyGame;
 	int8 m_PrefsMP3BoostVolume;
-	int8 m_ControlMethod;
 	// Kept in the menu manager; CCamera::Init memsets the camera.
 	bool m_bFirstPersonView;
 	uint8 m_nFirstPersonFOV;	// unsigned: the setting reaches 180

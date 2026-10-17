@@ -510,7 +510,6 @@ CMenuManager::CMenuManager()
 	DisplayComboButtonErrMsg = false;
 	m_PrefsDMA = 1;
 	OS_Language = LANG_ENGLISH;
-	m_ControlMethod = CONTROL_STANDARD;
 	m_bFirstPersonView = false;
 	m_nFirstPersonFOV = 70;
 	m_nCarCameraDistance = CAR_CAMERA_DISTANCE_DEFAULT;
@@ -2990,10 +2989,6 @@ CMenuManager::LoadSettings()
 			CFileMgr::Read(fileHandle, (char*)&m_PrefsFrameLimiter, 1);
 			CFileMgr::Read(fileHandle, (char*)&m_nDisplayVideoMode, 1);
 			CFileMgr::Read(fileHandle, m_PrefsSkinFile, 256);
-			CFileMgr::Read(fileHandle, (char*)&m_ControlMethod, 1);
-			// The classic scheme is gone (VICE-191): a file that carries it
-			// loads as the standard one
-			m_ControlMethod = CONTROL_STANDARD;
 			CFileMgr::Read(fileHandle, (char*)&m_PrefsLanguage, 1);
 			CFileMgr::Read(fileHandle, (char*)&m_PrefsShowHud, 1);
 			CFileMgr::Read(fileHandle, (char*)&m_PrefsRadarMode, 1);
@@ -3108,7 +3103,6 @@ CMenuManager::SaveSettings()
 		CFileMgr::Write(fileHandle, (char*)&m_PrefsFrameLimiter, 1);
 		CFileMgr::Write(fileHandle, (char*)&m_nPrefsVideoMode, 1);
 		CFileMgr::Write(fileHandle, m_PrefsSkinFile, 256);
-		CFileMgr::Write(fileHandle, (char*)&m_ControlMethod, 1);
 		CFileMgr::Write(fileHandle, (char*)&m_PrefsLanguage, 1);
 		CFileMgr::Write(fileHandle, (char*)&m_PrefsShowHud, 1);
 		CFileMgr::Write(fileHandle, (char*)&m_PrefsRadarMode, 1);
@@ -4805,7 +4799,6 @@ CMenuManager::ProcessUserInput(uint8 goDown, uint8 goUp, uint8 optionSelected, u
 #endif
 					TheCamera.m_fMouseAccelHorzntl = 0.0025f;
 					CVehicle::m_bDisableMouseSteering = true;
-					m_ControlMethod = CONTROL_STANDARD;
 #ifdef PC_PLAYER_CONTROLS
 					TheCamera.m_bUseMouse3rdPerson = true;
 #else
