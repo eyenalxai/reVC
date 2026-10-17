@@ -1147,6 +1147,13 @@ SectionCost(void)
  * the slope - the old path had none - the invisible band on the drawn point,
  * and the node reach: a node within 150 m and 5 m of the level), the cells
  * are the built ring's answer with the caller's band and level rules.
+ *
+ * One reading note on the table: the cells snap the draw to a stored point of
+ * the drawn cell, so a point near the band's or the area's edge can land on
+ * the other side of it. A standable area that was already fully covered (the
+ * near beach) therefore reads a few points lower than the old policy, while
+ * the areas beyond the node reach (the far sand, the airfield) go from
+ * nothing to the cells' share - the ticket's own measure.
  */
 #define COV_MAX_DIST	130.0f
 #define COV_MIN_DIST_OFFSCREEN 35.0f
