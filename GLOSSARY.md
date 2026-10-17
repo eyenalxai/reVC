@@ -860,3 +860,41 @@ reservation expires after two seconds (`SPAWN_OCCUPANCY_RESERVE_MS`), so an
 abandoned plan frees the site by itself. A held entry is one whose remaining
 lifetime is inside the reserve window: a clock that moved backwards (a load)
 reads the site free, and a stale entry cannot read held.
+## Spawn site
+
+A place a vehicle may be created on the car path graph, one per **directed**
+connection (VICE-148). A car path link record is one road segment and both
+travel directions share it, so a site is the (entry node -> connected node)
+pair itself and every travelled-side fact lives per orientation: the lanes of
+the travelled side (`numLeftLanes` or `numRightLanes`, the rule
+`CCarCtrl::CreateCarFromPlacement` reads), the travel direction (the link's
+direction with the sign of the node pair) and the flags. A site carries the
+connection's midpoint - the node pair's own midpoint, never the link record's
+position (the external links' positions are the synthetic midpoints of the
+merged external nodes) - the node pair, the connection and its link, the width,
+the rarity (`spawnRate`, the *smaller* of the two nodes: the acceptance
+threshold the spawner's dice read) and the info-zone index. A directed
+connection is not a site when the travelled side has no lanes (the wrong
+direction of a one-way street) or when the pair's ends disagree about water:
+boat sites are directed water-water pairs, road sites land-land pairs. The
+ground is never validated at build time (the collision world is not resident
+at boot): a site starts unvalidated and the ground is validated lazily, on the
+main thread.
+
+## Spawn site index
+
+The flat array of the spawn sites plus a 32 m spatial hash, in the style of the
+path node grid (ADR 0024): one record per directed connection, up to
+`NUM_PATHCONNECTIONS` (20,400), built once per load right after
+`PreparePathData` (`CSpawnSites::Build`, `CGame::Initialise`) and never
+rebuilt. The script's road toggles and a save load move the graph's node flags
+only (`CPathFind::m_nodeFlagsVersion`), and `CSpawnSites::RefreshFlags`
+re-derives the sites' flags when it moved - the `FarTrafficRefreshWorldFlags`
+pattern: one comparison a frame, no rebuild. The record holds the info-zone
+index, never a `CZoneInfo` (the zone records are filled by the script after
+boot and replaced by a save load, so the service resolves the info live). The
+rules and the storage are in `SpawnSites.h`/`SpawnSitesIndex.cpp` (engine-free),
+the snapshot out of `ThePaths` and the info-zone indices in `SpawnSites.cpp`
+(the engine side), and `utils/spawn-service` is the evidence program. Nothing
+consumes the index yet (VICE-148); the spawn service's planner is the next
+ticket.
