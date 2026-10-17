@@ -17,33 +17,55 @@
  * two strongest offline things instead:
  *
  *   A. It reads the sources that own the transition - Pools.cpp (the two
- *      branches of LoadVehiclePool), Vehicle.cpp (the constructor, Load and
- *      Save) and CarCtrl.cpp (UpdateCarCount, Init/ReInit) - and checks the
- *      shape of the transition in both branches: every construction uses
+ *      branches of LoadVehiclePool and the save's IsVehicleSaved),
+ *      Vehicle.cpp (the constructor, Load, Save and the destructor),
+ *      CarCtrl.cpp (UpdateCarCount, ReInit, NumCarsInUse), Game.cpp (the
+ *      load path), GenericGameStorage.cpp (the quick save) and config.h
+ *      (the COMPATIBLE_SAVES selection) - and checks the shape of the
+ *      transition in both branches: every construction uses
  *      RANDOM_VEHICLE, one manual NumRandomCars decrement takes the
  *      constructor's count back, the saved class arrives before the
  *      recount, and exactly one UpdateCarCount(pVehicle, false) follows it.
  *      An edit that drops the recount, duplicates it, moves it before the
- *      class or strays a counter write fails here.
+ *      class, puts it under a preprocessor conditional or strays a counter
+ *      write fails here.
  *
  *   B. It runs the transition as the sources write it: the counter deltas
  *      are parsed from CCarCtrl::UpdateCarCount and the order from
- *      LoadVehiclePool, and the counters are followed through a save/load
- *      soak. The counters after every load equal the counters of the saved
- *      set (the acceptance of the ticket), for every class a save can carry
- *      and for a law enforcer, which counts once as a random car and once
- *      as a law enforcer, the same as a live one. The recorded pre-fix
- *      sequence is run side by side: it nets zero per vehicle, so the
- *      soak shows NumMissionCars at zero and NumCarsInUse short by the
- *      restored set every round.
+ *      LoadVehiclePool, and the counters are followed through the restore,
+ *      a mixed saved set and a carried save/load soak. The counters after
+ *      every load equal the counters before the save (the acceptance of the
+ *      ticket); the constructed set destroyed through the parsed remove
+ *      deltas returns the counters to zero. The recorded pre-fix sequence
+ *      is run side by side: it nets zero per vehicle, so it loses the whole
+ *      restored set on the first load.
  *
  * What the program cannot measure: the counters of the running game across
  * a real save and load. That live soak is the acceptance of the live rig
  * (the owner's run, or a read of the running process as
- * utils/caps-audit/live-counters.py does for the traffic counters); this
- * program is the offline half. The call sites of UpdateCarCount outside the
- * restore (the replay player, the far layer's class switch) run on live
- * vehicles, not on a restored one.
+ * utils/caps-audit/live-counters.py does); the tool prints NumMissionCars
+ * and the other counters NumCarsInUse sums - NumRandomCars,
+ * NumLawEnforcerCars, NumParkedCars and the two emergency counters - so the
+ * operator reads them before the save and after the load. NumPermanentCars
+ * is printed too and stays outside the sum. The call sites of
+ * UpdateCarCount outside the restore (the replay player, the far layer's
+ * class switch) run on live vehicles, not on a restored one.
+ *
+ * The checks read C++ as text, so they rest on these shapes of the files:
+ *   - a function body closes with a brace at column 0 (FindBody);
+ *   - UpdateCarCount splits at a line that is exactly "else{" into the
+ *     remove and the create switch;
+ *   - LoadVehiclePool's branch table is one #ifdef COMPATIBLE_SAVES, one
+ *     #else and the body's last #endif; an #if 0 block of a branch is
+ *     skipped, and a preprocessor line between the recount and the branch
+ *     end fails the check;
+ *   - a count op is a line with "++Num" or "--Num"; its guard is the text
+ *     between it and the previous op (the law count is the one op under
+ *     the pVehicle->bIsLawEnforcer guard, and no op may sit under a class
+ *     guard of its own);
+ *   - the calls of the transition are recognized by their exact text.
+ * A structural edit that does not fit fails the read (a missing function,
+ * class, op or counter is reported), never passes silently.
  *
  * Build and run (from the repository root):
  *
@@ -80,7 +102,6 @@ static void Check(bool condition, const char *what)
 
 struct SSource
 {
-	std::string path;
 	std::vector<std::string> lines;
 };
 
@@ -98,7 +119,6 @@ static bool ReadSource(const char *path, SSource &src)
 		text.append(buf, n);
 	fclose(f);
 
-	src.path = path;
 	size_t start = 0;
 	while (start <= text.size()) {
 		size_t nl = text.find('\n', start);
@@ -125,6 +145,12 @@ static std::string Trim(const std::string &s)
 		return "";
 	size_t b = s.find_last_not_of(" \t");
 	return s.substr(a, b - a + 1);
+}
+
+static bool IsPreprocessorLine(const std::string &line)
+{
+	std::string t = Trim(line);
+	return !t.empty() && t[0] == '#';
 }
 
 static int FindLine(const SSource &src, const char *needle, int from)
@@ -164,6 +190,19 @@ static int FindInBody(const SSource &src, int begin, int end, const char *needle
 	return -1;
 }
 
+static int CountText(const SSource &src, int first, int last, const char *needle)
+{
+	int n = 0;
+	for (int i = first; i <= last; i++) {
+		size_t at = 0;
+		while ((at = src.lines[i].find(needle, at)) != std::string::npos) {
+			n++;
+			at += strlen(needle);
+		}
+	}
+	return n;
+}
+
 /* --------------------------------------------- A. the deltas of the count */
 
 /* One counter the count moves, with the line that moves it. */
@@ -171,7 +210,8 @@ struct SCountOp
 {
 	std::string counter;	/* NumRandomCars, NumLawEnforcerCars, ... */
 	int sign;		/* +1 (++) or -1 (--) */
-	bool whenLaw;		/* the op runs only for a law enforcer */
+	bool whenLaw;		/* the op sits under the bIsLawEnforcer guard */
+	bool classGuard;	/* the op sits under a guard on the created-by class */
 	int line;		/* 1-based */
 };
 
@@ -187,6 +227,17 @@ static const char *aClassNames[] = {
 	"PERMANENT_VEHICLE", "FAR_TRAFFIC_VEHICLE"
 };
 static const int nClassNames = sizeof(aClassNames) / sizeof(aClassNames[0]);
+
+/* The four class counters CCarCtrl::NumCarsInUse sums, in the order of its
+ * expression; the model's SCounters::InUse holds the same list. */
+static const char *aInUseClass[] = {
+	"NumRandomCars", "NumLawEnforcerCars", "NumMissionCars", "NumParkedCars"
+};
+
+static bool IsCountOpLine(const std::string &line)
+{
+	return Contains(line, "++Num") || Contains(line, "--Num");
+}
 
 static std::vector<SClassOps> ParseSwitch(const SSource &src, int startLine, int endLine)
 {
@@ -219,9 +270,23 @@ static std::vector<SClassOps> ParseSwitch(const SSource &src, int startLine, int
 		op.counter = src.lines[i].substr(opStart, opEnd - opStart);
 		op.sign = sign;
 		op.line = i + 1;
-		/* The law count is the one conditional op of the function: the
-		 * random case adds it under `if (pVehicle->bIsLawEnforcer)`. */
-		op.whenLaw = op.counter == "NumLawEnforcerCars";
+		/* The guard of the op: the text between it and the previous count
+		 * op (or the case line). The law count is the one op under the
+		 * bIsLawEnforcer guard; a counter may not sit under a guard on the
+		 * created-by class of its own. */
+		op.whenLaw = false;
+		op.classGuard = false;
+		for (int j = i - 1; j > startLine; j--) {
+			std::string p = Trim(src.lines[j]);
+			if (p.size() > 5 && p.compare(0, 5, "case ") == 0)
+				break;
+			if (IsCountOpLine(src.lines[j]))
+				break;
+			if (Contains(src.lines[j], "bIsLawEnforcer"))
+				op.whenLaw = true;
+			if (Contains(src.lines[j], "VehicleCreatedBy"))
+				op.classGuard = true;
+		}
 		classes.back().ops.push_back(op);
 	}
 	return classes;
@@ -253,10 +318,41 @@ struct SEvent
 	int line;	/* 1-based */
 };
 
+/*
+ * The counter-affecting lines of one branch, in order. A preprocessor
+ * conditional is tracked by depth: an #if 0 block is skipped whole (the
+ * alternate branch of its #else is live again), and a nested #ifdef of a
+ * branch (the direct branch's FIX_BUGS copy) stays in the scan.
+ */
 static std::vector<SEvent> ScanBranch(const SSource &src, int first, int last)
 {
 	std::vector<SEvent> events;
+	int depth = 0;
+	int deadDepth = -1;	/* the depth of the #if 0 block, -1 when live */
 	for (int i = first; i <= last; i++) {
+		std::string t = Trim(src.lines[i]);
+		if (t.compare(0, 3, "#if") == 0) {
+			if (deadDepth < 0 && (t == "#if 0" ||
+				(t.size() > 5 && t.compare(0, 5, "#if 0") == 0 &&
+				 (t[5] == ' ' || t[5] == '\t' || t[5] == '/'))))
+				deadDepth = depth;
+			depth++;
+			continue;
+		}
+		if (t.compare(0, 5, "#else") == 0 || t.compare(0, 5, "#elif") == 0) {
+			if (deadDepth >= 0 && depth == deadDepth + 1)
+				deadDepth = -1;	/* the alternate branch of the #if 0 is live */
+			continue;
+		}
+		if (t.compare(0, 6, "#endif") == 0) {
+			depth--;
+			if (deadDepth >= 0 && depth == deadDepth)
+				deadDepth = -1;
+			continue;
+		}
+		if (deadDepth >= 0)
+			continue;
+
 		const std::string &s = src.lines[i];
 		SEvent e;
 		if (Contains(s, "new(slot)") && Contains(s, "RANDOM_VEHICLE")) {
@@ -307,17 +403,14 @@ static int LastEvent(const std::vector<SEvent> &events, EEvent kind)
 	return line;
 }
 
-static int CountText(const SSource &src, int first, int last, const char *needle)
+/* A count that must stay unconditional: no #if... between it and the end of
+ * the branch that holds it. */
+static bool ConditionalAfter(const SSource &src, int countLine, int last)
 {
-	int n = 0;
-	for (int i = first; i <= last; i++) {
-		size_t at = 0;
-		while ((at = src.lines[i].find(needle, at)) != std::string::npos) {
-			n++;
-			at += strlen(needle);
-		}
-	}
-	return n;
+	for (int i = countLine; i <= last; i++)	/* countLine is 1-based: the next line is its index */
+		if (IsPreprocessorLine(src.lines[i]))
+			return true;
+	return false;
 }
 
 /* ------------------------------------------------- the shape of the restore */
@@ -351,6 +444,8 @@ static void CheckCompatibleBranch(const SSource &src, int first, int last, const
 		Check(lastCtor < dec, "the decrement takes the count of the construction");
 		Check(dec < load, "the decrement runs before Load sets the saved class");
 		Check(load < recount, "the recount runs after Load has set the saved class");
+		Check(!ConditionalAfter(src, recount, last),
+			"a preprocessor line sits between the recount and the branch end");
 	}
 }
 
@@ -395,11 +490,80 @@ static void CheckDirectBranch(const SSource &src, int first, int last, const std
 			dec, cls, law, recount);
 		Check(dec < cls && cls < recount && law < recount,
 			"the recount runs after the saved class is in place");
+		Check(!ConditionalAfter(src, recount, last),
+			"a preprocessor line sits between the recount and the branch end");
 	}
 }
 
-static bool CheckSources(SSource &pools, SSource &carCtrl, SSource &vehicle, std::vector<SClassOps> &createOut,
-	bool &recountInPlace)
+/* The guard text of every parsed op (the law count under bIsLawEnforcer, the
+ * rest under none), on both sides of the count. */
+static void CheckGuards(const std::vector<SClassOps> &create, const std::vector<SClassOps> &remove)
+{
+	static const char *aSide[] = { "create", "remove" };
+	for (int side = 0; side < 2; side++) {
+		const std::vector<SClassOps> &table = side == 0 ? create : remove;
+		for (size_t c = 0; c < table.size(); c++) {
+			for (size_t j = 0; j < table[c].ops.size(); j++) {
+				const SCountOp &op = table[c].ops[j];
+				char msg[200];
+				if (op.counter == "NumLawEnforcerCars") {
+					sprintf(msg, "%s: %s is not under the pVehicle->bIsLawEnforcer guard (%s side)",
+						table[c].cls.c_str(), op.counter.c_str(), aSide[side]);
+					Check(op.whenLaw, msg);
+				} else {
+					sprintf(msg, "%s: %s is under the law guard (%s side)",
+						table[c].cls.c_str(), op.counter.c_str(), aSide[side]);
+					Check(!op.whenLaw, msg);
+					sprintf(msg, "%s: %s is under a class guard of its own (%s side)",
+						table[c].cls.c_str(), op.counter.c_str(), aSide[side]);
+					Check(!op.classGuard, msg);
+				}
+			}
+		}
+	}
+}
+
+/* The sum expression of CCarCtrl::NumCarsInUse, the identifiers it adds. */
+static std::vector<std::string> ParseSumIdentifiers(const SSource &src, int begin, int end)
+{
+	std::vector<std::string> names;
+	std::string expr;
+	bool inReturn = false;
+	for (int i = begin + 1; i < end; i++) {
+		if (!inReturn) {
+			if (!Contains(src.lines[i], "return "))
+				continue;
+			inReturn = true;
+		}
+		expr += src.lines[i];
+		expr += " ";
+		if (Contains(src.lines[i], ";"))
+			break;
+	}
+	for (size_t i = 0; i < expr.size(); ) {
+		if (isalpha((unsigned char)expr[i]) || expr[i] == '_') {
+			size_t j = i;
+			while (j < expr.size() && (isalnum((unsigned char)expr[j]) || expr[j] == '_'))
+				j++;
+			if (j - i > 3 && expr.compare(i, 3, "Num") == 0)
+				names.push_back(expr.substr(i, j - i));
+			i = j;
+		} else
+			i++;
+	}
+	return names;
+}
+
+static bool HasName(const std::vector<std::string> &names, const char *name)
+{
+	for (size_t i = 0; i < names.size(); i++)
+		if (names[i] == name)
+			return true;
+	return false;
+}
+
+static bool CheckSources(SSource &pools, SSource &carCtrl, SSource &vehicle, SSource &game, SSource &storage,
+	std::vector<SClassOps> &createOut, std::vector<SClassOps> &removeOut, bool &recountInPlace)
 {
 	int begin, end, split, endif;
 
@@ -456,13 +620,25 @@ static bool CheckSources(SSource &pools, SSource &carCtrl, SSource &vehicle, std
 
 	/* --- IsVehicleSaved: what a save carries --- */
 	if (FindBody(pools, "IsVehicleSaved(CVehicle", begin, end)) {
+		const int force = FindInBody(pools, begin, end,
+			"m_pMyVehicle == pVehicle && IsQuickSave", begin);
+		const int forced = FindInBody(pools, begin, end, "if (bForceSaving)", begin);
 		const int ret = FindInBody(pools, begin, end,
 			"return pVehicle->VehicleCreatedBy == MISSION_VEHICLE;", begin);
-		printf("  src/core/Pools.cpp: IsVehicleSaved (lines %d..%d) carries only mission vehicles\n",
+		printf("  src/core/Pools.cpp: IsVehicleSaved (lines %d..%d) carries the mission vehicles;\n",
 			begin + 1, end + 1);
-		Check(ret >= 0, "IsVehicleSaved returns true only for a MISSION_VEHICLE");
+		printf("    a mission-replay quicksave adds the player's car, whatever its class\n");
+		Check(force >= 0 && forced >= 0, "IsVehicleSaved still forces the quicksave's player car");
+		Check(ret >= 0, "IsVehicleSaved still carries the MISSION_VEHICLE class");
 	} else
 		Fail("Pools.cpp: IsVehicleSaved is not found");
+	if (FindBody(storage, "bool SaveGameForPause", begin, end) ||
+	    FindBody(storage, "SaveGameForPause(", begin, end)) {
+		const int set = FindInBody(storage, begin, end, "IsQuickSave = type;", begin);
+		printf("  src/save/GenericGameStorage.cpp: the quicksave sets IsQuickSave (%d)\n", set + 1);
+		Check(set >= 0, "the mission-replay quicksave still sets IsQuickSave");
+	} else
+		Fail("GenericGameStorage.cpp: SaveGameForPause is not found");
 	printf("\n");
 
 	/* --- CVehicle: the constructor, Load, Save, the destructor --- */
@@ -473,11 +649,13 @@ static bool CheckSources(SSource &pools, SSource &carCtrl, SSource &vehicle, std
 	const int setClass = FindInBody(vehicle, begin, end, "VehicleCreatedBy = CreatedBy;", begin);
 	const int lawFalse = FindInBody(vehicle, begin, end, "bIsLawEnforcer = false;", begin);
 	const int ctorCount = FindInBody(vehicle, begin, end, "CCarCtrl::UpdateCarCount(this, false);", begin);
+	const int ctorCounts = CountText(vehicle, begin, end, "CCarCtrl::UpdateCarCount(this, false);");
 	printf("  src/vehicles/Vehicle.cpp: the constructor (lines %d..%d)\n", begin + 1, end + 1);
 	printf("    the class (line %d) and the law flag (line %d) are set before the count (line %d)\n",
 		setClass + 1, lawFalse + 1, ctorCount + 1);
 	Check(setClass >= 0 && lawFalse >= 0 && ctorCount >= 0,
 		"the constructor still sets the class, the law flag and the count");
+	Check(ctorCounts == 1, "the constructor counts the vehicle exactly once");
 	Check(setClass >= 0 && setClass < ctorCount, "the constructor counts with the class it was given");
 	Check(lawFalse >= 0 && lawFalse < ctorCount,
 		"the constructor counts a non-law-enforcer, so the count is the random one");
@@ -500,7 +678,9 @@ static bool CheckSources(SSource &pools, SSource &carCtrl, SSource &vehicle, std
 
 	if (FindBody(vehicle, "CVehicle::~CVehicle()", begin, end)) {
 		const int dtor = FindInBody(vehicle, begin, end, "CCarCtrl::UpdateCarCount(this, true);", begin);
+		const int dtorCounts = CountText(vehicle, begin, end, "CCarCtrl::UpdateCarCount(this, true);");
 		Check(dtor >= 0, "the destructor takes the count back with the class of the vehicle");
+		Check(dtorCounts == 1, "the destructor takes the count back exactly once");
 	} else
 		Fail("Vehicle.cpp: the CVehicle destructor is not found");
 
@@ -526,37 +706,56 @@ static bool CheckSources(SSource &pools, SSource &carCtrl, SSource &vehicle, std
 	Check((int)create.size() == nClassNames, "UpdateCarCount covers the five classes on the create side");
 	Check((int)remove.size() == nClassNames, "UpdateCarCount covers the five classes on the remove side");
 
+	CheckGuards(create, remove);
+
 	/* The deltas, class by class, against the table the program runs. */
 	static const SClassOps aExpected[] = {
 		/* RANDOM: a law enforcer is counted twice, as the live path counts it. */
-		{ "RANDOM_VEHICLE",      { { "NumLawEnforcerCars", +1, true, 0 }, { "NumRandomCars", +1, false, 0 } } },
-		{ "MISSION_VEHICLE",     { { "NumMissionCars", +1, false, 0 } } },
-		{ "PARKED_VEHICLE",      { { "NumParkedCars", +1, false, 0 } } },
-		{ "PERMANENT_VEHICLE",   { { "NumPermanentCars", +1, false, 0 } } },
+		{ "RANDOM_VEHICLE",      { { "NumLawEnforcerCars", +1, true, false, 0 }, { "NumRandomCars", +1, false, false, 0 } } },
+		{ "MISSION_VEHICLE",     { { "NumMissionCars", +1, false, false, 0 } } },
+		{ "PARKED_VEHICLE",      { { "NumParkedCars", +1, false, false, 0 } } },
+		{ "PERMANENT_VEHICLE",   { { "NumPermanentCars", +1, false, false, 0 } } },
 		{ "FAR_TRAFFIC_VEHICLE", { } },
 	};
+	char msg[240];
 	for (int i = 0; i < nClassNames; i++) {
 		const SClassOps *got = FindClass(create, aExpected[i].cls.c_str());
-		Check(got != NULL, "a class of the count table is missing");
+		sprintf(msg, "the create table has no %s class", aExpected[i].cls.c_str());
+		Check(got != NULL, msg);
 		if (got) {
-			Check(got->ops.size() == aExpected[i].ops.size(),
-				"a create delta of the count table is missing");
-			for (size_t j = 0; j < got->ops.size() && j < aExpected[i].ops.size(); j++)
-				Check(got->ops[j].counter == aExpected[i].ops[j].counter &&
+			sprintf(msg, "%s: the create table has %d deltas, expected %d",
+				aExpected[i].cls.c_str(), (int)got->ops.size(), (int)aExpected[i].ops.size());
+			Check(got->ops.size() == aExpected[i].ops.size(), msg);
+			for (size_t j = 0; j < got->ops.size() && j < aExpected[i].ops.size(); j++) {
+				bool same = got->ops[j].counter == aExpected[i].ops[j].counter &&
 					got->ops[j].sign == aExpected[i].ops[j].sign &&
-					got->ops[j].whenLaw == aExpected[i].ops[j].whenLaw,
-					"a create delta of the count table is not the expected one");
+					got->ops[j].whenLaw == aExpected[i].ops[j].whenLaw;
+				sprintf(msg, "%s: create delta %d is %s %+d (law %d), expected %s %+d (law %d)",
+					aExpected[i].cls.c_str(), (int)j,
+					got->ops[j].counter.c_str(), got->ops[j].sign, got->ops[j].whenLaw,
+					aExpected[i].ops[j].counter.c_str(), aExpected[i].ops[j].sign,
+					aExpected[i].ops[j].whenLaw);
+				Check(same, msg);
+			}
 		}
 		/* the remove side is the mirror of the create side */
 		const SClassOps *gone = FindClass(remove, aExpected[i].cls.c_str());
-		Check(gone != NULL, "a class of the remove table is missing");
+		sprintf(msg, "the remove table has no %s class", aExpected[i].cls.c_str());
+		Check(gone != NULL, msg);
 		if (got && gone) {
-			Check(gone->ops.size() == got->ops.size(), "the remove table does not mirror the create table");
-			for (size_t j = 0; j < gone->ops.size() && j < got->ops.size(); j++)
-				Check(gone->ops[j].counter == got->ops[j].counter &&
+			sprintf(msg, "%s: the remove table has %d deltas, expected %d (the mirror)",
+				aExpected[i].cls.c_str(), (int)gone->ops.size(), (int)got->ops.size());
+			Check(gone->ops.size() == got->ops.size(), msg);
+			for (size_t j = 0; j < gone->ops.size() && j < got->ops.size(); j++) {
+				bool mirror = gone->ops[j].counter == got->ops[j].counter &&
 					gone->ops[j].sign == -got->ops[j].sign &&
-					gone->ops[j].whenLaw == got->ops[j].whenLaw,
-					"a remove delta is not the mirror of the create delta");
+					gone->ops[j].whenLaw == got->ops[j].whenLaw;
+				sprintf(msg, "%s: remove delta %d is %s %+d (law %d), expected %s %+d (law %d)",
+					aExpected[i].cls.c_str(), (int)j,
+					gone->ops[j].counter.c_str(), gone->ops[j].sign, gone->ops[j].whenLaw,
+					got->ops[j].counter.c_str(), -got->ops[j].sign, got->ops[j].whenLaw);
+				Check(mirror, msg);
+			}
 		}
 	}
 	printf("    the five classes: RANDOM +1 random (+1 law for a law enforcer), MISSION +1 mission,\n");
@@ -570,44 +769,50 @@ static bool CheckSources(SSource &pools, SSource &carCtrl, SSource &vehicle, std
 		for (int i = 0; i < 5; i++) {
 			char want[64];
 			sprintf(want, "%s = 0;", aCounters[i]);
-			Check(FindInBody(carCtrl, begin, end, want, begin) >= 0,
-				"ReInit still zeroes every class counter (the load clears before the restore)");
+			sprintf(msg, "ReInit does not zero %s (the load clears before the restore)", aCounters[i]);
+			Check(FindInBody(carCtrl, begin, end, want, begin) >= 0, msg);
 		}
 		printf("    CCarCtrl::ReInit (line %d) zeroes every class counter\n", begin + 1);
 	} else
 		Fail("CarCtrl.cpp: CCarCtrl::ReInit is not found");
 
 	if (FindBody(carCtrl, "CCarCtrl::NumCarsInUse(void)", begin, end)) {
-		/* The budget of the car spawner: the four class counters of the count
-		 * plus the two emergency counters. The permanent class stays outside
-		 * it. */
-		static const char *aSummed[] = {
-			"NumFiretrucksOnDuty", "NumAmbulancesOnDuty", "NumParkedCars",
-			"NumMissionCars", "NumLawEnforcerCars", "NumRandomCars"
-		};
-		for (int i = 0; i < 6; i++)
-			Check(FindInBody(carCtrl, begin, end, aSummed[i], begin) >= 0,
-				"NumCarsInUse still sums the counters a restored car must reach");
-		printf("    CCarCtrl::NumCarsInUse (line %d) sums the four class counters and the two\n", begin + 1);
-		printf("    emergency counters; a restored mission car reaches the car budget through it\n");
+		const std::vector<std::string> sum = ParseSumIdentifiers(carCtrl, begin, end);
+		printf("    CCarCtrl::NumCarsInUse (line %d) sums:", begin + 1);
+		for (size_t i = 0; i < sum.size(); i++)
+			printf(" %s", sum[i].c_str());
+		printf("\n");
+		sprintf(msg, "NumCarsInUse sums %d counters, expected the four class counters and the two emergency counters",
+			(int)sum.size());
+		Check(sum.size() == 6, msg);
+		static const char *aDuty[] = { "NumFiretrucksOnDuty", "NumAmbulancesOnDuty" };
+		for (int i = 0; i < 4; i++) {
+			sprintf(msg, "NumCarsInUse does not sum %s (SCounters::InUse counts it)", aInUseClass[i]);
+			Check(HasName(sum, aInUseClass[i]), msg);
+		}
+		for (int i = 0; i < 2; i++) {
+			sprintf(msg, "NumCarsInUse does not sum %s", aDuty[i]);
+			Check(HasName(sum, aDuty[i]), msg);
+		}
+		Check(!HasName(sum, "NumPermanentCars"),
+			"NumCarsInUse sums NumPermanentCars (SCounters::InUse keeps it outside the budget)");
+		printf("    the four class counters of the sum are SCounters::InUse's list; the two emergency\n");
+		printf("    counters are zero through a restore (the save carries no duty flags)\n");
 	} else
 		Fail("CarCtrl.cpp: CCarCtrl::NumCarsInUse is not found");
 
 	/* The caller of ReInit on the load path. */
-	SSource game;
-	if (ReadSource("src/core/Game.cpp", game)) {
-		if (FindBody(game, "CGame::ReInitGameObjectVariables(void)", begin, end)) {
-			Check(FindInBody(game, begin, end, "CCarCtrl::ReInit();", begin) >= 0,
-				"ReInitGameObjectVariables still clears the counters on the load path");
-			printf("    the load path: CGame::ReInitGameObjectVariables (Game.cpp line %d) calls CCarCtrl::ReInit\n",
-				begin + 1);
-		} else
-			Fail("Game.cpp: CGame::ReInitGameObjectVariables is not found");
+	if (FindBody(game, "CGame::ReInitGameObjectVariables(void)", begin, end)) {
+		Check(FindInBody(game, begin, end, "CCarCtrl::ReInit();", begin) >= 0,
+			"ReInitGameObjectVariables still clears the counters on the load path");
+		printf("    the load path: CGame::ReInitGameObjectVariables (Game.cpp line %d) calls CCarCtrl::ReInit\n",
+			begin + 1);
 	} else
-		Fail("Game.cpp cannot be read");
+		Fail("Game.cpp: CGame::ReInitGameObjectVariables is not found");
 	printf("\n");
 
 	createOut = create;
+	removeOut = remove;
 	return true;
 }
 
@@ -617,9 +822,10 @@ struct SCounters
 {
 	int random, law, mission, parked, permanent;
 	SCounters() : random(0), law(0), mission(0), parked(0), permanent(0) {}
-	/* CCarCtrl::NumCarsInUse: the four class counters it sums (the
-	 * permanent class stays outside the budget; the two emergency counters
-	 * are zero through a restore - the save carries no duty flags). */
+	/* CCarCtrl::NumCarsInUse: the counters of aInUseClass (random, law,
+	 * mission, parked) and the two emergency counters. The save carries no
+	 * duty flags, so a restore leaves the emergency counters at zero; the
+	 * permanent class stays outside the budget. */
 	int InUse() const { return random + law + mission + parked; }
 };
 
@@ -627,6 +833,11 @@ static bool SameCounters(const SCounters &a, const SCounters &b)
 {
 	return a.random == b.random && a.law == b.law && a.mission == b.mission &&
 		a.parked == b.parked && a.permanent == b.permanent;
+}
+
+static bool IsZero(const SCounters &c)
+{
+	return c.random == 0 && c.law == 0 && c.mission == 0 && c.parked == 0 && c.permanent == 0;
 }
 
 static int *CounterSlot(SCounters &c, const std::string &name)
@@ -639,10 +850,8 @@ static int *CounterSlot(SCounters &c, const std::string &name)
 	return NULL;
 }
 
-/* The create count of one class, the way CCarCtrl::UpdateCarCount applies it. */
-static void ApplyCreate(SCounters &c, const std::vector<SClassOps> &create, const char *cls, bool law)
+static void ApplyOps(SCounters &c, const SClassOps *ops, bool law)
 {
-	const SClassOps *ops = FindClass(create, cls);
 	if (!ops)
 		return;
 	for (size_t i = 0; i < ops->ops.size(); i++) {
@@ -652,6 +861,18 @@ static void ApplyCreate(SCounters &c, const std::vector<SClassOps> &create, cons
 		if (slot)
 			*slot += ops->ops[i].sign;
 	}
+}
+
+/* The create count of one class, the way CCarCtrl::UpdateCarCount applies it. */
+static void ApplyCreate(SCounters &c, const std::vector<SClassOps> &create, const char *cls, bool law)
+{
+	ApplyOps(c, FindClass(create, cls), law);
+}
+
+/* The remove count of one class, the destructor's CCarCtrl::UpdateCarCount. */
+static void ApplyRemove(SCounters &c, const std::vector<SClassOps> &remove, const char *cls, bool law)
+{
+	ApplyOps(c, FindClass(remove, cls), law);
 }
 
 static void AddInto(SCounters &into, const SCounters &one)
@@ -680,7 +901,15 @@ static SCounters RestoreOne(const std::vector<SClassOps> &create, const char *cl
 	return c;
 }
 
-static void RunTransition(const std::vector<SClassOps> &create, bool recountInPlace)
+/* One saved car: the class the save carries and the law flag. */
+struct SSavedCar
+{
+	const char *cls;
+	bool law;
+};
+
+static void RunTransition(const std::vector<SClassOps> &create, const std::vector<SClassOps> &remove,
+	bool recountInPlace)
 {
 	printf("B. the transition itself, run with the deltas parsed above\n\n");
 
@@ -705,76 +934,126 @@ static void RunTransition(const std::vector<SClassOps> &create, bool recountInPl
 	printf("  the constructor's count and the decrement cancel, so the vehicle holds exactly one\n");
 	printf("  count: the one of the class the save carries (plus the law count of a law car).\n\n");
 
-	/* The soak: save S mission cars, clear the counters, restore, repeat. */
+	/* The mixed set: the classes a save can carry, one restore and one
+	 * destroy. The law car counts twice in the budget, as a live one does
+	 * (PopulationBudget.h). */
+	static const SSavedCar aMixed[] = {
+		{ "MISSION_VEHICLE", false }, { "MISSION_VEHICLE", false }, { "MISSION_VEHICLE", false },
+		{ "PARKED_VEHICLE", false }, { "RANDOM_VEHICLE", true }
+	};
+	const int nMixed = sizeof(aMixed) / sizeof(aMixed[0]);
+	SCounters wantMixed, gotMixed;
+	for (int i = 0; i < nMixed; i++) {
+		ApplyCreate(wantMixed, create, aMixed[i].cls, aMixed[i].law);
+		SCounters one = RestoreOne(create, aMixed[i].cls, aMixed[i].law, recountInPlace);
+		AddInto(gotMixed, one);
+	}
+	printf("  the mixed set: 3 mission + 1 parked + 1 random law car\n");
+	printf("    after the restore   %d/%d/%d/%d/%d\n", gotMixed.random, gotMixed.law, gotMixed.mission,
+		gotMixed.parked, gotMixed.permanent);
+	printf("    the create deltas   %d/%d/%d/%d/%d\n", wantMixed.random, wantMixed.law, wantMixed.mission,
+		wantMixed.parked, wantMixed.permanent);
+	printf("    NumCarsInUse %d (the law car counts in NumRandomCars and NumLawEnforcerCars, its documented\n",
+		gotMixed.InUse());
+	printf("    double count in PopulationBudget.h)\n");
+	Check(SameCounters(gotMixed, wantMixed), "the mixed set does not hold the sum of its create deltas");
+	SCounters destroyed = gotMixed;
+	for (int i = 0; i < nMixed; i++)
+		ApplyRemove(destroyed, remove, aMixed[i].cls, aMixed[i].law);
+	printf("    destroyed           %d/%d/%d/%d/%d\n", destroyed.random, destroyed.law, destroyed.mission,
+		destroyed.parked, destroyed.permanent);
+	Check(IsZero(destroyed), "the destroyed mixed set does not return the counters to zero");
+	printf("\n");
+
+	/* The carried soak: the counters before a save are the counters of the
+	 * live set (the normal creation paths count it); the load clears them
+	 * and restores the same set, and the next round carries the state it
+	 * left. The equality is a real one: a short count fails on the round it
+	 * happens. */
 	const int rounds = 10;
 	const int savedMission = 7;
-	printf("  the soak: %d rounds of save -> CCarCtrl::ReInit -> restore, %d saved mission cars\n",
-		rounds, savedMission);
-	printf("  %-6s %-30s %s\n", "round", recountInPlace ? "after the fix" : "as written (no recount)",
-		"the pre-fix sequence");
-	SCounters lastAfter, lastPre;
-	bool acceptance = true, stable = true;
+	SCounters live;
+	for (int i = 0; i < savedMission; i++)
+		ApplyCreate(live, create, "MISSION_VEHICLE", false);
+	printf("  the carried soak: %d rounds of save -> CCarCtrl::ReInit -> restore -> save again,\n",
+		rounds);
+	printf("  %d saved mission cars\n", savedMission);
+	printf("  %-6s %-30s %s\n", "round", "before the save", "after the load");
+	SCounters lastAfter;
+	bool acceptance = true;
 	for (int r = 0; r < rounds; r++) {
-		SCounters after, pre;
+		SCounters after;
 		for (int i = 0; i < savedMission; i++) {
 			SCounters one = RestoreOne(create, "MISSION_VEHICLE", false, recountInPlace);
 			AddInto(after, one);
-			one = RestoreOne(create, "MISSION_VEHICLE", false, false);
-			AddInto(pre, one);
 		}
-		if (r > 0 && !SameCounters(after, lastAfter))
-			stable = false;
-		lastAfter = after;
-		lastPre = pre;
-		if (r == 0 || r == rounds - 1) {
-			char a[48], p[48];
-			sprintf(a, "mission %d, cars in use %d", after.mission, after.InUse());
-			sprintf(p, "mission %d, cars in use %d", pre.mission, pre.InUse());
-			printf("  %-6d %-30s %s\n", r + 1, a, p);
-		}
-		if (after.mission != savedMission || after.InUse() != savedMission)
+		if (!SameCounters(after, live))
 			acceptance = false;
+		if (r == 0 || r == rounds - 1) {
+			char before[48], a[48];
+			sprintf(before, "mission %d, cars in use %d", live.mission, live.InUse());
+			sprintf(a, "mission %d, cars in use %d", after.mission, after.InUse());
+			printf("  %-6d %-30s %s\n", r + 1, before, a);
+		}
+		live = after;	/* the next round saves the set the load left */
+		lastAfter = after;
 	}
-	printf("  every round of the restore: NumMissionCars %d of %d, NumCarsInUse %d of %d (one count per\n",
-		lastAfter.mission, savedMission, lastAfter.InUse(), savedMission);
-	printf("  restored car); the pre-fix sequence: NumMissionCars %d, NumCarsInUse %d every round\n",
-		lastPre.mission, lastPre.InUse());
-	Check(acceptance, "the counters after the load do not equal the counters of the saved set");
-	Check(stable, "the counters of the soak drift between rounds (the fix)");
-	Check(lastPre.mission == 0, "the recorded pre-fix sequence is expected to leave the mission count at zero");
+	printf("  every round: the counters after the load equal the counters before the save;\n");
+	printf("  the whole set is carried, so a lost count fails on its round\n");
+	Check(acceptance, "the counters after the load do not equal the counters before the save");
 
-	printf("  the acceptance: the counters after the load equal the counters of the saved set -\n");
+	/* The recorded pre-fix sequence, for the contrast: the decrement and
+	 * no recount lose the whole restored set on the first load. */
+	SCounters preBefore;
+	for (int i = 0; i < savedMission; i++)
+		ApplyCreate(preBefore, create, "MISSION_VEHICLE", false);
+	SCounters preAfter;
+	for (int i = 0; i < savedMission; i++) {
+		SCounters one = RestoreOne(create, "MISSION_VEHICLE", false, false);
+		AddInto(preAfter, one);
+	}
+	printf("  the pre-fix sequence: before the first save mission %d, after the load mission %d,\n",
+		preBefore.mission, preAfter.mission);
+	printf("  cars in use %d -> %d (the set is lost; later rounds carry the zero)\n",
+		preBefore.InUse(), preAfter.InUse());
+	Check(preAfter.mission == 0 && !SameCounters(preAfter, preBefore),
+		"the recorded pre-fix sequence is expected to lose the restored set");
+
+	printf("  the acceptance: the counters after the load equal the counters before the save -\n");
 	printf("  NumMissionCars before the save is %d (the saved set of the round), the load restores\n", savedMission);
-	printf("  %d, and after it the counter reads %d. The live soak (the running game, a real save\n",
-		savedMission, lastAfter.mission);
-	printf("  and load) is the acceptance of the live rig; the counters it reads are\n");
-	printf("  CCarCtrl::NumMissionCars and CCarCtrl::NumCarsInUse.\n\n");
+	printf("  %d, and after it the counter reads %d.\n", savedMission, lastAfter.mission);
+	printf("  The live soak (the running game, a real save and load) is the acceptance of the live\n");
+	printf("  rig; utils/caps-audit/live-counters.py prints NumMissionCars and the other counters\n");
+	printf("  NumCarsInUse sums (NumRandomCars, NumLawEnforcerCars, NumParkedCars and the two\n");
+	printf("  emergency counters; NumPermanentCars is printed too and stays outside the sum).\n\n");
 }
 
 int main(void)
 {
 	printf("reVC save-load vehicle counter evidence (VICE-163)\n");
 	printf("the restore builds with RANDOM_VEHICLE, takes that count back and gives the one\n");
-	printf("count of the vehicle to the class the save carries; this program reads the three\n");
-	printf("sources that own the transition and runs it as they write it.\n\n");
+	printf("count of the vehicle to the class the save carries; this program reads the sources\n");
+	printf("that own the transition and runs it as they write it.\n\n");
 
-	SSource pools, carCtrl, vehicle;
-	std::vector<SClassOps> create;
+	SSource pools, carCtrl, vehicle, game, storage;
+	std::vector<SClassOps> create, remove;
 	bool recountInPlace = false;
 	if (!ReadSource("src/core/Pools.cpp", pools) ||
 	    !ReadSource("src/control/CarCtrl.cpp", carCtrl) ||
-	    !ReadSource("src/vehicles/Vehicle.cpp", vehicle)) {
+	    !ReadSource("src/vehicles/Vehicle.cpp", vehicle) ||
+	    !ReadSource("src/core/Game.cpp", game) ||
+	    !ReadSource("src/save/GenericGameStorage.cpp", storage)) {
 		Fail("the sources cannot be read (run the program from the repository root)");
-	} else if (CheckSources(pools, carCtrl, vehicle, create, recountInPlace)) {
-		RunTransition(create, recountInPlace);
+	} else if (CheckSources(pools, carCtrl, vehicle, game, storage, create, remove, recountInPlace)) {
+		RunTransition(create, remove, recountInPlace);
 	}
 
 	printf("== result\n\n");
 	if (g_failures == 0) {
 		printf("  the restore counts every restored vehicle once in the class the save carries;\n");
-		printf("  the counters after a load equal the counters of the saved set, and the pre-fix\n");
-		printf("  sequence is shown short by the restored set. Run the live soak for the full\n");
-		printf("  acceptance.\n");
+		printf("  the counters after a load equal the counters before the save, the mixed set and\n");
+		printf("  the destroyed set close, and the pre-fix sequence is shown short by the restored\n");
+		printf("  set. Run the live soak for the full acceptance.\n");
 		return 0;
 	}
 	printf("  %d check(s) failed.\n", g_failures);

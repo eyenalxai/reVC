@@ -770,11 +770,12 @@ stays as the fallback for a map the grid cannot hold. See ADR 0024.
 
 A vehicle the game created for a script, a mission or a set piece:
 `VehicleCreatedBy == MISSION_VEHICLE` (Vehicle.h). It counts in the car budget
-as `NumMissionCars`, and it is the only class a save carries: the pool save
-writes a vehicle out only when `IsVehicleSaved` reads it as a mission car
-(Pools.cpp), because the traffic and the parked cars are rebuilt around the
-player after a load. A loaded mission car is counted once in `NumMissionCars`
-(VICE-163).
+as `NumMissionCars`. A full save carries the mission cars - the pool save
+writes a vehicle out when `IsVehicleSaved` reads it as a mission car
+(Pools.cpp) - because the traffic and the parked cars are rebuilt around the
+player after a load; a mission-replay quicksave also carries the player's car,
+whatever its class (the same predicate, over `IsQuickSave`). A loaded mission
+car is counted once in `NumMissionCars` (VICE-163).
 
 ## Vehicle counter
 
@@ -782,9 +783,12 @@ One of the car classes' live counters in `CCarCtrl`: `NumRandomCars`,
 `NumLawEnforcerCars`, `NumMissionCars`, `NumParkedCars` and `NumPermanentCars`.
 A creation counts once in the class the vehicle carries (the `CVehicle`
 constructor) and a deletion takes the count back (the destructor); a class
-switch moves it (`CCarCtrl::UpdateCarCount`). `NumCarsInUse` sums the four
-classes the budget counts and the two emergency counters; the permanent class
-and the far traffic stay outside it. `CCarCtrl::ReInit` zeroes every counter,
-and the save load calls it before the vehicle pool restore; each restored
-vehicle counts once in the class the save carries (VICE-163). The offline check
-is `utils/save-vehicle-count`.
+switch moves it (`CCarCtrl::UpdateCarCount`). `NumCarsInUse` sums four of the
+counters (random, law, mission, parked) and the two emergency counters; the
+permanent class and the far traffic stay outside it. A law-enforcer random car
+counts in both `NumLawEnforcerCars` and `NumRandomCars`, so the sum counts it
+twice and the budget blocks one car early per live law car; the double count is
+documented and on the safe side (`PopulationBudget.h`). `CCarCtrl::ReInit`
+zeroes every counter, and the save load calls it before the vehicle pool
+restore; each restored vehicle counts once in the class the save carries
+(VICE-163). The offline check is `utils/save-vehicle-count`.
