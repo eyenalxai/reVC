@@ -768,12 +768,12 @@ CPlayerPed::IsThisPedAnAimingPriority(CPed *suspect)
 // when no cycle key went down or the camera forbids the cycle; the caller then
 // checks the empty weapon.
 bool
-CPlayerPed::CycleWeaponInput(CPad *padUsed, bool aimableOnly)
+CPlayerPed::CycleWeaponInput(CPad *padUsed, bool inCar)
 {
 	if (m_pPointGunAt || bDontAllowWeaponChange || GetWeapon()->m_eWeaponType == WEAPONTYPE_DETONATOR)
 		return false;
 
-	if (padUsed->CycleWeaponRightJustDown()) {
+	if (padUsed->CycleWeaponRightJustDown(inCar)) {
 		if (TheCamera.PlayerWeaponMode.Mode == CCam::MODE_M16_1STPERSON
 			|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_M16_1STPERSON_RUNABOUT
 			|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_SNIPER
@@ -783,18 +783,18 @@ CPlayerPed::CycleWeaponInput(CPad *padUsed, bool aimableOnly)
 			|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_CAMERA)
 			return false;
 
-		SelectCycledWeaponSlot(true, aimableOnly);
+		SelectCycledWeaponSlot(true, inCar);
 		return true;
 	}
 
-	if (padUsed->CycleWeaponLeftJustDown()) {
+	if (padUsed->CycleWeaponLeftJustDown(inCar)) {
 		if (TheCamera.PlayerWeaponMode.Mode == CCam::MODE_M16_1STPERSON
 			|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_SNIPER
 			|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_ROCKETLAUNCHER
 			|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_CAMERA)
 			return false;
 
-		SelectCycledWeaponSlot(false, aimableOnly);
+		SelectCycledWeaponSlot(false, inCar);
 		return true;
 	}
 
@@ -802,14 +802,14 @@ CPlayerPed::CycleWeaponInput(CPad *padUsed, bool aimableOnly)
 }
 
 // The forward cycle stops at the last slot and falls back to unarmed; the
-// backward cycle wraps round. With aimableOnly only the aimable weapons count,
+// backward cycle wraps round. With inCar only the aimable weapons count,
 // and the held weapon stays when no other one is left.
 void
-CPlayerPed::SelectCycledWeaponSlot(bool forward, bool aimableOnly)
+CPlayerPed::SelectCycledWeaponSlot(bool forward, bool inCar)
 {
 	if (forward) {
 		for (m_nSelectedWepSlot = m_currentWeapon + 1;
-			m_nSelectedWepSlot < TOTAL_WEAPON_SLOTS && !CanCycleToWeaponSlot(m_nSelectedWepSlot, aimableOnly);
+			m_nSelectedWepSlot < TOTAL_WEAPON_SLOTS && !CanCycleToWeaponSlot(m_nSelectedWepSlot, inCar);
 			++m_nSelectedWepSlot)
 			;
 		if (m_nSelectedWepSlot == TOTAL_WEAPON_SLOTS)
@@ -824,24 +824,24 @@ CPlayerPed::SelectCycledWeaponSlot(bool forward, bool aimableOnly)
 			if (m_nSelectedWepSlot == WEAPONSLOT_UNARMED)
 				break;
 
-			if (CanCycleToWeaponSlot(m_nSelectedWepSlot, aimableOnly))
+			if (CanCycleToWeaponSlot(m_nSelectedWepSlot, inCar))
 				break;
 
 			--m_nSelectedWepSlot;
 		} while (m_nSelectedWepSlot != WEAPONSLOT_UNARMED);
 	}
 
-	if (aimableOnly && m_nSelectedWepSlot == WEAPONSLOT_UNARMED)
+	if (inCar && m_nSelectedWepSlot == WEAPONSLOT_UNARMED)
 		m_nSelectedWepSlot = m_currentWeapon;
 }
 
 bool
-CPlayerPed::CanCycleToWeaponSlot(int32 slot, bool aimableOnly)
+CPlayerPed::CanCycleToWeaponSlot(int32 slot, bool inCar)
 {
 	if (!HasWeaponSlot(slot) || !GetWeapon(slot).HasWeaponAmmoToBeUsed())
 		return false;
 
-	return !aimableOnly || IsAimableWeapon(GetWeapon(slot).m_eWeaponType);
+	return !inCar || IsAimableWeapon(GetWeapon(slot).m_eWeaponType);
 }
 
 // Makes the weapon of the selected slot the held one.
@@ -854,6 +854,20 @@ CPlayerPed::ApplySelectedWeaponSlot(void)
 			MakeChangesForNewWeapon(m_nSelectedWepSlot);
 		}
 	}
+}
+
+// The driver cycles the aimable weapons with the car cycle keys. The weapon
+// that comes back on the exit follows the choice, as the seat stored it.
+void
+CPlayerPed::ProcessVehicleWeaponSwitch(CPad *padUsed)
+{
+	if (m_nPedState != PED_DRIVING || !CycleWeaponInput(padUsed, true))
+		return;
+
+	if (m_nSelectedWepSlot != m_currentWeapon && m_storedWeapon != WEAPONTYPE_UNIDENTIFIED)
+		m_storedWeapon = GetWeapon(m_nSelectedWepSlot).m_eWeaponType;
+
+	ApplySelectedWeaponSlot();
 }
 
 // I think R* also used goto in here.
