@@ -90,10 +90,10 @@
  * ----------------
  *
  * The planner promises a site before it creates the actor there, so two
- * requests cannot plan the same connection in the same frame. A reservation
- * is per site id (the site index's directed connection id, VICE-148) and
- * expires after SPAWN_OCCUPANCY_RESERVE_MS: short enough that an abandoned
- * plan frees the street for the next request, long enough to cover a
+ * requests cannot plan the same connection while the plan is outstanding. A
+ * reservation is per site id (the site index's directed connection id,
+ * VICE-148) and expires after SPAWN_OCCUPANCY_RESERVE_MS: short enough that an
+ * abandoned plan frees the street for the next request, long enough to cover a
  * planning batch. An entry carries an in-use flag, and a held entry is one
  * whose remaining lifetime is inside (0, SPAWN_OCCUPANCY_RESERVE_MS]: the
  * signed difference survives the timer's wrap, a clock that jumped backwards

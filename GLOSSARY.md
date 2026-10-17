@@ -945,6 +945,18 @@ behind the service's ladder API (`CSpawnService::AllowsCreation`,
 `SpawnService.cpp` asks them directly. The ambient traffic is the first
 requester (`CCarCtrl::GenerateOneRandomCar`).
 
+The service states its deltas from the old spawner, rather than hiding them:
+the plan's candidates are the sites whose **midpoint** is in the ring band,
+not the node pairs that bracket the ring (the index carries no per-node
+positions, and the rank's nearest-to-the-ring keeps the placement on the
+ring); the ped pool's reserve is checked once per request as well as once per
+frame and once per car; the top-down camera's bypass arm allows a creation
+the old birth cull's top-down disjunct refused (the ladder owns the view);
+and the RNG stream shifts, because the removed rarity draw and the moved
+budget gate consume the shared dice differently (the fill burst's own shift,
+ADR 0021). The plan's catchable-midpoint conservatism and the rarity weight
+are stated in the planner's entry below.
+
 ## Spawn planner
 
 The road-site half of the spawn service (VICE-150): `SpawnOfferSites` takes

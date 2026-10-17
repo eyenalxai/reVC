@@ -750,7 +750,7 @@ FarTrafficTrySite(const SFarTrafficBand &band, const CVector &playerPos, const C
 			continue;
 		pResult->inBand = true;
 		CVehicle *pCar = nil;
-		/* The far layer's own placement until VICE-167 (its migration to a
+		/* The far layer's own placement until VICE-190 (its migration to a
 		 * service request, where it becomes a first-class requester): the
 		 * raw node pair, no planned site, the far tier's birth-cull skip.
 		 * The old primitive's rarity dice is gone with VICE-150 (the

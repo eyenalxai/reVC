@@ -90,7 +90,7 @@ public:
 	 * the caps and reserves, the final validation and the counters. The
 	 * dice and the camera decisions are gone (the planner owns them); the
 	 * placement carries the planned site (or a raw collector placement, the
-	 * far layer's own until VICE-167) and the tier carries the far layer's
+	 * far layer's own until VICE-190) and the tier carries the far layer's
 	 * birth-cull skip. The return is the refusal (SPAWN_REFUSAL_*). */
 	static ESpawnRefusal CreateCarFromPlacement(const SSpawnPlacement& placement, int carClass, int carModel, const CVector& vecTargetPos, const CVector2D& vecPlayerSpeed, bool testForCollision, ESpawnTier tier = SPAWN_TIER_NEAR, CVehicle **ppCreated = nil, ENearBubbleArm *pArm = nil);
 	static void GenerateEmergencyServicesCar(void);
