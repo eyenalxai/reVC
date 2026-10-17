@@ -2,6 +2,7 @@
 #define __GTA_PED_H__
 
 #include "RwHelper.h"
+#include "Stance.h"
 #include "AnimManager.h"
 #include "Crime.h"
 #include "EventList.h"
@@ -364,12 +365,6 @@ enum eMoveState {
 // The body stance the movement solver owns (ADR 0028, VICE-178). The
 // collision set follows it; STAND is the default and what a save load resets
 // to, the same way m_nMoveState does.
-enum eStance {
-	STANCE_STAND,
-	STANCE_CROUCH,
-	STANCE_PRONE
-};
-
 extern float gfTommyFatness;
 
 class CVehicle;

@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "Stance.h"
+
 // The movement solver of the on-foot player: the state machine that owns the
 // player's horizontal velocity and the stance. The module is engine free - it
 // includes no engine header - so a harness compiles the translation unit alone.
@@ -22,16 +24,9 @@ enum eMoveStateId
 	MOVE_NUMSTATES,
 };
 
-// The stance axis: the solver owns the player's stance. Phase 0 has the stand;
-// the crouch and the prone arrive with the stance table (VICE-171) and their
-// tickets (VICE-176, VICE-177).
-enum eMoveStance
-{
-	STANCE_STAND,
-	STANCE_CROUCH,
-	STANCE_PRONE,
-	STANCE_NUM,
-};
+// The stance axis (eStance, Stance.h): the solver owns the player's stance.
+// Phase 0 has the stand; the crouch and the prone arrive with the stance
+// table (VICE-171) and their tickets (VICE-176, VICE-177).
 
 // The edges one step reports. The snapshot carries the bits to the listeners
 // (presentation, telemetry); the event list is VICE-173.
@@ -74,7 +69,7 @@ struct SMoveIntent
 struct SMoveSnapshot
 {
 	eMoveStateId state;	// the state the step solved
-	eMoveStance stance;	// the stance of the player
+	eStance stance;	// the stance of the player
 	SMoveVec2 velocity;	// the new m_vecMoveSpeed x/y: the own velocity plus the surface speed
 	SMoveVec2 moved;	// the controller's own velocity, the new m_moved
 	float speed;		// the speed of the own velocity, |moved|
@@ -103,7 +98,7 @@ public:
 private:
 	// The solver state. The readers use the snapshot (see SMoveSnapshot).
 	eMoveStateId m_State;
-	eMoveStance m_Stance;
+	eStance m_Stance;
 	float m_fStateTime;	// seconds spent in the current state
 	SMoveSnapshot m_Snapshot;	// written only by Step
 };
