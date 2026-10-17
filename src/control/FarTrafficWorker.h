@@ -149,6 +149,10 @@ struct SFarSimLink
 
 struct SFarTrafficWorld
 {
+	/* The world's sector grid (FarTraffic.h: SFarTrafficWorldBounds), filled
+	 * by the applicator from the engine's own macros: the simulation refuses
+	 * a pose it cannot hold, without an engine header (VICE-168). */
+	SFarTrafficWorldBounds bounds;
 	int32_t numNodes;
 	int32_t numLinks;
 	int32_t numConnections;
@@ -188,6 +192,14 @@ struct SFarSimCar
  * the car's height above the road), `dirX/dirY` the curve's tangent (the move
  * speed is this divided by GAME_SPEED_TO_CARAI_SPEED) and `forwardX/forwardY`
  * the flattened, normalised heading.
+ *
+ * `bRefused` is the world's rule over the pose (VICE-168): the simulation set
+ * it when FarTrafficPoseIsInWorld rejected the built pose (a position or a
+ * direction that is not finite, or x/y outside the sector grid). The pose
+ * still carries the arithmetic's numbers for the evidence, and the applicator
+ * must not apply it: the car keeps its last good position and leaves the
+ * layer, so a producer the sim cannot stand behind cannot reach the sector
+ * insert of CPhysical::RemoveAndAdd.
  */
 struct SFarSimPose
 {
@@ -195,6 +207,7 @@ struct SFarSimPose
 	uint16_t slot;		/* the same car's pool slot (the applicator checks) */
 	uint8_t bUTurn;
 	uint8_t bShortCurve;	/* the pick's clamped curve (the engine's "fout") */
+	uint8_t bRefused;	/* the world cannot hold the pose: never applied */
 	float x, y, z;
 	float dirX, dirY;
 	float forwardX, forwardY;
@@ -243,6 +256,7 @@ struct SFarTrafficOutput
 	int32_t numCars;	/* the layer after the commands */
 	int32_t numPoses;	/* the cars this cycle moved (the stagger's share) */
 	int32_t numShortCurves;	/* the pick's clamped curves (the "fout" case) */
+	int32_t numRefused;	/* the poses the world refused (the bRefused ones) */
 	int32_t numLost;	/* commands that could not be applied: must stay 0 */
 	SFarSimPose poses[FAR_TRAFFIC_MAX];
 };
@@ -317,6 +331,20 @@ public:
 
 	/* The cycle is handed over (Run) and the output is published. The main
 	 * thread reads it after Join. */
+
+	/* The sim car at `index` (VICE-168), for the promotion's write-back: the
+	 * applicator copies the simulation's route state into the vehicle's
+	 * AutoPilot before the entry is dropped, so the near rails carry on from
+	 * the state and the clock the simulation left rather than the state the
+	 * car was seeded with when it became far (the stale curve clock read as a
+	 * progress of hundreds and CCarCtrl::DragCarToPoint dragged the car out of
+	 * the world). The sim state is only read in the contract's own window -
+	 * between the join and the next hand-over (FarTrafficWorker.h, "THE
+	 * CONTRACT") - and the applicator's promotions run exactly there, with the
+	 * worker idle; the accessor asserts it in a debug build. Returns false
+	 * when `index` is outside the worker's list (the two lists disagreed; the
+	 * caller reports it and the promotion carries on). */
+	static bool ExportCar(int32_t index, SFarSimCar &out);
 
 	/* A debug build's audit of the contract's window: true when the worker is
 	 * inside a cycle. CWorld::Process and RenderScene assert it is false (the

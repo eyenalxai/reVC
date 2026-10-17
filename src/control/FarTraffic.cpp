@@ -110,6 +110,12 @@
  *					pose whose slot did not match): must stay 0
  *	ms_nFarTrafficShortCurves	the pick's clamped curves (the engine's own
  *					"fout" diagnostic, counted instead of printed)
+ *	ms_nFarTrafficRefusedPoses	the poses the world could not hold (VICE-168):
+ *					the simulation's refusals, plus any pose the
+ *					apply refused that the simulation published.
+ *					The pose is never written, and the car leaves
+ *					the layer without a driver; a healthy layer
+ *					reads 0
  *	ms_nFarTrafficCatchUps		the pending cycle the applicator ran inline
  *					because the window between two cycles grew
  *					the command ring towards its water mark (0 in
@@ -156,6 +162,7 @@ unsigned int CFarTraffic::ms_nFarTrafficWorkerCycles;
 unsigned int CFarTraffic::ms_nFarTrafficWorkerLost;
 unsigned int CFarTraffic::ms_nFarTrafficShortCurves;
 unsigned int CFarTraffic::ms_nFarTrafficCatchUps;
+unsigned int CFarTraffic::ms_nFarTrafficRefusedPoses;
 
 /*
  * The layer. A compact list of the cars it holds, with the pool slot each one
@@ -309,6 +316,49 @@ FarTrafficSeedSimCar(CVehicle *pVehicle, int32 slot, SFarSimCar *pSim)
 	pSim->forwardY = pVehicle->GetForward().y;
 }
 
+/* The write-back of a promotion (VICE-168): the inverse of
+ * FarTrafficSeedSimCar. While a car is far the simulation owns its route state
+ * (the two links of the curve, the lanes, the directions, the path-node infos,
+ * the curve times and the heading), so a car that returns to the near rails
+ * hands the near side the state the simulation advanced, not the state the car
+ * was seeded with when it became far. The clock is the one that matters: the
+ * near rails compile the curve progress from m_nTimeEnteredCurve against
+ * CTimer::GetTimeInMilliseconds (CCarRailsEngineView::CurveProgress,
+ * CarCtrl.cpp:1471) and the simulation's own clock is the same one (the cycle's
+ * `now`), so the copied times are consistent across the switch. A stale clock
+ * read a progress in the hundreds and CCarCtrl::DragCarToPoint dragged the car
+ * out of the world - the ScanForPedDanger assert of the crash report. */
+static void
+FarTrafficWriteBackSimCar(CVehicle *pVehicle, const SFarSimCar &sim)
+{
+	pVehicle->AutoPilot.m_nCurrentRouteNode = sim.currentRouteNode;
+	pVehicle->AutoPilot.m_nNextRouteNode = sim.nextRouteNode;
+	pVehicle->AutoPilot.m_nPrevRouteNode = sim.prevRouteNode;
+	pVehicle->AutoPilot.m_nTimeEnteredCurve = sim.timeEnteredCurve;
+	/* The picks floor the curve at 10 ms (CarOnRails.h:419); the same floor on
+	 * the way back, so the near rails can never divide by a curve time of
+	 * zero. */
+	pVehicle->AutoPilot.m_nTimeToSpendOnCurrentCurve =
+		sim.timeToSpendOnCurrentCurve > 10 ? sim.timeToSpendOnCurrentCurve : 10;
+	pVehicle->AutoPilot.m_nCurrentPathNodeInfo = (uint32)sim.currentPathNodeInfo;
+	pVehicle->AutoPilot.m_nNextPathNodeInfo = (uint32)sim.nextPathNodeInfo;
+	pVehicle->AutoPilot.m_nPreviousPathNodeInfo = (uint32)sim.previousPathNodeInfo;
+	pVehicle->AutoPilot.m_nPreviousDirection = sim.previousDirection;
+	pVehicle->AutoPilot.m_nCurrentDirection = sim.currentDirection;
+	pVehicle->AutoPilot.m_nNextDirection = sim.nextDirection;
+	pVehicle->AutoPilot.m_nCurrentLane = sim.currentLane;
+	pVehicle->AutoPilot.m_nNextLane = sim.nextLane;
+	/* The heading the simulation last applied. A normal promotion keeps the
+	 * matrix, and the last applied pose already wrote this value; a refused
+	 * pose never wrote its heading, so this writes one only when it is
+	 * finite. */
+	if (sim.forwardX >= -FLT_MAX && sim.forwardX <= FLT_MAX &&
+	    sim.forwardY >= -FLT_MAX && sim.forwardY <= FLT_MAX) {
+		pVehicle->GetForward() = CVector(sim.forwardX, sim.forwardY, 0.0f);
+		pVehicle->GetRight() = CVector(sim.forwardY, -sim.forwardX, 0.0f);
+	}
+}
+
 static void
 FarTrafficAddEntry(CVehicle *pVehicle)
 {
@@ -394,6 +444,19 @@ FarTrafficPromoteCar(int32 index, bool bWithDriver)
 	pVehicle->VehicleCreatedBy = RANDOM_VEHICLE;
 	CCarCtrl::UpdateCarCount(pVehicle, false);
 	CFarTraffic::ApplyTrafficState(pVehicle);
+	/* The simulation owned the car's route state while it was far: the near
+	 * rails must carry on from the state and the clock the simulation left
+	 * (VICE-168), not from the state the car was seeded with when it became
+	 * far. The worker is idle here - the applicator's window, between the join
+	 * and the next hand-over (FarTrafficWorker.h) - and the entry is dropped
+	 * below, after the write-back. A failed export is a boundary fault (the
+	 * two lists disagreed): it is counted, and the promotion carries on,
+	 * because a car at the band's edge may not wait a frame. */
+	SFarSimCar sim;
+	if (CFarTrafficWorker::ExportCar(index, sim))
+		FarTrafficWriteBackSimCar(pVehicle, sim);
+	else
+		CFarTraffic::ms_nFarTrafficWorkerLost++;
 	if (bWithDriver) {
 		/* A driver, from the population's own path (CPopulation::AddPedInCar
 		 * through CVehicle::SetUpDriver): the pool was checked this frame. The
@@ -467,8 +530,15 @@ FarTrafficRemoveCar(int32 index, const CVector &playerPos)
  * VICE-128: the far state first (an explosion can un-static a car), then the
  * pick's own world action (the u-turn), then the transform, the speed, the
  * sector re-insert, the RW frame and the alpha reveal.
+ *
+ * The world's rule comes before all of it (VICE-168): a pose the sector grid
+ * cannot hold is refused, whatever producer wrote it (the inline mode, a stale
+ * block, the catch-up path), and the return value tells the caller to recover
+ * the car. The recovery runs after the block's loop (FarTrafficApplyOutput):
+ * it promotes the car, and the promotion's drop swaps the last entry into the
+ * hole, which must not happen under a pose the loop has not applied yet.
  */
-static void
+static bool
 FarTrafficApplyPose(const SFarSimPose &pose)
 {
 	if (pose.index >= ms_nFarCars || ms_aFarCars[pose.index].slot != pose.slot) {
@@ -476,12 +546,27 @@ FarTrafficApplyPose(const SFarSimPose &pose)
 		 * mismatch is counted, and the pose is dropped (never written into
 		 * the wrong car). */
 		CFarTraffic::ms_nFarTrafficWorkerLost++;
-		return;
+		return false;
 	}
 	SFarTrafficEntry &entry = ms_aFarCars[pose.index];
 	if (!FarTrafficEntryIsLive(entry))
-		return;
+		return false;
 	CVehicle *pVehicle = entry.pVehicle;
+
+	/* The pose rule, the same one the simulation asks before it publishes
+	 * (FarTrafficPoseIsInWorld): a position or a direction that is not finite,
+	 * or an x/y outside the world's sector grid, walks CPhysical::RemoveAndAdd
+	 * out of CWorld::ms_aSectors. The pose is refused, never written: the car
+	 * keeps the position of its last good pose. A refusal the simulation
+	 * already counted is only picked up here (the block's numRefused carries
+	 * it to the row); a pose the simulation published but the grid cannot hold
+	 * is counted here. */
+	if (pose.bRefused ||
+	    !FarTrafficPoseIsInWorld(ms_farWorld.bounds, pose.x, pose.y, pose.z, pose.dirX, pose.dirY)) {
+		if (!pose.bRefused)
+			CFarTraffic::ms_nFarTrafficRefusedPoses++;
+		return true;
+	}
 
 	/* The far state is re-asserted on every update: an explosion un-statices
 	 * what it touches (CWorld::TriggerExplosionSectorList) and puts it back on
@@ -516,6 +601,7 @@ FarTrafficApplyPose(const SFarSimPose &pose)
 	 * the stagger, which is 1.6 s at 10 Hz. */
 	pVehicle->UpdateClumpAlpha();
 	CFarTraffic::ms_nFarTrafficUpdates++;
+	return false;
 }
 
 /*
@@ -534,6 +620,13 @@ CFarTraffic::BuildWorldSnapshot(void)
 	ms_nLastAppliedCycle = 0;
 	CFarTrafficWorker::ResetCars();
 
+	/* The world's sector grid (VICE-168): the bounds of the pose rule, from
+	 * the engine's own macros (World.h), so the worker's simulation can
+	 * refuse a pose it cannot hold without including an engine header. */
+	ms_farWorld.bounds.minX = WORLD_MIN_X;
+	ms_farWorld.bounds.maxX = WORLD_MAX_X;
+	ms_farWorld.bounds.minY = WORLD_MIN_Y;
+	ms_farWorld.bounds.maxY = WORLD_MAX_Y;
 	ms_farWorld.numNodes = ThePaths.m_numPathNodes;
 	ms_farWorld.numLinks = ThePaths.m_numCarPathLinks;
 	ms_farWorld.numConnections = ThePaths.m_numConnections;
@@ -806,7 +899,9 @@ CFarTraffic::RunWorker(void)
  * test), so a stale output can never touch a car that is not the one it
  * describes. The block is read out once, by its cycle number. A command the
  * cycle could not apply (the ring's bound) is reported into the lost row here
- * too, so a divergence is never silent.
+ * too, so a divergence is never silent. A pose the world cannot hold (VICE-168)
+ * is refused by FarTrafficApplyPose and its car is handed to the near side
+ * without a driver after the block's loop.
  */
 static void
 FarTrafficApplyOutput(void)
@@ -818,9 +913,31 @@ FarTrafficApplyOutput(void)
 	if (pOutput->cycle == ms_nLastAppliedCycle)
 		return;
 	ms_nLastAppliedCycle = pOutput->cycle;
-	for (int32 i = 0; i < pOutput->numPoses; i++)
-		FarTrafficApplyPose(pOutput->poses[i]);
+	/* The refused poses (VICE-168) are recovered after the block has been
+	 * walked: the recovery promotes the car (the layer must not hold a car it
+	 * cannot place), the promotion drops an entry, and a drop swaps the last
+	 * entry into the hole - in the middle of the loop that would move a car
+	 * under a pose the loop has not applied yet. The slot is the car's
+	 * identity across the drops, so the recovery finds it by slot and
+	 * re-validates it (an earlier recovery, or a catch-up's own apply, may
+	 * already have taken the car out of the layer). */
+	uint16 refusedSlots[FAR_TRAFFIC_MAX];
+	int32 numRefused = 0;
+	for (int32 i = 0; i < pOutput->numPoses; i++) {
+		const SFarSimPose &pose = pOutput->poses[i];
+		if (FarTrafficApplyPose(pose))
+			refusedSlots[numRefused++] = pose.slot;
+	}
+	for (int32 i = 0; i < numRefused; i++) {
+		for (int32 j = 0; j < ms_nFarCars; j++) {
+			if (ms_aFarCars[j].slot == refusedSlots[i] && FarTrafficEntryIsLive(ms_aFarCars[j])) {
+				FarTrafficPromoteCar(j, false);
+				break;
+			}
+		}
+	}
 	CFarTraffic::ms_nFarTrafficShortCurves += pOutput->numShortCurves;
+	CFarTraffic::ms_nFarTrafficRefusedPoses += pOutput->numRefused;
 	CFarTraffic::ms_nFarTrafficWorkerLost += pOutput->numLost;
 }
 
