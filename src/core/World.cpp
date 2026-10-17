@@ -20,6 +20,7 @@
 #include "Replay.h"
 #include "RpAnimBlend.h"
 #include "Shadows.h"
+#include "SpawnOccupancy.h"
 #include "TempColModels.h"
 #include "WaterLevel.h"
 #include "World.h"
@@ -84,7 +85,13 @@ CWorld::GetSectorEntityList(CSector *sector, uint8 type, bool inMiddleSector)
 void
 CWorld::Add(CEntity *ent)
 {
-	if(ent->IsVehicle() || ent->IsPed()) DMAudio.SetEntityStatus(((CPhysical *)ent)->m_audioEntityId, TRUE);
+	if(ent->IsVehicle() || ent->IsPed()){
+		DMAudio.SetEntityStatus(((CPhysical *)ent)->m_audioEntityId, TRUE);
+		/* The occupancy store follows the entity in at the position it was
+		 * placed at (VICE-149): a fresh creation, a teleport (Remove ->
+		 * SetPosition -> Add) and a save load's restore pass here. */
+		CSpawnOccupancy::EntityMoved(ent);
+	}
 
 	if(ent->bIsBIGBuilding)
 		ms_bigBuildingsList[ent->m_level].InsertItem(ent);

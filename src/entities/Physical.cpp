@@ -15,6 +15,7 @@
 #include "SurfaceTable.h"
 #include "PathFind.h"
 #include "CarCtrl.h"
+#include "SpawnOccupancy.h"
 #include "DMAudio.h"
 #include "Automobile.h"
 #include "Bike.h"
@@ -377,8 +378,13 @@ CPhysical::ApplyMoveSpeed(void)
 {
 	if(bIsFrozen)
 		m_vecMoveSpeed = CVector(0.0f, 0.0f, 0.0f);
-	else
+	else {
 		GetMatrix().Translate(m_vecMoveSpeed * CTimer::GetTimeStep());
+		/* The occupancy store re-homes a monitored entity whose move
+		 * crossed a cell edge (VICE-149); one it did not costs one
+		 * comparison and changes nothing. */
+		CSpawnOccupancy::EntityMoved(this);
+	}
 }
 
 void

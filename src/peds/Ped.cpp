@@ -19,6 +19,7 @@
 #include "Weather.h"
 #include "ZoneCull.h"
 #include "Population.h"
+#include "SpawnOccupancy.h"
 #include "Pad.h"
 #include "Phones.h"
 #include "TrafficLights.h"
@@ -366,6 +367,7 @@ CPed::CPed(uint32 pedType) : m_pedIK(this)
 	m_delayedSoundID = -1;
 	m_delayedSoundTimer = 0;
 	CPopulation::UpdatePedCount((ePedType)m_nPedType, false);
+	CSpawnOccupancy::PedCreated(this);
 	m_lastComment = UINT32_MAX;
 }
 
@@ -402,6 +404,7 @@ CPed::~CPed(void)
 	if (bMiamiViceCop)
 		CPopulation::NumMiamiViceCops--;
 	CPopulation::UpdatePedCount((ePedType)m_nPedType, true);
+	CSpawnOccupancy::PedRemoved(this);
 	DMAudio.DestroyEntity(m_audioEntityId);
 
 	// Because of the nature of ped lists in GTA, it can sometimes be outdated.
