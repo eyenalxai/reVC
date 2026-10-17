@@ -110,6 +110,10 @@ public:
 	void ProcessAirborneWeapon(CPad*);
 	void PlayerControlFighter(CPad*);
 	void ProcessWeaponSwitch(CPad*);
+	bool CycleWeaponInput(CPad*, bool aimableOnly);
+	void SelectCycledWeaponSlot(bool forward, bool aimableOnly);
+	bool CanCycleToWeaponSlot(int32 slot, bool aimableOnly);
+	void ApplySelectedWeaponSlot(void);
 	void ProcessActiveReload(CPad*);
 	void ProcessActiveReloadInput(CPad*);
 	void MakeObjectTargettable(int32);
