@@ -145,8 +145,11 @@ do not run the solver and keep the animation driven movement.
 
 The one frame request the adapter hands to the solver: the live velocity, the
 surface speed, the steep slope normal, the camera relative movement heading, the
-target speed, the grounded and steep flags, the speed tier and the action edges
-(jump, dive, slide, stand).
+target speed, the grounded and steep flags, the speed tier, the action edges
+(jump, dive, slide, stand) and the stance request with the one world fact it
+needs: the Duck edge, the sprint, the jump and the exit-vehicle presses, and the
+headroom every stand-up needs (VICE-178's test, run by the adapter). The solver
+never touches the world.
 
 ## Movement snapshot
 
@@ -190,8 +193,9 @@ their priority order over that one mask, so a move is a row and never a branch.
 The player's body attitude, an axis of its own beside the movement state: stand,
 crouch and prone. The stance scales the target speed, the turn rate and the
 collision capsule, and it owns the exits: standing up needs the headroom check.
-The duck action and the prone action drive the stance; it is the solver's value,
-not a flag the animation sets.
+The duck action and the prone action drive the stance, the sprint, the jump and
+the exit-vehicle press stand a crouch up, and it is the solver's value, not a
+flag the animation sets.
 
 ## Speed ladder
 
