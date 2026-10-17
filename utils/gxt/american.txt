@@ -3796,6 +3796,9 @@ Crouch
 [FEC_CR3]
 Crouch (L3 button)
 
+[FEC_PRN]
+Prone
+
 [FEC_SMT]
 Sub-mission
 

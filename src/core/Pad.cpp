@@ -91,7 +91,7 @@ CControllerState::CheckForInput(void)
 		|| !!Triangle || !!Cross || !!Circle || !!Square
 		|| !!Start || !!Select
 		|| !!LeftShoulder1 || !!LeftShoulder2 || !!RightShoulder1 || !!RightShoulder2
-		|| !!LeftShock || !!RightShock || !!Reload;
+		|| !!LeftShock || !!RightShock || !!Reload || !!Prone;
 }
 
 void
@@ -105,6 +105,7 @@ CControllerState::Clear(void)
 	LeftShock = RightShock = 0;
 	NetworkTalk = 0;
 	Reload = 0;
+	Prone = 0;
 }
 
 void CKeyboardState::Clear()
@@ -462,6 +463,7 @@ CControllerState CPad::ReconcileTwoControllersInput(CControllerState const &Stat
 	_RECONCILE_BUTTON(RightShock);
 	_RECONCILE_BUTTON(NetworkTalk);
 	_RECONCILE_BUTTON(Reload);
+	_RECONCILE_BUTTON(Prone);
 	_RECONCILE_AXIS(LeftStickX);
 	_RECONCILE_AXIS(LeftStickY);
 	_FIX_AXIS_DIR(LeftStickX);
@@ -2084,6 +2086,14 @@ bool CPad::DuckJustDown(void)
 		return false;
 
 	return !!(NewState.LeftShock && !OldState.LeftShock);
+}
+
+bool CPad::ProneJustDown(void)
+{
+	if (ArePlayerControlsDisabled())
+		return false;
+
+	return !!(NewState.Prone && !OldState.Prone);
 }
 
 bool CPad::JumpJustDown(void)

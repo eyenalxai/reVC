@@ -27,6 +27,7 @@ public:
 	int16 LeftShock, RightShock;
 	int16 NetworkTalk;
 	int16 Reload;
+	int16 Prone;
 	float GetLeftStickX(void) { return LeftStickX/32767.0f; };
 	float GetLeftStickY(void) { return LeftStickY/32767.0f; };
 	float GetRightStickX(void) { return RightStickX/32767.0f; };
@@ -42,10 +43,10 @@ public:
 			Start || Select ||
 			LeftShoulder1 || LeftShoulder2 ||
 			RightShoulder1 || RightShoulder2 ||
-			LeftShock || RightShock || Reload;
+			LeftShock || RightShock || Reload || Prone;
 	}
 };
-VALIDATE_SIZE(CControllerState, 0x2C);
+VALIDATE_SIZE(CControllerState, 0x2E);
 
 class CMouseControllerState
 {
@@ -264,6 +265,7 @@ public:
 	bool GetTarget(void);
 	bool TargetJustDown(void);
 	bool DuckJustDown(void);
+	bool ProneJustDown(void);
 	bool CollectPickupJustDown(void);
 	bool JumpJustDown(void);
 	bool ReloadJustDown(void);

@@ -5516,6 +5516,9 @@ Ducken
 [FEC_CR3]
 Ducken (L3-Taste)
 
+[FEC_PRN]
+Hinlegen
+
 [FEC_SMT]
 Spezialmission
 
