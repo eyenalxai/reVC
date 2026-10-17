@@ -36,6 +36,21 @@ static const tMoveState moveStates[MOVE_NUMSTATES] = {
 	{ 0.0f, 0.0f, 0.0f },	// MOVE_DIVE: the row arrives with VICE-181
 };
 
+// The tokens of the states, the stances and the tiers, in the enum order. The
+// telemetry rows and the harness print them (GetStateName and the like); a
+// debug reader knows what a row says without a lookup table beside it.
+static const char *moveStateNames[MOVE_NUMSTATES] = {
+	"GROUND", "AIR", "SLIDE", "DIVE"
+};
+
+static const char *moveStanceNames[STANCE_NUM] = {
+	"STAND", "CROUCH", "PRONE"
+};
+
+static const char *moveTierNames[TIER_NUM] = {
+	"WALK", "RUN", "SPRINT"
+};
+
 // The engine does not reach this module, so the few functions the maths needs
 // live here, with the engine's own implementations beside them.
 
@@ -141,7 +156,33 @@ CPlayerMoveSolver::Reset(void)
 	m_State = MOVE_GROUND;
 	m_Stance = STANCE_STAND;
 	m_fStateTime = 0.0f;
+	m_fPrevFacing = 0.0f;
+	m_bFirstStep = true;
 	m_Snapshot = SMoveSnapshot{};
+}
+
+const char *
+CPlayerMoveSolver::GetStateName(eMoveStateId state)
+{
+	if (state < 0 || state >= MOVE_NUMSTATES)
+		return "?";
+	return moveStateNames[state];
+}
+
+const char *
+CPlayerMoveSolver::GetStanceName(eMoveStance stance)
+{
+	if (stance < 0 || stance >= STANCE_NUM)
+		return "?";
+	return moveStanceNames[stance];
+}
+
+const char *
+CPlayerMoveSolver::GetTierName(eMoveTier tier)
+{
+	if (tier < 0 || tier >= TIER_NUM)
+		return "?";
+	return moveTierNames[tier];
 }
 
 // One step of the player's movement. The body is the controller's state machine
@@ -203,15 +244,57 @@ CPlayerMoveSolver::Step(const SMoveIntent &intent)
 		velocity = MoveVelocityTowards(velocity, SMoveVec2{ 0.0f, 0.0f }, stateRow.friction * intent.dt);
 	}
 
+	// The facts of the step the listeners read. The spin is the body turn: the
+	// facing the adapter passed less the facing of the previous step, wrapped,
+	// so a reader (or the CSV replay) adds the spins up and holds the body yaw.
+	float spin = 0.0f;
+	if (m_bFirstStep) {
+		m_bFirstStep = false;
+	} else {
+		spin = LimitRadianAngle(intent.facing - m_fPrevFacing);
+	}
+	m_fPrevFacing = intent.facing;
+
+	// The input direction in the body frame: forward along the facing, side to
+	// the ped's right. The body forward is (-sin(f), cos(f)) and its right is
+	// (cos(f), sin(f)) (CMatrix::SetRotateZ), and the input direction of the
+	// heading h is (-sin(h), cos(h)), so the two parts are the cosine and the
+	// minus sine of the gap between the input and the body.
+	SMoveVec2 facingDir = SMoveVec2{ 0.0f, 0.0f };
+	if (intent.hasInput) {
+		float gap = LimitRadianAngle(intent.moveHeading - intent.facing);
+		facingDir = SMoveVec2{ cosf(gap), -sinf(gap) };
+	}
+
+	// The tilt of the surface the step saw, from the normal of the steep cliff:
+	// the angle of the normal from the vertical, so a wall is 90 degrees, the
+	// flat ground and the air are 0.
+	float slope = 0.0f;
+	if (intent.steepCliff) {
+		float vertical = intent.slopeNormal.z;
+		if (vertical < 0.0f)
+			vertical = -vertical;
+		slope = acosf(Clamp(vertical, 0.0f, 1.0f));
+	}
+
 	m_Snapshot.state = m_State;
 	m_Snapshot.stance = m_Stance;
 	m_Snapshot.moved = velocity;
 	m_Snapshot.velocity = Vec2Add(velocity, intent.surfaceSpeed);
 	m_Snapshot.speed = Vec2Magnitude(velocity);
+	m_Snapshot.targetSpeed = targetSpeed;
+	m_Snapshot.tier = intent.tier;
+	m_Snapshot.facingDir = facingDir;
+	m_Snapshot.spin = spin;
+	// The wall and the head contacts arrive with the tests that read them
+	// (VICE-178, VICE-180); the feet are the one contact of phase 0.
+	m_Snapshot.contacts = intent.onGround ? CONTACT_GROUND : 0;
+	m_Snapshot.slope = slope;
+	m_Snapshot.surface = intent.surface;
 	m_Snapshot.heading = intent.moveHeading;
-	// The one stance of phase 0, and the step's own facts. The event list, the
-	// reported movement state and the capsule height arrive with VICE-173,
-	// VICE-171 and VICE-178.
+	// The one stance of phase 0, and the step's own facts. The events, the
+	// reported movement state and the capsule height arrive with the state
+	// tables, the transition table and the stance table (VICE-171, VICE-178).
 	m_Snapshot.turnScale = MOVE_STAND_TURN_SCALE;
 	m_Snapshot.capsuleHeight = MOVE_STAND_CAPSULE_HEIGHT;
 	m_Snapshot.inCharge = true;

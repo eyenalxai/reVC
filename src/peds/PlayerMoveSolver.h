@@ -12,6 +12,13 @@
 // adapter: it turns the pad, the camera and the ped into one SMoveIntent, calls
 // Step and writes the snapshot back (see the Movement solver in GLOSSARY.md).
 
+// The engine velocity unit: one unit of m_vecMoveSpeed per 1/50 second, so one
+// unit is 50 units per second. The reference speed of the controller and the
+// telemetry readout convert with it (PlayerPed.cpp, MovementTelemetry.cpp),
+// and the tuning constants of the solver are written in it
+// (PlayerMoveSolver.cpp).
+#define MOVE_ENGINE_UNITS_PER_SECOND	50.0f
+
 // The states of the solver: one row per state in moveStates
 // (PlayerMoveSolver.cpp). Phase 0 has the ground and the air; the slide and the
 // dive arrive with the state table (VICE-171) and their tickets.
@@ -28,19 +35,48 @@ enum eMoveStateId
 // Phase 0 has the stand; the crouch and the prone arrive with the stance
 // table (VICE-171) and their tickets (VICE-176, VICE-177).
 
+// The speed tier: the rung of the speed ladder the player asks for. The ladder
+// (VICE-171) names the target speed and the reported movement state of each
+// tier; the tier itself is the intent's request.
+enum eMoveTier
+{
+	TIER_WALK,
+	TIER_RUN,
+	TIER_SPRINT,
+	TIER_NUM,
+};
+
 // The edges one step reports. The snapshot carries the bits to the listeners
-// (presentation, telemetry); the event list is VICE-173.
+// (presentation, telemetry); the telemetry names them (MovementTelemetry.cpp).
+// A state change is not a bit: the listeners read the state, so the enter and
+// exit rows come from the change itself.
 enum eMoveEvent
 {
 	EVENT_LANDED = 1,
 	EVENT_WALL_CONTACT = 2,
 	EVENT_WALL_LEFT = 4,
 	EVENT_HEAD_HIT = 8,
+	EVENT_JUMP = 16,	// the air extensions number theirs (JUMP2, JUMP3, ...)
+};
+
+// The live contact facts of one step: what the body touches right now. The
+// events above are the edges of these bits; the wall and head bits arrive with
+// the tickets that add the wall and head tests (VICE-178, VICE-180).
+enum eMoveContact
+{
+	CONTACT_GROUND = 1,	// the feet rest on a surface
+	CONTACT_WALL = 2,	// the body presses against a wall or a solid
+	CONTACT_HEAD = 4,	// the head touches an obstacle above
 };
 
 struct SMoveVec2
 {
 	float x, y;
+};
+
+struct SMoveVec3
+{
+	float x, y, z;
 };
 
 // Everything one step may see. The adapter reads the live ped state into this
@@ -51,13 +87,15 @@ struct SMoveIntent
 	float dt;		// seconds, the frame step (CTimer::GetTimeStepInSeconds)
 	SMoveVec2 vel;		// m_vecMoveSpeed x/y minus the surface speed, read fresh every frame
 	SMoveVec2 surfaceSpeed;	// the speed of the surface under the ped, so a collision impulse survives the step
-	SMoveVec2 slopeNormal;	// m_vecDamageNormal while the touched surface is a steep cliff, else (0, 0)
+	SMoveVec3 slopeNormal;	// m_vecDamageNormal while the touched surface is a steep cliff, else (0, 0, 0)
 	float moveHeading;	// m_fMoveHeading: the world heading of the input direction
+	float facing;		// m_fRotationCur: the world heading of the body, the frame the facing relative direction is measured in
 	float targetSpeed;	// the reference speed of the playing movement animations, engine units
+	eMoveTier tier;		// the speed tier the pad asks for
+	uint8_t surface;	// m_nSurfaceTouched: the eSurfaceType the ped touched (SurfaceTable.h)
 	bool onGround;		// bIsStanding
 	bool steepCliff;	// the touched surface is a steep cliff with a normal
 	bool hasInput;		// the pad moves the ped this frame (the controller's bMoving)
-	bool sprint;		// the pad asks for the sprint; no reader in phase 0
 	bool faceCamera;	// the body faces the camera; no reader in phase 0
 	bool jumpRequested;	// no reader in phase 0; VICE-182
 	bool diveRequested;	// no reader in phase 0; VICE-181
@@ -72,12 +110,19 @@ struct SMoveSnapshot
 	eStance stance;	// the stance of the player
 	SMoveVec2 velocity;	// the new m_vecMoveSpeed x/y: the own velocity plus the surface speed
 	SMoveVec2 moved;	// the controller's own velocity, the new m_moved
-	float speed;		// the speed of the own velocity, |moved|
+	float speed;		// the speed of the own velocity, |moved|, engine units
+	float targetSpeed;	// the speed the step targeted, engine units
+	eMoveTier tier;		// the tier the step moved at
+	SMoveVec2 facingDir;	// the input direction in the body frame: x forward, y side; (0, 0) with no input
+	float spin;		// the body turn of the step: the facing delta, radians, signed
+	uint32_t contacts;	// the eMoveContact bits of the step
+	float slope;		// the tilt of the slope the step saw from the horizontal, radians; 0 while flat
+	uint8_t surface;	// the eSurfaceType the step touched (SurfaceTable.h)
 	float heading;		// the world heading of the movement direction
 	float turnScale;	// the stance turn scale; 1.0 while the stand is the only stance
 	float capsuleHeight;	// the stance capsule height; the stance table (VICE-178) fills it
 	bool inCharge;		// the controller owned the velocity this step
-	uint32_t events;	// the eMoveEvent bits of this step; the event list is VICE-173
+	uint32_t events;	// the eMoveEvent bits of this step
 	uint8_t reportMoveState;	// the eMoveState value the solver reports; the ladder (VICE-171) fills it
 };
 
@@ -94,12 +139,19 @@ public:
 	const SMoveSnapshot &Step(const SMoveIntent &intent);
 	// The snapshot of the last step (see SMoveSnapshot).
 	const SMoveSnapshot &GetSnapshot(void) const { return m_Snapshot; }
+	// The tokens of the enums, for the debug readout and the telemetry rows
+	// (MovementTelemetry.cpp). The harness prints them too.
+	static const char *GetStateName(eMoveStateId state);
+	static const char *GetStanceName(eMoveStance stance);
+	static const char *GetTierName(eMoveTier tier);
 
 private:
 	// The solver state. The readers use the snapshot (see SMoveSnapshot).
 	eMoveStateId m_State;
 	eStance m_Stance;
 	float m_fStateTime;	// seconds spent in the current state
+	float m_fPrevFacing;	// the body facing of the previous step, so the spin survives
+	bool m_bFirstStep;	// no previous facing to take the spin from yet
 	SMoveSnapshot m_Snapshot;	// written only by Step
 };
 

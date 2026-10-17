@@ -82,6 +82,10 @@ extern float gDriftStrength;
 extern float gDriftAssist;
 extern bool gDriftDebug;
 
+// Movement telemetry (see src/peds/MovementTelemetry.h): the movement debug
+// readout and the movement-telemetry.csv record
+extern bool gMovementDebug;
+
 // Active reload (see src/weapons/ActiveReload.h)
 extern bool gActiveReloadEnabled;
 

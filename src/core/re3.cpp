@@ -70,6 +70,9 @@ float gDriftStrength = 1.0f;
 float gDriftAssist = 1.0f;
 bool gDriftDebug = false;
 
+// Movement telemetry (see src/peds/MovementTelemetry.h)
+bool gMovementDebug = false;
+
 // Active reload (see src/weapons/ActiveReload.h)
 bool gActiveReloadEnabled = true;
 
@@ -1076,6 +1079,20 @@ extern bool gbRenderWorld2;
 		DebugMenuAddVar("Drift", "Charge", &gDriftDebugCharge, nil, 0.01f, 0.0f, 3.0f);
 		DebugMenuAddVar("Drift", "Boost", &gDriftDebugBoost, nil, 0.01f, 0.0f, 1.0f);
 		DebugMenuAddVar("Drift", "Speed delta", &gDriftDebugSpeed, nil, 0.01f, -1.0f, 1.0f);
+
+		// Movement handling (see src/peds/MovementTelemetry.h): the live values
+		// of the movement solver and the row counters of the telemetry file
+		extern int32 gMovementDebugState, gMovementDebugStance, gMovementDebugTier;
+		extern float gMovementDebugSpeed, gMovementDebugTarget;
+		extern uint32 gMovementDebugRows, gMovementDebugDropped;
+		DebugMenuAddVarBool8("Movement", "Debug readout", &gMovementDebug, nil);
+		DebugMenuAddVar("Movement", "State", &gMovementDebugState, nil, 1, 0, MOVE_NUMSTATES-1, nil);
+		DebugMenuAddVar("Movement", "Stance", &gMovementDebugStance, nil, 1, 0, STANCE_NUM-1, nil);
+		DebugMenuAddVar("Movement", "Tier", &gMovementDebugTier, nil, 1, 0, TIER_NUM-1, nil);
+		DebugMenuAddVar("Movement", "Speed", &gMovementDebugSpeed, nil, 0.1f, 0.0f, 100.0f);
+		DebugMenuAddVar("Movement", "Target speed", &gMovementDebugTarget, nil, 0.1f, 0.0f, 100.0f);
+		DebugMenuAddVar("Movement", "Rows", &gMovementDebugRows, nil, 1, 0, 1000000, nil);
+		DebugMenuAddVar("Movement", "Dropped rows", &gMovementDebugDropped, nil, 1, 0, 1000000, nil);
 
 
 #ifdef MISSION_SWITCHER

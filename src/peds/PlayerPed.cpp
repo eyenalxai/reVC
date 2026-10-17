@@ -12,6 +12,7 @@
 #include "WeaponAim.h"
 #include "ActiveReload.h"
 #include "ModelIndices.h"
+#include "MovementTelemetry.h"
 #include "World.h"
 #include "RpAnimBlend.h"
 #include "AnimBlendAssociation.h"
@@ -40,10 +41,6 @@
 // of this, and the solver targets the speed the legs really cover.
 #define PLAYER_ADRENALINE_ANIM_SPEED		2.0f
 #define PLAYER_FIXED_CAM_SPRINT_ANIM_SPEED	0.7f
-
-// The measured animation speeds are in units per second; the solver and the
-// playback scaling work in engine units (one unit per 1/50 second).
-#define PLAYER_ENGINE_UNITS_PER_SECOND		50.0f
 
 // The animation playback follows the real speed between these bounds; the clamp
 // keeps a large mismatch from looking wrong
@@ -1738,8 +1735,9 @@ CPlayerPed::GetMoveAnimReferenceSpeed(void)
 			referenceSpeed += moveAssoc->blendAmount * moveAssoc->hierarchy->rootSpeed * GetMoveAnimPlayback(moveAnims[i]);
 	}
 	// The measured root speeds are in units per second; the movement and the
-	// playback scaling use engine units (one unit per 1/50 second).
-	return referenceSpeed / PLAYER_ENGINE_UNITS_PER_SECOND;
+	// playback scaling use engine units (one unit per 1/50 second, see
+	// MOVE_ENGINE_UNITS_PER_SECOND).
+	return referenceSpeed / MOVE_ENGINE_UNITS_PER_SECOND;
 }
 
 // The movement controller of the player, called by every on-foot control path
@@ -1838,16 +1836,30 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 	intent.vel = SMoveVec2{ velocity.x, velocity.y };
 	intent.surfaceSpeed = SMoveVec2{ surfaceSpeed.x, surfaceSpeed.y };
 	intent.slopeNormal = bSteepCliff
-		? SMoveVec2{ m_vecDamageNormal.x, m_vecDamageNormal.y }
-		: SMoveVec2{ 0.0f, 0.0f };
+		? SMoveVec3{ m_vecDamageNormal.x, m_vecDamageNormal.y, m_vecDamageNormal.z }
+		: SMoveVec3{ 0.0f, 0.0f, 0.0f };
 	intent.moveHeading = m_fMoveHeading;
+	// The body's own facing: the frame the snapshot's facing relative direction
+	// is measured in (CalculateNewVelocity turned it toward m_fRotationDest
+	// this frame)
+	intent.facing = m_fRotationCur;
 	// The ped moves at the ground speed of the animation it plays, so the legs
 	// stay with the movement in every direction and with every weapon
 	intent.targetSpeed = bMoving ? GetMoveAnimReferenceSpeed() : 0.0f;
+	// The speed tier the pad asks for: the sprint button raises it, and the pad
+	// magnitude splits the walk and the run (the split the walk/run blend of
+	// SetRealMoveAnim makes from the same ramp). VICE-175 owns the intent's own
+	// tier source.
+	if (padUsed->GetSprint())
+		intent.tier = TIER_SPRINT;
+	else if (padMoveInGameUnit >= 1.0f)
+		intent.tier = TIER_RUN;
+	else
+		intent.tier = TIER_WALK;
+	intent.surface = m_nSurfaceTouched;
 	intent.onGround = bIsStanding;
 	intent.steepCliff = bSteepCliff;
 	intent.hasInput = bMoving;
-	intent.sprint = padUsed->GetSprint();
 	intent.faceCamera = bFacingCamera;
 	// The jump and the dive gate on more than the pad (PlayerJumpOrDive), so
 	// their edges arrive with VICE-182 and VICE-181.
@@ -1855,6 +1867,11 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 	intent.diveRequested = false;
 
 	const SMoveSnapshot &snapshot = m_MoveSolver.Step(intent);
+
+	// The movement debug readout and the telemetry record (see
+	// MovementTelemetry.h); both are inert while the flag is off.
+	if (gMovementDebug)
+		CMovementTelemetry::Tick(snapshot);
 
 	// The write-back: the snapshot is exactly what the ped keeps
 	m_vecMoveSpeed.x = snapshot.velocity.x;
