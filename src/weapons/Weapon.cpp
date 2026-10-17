@@ -2713,7 +2713,7 @@ CWeapon::FireFromCarAt(CVehicle *shooter, CVector &source, CVector &target, bool
 	CWorld::pIgnoreEntity = NULL;
 	CWorld::bIncludeBikers = false;
 
-	// The driver is never a target of the vehicle's own gunfire: the free aim
+	// The driver is never a target of the vehicle's own gunfire: the aim ray
 	// can point back through the player, and a bike or boat driver is in the
 	// line of sight
 	if ( victim == (CEntity*)shooter->pDriver )
