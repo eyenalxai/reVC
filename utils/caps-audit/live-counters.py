@@ -533,12 +533,13 @@ def main():
     # static-asserts them). "Sets resident" counts the blocking prewarms that
     # found every pin ready (the boot, a transition, a save load); "requests
     # deferred" counts the pins the budget refused (the vehicle pins stop at
-    # SPAWN_READY_PIN_BUDGET, the tracker less its reserve, so a pin never
-    # starves the loader); "frames waited" counts the frames a requested set
-    # was not yet resident; "pins held" and "vehicle pins" are live; "last
-    # stall" is the wall time of the last blocking prewarm (the acceptance's
-    # measured stall bound, with the file processing in it) and the total is
-    # the sum since boot.
+    # SPAWN_READY_PIN_BUDGET, the tracker less its reserve: the pins are never
+    # removable while held, so the reserve is the loader's room, and the pins
+    # row is read next to `stream: ms_numVehiclesLoaded` above); "frames
+    # waited" counts the frames a requested set was not yet resident; "pins
+    # held" and "vehicle pins" are live; "last stall" is the wall time of the
+    # last blocking prewarm (the acceptance's measured stall bound, with the
+    # file processing in it) and the total is the sum since boot.
     print()
     for label, mangled, offset in READINESS:
         off = sym.get(mangled)
