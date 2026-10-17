@@ -144,10 +144,6 @@ CCamera::Init(void)
 	m_vecPresentedSource = CVector(0.0f, 0.0f, 0.0f);
 	m_vecPresentedFront = CVector(0.0f, 0.0f, -1.0f);
 	m_fPresentedFOV = DefaultFOV;
-	m_bScopeZoomRunning = false;
-	m_fScopeFOV = DefaultFOV;
-	m_fScopeFOVTarget = DefaultFOV;
-	m_fScopeFOVSpeed = 0.0f;
 	// The car zoom levels only serve the script and RC car cameras
 	CarZoomIndicator = CAM_ZOOM_2;
 	PedZoomIndicator = CAM_ZOOM_2;
@@ -1187,30 +1183,24 @@ CCamera::CamControl(void)
 			if(m_PlayerMode.Mode != CCam::MODE_NONE)
 				ReqMode = m_PlayerMode.Mode;
 			if(PlayerWeaponMode.Mode != CCam::MODE_NONE && !stairs){
+				// The scope and the viewfinder run their own camera mode in
+				// every view, so the scope and the viewfinder look the same in
+				// first and third person. The hunter cannon keeps its own
+				// camera too. Every other aim keeps the plain view: the camera
+				// does not move or zoom for a normal gun.
 				if(PlayerWeaponMode.Mode == CCam::MODE_SNIPER ||
-				   PlayerWeaponMode.Mode == CCam::MODE_ROCKETLAUNCHER ||
-					// game also checks MODE_MODELVIEW here but that does make any sense...
-				   PlayerWeaponMode.Mode == CCam::MODE_M16_1STPERSON ||
-				   PlayerWeaponMode.Mode == CCam::MODE_HELICANNON_1STPERSON ||
 				   PlayerWeaponMode.Mode == CCam::MODE_CAMERA ||
+				   PlayerWeaponMode.Mode == CCam::MODE_HELICANNON_1STPERSON ||
 				   Cams[ActiveCam].GetWeaponFirstPersonOn()){
-					// First person weapon mode
 					if(PLAYER->GetPedState() == PED_SEEK_CAR){
 						if(ReqMode == CCam::MODE_TOP_DOWN_PED || Cams[ActiveCam].GetWeaponFirstPersonOn())
 							ReqMode = PlayerWeaponMode.Mode;
 						else
 							ReqMode = CCam::MODE_FOLLOWPED;
-					}
-					else if(TheCamera.FirstPersonViewEnabled() && CCamera::FirstPersonServesSightMode(PlayerWeaponMode.Mode))
-						// The aiming weapons run the first person player camera: the
-						// mouse aims and WASD stays with the movement in every state
-						// (VICE-137). The M16, sniper and rocket modes are the stock
-						// stationary sight cameras, which drive the view from the
-						// movement keys and block the moving.
-						ReqMode = CCam::MODE_1STPERSON;
-					else
+					}else
 						ReqMode = PlayerWeaponMode.Mode;
-				}else if(ReqMode != CCam::MODE_TOP_DOWN_PED && PedZoomIndicator != CAM_ZOOM_3){
+				}else if(PlayerWeaponMode.Mode == CCam::MODE_SYPHON &&
+				         ReqMode != CCam::MODE_TOP_DOWN_PED && PedZoomIndicator != CAM_ZOOM_3){
 					// Syphon mode
 					float playerTargetDist;
 					float deadPedDist = 4.0f;
@@ -3281,101 +3271,16 @@ CCamera::ToggleFirstPersonView(void)
 bool
 CCamera::UsingFirstPersonSights(void)
 {
-	// Aiming down the sights in the first person view: the player camera holds
-	// the weapon pose at the view and the shot follows it, for every sight it
-	// serves (the plain sights, the sniper scope and the rocket sight alike)
-	return FirstPersonViewEnabled() && FirstPersonServesSightMode(PlayerWeaponMode.Mode);
-}
-
-bool
-CCamera::FirstPersonServesSightMode(int16 weaponMode)
-{
-	// The sight camera mode of the aimed weapon: the mode the stock game would
-	// use, which the first person player camera stands in for
-	return weaponMode == CCam::MODE_M16_1STPERSON ||
-	       weaponMode == CCam::MODE_SNIPER ||
-	       weaponMode == CCam::MODE_ROCKETLAUNCHER;
-}
-
-bool
-CCamera::UsingFirstPersonScope(void)
-{
-	// The sniper and the laser scope aim through the first person player camera
-	return FirstPersonViewEnabled() && Cams[ActiveCam].Mode == CCam::MODE_1STPERSON &&
-		PlayerWeaponMode.Mode == CCam::MODE_SNIPER;
-}
-
-// The scope of the sniper and the laser scope keeps the rules of the stock
-// sniper camera: the mouse wheel steps the target FOV, WellBufferMe eases the
-// value, the held zoom keys zoom smoothly, and 15 degrees to DefaultFOV holds
-// the range, whatever the plain view FOV of the setting is. The scope starts at
-// the FOV the view came from, like the stock camera starts at the FOV it had.
-// The stock range and the sniper motion blur come with it, so the scope looks
-// like the scope it stands in for.
-float
-CCamera::UpdateFirstPersonViewFOV(float previousFOV, bool usingSights, bool usingScope)
-{
-	if(!usingScope){
-		m_bScopeZoomRunning = false;
-		return usingSights ? GetFirstPersonSightsFOV() : (float)FrontEndMenuManager.GetFirstPersonFOV();
-	}
-
-	if(!m_bScopeZoomRunning){
-		m_bScopeZoomRunning = true;
-		m_fScopeFOV = previousFOV;
-		m_fScopeFOVTarget = previousFOV;
-		m_fScopeFOVSpeed = 0.0f;
-	}
-
-	bool usedWheel = false;
-#ifdef GTA_PC_CONTROLS
-	{
-		int zoomInButton = ControlsManager.GetMouseButtonAssociatedWithAction(PED_SNIPER_ZOOM_IN);
-		int zoomOutButton = ControlsManager.GetMouseButtonAssociatedWithAction(PED_SNIPER_ZOOM_OUT);
-		if((zoomInButton == rsMOUSEWHEELUPBUTTON || zoomInButton == rsMOUSEWHEELDOWNBUTTON ||
-		    zoomOutButton == rsMOUSEWHEELUPBUTTON || zoomOutButton == rsMOUSEWHEELDOWNBUTTON) &&
-		   (CPad::GetPad(0)->GetMouseWheelUp() || CPad::GetPad(0)->GetMouseWheelDown())){
-			if(CPad::GetPad(0)->SniperZoomIn())
-				m_fScopeFOVTarget = m_fScopeFOV - FIRST_PERSON_SCOPE_ZOOM_STEP;
-			if(CPad::GetPad(0)->SniperZoomOut())
-				m_fScopeFOVTarget = m_fScopeFOV + FIRST_PERSON_SCOPE_ZOOM_STEP;
-			usedWheel = true;
-		}
-	}
-#endif
-	if((CPad::GetPad(0)->SniperZoomIn() || CPad::GetPad(0)->SniperZoomOut()) && !usedWheel){
-		// A held zoom key zooms smoothly, the wheel steps the target above
-		if(CPad::GetPad(0)->SniperZoomOut())
-			m_fScopeFOV *= (255.0f*CTimer::GetTimeStep() + 10000.0f) / 10000.0f;
-		else
-			m_fScopeFOV /= (255.0f*CTimer::GetTimeStep() + 10000.0f) / 10000.0f;
-		m_fScopeFOVTarget = m_fScopeFOV;
-		m_fScopeFOVSpeed = 0.0f;
-	}else if(Abs(m_fScopeFOVTarget - m_fScopeFOV) > 0.5f)
-		WellBufferMe(m_fScopeFOVTarget, &m_fScopeFOV, &m_fScopeFOVSpeed, 0.5f, 0.25f, false);
-	else
-		m_fScopeFOVSpeed = 0.0f;
-
-	// The stock scope range, whatever the plain view FOV of the setting is
-	float maxFOV = Max(DefaultFOV, FIRST_PERSON_SCOPE_FOV_MIN);
-	m_fScopeFOVTarget = Clamp(m_fScopeFOVTarget, FIRST_PERSON_SCOPE_FOV_MIN, maxFOV);
-	m_fScopeFOV = Clamp(m_fScopeFOV, FIRST_PERSON_SCOPE_FOV_MIN, maxFOV);
-	TheCamera.SetMotionBlur(180, 255, 180, 120, MOTION_BLUR_SNIPER);
-	return m_fScopeFOV;
-}
-
-float
-CCamera::GetFirstPersonSightsFOV(void)
-{
-	// Aiming down the sights: the sight view zooms in, about 1.5x
-	return Max((float)FrontEndMenuManager.GetFirstPersonFOV() * FIRST_PERSON_SIGHTS_FOV_MULT,
-	           (float)FIRST_PERSON_SIGHTS_FOV_MIN);
+	// The first person view holds the weapon at the sights while the player
+	// aims: the pose follows the view and the shot follows the aim ray. There
+	// is no sight camera and no sight FOV; the view keeps the player FOV.
+	return Using1stPersonView() && FindPlayerPed() && FindPlayerPed()->IsAimingWeapon();
 }
 
 bool
 CCamera::Using1stPersonView(void)
 {
-	// First person view: the plain on-foot view or the view down the sights
+	// First person view: the plain on-foot view, on foot and in a vehicle
 	return FirstPersonViewEnabled() &&
 		(Cams[ActiveCam].Mode == CCam::MODE_1STPERSON || Cams[ActiveCam].Mode == CCam::MODE_M16_1STPERSON);
 }
@@ -3383,8 +3288,9 @@ CCamera::Using1stPersonView(void)
 bool
 CCamera::UsingThirdPersonAds(void)
 {
-	// Third person aim down the sights on the plain mouse camera
-	return Cams[ActiveCam].Using3rdPersonMouseCam() && Cams[ActiveCam].m_fAdsAmount > 0.5f;
+	// The third person aim down the sights pull is gone: the aim does not move
+	// or zoom the camera. The weapon code must drop this call.
+	return false;
 }
 
 bool
@@ -3399,18 +3305,18 @@ CCamera::InFirstPersonCarView(void)
 bool
 CCamera::UsingCarAds(void)
 {
-	// The car ADS: the aim button held while the camera serves the player's
-	// vehicle. Third person aims along the mouse follow camera, the first
-	// person car view along its own camera. Only the drive-by vehicles take
-	// the aim, the drive-by belongs to the driver, and only the drive-by
-	// weapon aims, so the camera and the handbrake follow the same rule as
-	// the fire.
-	if(!CPad::GetPad(0)->GetCarAim())
+	// The car aim: the driver holds the one aim state and the camera serves
+	// the player's vehicle, so the third person mouse camera or the first
+	// person car view aims freely. The drive-by belongs to the driver. The
+	// handbrake suppression reads this, so the aim never brakes the car.
+	CPlayerPed *player = FindPlayerPed();
+	if(player == nil || !player->IsAimingWeapon())
 		return false;
 
 	CVehicle *vehicle = FindPlayerVehicle();
-	if(vehicle == nil || vehicle->pDriver != FindPlayerPed())
+	if(vehicle == nil || vehicle->pDriver != player)
 		return false;
+	// The drive-by vehicles: a car, a bike or a boat
 	if(!vehicle->IsCar() && !vehicle->IsBike() && !vehicle->IsBoat())
 		return false;
 	// The Hunter and the Sea Sparrow fire their guns with the handbrake
@@ -3419,11 +3325,8 @@ CCamera::UsingCarAds(void)
 	if(vehicle->IsRealHeli() || vehicle->IsRealPlane())
 		return false;
 
-	CPlayerPed *player = FindPlayerPed();
 	CPlayerInfo *playerInfo = player->GetPlayerInfoForThisPlayerPed();
 	if(playerInfo && !playerInfo->m_bDriveByAllowed)
-		return false;
-	if(CWeaponInfo::GetWeaponInfo(player->GetWeapon()->m_eWeaponType)->m_nWeaponSlot != WEAPONSLOT_SUBMACHINEGUN)
 		return false;
 
 	if(InFirstPersonCarView())
@@ -3433,60 +3336,30 @@ CCamera::UsingCarAds(void)
 	       Cams[ActiveCam].CamTargetEntity == (CEntity*)vehicle;
 }
 
-// The overlay a stock sight camera mode draws, if the mode has one. The plain
-// first person view draws the on-foot reticle while the player aims (VICE-143).
-static int16
-SightOverlayOfMode(int16 mode)
-{
-	switch(mode){
-	case CCam::MODE_1STPERSON:
-	case CCam::MODE_SNIPER:
-	case CCam::MODE_ROCKETLAUNCHER:
-	case CCam::MODE_M16_1STPERSON:
-	case CCam::MODE_HELICANNON_1STPERSON:
-	case CCam::MODE_CAMERA:
-	case CCam::MODE_SNIPER_RUNABOUT:
-	case CCam::MODE_ROCKETLAUNCHER_RUNABOUT:
-	case CCam::MODE_M16_1STPERSON_RUNABOUT:
-		return mode;
-	default:
-		return CCam::MODE_NONE;
-	}
-}
-
 int16
 CCamera::GetSightCameraMode(void)
 {
-	// The first person player camera serves the aiming weapons while they aim:
-	// it stands in for the sight camera of the aimed weapon, so the weapon fire
-	// paths and the weapon pose read the same mode in both views. Every other
-	// view reports its own mode.
-	if(FirstPersonViewEnabled() && Cams[ActiveCam].Mode == CCam::MODE_1STPERSON &&
-	   FirstPersonServesSightMode(PlayerWeaponMode.Mode))
-		return PlayerWeaponMode.Mode;
-
+	// The one camera mode of the view. The scope and the viewfinder run their
+	// own modes in every view, and the first person player camera no longer
+	// stands in for a sight camera. The weapon fire must read GetPlayerAimRay,
+	// the one aim ray, instead of the sight mode.
 	return Cams[ActiveCam].Mode;
 }
 
 int16
 CCamera::GetSightOverlayMode(void)
 {
-	// The first person player camera draws the overlay of the sight it serves.
-	// The sniper scope and the rocket sight draw their own; every other aim
-	// draws the on-foot reticle of the plain first person view (VICE-143), and
-	// the caller raises its flag only while the player aims.
-	if(FirstPersonViewEnabled() && Cams[ActiveCam].Mode == CCam::MODE_1STPERSON){
-		switch(PlayerWeaponMode.Mode){
-		case CCam::MODE_SNIPER:
-		case CCam::MODE_ROCKETLAUNCHER:
-			return PlayerWeaponMode.Mode;
-		default:
-			return CCam::MODE_1STPERSON;
-		}
+	// Only the two sight views draw an overlay of their own: the scope of the
+	// sniper and the laser scope, and the viewfinder of the photo camera.
+	// Every other weapon answers MODE_NONE, so the HUD draws its own one
+	// reticle for a normal gun.
+	switch(Cams[ActiveCam].Mode){
+	case CCam::MODE_SNIPER:
+	case CCam::MODE_CAMERA:
+		return Cams[ActiveCam].Mode;
+	default:
+		return CCam::MODE_NONE;
 	}
-
-	// Every other view draws the overlay of its own mode, if the mode has one
-	return SightOverlayOfMode(Cams[ActiveCam].Mode);
 }
 
 
