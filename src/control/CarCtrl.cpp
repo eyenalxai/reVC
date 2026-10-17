@@ -3568,8 +3568,9 @@ void CCarCtrl::UpdateCarCount(CVehicle* pVehicle, bool remove)
 	/* The law flag is counted independently of the class (VICE-166).
 	 * ChangeLawEnforcerState toggles the flag on a car of every class, and a
 	 * car restored from a save carries the flag of a car of any class
-	 * (CPools.cpp): a class-bound count misses the addition of such a car and
-	 * leaks its deletion. Only a car that carries the flag is counted. */
+	 * (CPools::LoadVehiclePool, Pools.cpp): a class-bound count misses the
+	 * addition of such a car and leaks its deletion. Only a car that carries
+	 * the flag is counted. */
 	if (remove){
 		if (pVehicle->bIsLawEnforcer) {
 			if (--NumLawEnforcerCars < 0)

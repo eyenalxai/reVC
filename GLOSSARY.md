@@ -810,18 +810,38 @@ player after a load; a mission-replay quicksave also carries the player's car,
 whatever its class (the same predicate, over `IsQuickSave`). A loaded mission
 car is counted once in `NumMissionCars` (VICE-163).
 
+## Law flag
+
+The `CVehicle::bIsLawEnforcer` flag: the car chases the player's wanted level.
+A car of any class can carry it - a set piece chase car of the random class, a
+mission car a cop driver enters (Ped.cpp), or a car restored from a save,
+whatever its class. `CVehicle::ChangeLawEnforcerState` sets and clears the flag
+and moves `NumLawEnforcerCars` with it, and the count follows the flag, not the
+class (VICE-166): the car counts when the flag is set, and the count is given
+back when the flag is cleared or the car is destroyed. A flagged car of a
+non-random class therefore counts in its class counter and in
+`NumLawEnforcerCars` while the flag is set (the documented double count;
+PopulationBudget.h).
+
 ## Vehicle counter
 
 One of the car classes' live counters in `CCarCtrl`: `NumRandomCars`,
 `NumLawEnforcerCars`, `NumMissionCars`, `NumParkedCars` and `NumPermanentCars`.
 A creation counts once in the class the vehicle carries (the `CVehicle`
 constructor) and a deletion takes the count back (the destructor); a class
-switch moves it (`CCarCtrl::UpdateCarCount`). `NumCarsInUse` sums four of the
-counters (random, law, mission, parked) and the two emergency counters; the
-permanent class and the far traffic stay outside it. A law-enforcer random car
-counts in both `NumLawEnforcerCars` and `NumRandomCars`, so the sum counts it
-twice and the budget blocks one car early per live law car; the double count is
-documented and on the safe side (`PopulationBudget.h`). `CCarCtrl::ReInit`
-zeroes every counter, and the save load calls it before the vehicle pool
-restore; each restored vehicle counts once in the class the save carries
-(VICE-163). The offline check is `utils/save-vehicle-count`.
+switch moves it (`CCarCtrl::UpdateCarCount`). `NumLawEnforcerCars` follows the
+law flag, not the class (VICE-166): a car of any class that carries it counts
+when the flag is set, and the count is given back when the flag is cleared or
+the car is destroyed, so the counter balances whatever the class.
+`NumCarsInUse` sums four of the counters (random, law, mission, parked) and the
+two emergency counters; the permanent class and the far traffic stay outside
+it. A law car of the random class counts in both `NumLawEnforcerCars` and
+`NumRandomCars`; a law-flagged car of a non-random class counts twice the same
+way while the flag is set, so the sum counts each of them twice and the budget
+blocks one car early per live law car; the double count is documented and on
+the safe side (`PopulationBudget.h`). `CCarCtrl::ReInit` zeroes every counter,
+and the save load calls it before the vehicle pool restore; each restored
+vehicle counts once in the class the save carries (VICE-163), and the law flag
+of the save rides that count (VICE-166). The offline checks are
+`utils/save-vehicle-count` (the restore count, VICE-163) and
+`utils/spawn-law-counter` (the law flag on both sides of the count, VICE-166).
