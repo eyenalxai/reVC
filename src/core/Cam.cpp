@@ -22,6 +22,7 @@
 #include "Hud.h"
 #include "ZoneCull.h"
 #include "SurfaceTable.h"
+#include "TempColModels.h"	// the per-stance collision sets the camera's stance offsets read
 #include "WaterLevel.h"
 #include "MBlur.h"
 #include "SceneEdit.h"
@@ -878,6 +879,80 @@ float fDefaultSpeedLimit4Avoid = 0.25f;
 float fAvoidGeomThreshhold = 1.5f;
 float fMiniGunBetaOffset = 0.3f;
 
+// The camera's stance offsets (VICE-179): one row per eStance (Stance.h), and
+// the one place the camera reads a stance's height from. The follow cameras'
+// target rides the body's height, and the first person and sight cameras'
+// anchor sits at the stance's eye. Both heights are read from the stance's
+// collision set (CTempColModels, the set CPed::GetCollisionColModel hands the
+// collision), so the camera and the body the world collides with cannot
+// disagree: the box that stops the body is the box the camera looks at. One
+// table, one place - a stance that moves its body moves the camera with it.
+//
+// The rows are offsets from the standing row, so the standing row is exactly
+// zero and the standing camera keeps the stock pose. The sight cameras keep
+// their own back offsets (Process_M16_1stPerson, Process_Sniper,
+// Process_Rocket): a stance carries no back offset of its own.
+//
+// The eye column is the stance's own height and nothing else: the fork's first
+// person view already sits at the eyes (the head bone, VICE-47), so the anchor
+// takes this one height and none of the stock duck camera's back and right
+// repositioning, which stays for the peds that still set bIsDucking. The stance
+// case never adds that duck offset on top: for the player the solver owns the
+// stance (ADR 0028), so the flag is clear for him and the two cannot double up.
+struct tStanceCamOffset
+{
+	float bodyHeight;	// the follow cameras' target height
+	float eyeHeight;	// the first person and sight cameras' anchor height
+};
+
+// The stance's collision set, in eStance order: the set the world collides the
+// stance's body with (TempColModels.cpp). The camera reads its heights from the
+// top of each set's bounding box.
+static const CColModel *const StanceCamColModels[STANCE_NUM] = {
+	&CTempColModels::ms_colModelPed1,	// STANCE_STAND
+	&CTempColModels::ms_colModelPedCrouch,	// STANCE_CROUCH
+	&CTempColModels::ms_colModelPedProne,	// STANCE_PRONE
+};
+
+// The stance's two heights, both measured from the standing row: the top of the
+// collision set's box is the body's height, and the eye rides the head, whose
+// top the same box is, so the eye drops with it. The one drop is read under the
+// two names their readers use (FollowCamStanceHeight and StanceEyeHeight); the
+// columns are separate because a later stance that carries its head differently
+// moves the eye row alone.
+static tStanceCamOffset
+StanceCamOffset(eStance stance)
+{
+	const CColModel *standing = StanceCamColModels[STANCE_STAND];
+	const CColModel *set = StanceCamColModels[stance];
+	float drop = set->boundingBox.max.z - standing->boundingBox.max.z;
+
+	tStanceCamOffset offset;
+	offset.bodyHeight = drop;
+	offset.eyeHeight = drop;
+	return offset;
+}
+
+// The body height offset of the entity a follow camera looks at: a ped's stance
+// height, and zero for a vehicle (a car has no stance).
+static float
+FollowCamStanceHeight(CEntity *entity)
+{
+	if(entity->IsPed())
+		return StanceCamOffset(((CPed*)entity)->GetStance()).bodyHeight;
+	return 0.0f;
+}
+
+// The eye height offset of the ped a first person or sight camera follows; zero
+// for a vehicle's own camera (the seat view reads no stance).
+static float
+StanceEyeHeight(CEntity *entity)
+{
+	if(entity->IsPed())
+		return StanceCamOffset(((CPed*)entity)->GetStance()).eyeHeight;
+	return 0.0f;
+}
+
 void
 CCam::Process_FollowPed(const CVector &CameraTarget, float TargetOrientation, float, float)
 {
@@ -933,7 +1008,13 @@ CCam::Process_FollowPed(const CVector &CameraTarget, float TargetOrientation, fl
 
 	Source += GroundMovement;
 	IdealSource = Source;
-	TargetCoors.z += m_fSyphonModeTargetZOffSet;
+	// The stance's body height (VICE-179): the target the camera looks at
+	// rides the body, so a crouch or a prone brings the view down with the
+	// body. The buffered height below takes the same offset, so the camera's
+	// own height follows the stance through the buffer: the camera and its
+	// target drop together and the view direction does not change.
+	float StanceHeight = FollowCamStanceHeight(CamTargetEntity);
+	TargetCoors.z += m_fSyphonModeTargetZOffSet + StanceHeight;
 
 	TargetCoors.z = DoAverageOnVector(TargetCoors).z;
 
@@ -1196,7 +1277,7 @@ CCam::Process_FollowPed(const CVector &CameraTarget, float TargetOrientation, fl
 	float TargetZOffSet = CamTargetEntity->IsVehicle() ?
 		FollowCamVehicleTargetHeight(CamTargetEntity) :
 		Max(m_fDimensionOfHighestNearCar, m_fPedBetweenCameraHeightOffset);
-	float TargetHeight = CameraTarget.z + TargetZOffSet - Source.z;
+	float TargetHeight = CameraTarget.z + TargetZOffSet + StanceHeight - Source.z;
 
 	if(TargetHeight > m_fCamBufferedHeight){
 		// Have to go up
@@ -1256,6 +1337,8 @@ float fFalloff = 3.0f;
 float fStickSens = 0.01f;
 float fTweakFOV = 1.1f;
 float fTranslateCamUp = 0.8f;
+float fFollowCamStanceHeightStep = 0.2f;	// the stance height takes up a stance change in about half a second
+float fFollowCamStanceHeightAccel = 0.07f;	// ... and this is how fast that speed changes
 int16 nFadeControlThreshhold = 45;
 float fDefaultAlphaOrient = -0.22f;
 float fMouseAvoidGeomReturnRate = 0.92f;
@@ -1291,9 +1374,19 @@ CCam::Process_FollowPedWithMouse(const CVector &CameraTarget, float TargetOrient
 	             &VehicleDistance, &VehicleDistanceSpeed,
 	             fFollowCamVehicleDistStep, fFollowCamVehicleDistAccel, false);
 
+	// The stance's body height (VICE-179) is buffered the same way: the whole
+	// follow camera is placed from the target below, so the offset brings the
+	// camera down with the body, and the buffer makes a stance change glide
+	// instead of dropping the view in one frame. A vehicle has no stance, so
+	// the buffer returns to zero while the player drives.
+	static float StanceHeight = 0.0f;
+	static float StanceHeightSpeed = 0.0f;
+	WellBufferMe(FollowCamStanceHeight(CamTargetEntity), &StanceHeight, &StanceHeightSpeed,
+	             fFollowCamStanceHeightStep, fFollowCamStanceHeightAccel, false);
+
 	TargetCoors = CameraTarget;
 	TargetCoors.z += CamTargetEntity->IsVehicle() ?
-		FollowCamVehicleTargetHeight(CamTargetEntity) : fTranslateCamUp;
+		FollowCamVehicleTargetHeight(CamTargetEntity) : fTranslateCamUp + StanceHeight;
 
 	float AlphaOffset, BetaOffset;
 	if(CPad::GetPad(0)->IsPlayerControlsDisabledBy(PLAYERCONTROL_PLAYERINFO)){
@@ -1969,6 +2062,9 @@ CCam::Process_Rocket(const CVector &CameraTarget, float, float, float)
 	((CPed*)CamTargetEntity)->m_pedIK.GetComponentPosition(HeadPos, PED_HEAD);
 	Source = HeadPos;
 	Source.z += 0.1f;
+	// The stance's eye height, so the scope looks through the eye of the
+	// stance's own body (VICE-179; see StanceCamOffset)
+	Source.z += StanceEyeHeight(CamTargetEntity);
 	Source.x -= BackOffset*Cos(m_fInitialPlayerOrientation);
 	Source.y -= BackOffset*Sin(m_fInitialPlayerOrientation);
 
@@ -2199,6 +2295,10 @@ CCam::Process_M16_1stPerson(const CVector &CameraTarget, float, float, float)
 		((CPed*)CamTargetEntity)->m_pedIK.GetComponentPosition(HeadPos, PED_HEAD);
 		Source = HeadPos;
 		Source.z += 0.1f;
+		// The stance's eye height, so the sight looks through the eye of the
+		// stance's own body (VICE-179; see StanceCamOffset). The back offsets
+		// below stay the camera's own.
+		Source.z += StanceEyeHeight(CamTargetEntity);
 		if(((CPed*)CamTargetEntity)->bIsDucking){
 			Source.x -= fDuckingBackOffset*CamTargetEntity->GetForward().x;
 			Source.y -= fDuckingBackOffset*CamTargetEntity->GetForward().y;
@@ -2347,13 +2447,25 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		((CPed*)CamTargetEntity)->m_pedIK.GetComponentPosition(HeadPos, PED_HEAD);
 		Source = HeadPos;
 		Source.z += 0.1f;
+		// The stance's eye height: the anchor sits at the eye of the stance's
+		// own body (VICE-179; see StanceCamOffset). The fork's first person
+		// view already sits at the eyes (VICE-47), so the offset is this one
+		// height, and the head bone keeps the pose the animation gives it.
+		Source.z += StanceEyeHeight(CamTargetEntity);
 		// The first person view sits at the eyes: the head bone plus a small
 		// forward offset. The stock back offsets would sit inside the neck.
 		if(TheCamera.FirstPersonViewEnabled()){
 			Source.x += fFirstPersonEyeOffsetFwd*CamTargetEntity->GetForward().x;
 			Source.y += fFirstPersonEyeOffsetFwd*CamTargetEntity->GetForward().y;
 		}else
-		if(((CPed*)CamTargetEntity)->bIsDucking){
+		if(((CPed*)CamTargetEntity)->bIsDucking ||
+		   ((CPed*)CamTargetEntity)->GetStance() != STANCE_STAND){
+			// The stock duck camera, for the peds that still set the duck flag
+			// (the AI, the scripted states) and for the player's crouch and
+			// prone, which own the same case through the stance. The eye height
+			// above is the authority and the duck offset is never added on top
+			// of it: the solver owns the player's stance (ADR 0028), so the
+			// flag is clear for him and the two cannot double up.
 			Source.x -= fDuckingBackOffset*CamTargetEntity->GetForward().x;
 			Source.y -= fDuckingBackOffset*CamTargetEntity->GetForward().y;
 			Source.x -= fDuckingRightOffset*CamTargetEntity->GetRight().x;
@@ -2777,6 +2889,10 @@ CCam::Process_Sniper(const CVector &CameraTarget, float TargetOrientation, float
 	target->m_pedIK.GetComponentPosition(HeadPos, PED_HEAD);
 	Source = HeadPos;
 	Source.z += 0.1f;
+	// The stance's eye height, so the scope looks through the eye of the
+	// stance's own body (VICE-179; see StanceCamOffset). The back offsets below
+	// stay the camera's own, and the duck flag keeps its own pair.
+	Source.z += StanceEyeHeight(target);
 	if(target->bIsDucking){
 		Source.x -= fDuckingBackOffset*target->GetForward().x;
 		Source.y -= fDuckingBackOffset*target->GetForward().y;
