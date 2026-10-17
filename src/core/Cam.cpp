@@ -99,8 +99,6 @@ CCam::Init(void)
 	m_fBufferedTargetBeta = 0.0f;
 	m_fBufferedTargetOrientation = 0.0f;
 	m_fBufferedTargetOrientationSpeed = 0.0f;
-	m_fAdsAmount = 0.0f;
-	m_fAdsAmountSpeed = 0.0f;
 	m_bRecenteringLook = false;
 	m_uiLookInputTime = 0;
 	m_uiRecenterStart = 0;
@@ -1262,11 +1260,6 @@ int16 nFadeControlThreshhold = 45;
 float fDefaultAlphaOrient = -0.22f;
 float fMouseAvoidGeomReturnRate = 0.92f;
 
-// Third person aim down the sights: while the player aims, the camera pulls
-// in and the view zooms in a little, like a modern third person shooter
-float fAdsDistanceScale = 0.6f;
-float fAdsFOVScale = 0.8f;
-
 #ifdef GTA_PC_CONTROLS
 void
 CCam::Process_FollowPedWithMouse(const CVector &CameraTarget, float TargetOrientation, float, float)
@@ -1285,31 +1278,8 @@ CCam::Process_FollowPedWithMouse(const CVector &CameraTarget, float TargetOrient
 		Rotating = false;
 		m_bCollisionChecksOn = true;
 		CPad::GetPad(0)->ClearMouseHistory();
-		m_fAdsAmount = 0.0f;
-		m_fAdsAmountSpeed = 0.0f;
 		ResetStatics = false;
 	}
-
-	// Third person aim down the sights: Target pulls the camera in and zooms
-	// the view a little. The first person view and the weapon cameras have
-	// their own sights, and the stock lock-on camera modes do not change. The
-	// car ADS pulls the follow camera of the player's vehicle in the same way.
-	bool AdsAiming = false;
-	if(Mode == MODE_FOLLOWPED &&
-	   !TheCamera.FirstPersonViewEnabled() &&
-	   !TheCamera.Using1stPersonView() && !TheCamera.Using1stPersonWeaponMode() &&
-	   CPad::GetPad(0)->GetTarget()){
-		if(CamTargetEntity->IsPed()){
-			CPed *TargetPed = (CPed*)CamTargetEntity;
-			AdsAiming = TargetPed->m_nMoveState != PEDMOVE_SPRINT &&
-				CWeaponInfo::GetWeaponInfo(TargetPed->GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_CANAIM);
-		}else if(CamTargetEntity->IsVehicle())
-			AdsAiming = TheCamera.UsingCarAds();
-	}
-	WellBufferMe(AdsAiming ? 1.0f : 0.0f, &m_fAdsAmount, &m_fAdsAmountSpeed, 0.2f, 0.1f, false);
-	float AdsDistScale = 1.0f - (1.0f - fAdsDistanceScale)*m_fAdsAmount;
-	float AdsFOVScale = 1.0f - (1.0f - fAdsFOVScale)*m_fAdsAmount;
-	FOV *= AdsFOVScale;
 
 	bool OnTrain = FindPlayerVehicle() && FindPlayerVehicle()->IsTrain();
 
@@ -1389,7 +1359,6 @@ CCam::Process_FollowPedWithMouse(const CVector &CameraTarget, float TargetOrient
 		CamDist = fBaseDist + Cos(Min(Alpha*fFalloff, HALFPI))*fAngleDist;
 	else
 		CamDist = fBaseDist + Cos(Alpha)*fAngleDist;
-	CamDist *= AdsDistScale;
 	// The camera sits further back in a vehicle, so it clears the car body
 	CamDist += VehicleDistance;
 
@@ -2102,11 +2071,9 @@ CCam::Process_M16_1stPerson(const CVector &CameraTarget, float, float, float)
 
 	bool isAttached = ((CPed*)CamTargetEntity)->IsPlayer() && ((CPed*)CamTargetEntity)->m_attachedTo;
 
-	// Aiming down the sights: the sight view zooms in a little
-	if(TheCamera.FirstPersonViewEnabled() && Mode == MODE_M16_1STPERSON)
-		FOV = TheCamera.GetFirstPersonSightsFOV();
-	else
-		FOV = DefaultFOV;
+	// The sight cameras keep the plain FOV. A normal gun does not zoom: the
+	// sniper scope and the viewfinder run their own camera mode instead.
+	FOV = DefaultFOV;
 	TargetCoors = CameraTarget;
 
 	if(ResetStatics){
@@ -2232,12 +2199,6 @@ CCam::Process_M16_1stPerson(const CVector &CameraTarget, float, float, float)
 		((CPed*)CamTargetEntity)->m_pedIK.GetComponentPosition(HeadPos, PED_HEAD);
 		Source = HeadPos;
 		Source.z += 0.1f;
-		// The first person sight view sits at the eyes: the head bone plus a
-		// small forward offset. The stock back offsets would sit inside the neck.
-		if(TheCamera.FirstPersonViewEnabled() && Mode == MODE_M16_1STPERSON){
-			Source.x += fFirstPersonEyeOffsetFwd*CamTargetEntity->GetForward().x;
-			Source.y += fFirstPersonEyeOffsetFwd*CamTargetEntity->GetForward().y;
-		}else
 		if(((CPed*)CamTargetEntity)->bIsDucking){
 			Source.x -= fDuckingBackOffset*CamTargetEntity->GetForward().x;
 			Source.y -= fDuckingBackOffset*CamTargetEntity->GetForward().y;
@@ -2302,9 +2263,6 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 	static float DontLookThroughWorldFixer = 0.0f;
 	CVector TargetCoors;
 
-	// The FOV of the last frame: the scope starts where the view it takes over
-	// was, the way the stock sniper camera starts at the FOV it had
-	float previousFOV = FOV;
 	FOV = DefaultFOV;
 	TargetCoors = CameraTarget;
 	if(CamTargetEntity->m_rwObject == nil)
@@ -2357,22 +2315,15 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		static bool FailedTestTwelveFramesAgo = false;
 		RwV3d HeadPos;
 
-		// The first person view setting overrides the default FOV; aiming down
-		// the sights zooms in, the car ADS zooms the car view too, and the
-		// sniper and the laser scope keep the wheel zoom of the stock scope.
-		// The zoom is a view change in one frame, so it glides like the others.
+		// The car aim does not change the view: the aim never moves or zooms
+		// the camera for a normal gun, so the fast car view never lags back
+		// and then catches forward. The scope and the viewfinder run their own
+		// camera modes. The look return below reads the car aim.
 		bool carAds = firstPersonCarView && TheCamera.UsingCarAds();
-		bool usingScope = TheCamera.UsingFirstPersonScope();
-		bool usingSights = TheCamera.UsingFirstPersonSights() || carAds;
-		static bool wasUsingSights = false;
-		if(TheCamera.FirstPersonViewEnabled() && usingSights != wasUsingSights)
-			TheCamera.StartCameraHandover(CAMERA_SIGHTS_HANDOVER_TIME);
-		wasUsingSights = usingSights;
+		// The first person view keeps the player FOV; the stock vehicle first
+		// person view (the setting off) keeps the default
 		if(TheCamera.FirstPersonViewEnabled())
-			FOV = TheCamera.UpdateFirstPersonViewFOV(previousFOV, usingSights, usingScope);
-		else if(usingSights)
-			// The stock vehicle first person view keeps its own ADS zoom
-			FOV = TheCamera.GetFirstPersonSightsFOV();
+			FOV = (float)FrontEndMenuManager.GetFirstPersonFOV();
 
 		TargetCoors = CameraTarget;
 
