@@ -266,6 +266,20 @@ slot the wrong behaviour. The walk, run and sprint slots are repeating cycles
 with an increasing root speed, the idle is a pose and does not translate, and
 the startwalk is a one-shot.
 
+## Crouch pose
+
+The leg and spine offset every key of a crouch cycle carries on top of the
+shipped standing cycle: hip flexion on both thighs, knee flexion on both calves,
+an ankle pitch that keeps the soles flat and a lean of the spine, composed into
+the key's rotation in the bone's parent frame. The shipped crouch content
+(`WEAPON_crouch`) is stationary, and its settled pose is where the angles come
+from. A crouch cycle is one shipped standing cycle with the pose, the crouch
+body height and the crouch stride: the height is the root key `z` the engine
+reads as the body drop, and the stride is the root cycle translation scaled to
+shrink with the folded legs. The height and the stride are one setting with the
+pose, or the feet float or slide. The tables and the transform are
+`tools/ifp/crouch.cpp` (VICE-186); the block is `anim/crouch.ifp`.
+
 ## Magazine weapon
 
 A weapon that fires instant hits and has a clip of two or more rounds. The

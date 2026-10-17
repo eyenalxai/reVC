@@ -9,10 +9,11 @@
 # Nothing is written into the game folder.
 #
 # It checks the shipped file, proves the round trip byte for byte, extracts a
-# movement set from the shipped cycles and checks it, and runs the validator
-# against every planted defect, each of which must be caught. When python3 is
-# present it also compares the tool's keys with tools/ifp/verify_keys.py, an
-# independent reader of the raw bytes.
+# movement set from the shipped cycles and checks it, builds the crouch movement
+# block and checks its four sets, and runs the validator against every planted
+# defect, each of which must be caught. When python3 is present it also compares
+# the tool's keys with tools/ifp/verify_keys.py, an independent reader of the
+# raw bytes.
 set -u
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -70,6 +71,44 @@ else
 fi
 
 echo
+echo "== the crouch block from the shipped cycles (VICE-186)"
+CROUCH="$ROOT/gamefiles/anim/crouch.ifp"
+if "$IFP" crouch "$GAME" "$D/crouch.ifp" > "$D/crouch.txt" 2>&1; then
+	ok "$(head -1 "$D/crouch.txt")"
+	if cmp -s "$D/crouch.ifp" "$CROUCH"; then
+		ok "the built block is the committed gamefiles/anim/crouch.ifp (cmp)"
+	else
+		bad "the built block differs from the committed gamefiles/anim/crouch.ifp"
+	fi
+else
+	bad "the crouch step does not build the block"; cat "$D/crouch.txt"
+fi
+if "$IFP" check "$CROUCH" --movement > "$D/crouch-check.txt" 2>&1 &&
+   "$IFP" check "$CROUCH" --require-root >> "$D/crouch-check.txt" 2>&1; then
+	ok "$(head -1 "$D/crouch-check.txt")"
+	ok "$(tail -1 "$D/crouch-check.txt")"
+else
+	bad "the crouch block does not check out"; cat "$D/crouch-check.txt"
+fi
+# Every direction set passes the movement checks on its own. The block's own
+# --movement check reads its first five animations only (the forward set), so
+# each set is extracted and checked the way a presentation reads it.
+CrouchSet() { # <name> <walk> <run> <sprint> <idle> <startwalk>
+	local name="$1" set="$D/crouch-$1.ifp"
+	shift
+	if "$IFP" extract "$CROUCH" "$set" "$@" > /dev/null 2>&1 &&
+	   "$IFP" check "$set" --movement > "$D/crouch-set-$name.txt" 2>&1; then
+		ok "the $name set: $(tail -1 "$D/crouch-set-$name.txt" | sed "s|^$set: ||")"
+	else
+		bad "the $name set does not check out"; cat "$D/crouch-set-$name.txt"
+	fi
+}
+CrouchSet forward walk_crouch run_crouch sprint_crouch IDLE_crouch walk_start_crouch
+CrouchSet back walk_back_crouch run_back_crouch sprint_back_crouch IDLE_crouch walk_start_back_crouch
+CrouchSet left walk_left_crouch run_left_crouch sprint_left_crouch IDLE_crouch walk_start_left_crouch
+CrouchSet right walk_right_crouch run_right_crouch sprint_right_crouch IDLE_crouch walk_start_right_crouch
+
+echo
 echo "== planted defects, every one must fail"
 Plant() { # <defect> <input> <out> <check flags...>
 	local defect="$1" input="$2" out="$3"
@@ -100,6 +139,12 @@ if command -v python3 > /dev/null; then
 		ok "$(cat "$D/verify.txt")"
 	else
 		bad "the independent reader disagrees"; cat "$D/verify.txt"
+	fi
+	"$IFP" dump "$CROUCH" --keys > "$D/crouch.dump" 2>> "$D/dump.txt"
+	if python3 "$ROOT/tools/ifp/verify_keys.py" "$CROUCH" "$D/crouch.dump" >> "$D/verify.txt" 2>&1; then
+		ok "the crouch block: $(tail -1 "$D/verify.txt")"
+	else
+		bad "the independent reader disagrees with the crouch block"; cat "$D/verify.txt"
 	fi
 else
 	echo "skip python3 is not installed"
