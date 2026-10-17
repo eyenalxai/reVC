@@ -378,22 +378,21 @@ DrawSights(CPlayerPed *playerPed, eWeaponType WeaponType, int32 sightMode)
 	return false;
 }
 
-// The player aims a gun: the free aim of the third person mouse view (the
-// ped's aim state, which the plain fire button raises too), the sight the
-// camera serves (the first person sights and the stock sight camera the
-// classic aim takes), or the car ADS. A gun that is not aimed draws nothing.
+// The player aims a gun: the one aim state holds in both views and in a
+// vehicle. A gun that is not aimed draws nothing.
 static bool
 PlayerAimsGun(CPlayerPed *playerPed)
 {
-	// The free aim of the third person mouse view: the ped holds the gun at
-	// the crosshair. The look-behind view draws no crosshair, because its
-	// shots follow the forward of the ped, not the pointer; the garage adds
-	// its crosshair back.
+	// The third person mouse view draws the crosshair where its shots go; the
+	// look-behind view draws none, because its shots follow the forward of the
+	// ped, not the pointer. The garage adds its crosshair back.
 	if (TheCamera.Cams[TheCamera.ActiveCam].Using3rdPersonMouseCam() && playerPed && playerPed->IsAimingWeapon() &&
 	    (!CPad::GetPad(0)->GetLookBehindForPed() || TheCamera.m_bPlayerIsInGarage))
 		return true;
 
-	return TheCamera.Using1stPersonWeaponMode() || TheCamera.UsingCarAds();
+	// The first person view, the classic view and the car view: the aim state
+	// is the one rule.
+	return playerPed && playerPed->IsAimingWeapon();
 }
 
 // The reticle and the sight overlay of the aim. One rule for every aiming
