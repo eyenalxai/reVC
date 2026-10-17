@@ -7,6 +7,11 @@ class CTempColModels
 {
 public:
 	static CColModel ms_colModelPed1;
+	// The per-stance ped sets (VICE-178): selected by CPed::GetCollisionColModel.
+	// Both live at LEVEL_GENERIC with ownsCollisionVolumes = false, exactly like
+	// ms_colModelPed1, so CColStore::RemoveCol can never free them.
+	static CColModel ms_colModelPedCrouch;
+	static CColModel ms_colModelPedProne;
 	static CColModel ms_colModelPed2;
 	static CColModel ms_colModelBBox;
 	static CColModel ms_colModelBumper1;

@@ -361,6 +361,15 @@ enum eMoveState {
 	PEDMOVE_THROWN
 };
 
+// The body stance the movement solver owns (ADR 0028, VICE-178). The
+// collision set follows it; STAND is the default and what a save load resets
+// to, the same way m_nMoveState does.
+enum eStance {
+	STANCE_STAND,
+	STANCE_CROUCH,
+	STANCE_PRONE
+};
+
 extern float gfTommyFatness;
 
 class CVehicle;
@@ -531,6 +540,7 @@ public:
 	PedState m_nLastPedState;
 	eMoveState m_nMoveState;
 	int32 m_nStoredMoveState;
+	eStance m_nStance;	// the body stance; a save load zeroes it to STANCE_STAND
 	int32 m_nPrevMoveState;
 	eWaitState m_nWaitState;
 	uint32 m_nWaitTimer;
@@ -673,6 +683,14 @@ public:
 	void RemoveLighting(bool);
 	void FlagToDestroyWhenNextProcessed(void);
 	int32 ProcessEntityCollision(CEntity*, CColPoint*);
+	// The col model the ped collides with as a physical body: the set of its
+	// stance (VICE-178). GetColModel() stays the model's declared set for the
+	// hit, the melee and the placement paths.
+	CColModel *GetCollisionColModel(void);
+	// True when the standing body fits where the ped is: the standing column
+	// above the feet against the world, ignoring the ped itself and the other
+	// peds. The stance exits gate standing up on it (VICE-176/177).
+	bool IsHeadroomClear(void);
 
 	virtual void SetMoveAnim(void);
 
@@ -1005,6 +1023,8 @@ public:
 	}
 	bool Dead(void) { return m_nPedState == PED_DEAD; }
 	bool Dying(void) { return m_nPedState == PED_DIE; }
+	eStance GetStance(void) { return m_nStance; }
+	void SetStance(eStance stance) { m_nStance = stance; }
 	bool DyingOrDead(void) { return m_nPedState == PED_DIE || m_nPedState == PED_DEAD; }
 	bool OnGround(void) { return m_nPedState == PED_FALL || m_nPedState == PED_DIE || m_nPedState == PED_DEAD; }
 	bool OnGroundOrGettingUp(void) { return OnGround() || m_nPedState == PED_GETUP; }
