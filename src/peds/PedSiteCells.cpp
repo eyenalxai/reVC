@@ -61,10 +61,12 @@ PedSiteEvaluateProbe(float levelZ, const SPedSiteProbe &probe, float *pStandZ)
 	if (probe.groundZ - levelZ > PED_SITE_LEVEL_MARGIN || levelZ - probe.groundZ > PED_SITE_LEVEL_MARGIN)
 		return PED_SITE_LEVEL;
 	/* 4. The surface over the ground: the top surface below the cast stands
-	 * no more than a step above the level of the request. A roof, a canopy
-	 * or a bridge deck stands higher, and a point under one is a point
-	 * inside the world - the VICE-122 rule, unchanged. */
-	if (!probe.surfaceFound || probe.surfaceZ > levelZ + PED_SITE_STEP)
+	 * no more than a step above the ground the probe stands on. A roof, a
+	 * canopy or a bridge deck stands higher, and a point under one is a
+	 * point inside the world - the VICE-122 rule exactly (its cast started
+	 * at the ground and its comparison read the ground, because it set the
+	 * position to the ground before the test). */
+	if (!probe.surfaceFound || probe.surfaceZ > probe.groundZ + PED_SITE_STEP)
 		return PED_SITE_ROOF;
 	/* 5. The clearance over the feet: the static world leaves the sphere
 	 * empty. The dynamic clearance (vehicles, pedestrians) is the creation

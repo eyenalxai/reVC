@@ -9,7 +9,7 @@
 
 /*
  * The engine side of the pedestrian standable cells (VICE-154). The model,
- * the predicate and the store are in PedSites.h/PedSitesCore.cpp, which are
+ * the predicate and the store are in PedSites.h/PedSiteCells.cpp, which are
  * engine-free; this file is the world queries of one probe, the frame's slice
  * of the lazy build, and the population's entry point.
  *
@@ -67,9 +67,13 @@ PedSiteProbeWorld(float x, float y, float levelZ, SPedSiteProbe &probe)
 	probe.groundNormalZ = probe.groundFound ? col.normal.z : 0.0f;
 
 	/* The surface over the point: the topmost surface below the cast, the
-	 * VICE-122 roof test. A roof, a canopy or a bridge deck stands above the
-	 * level and the predicate rejects the point. */
-	surfaceZ = CWorld::FindGroundZFor3DCoord(x, y, levelZ + PED_SITE_ROOF_CAST, &found);
+	 * VICE-122 roof test. The cast starts at the ground (the old path's own
+	 * start: it set its position to the ground before the cast); a ground
+	 * that was not found leaves the cast at the level (the verdict is the
+	 * no-ground one, so the surface is never read). A roof, a canopy or a
+	 * bridge deck more than a step above the ground rejects the point. */
+	surfaceZ = CWorld::FindGroundZFor3DCoord(x, y,
+		(probe.groundFound ? probe.groundZ : levelZ) + PED_SITE_ROOF_CAST, &found);
 	probe.surfaceFound = found;
 	probe.surfaceZ = surfaceZ;
 
@@ -189,10 +193,4 @@ CPedSites::PublishStats(void)
 	ms_nRejectsRoof = stats.verdicts[PED_SITE_ROOF];
 	ms_nRejectsClearance = stats.verdicts[PED_SITE_CLEARANCE];
 	ms_nRejectsSlope = stats.verdicts[PED_SITE_SLOPE];
-}
-
-const SPedSiteStats &
-CPedSites::Stats(void)
-{
-	return ms_cells.GetStats();
 }

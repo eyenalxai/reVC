@@ -40,11 +40,16 @@
 #define PED_AREA_DENSITY_SCALE	3.0f // scale the zone density budget for dense on-foot crowds
 
 // The off-network spawns (VICE-122), on the standable cells (VICE-154). A
-// target share of the pedestrian spawns skips the node path and stands on a
-// validated point of the cell cache (src/peds/PedSites.h), and the existing
-// wander state walks the pedestrian to the closest ped node from there. The
-// cell module owns the placement's rules (ground, water, clearance, slope) and
-// its bounded build; the constants here are the share and the stray watch.
+// target share of the created pedestrians stands on a validated point of the
+// cell cache (src/peds/PedSites.h) and the existing wander state walks the
+// pedestrian to the closest ped node from there; the rest keeps the node path.
+// The cell module owns the placement's rules (ground, water, clearance, slope)
+// and its bounded build; the constants here are the share and the stray watch.
+//
+// The share is held near the target, not pinned to it: the share is a share of
+// the created pedestrians, and a gang (3..5) or a couple (2) that a spawn
+// creates counts every member, so one group can overshoot the line; the share
+// only falls short while the cells cannot answer (the validation bound).
 //
 // The target share of zero is special: no cell is asked, so the node path
 // stays bit-exact with the behaviour before the off-network work.
@@ -276,10 +281,12 @@ TrackOffNetworkPed(CPed *ped)
 }
 
 // A pedestrian the placement created on a free position: count it and watch it
-// until it reaches the network (VICE-122). The population's own spawns count
-// both ways, so the share the target ratio is held against is the realised
-// one (VICE-154); the mall groups and the scripted pedestrians never pass
-// here.
+// until it reaches the network (VICE-122). The population's own pedestrians
+// count both ways, so the share the target ratio is held against is the
+// realised one (VICE-154); a gang or a couple counts every member it creates
+// (before the group's own rules can drop one), which is why the share can
+// overshoot the target by one group. The mall groups and the scripted
+// pedestrians never pass here.
 static void
 AddOffNetworkPed(CPed *ped, bool offNetwork)
 {
@@ -711,9 +718,11 @@ CPopulation::Update(bool addPeds)
 	MoveCarsAndPedsOutOfAbandonedZones();
 	/* The standable cells' frame slice (VICE-154): the cells the spawn calls
 	 * have asked for, nearest first, on this thread. Interiors place no
-	 * off-network pedestrian (the mall keeps its own path), so the slice is
-	 * not spent on their coordinates. */
-	if (!CGame::IsInInterior())
+	 * off-network pedestrian (the mall keeps its own path), and a cutscene
+	 * builds nothing: the spawn calls themselves wait it out, the camera
+	 * there is not the game view, and the biggest cutscenes replace the
+	 * world a probe would read. */
+	if (!CGame::IsInInterior() && !CCutsceneMgr::IsRunning())
 		CPedSites::Pump();
 	// The strays wait out a cutscene: the camera there is not the game view.
 	if (!CCutsceneMgr::IsRunning())
@@ -980,11 +989,12 @@ CPopulation::AddPed(ePedType pedType, uint32 miOrCopType, CVector const &coors, 
 
 /* The off-network share of the created pedestrians is below the target ratio:
  * the next placement asks the cell cache for a standable point (VICE-154).
- * The share is the realised one - the spawns the cells answered against the
+ * The share is the realised one - the pedestrians the cells placed against the
  * whole population the trickle created - so it falls short of the target only
- * while the cells cannot answer (the validation bound), and it never runs
- * past the target. No random number is drawn for the decision: a target of
- * zero asks for nothing, and the node path keeps the stream it had. */
+ * while the cells cannot answer (the validation bound), and a group's members
+ * can carry it a little past the line (a share of pedestrians, not of spawn
+ * calls). No random number is drawn for the decision: a target of zero asks
+ * for nothing, and the node path keeps the stream it had. */
 static bool
 OffNetworkSpawnIsWanted(void)
 {
@@ -1097,9 +1107,10 @@ CPopulation::AddToPopulation(float minDist, float maxDist, float minDistOffScree
 		/* Off the network (VICE-122; the standable cells of VICE-154): while
 		 * the realised share is below the target ratio, the placement asks
 		 * the cell cache for a validated standable point. A request the cache
-		 * cannot answer falls back to the node path below, so the share never
-		 * runs past the target and the node path keeps the spawn whenever the
-		 * cells have nothing. Interiors (the mall) keep the node path. */
+		 * cannot answer falls back to the node path below, so the share falls
+		 * short of the target only when the cells have nothing and never runs
+		 * far past it (a group's members can overshoot by the group's size).
+		 * Interiors (the mall) keep the node path. */
 		bool offNetwork = false;
 		if (!CGame::IsInInterior() && PED_OFF_NETWORK_TARGET_RATIO > 0.0f && OffNetworkSpawnIsWanted()) {
 			SPedSitePoint centre;

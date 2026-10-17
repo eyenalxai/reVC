@@ -284,9 +284,12 @@ FAR_TRAFFIC = [
 # The pedestrian standable cells (VICE-154). The store holds the truth
 # (CPedSites::ms_cells); the facade mirrors its stats into these plain statics
 # after every pump and every request, so the rig can name them. The rows are
-# cumulative since the last boot (CPopulation::Initialise resets the store):
-# the cells built and queued, the queue's and the cache's drops, the positions
-# the off-network spawns requested and how they were answered (a spot, a dead
+# cumulative since the last reset (a boot, a restart or a save load:
+# CPopulation::Initialise resets the store): the cells built and queued, the
+# queue's and the cache's drops (the queue gives up its farthest cell for a
+# nearer one; the cache evicts the farthest entry for a nearer build, or
+# drops an entry a request found stale at another level), the positions the
+# off-network spawns requested and how they were answered (a spot, a dead
 # cell), the probes the builds ran and their verdicts - the rejects by their
 # reason, the ticket's telemetry. The off-network counters of the population
 # above them are the other side of the same story: the spawns that stood on a
@@ -306,7 +309,8 @@ PED_SITES = [
     ("ped sites: rejects level",     "_ZN9CPedSites16ms_nRejectsLevelE",     "I"),
     ("ped sites: rejects roof",      "_ZN9CPedSites15ms_nRejectsRoofE",      "I"),
     ("ped sites: rejects clearance", "_ZN9CPedSites20ms_nRejectsClearanceE", "I"),
-    ("ped sites: rejects slope",     "_ZN9CPedSites16ms_nRejectsSlopeE",     "I"),]
+    ("ped sites: rejects slope",     "_ZN9CPedSites16ms_nRejectsSlopeE",     "I"),
+]
 
 CONFIG = "src/core/config.h"
 

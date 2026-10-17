@@ -2,7 +2,7 @@
  * The evidence program for the pedestrian standable cells (VICE-154).
  *
  * It compiles the cell store's own engine-free translation unit
- * (src/peds/PedSitesCore.cpp - the real lattice, the real predicate, the real
+ * (src/peds/PedSiteCells.cpp - the real lattice, the real predicate, the real
  * queue and cache) and drives it over synthetic maps. No engine header is
  * included anywhere: the program fills the same SPedSiteProbe the engine side
  * fills from CWorld/CWaterLevel, and that is the only seam.
@@ -13,12 +13,15 @@
  *	   point inside its own cell.
  *
  *	B. The predicate. The six rules one at a time and at the boundary: no
- *	   ground, the water line and its margin, the level margin, the roof step,
- *	   the clearance, the slope. Every case checks the *verdict* (the reason),
- *	   not just "rejected", and the order of the rules is checked with probes
- *	   that are bad in two ways at once. The slope predicate is then driven
- *	   alone over a table of normals (flat, the limit, just past it, a wall, a
- *	   NaN), and the water rule alone over the margin's two sides.
+ *	   ground, the water line and its margin, the level margin, the roof step
+ *	   against the ground (the VICE-122 reference: a surface more than a step
+ *	   above the ground rejects even when the ground stands below the level),
+ *	   the clearance, the slope. Every case checks the *verdict* (the
+ *	   reason), not just "rejected", and the order of the rules is checked
+ *	   with probes that are bad in two ways at once. The slope predicate is
+ *	   then driven alone over a table of normals (flat, the limit, just past
+ *	   it, a wall, a NaN), and the water rule alone over the margin's two
+ *	   sides.
  *
  *	C. The build. A synthetic 600 x 256 m map with a sea and its shore, a
  *	   beach, a city of blocks with roofs, a wall segment, a hill, a cliff
@@ -66,13 +69,15 @@
  * queries a frame can spend, not by a clock on CWorld. The population's
  * wiring (the target ratio, the choice of the cell path per spawn) and the
  * creation loop's dynamic clearance are the game's; the build and the live
- * soak cover them.
+ * soak cover them. The live soak itself is the ticket's open item: the water
+ * deaths, the pop-in and the coverage in the real map are read there, and
+ * this program is the offline half.
  *
  * Build and run (from the repository root):
  *
  *	c++ -std=c++17 -I src -I src/core -I src/peds -O2 \
  *	    -o /tmp/spawn-ped-sites utils/spawn-service/ped-sites.cpp \
- *	    src/peds/PedSitesCore.cpp
+ *	    src/peds/PedSiteCells.cpp
  *	/tmp/spawn-ped-sites
  *
  * The exit code is 0 when every check passes. The output goes into the
@@ -534,8 +539,9 @@ SectionPredicate(void)
 		CheckVerdict(PED_SITE_LEVEL, 5.0f, p, "a ground above the level margin must reject as level");
 	}
 
-	/* 4. The roof step: the top surface may stand a step above the level,
-	 * not more; no surface at all rejects as a roof. */
+	/* 4. The roof step, against the ground (the VICE-122 reference): the top
+	 * surface may stand a step above the ground the probe stands on, not
+	 * more; no surface at all rejects as a roof. */
 	{
 		SPedSiteProbe p = PassProbe();
 		p.surfaceZ = 5.0f + PED_SITE_STEP;
@@ -546,6 +552,15 @@ SectionPredicate(void)
 		CheckVerdict(PED_SITE_ROOF, 5.0f, p, "a roof over the street must reject as a roof");
 		p.surfaceFound = false;
 		CheckVerdict(PED_SITE_ROOF, 5.0f, p, "a missing surface cast must reject as a roof");
+		/* The reference is the ground, not the level: a surface 0.6 m over a
+		 * ground one margin below the level rejects (the exact VICE-122
+		 * rule; a level-referenced rule would pass it). */
+		p = PassProbe();
+		p.groundZ = 5.0f - PED_SITE_LEVEL_MARGIN;
+		p.surfaceZ = p.groundZ + PED_SITE_STEP + 0.01f;
+		CheckVerdict(PED_SITE_ROOF, 5.0f, p, "a surface past the step over a low ground must reject as a roof");
+		p.surfaceZ = p.groundZ + PED_SITE_STEP;
+		CheckVerdict(PED_SITE_PASS, 5.0f, p, "a surface at the step over a low ground must pass");
 	}
 
 	/* 5. The clearance. */
@@ -783,7 +798,8 @@ SectionBuild(void)
 			"a cell keeps between one and the cap's spots");
 	}
 
-	/* A cell's dead answer counts too. */
+	/* A cell's dead answer counts too, and a dead cell is never re-probed
+	 * while it stays cached (the entry holds its level and its zero spots). */
 	{
 		SPedSitePoint spot;
 		before = cells.GetStats();
@@ -792,6 +808,13 @@ SectionBuild(void)
 		after = cells.GetStats();
 		Check(after.deadAnswers == before.deadAnswers + 1, "a dead answer must count");
 		Check(after.answered == before.answered, "a dead answer must not count as answered");
+		Check(after.probes == before.probes && after.cellsBuilt == before.cellsBuilt,
+			"a dead cell must not be re-probed");
+		before = after;
+		Check(cells.RequestSpot(88.0f, 128.0f, 0.0f, &spot) == PED_SITE_ANSWER_DEAD, "the dead cell answers dead again");
+		after = cells.GetStats();
+		Check(after.deadAnswers == before.deadAnswers + 1 && after.probes == before.probes,
+			"the second dead answer must count and still not probe");
 	}
 
 	printf("  the answer kinds and the counters: ok\n");
@@ -1106,9 +1129,10 @@ SectionCost(void)
 	 * the clearance sphere). The old path's worst frame is the hidden
 	 * burst's (FILL_BURST_HIDDEN_ATTEMPTS_PER_FRAME = 100 attempts, the
 	 * 0.15 share, the 5 positions of one spawn and its 5 queries - the
-	 * casts, the line, the sphere and the node search); the trickle's is
-	 * the sixth of it. The cells' frame is below both and does not move
-	 * with the crowd. */
+	 * casts, the line, the sphere and the node search), about 375; the
+	 * trickle's is about 22, a seventeenth of it (6 spawn calls a frame
+	 * against the burst's 100). The cells' frame is below both and does not
+	 * move with the crowd. */
 	{
 		int32_t probes = PED_SITE_CELLS_PER_FRAME * PED_SITE_PROBES;
 		int32_t queries = probes * 4;
@@ -1175,9 +1199,13 @@ static SCovNode g_aNodes[] = {
 	{ 328.0f, 8.0f, 0.0f }, { 368.0f, 8.0f, 0.0f },
 };
 
-/* The old path's node rule: the closest node within 150 m, on the level
- * within 5 m. The harness's table is small, so the closest is a scan (the
- * game's own search is the node grid's walk). */
+/* The old path's node rule: the closest node under the game's own metric -
+ * |dx| + |dy| + 3|dz| (CPathFind::FindNodeClosestToCoors, PathFind.cpp) -
+ * within the 150 m the old placement passed, on the level within 5 m. The
+ * closest node is the one the old code tested its level against, so a farther
+ * node on the level never rescues a closer one off it. The harness's table is
+ * small, so the closest is a scan (the game's own search is the node grid's
+ * walk; the tie rule - the lowest node index - matches the table's order). */
 static bool
 CovNodeReachable(float x, float y, float z)
 {
@@ -1185,15 +1213,13 @@ CovNodeReachable(float x, float y, float z)
 	float bestZ = 0.0f;
 
 	for (size_t i = 0; i < sizeof(g_aNodes) / sizeof(g_aNodes[0]); i++) {
-		float dx = g_aNodes[i].x - x;
-		float dy = g_aNodes[i].y - y;
-		float d = dx * dx + dy * dy;
+		float d = fabsf(g_aNodes[i].x - x) + fabsf(g_aNodes[i].y - y) + 3.0f * fabsf(g_aNodes[i].z - z);
 		if (d < best) {
 			best = d;
 			bestZ = g_aNodes[i].z;
 		}
 	}
-	if (best > 150.0f * 150.0f)
+	if (!(best < 150.0f))	/* the game's own closestDist < distLimit */
 		return false;
 	return fabsf(bestZ - z) <= 5.0f;
 }

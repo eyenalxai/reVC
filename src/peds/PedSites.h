@@ -67,12 +67,15 @@
  *				a bridge, a hilltop above the player. Rejected
  *				(PED_SITE_LEVEL).
  *	4. roof			the top surface below the cast stands more than
- *				PED_SITE_STEP (0.5 m) above the level of the
- *				request: a roof, a canopy or a bridge deck over
+ *				PED_SITE_STEP (0.5 m) above the ground the probe
+ *				stands on: a roof, a canopy or a bridge deck over
  *				the point. This is the rule that keeps a
  *				pedestrian out of a building's inside and out of
- *				the air under a deck; it is the VICE-122 rule,
- *				unchanged. Rejected (PED_SITE_ROOF).
+ *				the air under a deck; it is the VICE-122 rule
+ *				exactly (that path set its position to the
+ *				ground before the surface test, so its reference
+ *				was the ground too, and its cast started at the
+ *				ground). Rejected (PED_SITE_ROOF).
  *	5. clearance		the sphere (PED_SITE_CLEARANCE_RADIUS, raised
  *				PED_SITE_CLEARANCE_HEIGHT over the ground) into
  *				the static world: a spot inside a wall, a fence
@@ -152,11 +155,12 @@
  * The counters
  * ------------
  * The store keeps SPedSiteStats: the cells built, queued (admissions), dropped
- * (queue overflow), evicted (cache overflow); the positions requested and how
- * they were answered (a spot, a dead cell, off the grid); the probes the
- * builds ran and their verdicts (the six rejects by their reason, the ticket's
- * telemetry). The engine side (PedSites.cpp) mirrors them into the plain
- * statics on CPedSites the live rig reads (utils/caps-audit/live-counters.py).
+ * (queue overflow), evicted (the cache's farthest entry for a nearer build, or
+ * a stale-level entry a request dropped); the positions requested and how they
+ * were answered (a spot, a dead cell, off the grid); the probes the builds ran
+ * and their verdicts (the six rejects by their reason, the ticket's telemetry).
+ * The engine side (PedSites.cpp) mirrors them into the plain statics on
+ * CPedSites the live rig reads (utils/caps-audit/live-counters.py).
  *
  * What the checks cannot tell, and what covers it
  * -----------------------------------------------
@@ -173,18 +177,23 @@
  * thing directly). The walk to the network is the wander state's own (it
  * searches without a reach bound), the stray cull bounds the walk of the ones
  * that stall, and reachability is the service planner's contract (design
- * section 4), not the population's.
+ * section 4), not the population's. And the members of a gang or a couple are
+ * not placed by the cells: the seed's cell answers and every member is
+ * validated by the group's own rules - the water line, the 1 m step to the
+ * leader and the line of sight (Population.cpp, ADR 0019 rule 5 restated) -
+ * exactly as they were under VICE-122.
  *
  * The engine side (PedSites.cpp): the world queries of one probe (the two
  * casts, the water line, the clearance sphere), the pump (the frame's slice of
  * the build queue), and the population's entry point
  * (CPedSites::FindOffNetworkCoors: the draw, the band, the camera, the level).
  * The evidence program (utils/spawn-service/ped-sites.cpp) compiles this
- * header's implementing translation unit (PedSitesCore.cpp) alone, fills the
- * same SPedSiteProbe from a synthetic map and drives the same store: the
- * predicate, the lattice, the queue, the cache, the counters and the coverage
- * are checked there, and the world queries themselves are the game's (the
- * build and the live soak).
+ * header's implementing translation unit (PedSiteCells.cpp, named after the
+ * class it implements, the SpawnSitesIndex.cpp pattern) alone, fills the same
+ * SPedSiteProbe from a synthetic map and drives the same store: the predicate,
+ * the lattice, the queue, the cache, the counters and the coverage are checked
+ * there, and the world queries themselves are the game's (the build and the
+ * live soak).
  */
 
 #include <stdint.h>
@@ -204,18 +213,18 @@
 #define PED_SITE_SPOTS		4	/* the standable points a cell keeps */
 #define PED_SITE_QUEUE		512	/* the bounded build queue */
 #define PED_SITE_CACHE		1024	/* the bounded cache of built cells (a 512 m square) */
-#define PED_SITE_CELLS_PER_FRAME 2	/* the build budget of one frame (main thread) */
+#define PED_SITE_CELLS_PER_FRAME	2	/* the build budget of one frame (main thread) */
 #define PED_SITE_ATTEMPTS	5	/* the positions one spawn draws (the VICE-122 retries) */
 
 /* --- the predicate's constants ------------------------------------------ */
 
 #define PED_SITE_LEVEL_MARGIN	3.0f	/* the ground-to-request tolerance (the node path's own) */
-#define PED_SITE_STEP		0.5f	/* the surface may stand this far above the request level */
+#define PED_SITE_STEP		0.5f	/* the surface may stand this far above the ground it covers */
 #define PED_SITE_WATER_MARGIN	0.1f	/* the ground must stand this far above the water line */
 #define PED_SITE_SLOPE_COS_MIN	0.70710678f /* cos 45: the steepest ground a pedestrian walks (a guess) */
-#define PED_SITE_ROOF_CAST	50.0f	/* the surface cast starts this far above the request level */
-#define PED_SITE_CLEARANCE_HEIGHT 0.9f	/* the clearance sphere sits this far above the ground */
-#define PED_SITE_CLEARANCE_RADIUS 0.5f	/* and is this wide */
+#define PED_SITE_ROOF_CAST	50.0f	/* the surface cast starts this far above the ground */
+#define PED_SITE_CLEARANCE_HEIGHT	0.9f	/* the clearance sphere sits this far above the ground */
+#define PED_SITE_CLEARANCE_RADIUS	0.5f	/* and is this wide */
 
 /* One standable point, metres. */
 struct SPedSitePoint
@@ -232,7 +241,7 @@ struct SPedSiteProbe
 	bool groundFound;	/* the cast down from the request level found a surface */
 	float groundZ;		/* that surface's height (the ground the probe stands on) */
 	float groundNormalZ;	/* its collision normal's z: 1 is flat, 0 is vertical */
-	bool surfaceFound;	/* the cast from level + PED_SITE_ROOF_CAST found the top surface */
+	bool surfaceFound;	/* the cast from ground + PED_SITE_ROOF_CAST found the top surface */
 	float surfaceZ;		/* that surface's height (the one over the point) */
 	bool waterFound;	/* the block under the point has a water line */
 	float waterZ;		/* the line, without the waves */
@@ -270,7 +279,7 @@ struct SPedSiteStats
 	uint32_t cellsBuilt;	/* the builds the queue spent */
 	uint32_t cellsQueued;	/* the admissions to the queue */
 	uint32_t cellsDropped;	/* the cells the queue gave up for a nearer one (a displaced far cell, or a far admission) */
-	uint32_t cellsEvicted;	/* cache entries dropped for a nearer build */
+	uint32_t cellsEvicted;	/* cache entries dropped: the farthest for a nearer build, or a stale-level entry */
 	uint32_t requests;	/* the positions requested */
 	uint32_t answered;	/* of them, a validated spot answered */
 	uint32_t deadAnswers;	/* of them, a built cell held no spot */
@@ -332,8 +341,6 @@ public:
 	const SPedSiteStats &GetStats(void) const { return m_stats; }
 	int32_t GetNumQueued(void) const { return m_numQueued; }
 	int32_t GetNumCached(void) const { return m_numCached; }
-	float GetAnchorX(void) const { return m_anchorX; }
-	float GetAnchorY(void) const { return m_anchorY; }
 	bool CellIsQueued(uint16_t cell) const { return m_aCell[cell] == CELL_QUEUED; }
 	bool CellIsBuilt(uint16_t cell) const { return m_aCell[cell] != CELL_UNVALIDATED && m_aCell[cell] != CELL_QUEUED; }
 	bool CellIsStandable(uint16_t cell) const { return CellGetSpots(cell) > 0; }
@@ -404,13 +411,18 @@ private:
 class CPedSites
 {
 public:
-	/* The boot (and restart) reset: CPopulation::Initialise, with the stray
-	 * table (the cells belong to the game that ends with the call). */
+	/* The reset of the store: CPopulation::Initialise, with the stray table
+	 * - the boot (CGame::Initialise), a restart and a save load all reach it
+	 * (CGame::InitialiseWhenRestarting -> ReInitGameObjectVariables), and the
+	 * ring rebuilds over the frames that follow. The cells belong to the game
+	 * that ends with the call. */
 	static void Reset(void);
 
 	/* The frame's slice of the lazy build: CPopulation::Update, before the
-	 * spawn calls. Interiors are the caller's own gate (the population's
-	 * spawn path does not ask for cells in an interior). */
+	 * spawn calls. The caller gates it: interiors (the mall has its own
+	 * path) and cutscenes (the camera there is not the game view, the spawn
+	 * calls themselves wait them out, and the biggest cutscenes replace the
+	 * world a probe would read). */
 	static void Pump(void);
 
 	/* A free position for one off-network spawn. The caller passes the
@@ -420,11 +432,10 @@ public:
 	static bool FindOffNetworkCoors(const SPedSitePoint &centre, float minDist, float maxDist,
 		float minDistOffScreen, float maxDistOffScreen, SPedSitePoint *pPosition);
 
-	/* The store's stats, and the live rig's plain statics: the store holds
-	 * the truth, PublishStats mirrors it after every pump and every request
-	 * (the rig reads the game's memory by symbol name, so the counters it
-	 * names are these; utils/caps-audit/live-counters.py). */
-	static const SPedSiteStats &Stats(void);
+	/* The live rig's plain statics (utils/caps-audit/live-counters.py): the
+	 * store holds the truth, PublishStats mirrors it after every pump and
+	 * every request, and the rig reads the game's memory by symbol name. The
+	 * store's own SPedSiteStats is the source (CPedSiteCells::GetStats). */
 	static uint32_t ms_nCellsBuilt;
 	static uint32_t ms_nCellsQueued;
 	static uint32_t ms_nCellsDropped;

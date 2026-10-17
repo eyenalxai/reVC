@@ -568,16 +568,16 @@ unvalidated until its build. The build probes a 4 x 4 lattice of the cell on
 the main thread and keeps up to four spread points that pass the predicate:
 the ground cast down from the level of the request (3 m of tolerance), no
 water (the ground above the line plus 0.1 m), the top surface over the point
-no more than a step (0.5 m) above the level (a roof, a canopy or a bridge deck
-rejects), a free clearance sphere over the feet, and a ground not steeper than
-the walk limit (cos 45, the new slope predicate). A request maps the drawn
-position to its cell: a built cell answers with its stored point nearest the
-draw, a built cell with no point (a *dead* cell) and an unvalidated one fall
-back to the node path (the unvalidated one enters the bounded build queue
-first). The queue (512 requested cells, nearest-first) and the cache (1024
-built cells, the farthest evicted) are bounded, the pump spends two builds a
-frame, and every world query stays on the main thread: the planner worker
-reads the store's plain answers only.
+no more than a step (0.5 m) above the ground the point stands on (a roof, a
+canopy or a bridge deck rejects), a free clearance sphere over the feet, and a
+ground not steeper than the walk limit (cos 45, the new slope predicate). A
+request maps the drawn position to its cell: a built cell answers with its
+stored point nearest the draw, a built cell with no point (a *dead* cell) and
+an unvalidated one fall back to the node path (the unvalidated one enters the
+bounded build queue first). The queue (512 requested cells, nearest-first) and
+the cache (1024 built cells, the farthest evicted) are bounded, the pump
+spends two builds a frame, and every world query stays on the main thread:
+the planner worker reads the store's plain answers only.
 
 ## Stray (off-network pedestrian)
 

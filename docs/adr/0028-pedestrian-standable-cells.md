@@ -32,7 +32,8 @@ path now; the service planner consumes the same store later.
    for. Storage is static: a `uint16_t` state per cell (the cache slot + 1),
    a bounded cache of 1024 built cells, a bounded queue of 512, and the
    counters - about 181 KB, no allocation (`src/peds/PedSites.h`,
-   `PedSitesCore.cpp`).
+   `PedSiteCells.cpp` - the engine-free unit is named after the class it
+   implements, the `SpawnSitesIndex.cpp` pattern).
 
 2. **The predicate.** A build probes a 4 x 4 lattice of the cell (16 points,
    4 m apart) and keeps the points that pass, in this order: the ground cast
@@ -41,11 +42,13 @@ path now; the service planner consumes the same store later.
    `GetWaterLevelNoWaves`, the line ADR 0019 read; else *water*); the ground
    stands within `PED_SITE_LEVEL_MARGIN` (3 m, the node path's own tolerance)
    of the level (else *level*); the top surface below the roof cast stands no
-   more than `PED_SITE_STEP` (0.5 m) above the level (else *roof* - the
-   VICE-122 rule, unchanged); the static clearance sphere over the feet is
-   free (else *clearance*; the dynamic clearance stays in the creation loop,
-   where it is fresh); and the ground's collision normal is not steeper than
-   the walk limit (else *slope*).
+   more than `PED_SITE_STEP` (0.5 m) above the **ground the probe stands on**
+   (else *roof* - the VICE-122 rule exactly: that path set its position to the
+   ground before its surface test, so its reference was the ground, and its
+   cast started at the ground too, which this build mirrors); the static
+   clearance sphere over the feet is free (else *clearance*; the dynamic
+   clearance stays in the creation loop, where it is fresh); and the ground's
+   collision normal is not steeper than the walk limit (else *slope*).
 
 3. **The slope predicate is new** (`PedSiteGroundIsWalkable`): the ground's
    collision normal against `PED_SITE_SLOPE_COS_MIN` (cos 45). No slope rule
@@ -65,32 +68,37 @@ path now; the service planner consumes the same store later.
 
 5. **The lazy build is bounded and on the main thread.** The queue holds the
    requested cells; the pump (`CPedSites::Pump`, from `CPopulation::Update`,
-   before the spawn calls and not in an interior) takes the queued cell
-   nearest the player each time and spends `PED_SITE_CELLS_PER_FRAME` (2)
-   builds a frame. The cache holds 1024 built cells and evicts the entry
-   farthest from the player; a full queue drops the farthest cell for a nearer
-   admission and refuses a farther one. Every world query of the module runs
-   in `PedSites.cpp`, on the game's thread: the planner worker will read the
+   before the spawn calls, not in an interior and not during a cutscene - the
+   spawn calls wait a cutscene out themselves, and the biggest cutscenes
+   replace the world a probe would read) takes the queued cell nearest the
+   player each time and spends `PED_SITE_CELLS_PER_FRAME` (2) builds a frame.
+   The cache holds 1024 built cells and evicts the entry farthest from the
+   player; a full queue drops the farthest cell for a nearer admission and
+   refuses a farther one. Every world query of the module runs in
+   `PedSites.cpp`, on the game's thread: the planner worker will read the
    store's plain answers only (the design's worker boundary, sections 9 and
    11).
 
 6. **The level of an entry.** The rules read the level of the request, so a
    cell's answer belongs to it: the entry stores its build level and a request
    more than the margin away treats the entry as stale - the cell is dropped
-   and re-queued for the new level (the level rules re-run; the old points are
-   not the ground of the new level). The caller still refuses a point too far
-   from its own ring level, with the same margin.
+   (the drop counts as an eviction with the cache's own) and re-queued for the
+   new level (the level rules re-run; the old points are not the ground of the
+   new level). The caller still refuses a point too far from its own ring
+   level, with the same margin.
 
 7. **The target ratio replaces the fraction.** `PED_OFF_NETWORK_FRACTION`
    becomes `PED_OFF_NETWORK_TARGET_RATIO` (0.15): the population keeps the
    realised share of the created pedestrians (the cell spawns against the node
    path's, `ms_nOffNetworkSpawns` against `ms_nNetworkSpawns`) and asks the
-   cells while the share is below the target. The share falls short only while
-   the cells cannot answer (the validation bound) and never runs past the
-   target; no random number is drawn for the decision, so a target of zero
-   keeps the node path bit-exact. The on-network path itself is untouched: the
-   node pair, the rarity dice, the width and the creation ring are the same
-   code.
+   cells while the share is below the target. The share is held near the
+   target, not pinned to it: it falls short only while the cells cannot answer
+   (the validation bound), and it can overshoot by one group, because the share
+   is a share of *pedestrians* and a gang (3..5) or a couple (2) counts every
+   member it creates. No random number is drawn for the decision, so a target
+   of zero keeps the node path bit-exact. The on-network path itself is
+   untouched: the node pair, the rarity dice, the width and the creation ring
+   are the same code.
 
 8. **The node reach bound is dropped from the placement.** ADR 0019's last two
    checks - a ped node within 150 m and within 5 m of the level - were the walk
@@ -114,11 +122,16 @@ path now; the service planner consumes the same store later.
    (`CPedSites::ms_nCellsBuilt`, `ms_nRejectsWater`, ... in
    `utils/caps-audit/live-counters.py`).
 
-10. **The reset.** `CPopulation::Initialise` (boot and restart) resets the
-    store with the stray table: the cells belong to the game that ends with
-    the call. A save load keeps the cache (the ground does not change); the
-    level staleness handles a load at another level, and the eviction handles
-    another place.
+10. **The reset.** `CPopulation::Initialise` resets the store with the stray
+    table: the cells belong to the game that ends with the call. The boot
+    (`CGame::Initialise`), a restart and a save load all reach it
+    (`CGame::InitialiseWhenRestarting` -> `ReInitGameObjectVariables` ->
+    `CPopulation::Initialise` -> `CPedSites::Reset`), so a loaded game starts
+    with an empty cache and the ring rebuilds over the frames that follow (the
+    spawns that arrive before their cell is built fall back to the node path,
+    as they do after a boot). The safe behaviour is deliberate: a reset is
+    always correct, and the ground of a loaded world is the ground of the map
+    anyway.
 
 ## What the checks cannot tell, and what covers it
 
@@ -133,23 +146,35 @@ path now; the service planner consumes the same store later.
   far from every node walks a long way, and the stray cull bounds the ones
   that stall. The service planner will own reachability; until then the
   placement prefers nothing - it takes what the cells answer.
+- A gang or a couple is not placed by the cells: the seed's cell answers and
+  every member is validated by the group's own rules - the water line, the 1 m
+  step to the leader and the line of sight (ADR 0019 rule 5 restated) - so a
+  member can stand a little outside the seed's cell. The group's own rules are
+  what keep it out of the water; the cell predicate is the seed's.
 - The build's world queries are the game's; the evidence program
   (`utils/spawn-service/ped-sites.cpp`) fills the same probe structure from a
   synthetic map and prices the store's arithmetic exactly, but not `CWorld`.
+  The live soak is the ticket's open item: it reads the water deaths, the
+  pop-in and the coverage in the real map.
 
 ## Consequences
 
-- The empty places gain pedestrians: the far sand and the airfield go from
-  nothing (the node reach) to the cells' share (about 37..43 % of the draws in
-  the harness's model, against 0 before), and the near beach and the city keep
-  their coverage.
+- The empty places gain pedestrians. The harness's coverage table (the same
+  seeded draws through the old policy and the cells, per area; the before
+  model now uses the game's own node metric, `|dx| + |dy| + 3|dz|`):
+  the far sand 0.0 -> 43.3 % of the draws, the airfield 0.0 -> 36.6 %, the
+  city 20.5 -> 20.9 % (a small gain), the near beach 40.3 -> 36.4 % (a few
+  points given up to the snap's edge effect - the cells move a draw to a
+  stored point of its cell, which can cross the harness's area line), and the
+  sea 0.0 % both ways. The per-spawn share of five attempts is
+  1 - (1 - p)^5 of those numbers.
 - The placement's cost moves from the per-spawn search to the per-cell build:
   a frame spends at most 2 builds x 16 probes = 32 probes = 128 world queries,
   a constant that does not move with the crowd - below the old path's hidden
   burst frame (about 375 queries) and far below a frame. The store's own
-  arithmetic is tens of nanoseconds a request and about 60 ns a steady frame
-  (the harness's measurements); a report into a full cache (the eviction scan)
-  is the one heavier step, about 640 ns.
+  arithmetic is about 35 ns a request and about 73 ns a steady frame (the
+  harness's measurements); a report into a full cache (the eviction scan) is
+  the one heavier step, about 690 ns.
 - The random stream shifts: the off-network decision no longer draws, and a
   cell request draws the same angle and distance the old search did. The
   wander path and the model choices that follow a spawn are therefore shifted
@@ -157,3 +182,6 @@ path now; the service planner consumes the same store later.
 - The tunables: the target ratio, the frame's build budget, the lattice's
   density, the slope limit, the queue and the cache sizes. They are guesses to
   tune against the owner's play-test, like the ring values (VICE-132).
+- The live soak is the ticket's open item: the water deaths, the pop-in and
+  the coverage in the real map are read there, with the counters the live rig
+  names (`utils/caps-audit/live-counters.py`).
