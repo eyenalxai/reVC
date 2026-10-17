@@ -21,7 +21,7 @@ const char *const PlantDefects[] = {
 	"slotorder",	// the movement slots in the wrong order
 	"deltatimes",	// time deltas where the absolute times belong
 };
-const int NumPlantDefects = (int)(sizeof(PlantDefects)/sizeof(PlantDefects[0]));
+const int NumPlantDefects = CountOf(PlantDefects);
 
 static Sequence *
 FirstSequence(Block *block)

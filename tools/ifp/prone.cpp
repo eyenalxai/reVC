@@ -17,8 +17,12 @@
 // gamefiles/anim/prone.ifp. The game file is opened read only. The tool prints
 // the parameter table, the animation list with each root speed, and the four
 // movement sets checked slot by slot with the validator's own rules.
+//
+// The rotation machinery and the bone-name lookup are shared with the crouch
+// generator: tools/ifp/pose.h. The parameter table below is this generator's
+// own.
 
-#include "ifp.h"
+#include "pose.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -29,10 +33,21 @@
 
 using ifp::Block;
 using ifp::CheckOptions;
+using ifp::CountOf;
+using ifp::FindBone;
+using ifp::FindHierarchy;
+using ifp::FindSequence;
 using ifp::Hierarchy;
 using ifp::Key;
 using ifp::KeyIdent;
+using ifp::Quat;
+using ifp::QuatFromKey;
+using ifp::QuatMake;
+using ifp::QuatMultiply;
+using ifp::QuatNormalise;
+using ifp::QuatSlerp;
 using ifp::Sequence;
+using ifp::SetKeyRotation;
 
 // ---------------------------------------------------------------- parameters
 // Everything the owner tunes lives here, in one table. The pose of the prone
@@ -69,7 +84,7 @@ static const Crawl Crawls[] = {
 	{ "crawl_left", -0.86f,  0.00f,  3.0f, -4.0f, false },
 	{ "crawl_right", 0.86f,  0.00f,  3.0f,  4.0f, false },
 };
-static const int NumCrawls = sizeof(Crawls)/sizeof(Crawls[0]);
+static const int NumCrawls = CountOf(Crawls);
 
 // The limbs. Each crawl key is a per-bone slerp of the base pose and one of
 // these donors; the donors are shipped keys, so a limb angle in the output is
@@ -98,7 +113,7 @@ static const AimPose AimPoses[] = {
 	{ "prone_aim_side",  20.0f, 14.0f },
 	{ "prone_aim_back",  34.0f,  0.0f },
 };
-static const int NumAimPoses = sizeof(AimPoses)/sizeof(AimPoses[0]);
+static const int NumAimPoses = CountOf(AimPoses);
 
 // The dive and the landing are the base pose with the body pitched (the root
 // carries it) and the torso lifted; presentation only, the solver owns the
@@ -127,7 +142,7 @@ static const char *const BoneNames[] = {
 	"L Thigh", "L Calf", "L Foot",
 	"R Thigh", "R Calf", "R Foot",
 };
-static const int NumBones = sizeof(BoneNames)/sizeof(BoneNames[0]);
+static const int NumBones = CountOf(BoneNames);
 
 // The four engine sets, in the slot order aStdAnimDescs uses: walk, run,
 // sprint, idle, startwalk. The three moving slots reuse one cycle: a crawl is
@@ -142,61 +157,16 @@ static const MovementSet MovementSets[] = {
 	{ "left",    "crawl_left" },
 	{ "right",   "crawl_right" },
 };
-static const int NumMovementSets = sizeof(MovementSets)/sizeof(MovementSets[0]);
+static const int NumMovementSets = CountOf(MovementSets);
 
 // ---------------------------------------------------------------- quaternions
 
-struct Quat {
-	float x, y, z, w;
-};
-
-static Quat
-MakeQuat(float x, float y, float z, float w)
-{
-	Quat q;
-	q.x = x; q.y = y; q.z = z; q.w = w;
-	return q;
-}
-
-static Quat
-QuatNorm(Quat q)
-{
-	float n = sqrtf(q.x*q.x + q.y*q.y + q.z*q.z + q.w*q.w);
-	if(n == 0.0f)
-		return MakeQuat(0, 0, 0, 1);
-	q.x /= n; q.y /= n; q.z /= n; q.w /= n;
-	return q;
-}
-
-// The index of an animation by name, -1 when the block has no such name.
-static int
-FindAnimation(const Block &block, const std::string &name)
-{
-	for(size_t i = 0; i < block.hierarchies.size(); i++)
-		if(block.hierarchies[i].name == name)
-			return (int)i;
-	return -1;
-}
-
-// a then b, as the engine applies them: the child's rotation first, then the
-// parent's (RwMatrix::mult takes the applied-first matrix first).
-static Quat
-QuatMul(const Quat &a, const Quat &b)
-{
-	return MakeQuat(
-		a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
-		a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
-		a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
-		a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z);
-}
-
-static float
-QuatDot(const Quat &a, const Quat &b)
-{
-	return a.x*b.x + a.y*b.y + a.z*b.z + a.w*b.w;
-}
-
-// A rotation of `deg` about an axis in the bone's own frame.
+// A rotation of the table, about an axis in the bone's own frame. It stays in
+// this file rather than moving to pose.h: the two generators round the same
+// rotation differently (this one normalises the axis and the result, the crouch
+// generator's divides the axis length into the sine), and a single shared
+// constructor changed the bytes of the committed gamefiles/anim/prone.ifp. The
+// composition itself is shared (QuatMultiply).
 static Quat
 AxisAngle(float ax, float ay, float az, float deg)
 {
@@ -204,29 +174,8 @@ AxisAngle(float ax, float ay, float az, float deg)
 	float s = sinf(r);
 	float n = sqrtf(ax*ax + ay*ay + az*az);
 	if(n == 0.0f)
-		return MakeQuat(0, 0, 0, 1);
-	return QuatNorm(MakeQuat(ax/n*s, ay/n*s, az/n*s, cosf(r)));
-}
-
-static Quat
-QuatSlerp(Quat a, Quat b, float t)
-{
-	float d = QuatDot(a, b);
-	if(d < 0.0f){
-		b = MakeQuat(-b.x, -b.y, -b.z, -b.w);
-		d = -d;
-	}
-	if(d > 0.9995f){
-		Quat r = MakeQuat(a.x + t*(b.x - a.x), a.y + t*(b.y - a.y),
-			a.z + t*(b.z - a.z), a.w + t*(b.w - a.w));
-		return QuatNorm(r);
-	}
-	float th = acosf(d);
-	float s = sinf(th);
-	float wa = sinf((1.0f - t)*th)/s;
-	float wb = sinf(t*th)/s;
-	return QuatNorm(MakeQuat(wa*a.x + wb*b.x, wa*a.y + wb*b.y,
-		wa*a.z + wb*b.z, wa*a.w + wb*b.w));
+		return QuatMake(0, 0, 0, 1);
+	return QuatNormalise(QuatMake(ax/n*s, ay/n*s, az/n*s, cosf(r)));
 }
 
 // ---------------------------------------------------------------- sampling
@@ -237,15 +186,6 @@ struct Pose {
 	Quat rot[NumBones];
 	float rootTrans[3];
 };
-
-static const Sequence *
-FindSequence(const Hierarchy &hier, const char *name)
-{
-	for(size_t i = 0; i < hier.sequences.size(); i++)
-		if(hier.sequences[i].name == name)
-			return &hier.sequences[i];
-	return 0;
-}
 
 static bool
 SampleSequence(const Sequence &seq, float time, Quat *rot, float *trans)
@@ -258,8 +198,7 @@ SampleSequence(const Sequence &seq, float time, Quat *rot, float *trans)
 		if(seq.keys[i].time >= time)
 			break;
 	if(i == 0){
-		*rot = MakeQuat(seq.keys[0].rotation[0], seq.keys[0].rotation[1],
-			seq.keys[0].rotation[2], seq.keys[0].rotation[3]);
+		*rot = QuatFromKey(seq.keys[0]);
 		if(trans && seq.HasTranslation())
 			for(int c = 0; c < 3; c++)
 				trans[c] = seq.keys[0].translation[c];
@@ -275,8 +214,7 @@ SampleSequence(const Sequence &seq, float time, Quat *rot, float *trans)
 		f = 0.0f;
 	if(f > 1.0f)
 		f = 1.0f;
-	*rot = QuatSlerp(MakeQuat(a.rotation[0], a.rotation[1], a.rotation[2], a.rotation[3]),
-		MakeQuat(b.rotation[0], b.rotation[1], b.rotation[2], b.rotation[3]), f);
+	*rot = QuatSlerp(QuatFromKey(a), QuatFromKey(b), f);
 	if(trans && seq.HasTranslation())
 		for(int c = 0; c < 3; c++)
 			trans[c] = a.translation[c] + f*(b.translation[c] - a.translation[c]);
@@ -287,15 +225,15 @@ SampleSequence(const Sequence &seq, float time, Quat *rot, float *trans)
 static bool
 SamplePose(const Block &ped, const char *anim, float time, Pose *pose)
 {
-	int index = FindAnimation(ped, anim);
+	int index = FindHierarchy(ped, anim);
 	if(index < 0)
 		return false;
 	const Hierarchy &hier = ped.hierarchies[index];
 	for(int b = 0; b < NumBones; b++){
-		const Sequence *seq = FindSequence(hier, BoneNames[b]);
-		if(seq == 0)
+		int s = FindSequence(hier, BoneNames[b]);
+		if(s < 0)
 			return false;
-		if(!SampleSequence(*seq, time, &pose->rot[b], pose->rootTrans))
+		if(!SampleSequence(hier.sequences[s], time, &pose->rot[b], pose->rootTrans))
 			return false;
 	}
 	return true;
@@ -320,14 +258,9 @@ MakeMirror(const Pose &src, Pose *dst)
 		{ "L Hand", "R Hand" }, { "L Finger", "R Finger" },
 		{ "Bip01 L Clavicle", "Bip01 R Clavicle" },
 	};
-	for(size_t p = 0; p < sizeof(Pairs)/sizeof(Pairs[0]); p++){
-		int l = -1, r = -1;
-		for(int b = 0; b < NumBones; b++){
-			if(strcmp(BoneNames[b], Pairs[p].left) == 0)
-				l = b;
-			if(strcmp(BoneNames[b], Pairs[p].right) == 0)
-				r = b;
-		}
+	for(int p = 0; p < CountOf(Pairs); p++){
+		int l = FindBone(BoneNames, NumBones, Pairs[p].left);
+		int r = FindBone(BoneNames, NumBones, Pairs[p].right);
 		if(l >= 0 && r >= 0){
 			dst->rot[r] = src.rot[l];
 			dst->rot[l] = src.rot[r];
@@ -360,7 +293,7 @@ struct Build {
 static Hierarchy
 MakeHierarchy(const Block &ped, const char *name, const Build &build)
 {
-	int index = FindAnimation(ped, BaseAnim);
+	int index = FindHierarchy(ped, BaseAnim);
 	const Hierarchy &source = ped.hierarchies[index];
 
 	Hierarchy hier;
@@ -368,10 +301,11 @@ MakeHierarchy(const Block &ped, const char *name, const Build &build)
 	hier.reserved = source.reserved;
 
 	for(int b = 0; b < NumBones; b++){
-		const Sequence *seq = FindSequence(source, BoneNames[b]);
-		if(seq == 0)
+		int s = FindSequence(source, BoneNames[b]);
+		if(s < 0)
 			continue;
-		Sequence out = *seq;
+		const Sequence &seq = source.sequences[s];
+		Sequence out = seq;
 		out.keys.clear();
 		if(build.rot[b].empty())
 			continue;	// a bone the set does not key: no frames, no chunk
@@ -379,11 +313,7 @@ MakeHierarchy(const Block &ped, const char *name, const Build &build)
 		for(size_t k = 0; k < build.rot[b].size(); k++){
 			Key key;
 			memset(&key, 0, sizeof(key));
-			const Quat &q = build.rot[b][k];
-			key.rotation[0] = q.x;
-			key.rotation[1] = q.y;
-			key.rotation[2] = q.z;
-			key.rotation[3] = q.w;
+			SetKeyRotation(&key, build.rot[b][k]);
 			key.time = build.root[k].time;
 			if(b == 0){
 				key.translation[0] = build.root[k].trans[0];
@@ -392,7 +322,7 @@ MakeHierarchy(const Block &ped, const char *name, const Build &build)
 			}
 			keys.push_back(key);
 		}
-		out.SetTagged(seq->EngineBoneTag());
+		out.SetTagged(seq.EngineBoneTag());
 		out.SetKeys(b == 0 ? ifp::KEYS_KRT0 : ifp::KEYS_KR00, keys);
 		hier.sequences.push_back(out);
 	}
@@ -455,11 +385,11 @@ BuildCrawl(const Crawl &crawl, const Block &ped, Hierarchy *out)
 			// The body sways: the spine bends a little and the hips carry
 			// the roll into a sideways crawl.
 			if(strcmp(name, "Spine") == 0)
-				q = QuatMul(q, AxisAngle(0, 0, 1, -0.6f*sway));
+				q = QuatMultiply(q, AxisAngle(0, 0, 1, -0.6f*sway));
 			else if(strcmp(name, "Spine1") == 0)
-				q = QuatMul(q, AxisAngle(0, 0, 1, -0.4f*sway));
+				q = QuatMultiply(q, AxisAngle(0, 0, 1, -0.4f*sway));
 			else if(strcmp(name, "Pelvis") == 0)
-				q = QuatMul(q, AxisAngle(1, 0, 0, -crawl.leanDeg));
+				q = QuatMultiply(q, AxisAngle(1, 0, 0, -crawl.leanDeg));
 			build.rot[b][k] = q;
 		}
 
@@ -503,9 +433,9 @@ BuildAim(const AimPose &aim, const Block &ped, Hierarchy *out)
 			// A negative bend about the bone's own lateral axis lifts the
 			// chest; the twist is about the body's long axis.
 			if(lift != 0.0f)
-				q = QuatMul(q, AxisAngle(0, 0, 1, -lift));
+				q = QuatMultiply(q, AxisAngle(0, 0, 1, -lift));
 			if(twist != 0.0f)
-				q = QuatMul(q, AxisAngle(1, 0, 0, twist));
+				q = QuatMultiply(q, AxisAngle(1, 0, 0, twist));
 			build.rot[b][k] = q;
 		}
 		build.root[k].trans[0] = BasePose.rootTrans[0];
@@ -534,11 +464,11 @@ BuildPitched(const char *name, float pitchDeg, float liftDeg, const Block &ped, 
 			if(strcmp(bone, "Root") == 0)
 				// The root's own lateral axis: a rotation about it pitches
 				// the body (the head down for a positive angle).
-				q = QuatMul(q, AxisAngle(0, 1, 0, pitchDeg));
+				q = QuatMultiply(q, AxisAngle(0, 1, 0, pitchDeg));
 			else if(strcmp(bone, "Spine1") == 0)
-				q = QuatMul(q, AxisAngle(0, 0, 1, -liftDeg*0.5f));
+				q = QuatMultiply(q, AxisAngle(0, 0, 1, -liftDeg*0.5f));
 			else if(strcmp(bone, "Neck") == 0)
-				q = QuatMul(q, AxisAngle(0, 0, 1, -liftDeg*0.5f));
+				q = QuatMultiply(q, AxisAngle(0, 0, 1, -liftDeg*0.5f));
 			build.rot[b][k] = q;
 		}
 		build.root[k].trans[0] = BasePose.rootTrans[0];
@@ -568,9 +498,9 @@ BuildIdle(const Block &ped, Hierarchy *out)
 			const char *name = BoneNames[b];
 			Quat q = build.rot[b][k];
 			if(strcmp(name, "Spine") == 0)
-				q = QuatMul(q, AxisAngle(0, 0, 1, -breath));
+				q = QuatMultiply(q, AxisAngle(0, 0, 1, -breath));
 			else if(strcmp(name, "Neck") == 0)
-				q = QuatMul(q, AxisAngle(0, 0, 1, -0.5f*breath));
+				q = QuatMultiply(q, AxisAngle(0, 0, 1, -0.5f*breath));
 			build.rot[b][k] = q;
 		}
 		build.root[k].trans[0] = BasePose.rootTrans[0];
@@ -633,7 +563,7 @@ PrintSets(const Block &block)
 		slots[4] = "crawl_start";
 		printf("  %-8s", MovementSets[s].name);
 		for(int i = 0; i < 5; i++){
-			int index = FindAnimation(block, slots[i]);
+			int index = FindHierarchy(block, slots[i]);
 			if(index < 0){
 				printf(" [%s MISSING]", slots[i]);
 				continue;

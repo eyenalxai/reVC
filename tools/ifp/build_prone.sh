@@ -16,6 +16,7 @@ OUT="${2:-$ROOT/gamefiles/anim/prone.ifp}"
 mkdir -p "$ROOT/build"
 c++ -std=c++17 -O2 -g -Wall -Wextra -o "$ROOT/build/prone" \
 	"$ROOT/tools/ifp/prone.cpp" \
+	"$ROOT/tools/ifp/pose.cpp" \
 	"$ROOT/tools/ifp/file.cpp" \
 	"$ROOT/tools/ifp/view.cpp" \
 	"$ROOT/tools/ifp/check.cpp" \

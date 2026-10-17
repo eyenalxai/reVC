@@ -16,6 +16,7 @@ mkdir -p "$BUILD"
 c++ -std=c++17 -O2 -g -Wall -Wextra -o "$BUILD/ifp" \
 	"$ROOT/tools/ifp/file.cpp" \
 	"$ROOT/tools/ifp/view.cpp" \
+	"$ROOT/tools/ifp/pose.cpp" \
 	"$ROOT/tools/ifp/check.cpp" \
 	"$ROOT/tools/ifp/crouch.cpp" \
 	"$ROOT/tools/ifp/dump.cpp" \

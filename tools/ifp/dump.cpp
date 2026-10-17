@@ -38,7 +38,7 @@ static const struct { int tag; const char *name; } BoneTags[] = {
 static const char *
 BoneTagName(int tag)
 {
-	for(size_t i = 0; i < sizeof(BoneTags)/sizeof(BoneTags[0]); i++)
+	for(int i = 0; i < CountOf(BoneTags); i++)
 		if(BoneTags[i].tag == tag)
 			return BoneTags[i].name;
 	return 0;
@@ -119,15 +119,6 @@ DumpBlock(const Block &block, std::vector<std::string> *only, bool withKeys, std
 	else
 		out << Format("block \"%s\": %d of %d animations shown, %ld sequences, %ld keys\n",
 			block.name.c_str(), hierarchies, (int)block.hierarchies.size(), sequences, keys);
-}
-
-int
-FindHierarchy(const Block &block, const std::string &name)
-{
-	for(size_t i = 0; i < block.hierarchies.size(); i++)
-		if(block.hierarchies[i].name == name)
-			return (int)i;
-	return -1;
 }
 
 } // namespace ifp
