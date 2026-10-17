@@ -7,11 +7,14 @@
  * the parked target and the fill rate (VICE-123). The fill burst of the traffic
  * lives in FillBurst.h (VICE-126); the near bubble of the spawns and the culls
  * lives in NearBubble.h (VICE-127); the far traffic layer lives in
- * FarTraffic.h (VICE-128). */
+ * FarTraffic.h (VICE-128). The spawn service (VICE-150) lives in
+ * SpawnService.h: the planner, the two creation kinds and the primitive's
+ * decisions; CarCtrl.cpp is its ambient requester. */
 #include "PopulationBudget.h"
 #include "FillBurst.h"
 #include "NearBubble.h"
 #include "FarTraffic.h"
+#include "SpawnService.h"
 
 #define GAME_SPEED_TO_METERS_PER_SECOND 50.0f
 #define METERS_PER_SECOND_TO_GAME_SPEED (1.0f / GAME_SPEED_TO_METERS_PER_SECOND)
@@ -82,7 +85,14 @@ public:
 	static void GenerateOneRandomCar(void);
 	static void ArmFillBurst(bool withParkedCars);
 	static void SpendFillBurstFrame(void);
-	static bool CreateCarFromPlacement(const CCarCreationPlacement& placement, int carClass, int carModel, const CVector& vecTargetPos, const CVector2D& vecPlayerSpeed, bool testForCollision, bool bTopDownCamera, bool bFarTraffic = false, CVehicle **ppCreated = nil);
+	/* The creation primitive (VICE-150): the route and lane state, the
+	 * ground and the water, the physics and the status, the occupants with
+	 * the caps and reserves, the final validation and the counters. The
+	 * dice and the camera decisions are gone (the planner owns them); the
+	 * placement carries the planned site (or a raw collector placement, the
+	 * far layer's own until its migration) and the tier carries the far
+	 * layer's birth-cull skip. The return is the refusal (SPAWN_REFUSAL_*). */
+	static ESpawnRefusal CreateCarFromPlacement(const SSpawnPlacement& placement, int carClass, int carModel, const CVector& vecTargetPos, const CVector2D& vecPlayerSpeed, bool testForCollision, ESpawnTier tier = SPAWN_TIER_NEAR, CVehicle **ppCreated = nil);
 	static void GenerateEmergencyServicesCar(void);
 	static int32 ChooseModel(CZoneInfo*, int*);
 	static int32 ChoosePoliceCarModel(void);
@@ -149,10 +159,14 @@ public:
 
 	/* The near bubble (VICE-127): the gates of the spawns and the culls, and
 	 * the counters the acceptance reads (NearBubble.h, NearBubble.cpp). The
-	 * frame begins them once, from GenerateRandomCars. `rayAllowed` false (the
-	 * far layer's option, VICE-128) refuses the two arms that would confirm
-	 * with a line-of-sight ray instead of spending one. */
+	 * frame begins them once, from GenerateRandomCars. The spawn service
+	 * (VICE-150) is the only caller of these: its ladder API forwards here,
+	 * so no spawn decision outside SpawnService.cpp asks the gates. */
 	static void NearBubbleBeginFrame(void);
+	/* The ladder's candidate for a position (the planner's cheap fact).
+	 * `occluded` is the trusted hint; the rank derives the arm from the
+	 * candidate and never spends a ray. */
+	static void NearBubbleCandidateFor(const CVector &pos, const CVector &playerCentre, float radius, SNearBubbleCandidate *pOut);
 	static bool NearBubbleAllowsCreation(const CVector &pos, const CVector &playerCentre, float radius, bool rayAllowed);
 	static bool NearBubbleAllowsRemoval(CVehicle *pVehicle, const CVector &playerCentre, float ringThreshold, bool rayAllowed = true);
 	static void NearBubbleCountCreation(const CVector &pos, float radius);

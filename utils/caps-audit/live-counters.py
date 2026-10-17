@@ -264,6 +264,67 @@ FAR_TRAFFIC = [
     ("far: refused poses (must be 0)", "_ZN11CFarTraffic26ms_nFarTrafficRefusedPosesE", "I"),
 ]
 
+# The spawn service (VICE-150): the one SSpawnServiceTelemetry instance the
+# engine fills. The symbol is the struct; the rows read its fields at the
+# offsets pinned by the static_asserts in SpawnService.cpp, so a field move
+# breaks the build before it can misread a live row. The arrays are in the
+# purpose / kind / reason enumeration order.
+#
+# The requests are the service's intake, by purpose (ambient, parked,
+# responder, police, mission, scenario, special, debug) and by kind (road-site,
+# explicit). The refusals are every refusal event by reason (no site,
+# occupancy, visibility, zone, readiness, budget, pool, reachability): a
+# request's own gate, a candidate the plan dropped, or an attempt the
+# primitive refused - refusals after planning are counted, not hidden. The
+# created and removed rows are the placements by purpose; the covered-fill row
+# is the fade's own creations. The readiness rows are the requests deferred
+# for models and the milliseconds they spent waiting. The plan rows are the
+# planner's cost: the calls, the candidates examined, the placements returned
+# and the total microseconds (us/call is the column to read against a frame's
+# budget; the measured harness rate is about 5 us a call over 197 candidates).
+# The conservation rows are the director's check (the cell target sum against
+# the global target) and its breach row; the defect rows are the primitive's
+# ground casts that found nothing, the air offsets over its 7 m guard and the
+# water casts that failed. The rows are cumulative since CCarCtrl's Init or
+# ReInit (the service restarts its counters with the world).
+SPAWN_SERVICE_STRUCT = "_ZN13CSpawnService12ms_TelemetryE"
+SPAWN_SERVICE = [
+    ("spawn: requests ambient",         0,                          "I"),
+    ("spawn: requests parked",          4,                          "I"),
+    ("spawn: requests responder",       8,                          "I"),
+    ("spawn: requests police",          12,                         "I"),
+    ("spawn: requests mission",         16,                         "I"),
+    ("spawn: requests scenario",        20,                         "I"),
+    ("spawn: requests special",         24,                         "I"),
+    ("spawn: requests debug",           28,                         "I"),
+    ("spawn: requests road-site",       32,                         "I"),
+    ("spawn: requests explicit",        36,                         "I"),
+    ("spawn: refused no site",          40 + 1 * 4,                 "I"),
+    ("spawn: refused occupancy",        40 + 2 * 4,                 "I"),
+    ("spawn: refused visibility",       40 + 3 * 4,                 "I"),
+    ("spawn: refused zone",             40 + 4 * 4,                 "I"),
+    ("spawn: refused readiness",        40 + 5 * 4,                 "I"),
+    ("spawn: refused budget",           40 + 6 * 4,                 "I"),
+    ("spawn: refused pool",             40 + 7 * 4,                 "I"),
+    ("spawn: refused reachability",     40 + 8 * 4,                 "I"),
+    ("spawn: created ambient",          76,                         "I"),
+    ("spawn: created mission",          76 + 4 * 4,                 "I"),
+    ("spawn: removed ambient",          108,                        "I"),
+    ("spawn: covered-fill creations",   140,                        "I"),
+    ("spawn: readiness waits",          144,                        "I"),
+    ("spawn: readiness wait ms",        148,                        "I"),
+    ("spawn: plan calls",               184,                        "I"),
+    ("spawn: plan candidates",          188,                        "I"),
+    ("spawn: plan placements",          192,                        "I"),
+    ("spawn: plan micros total",        200,                        "Q"),
+    ("spawn: conservation cell sum",    208,                        "I"),
+    ("spawn: conservation global",      212,                        "I"),
+    ("spawn: conservation breaches",    216,                        "I"),
+    ("spawn: ground rejections",        220,                        "I"),
+    ("spawn: air offset rejections",    224,                        "I"),
+    ("spawn: water rejections",         228,                        "I"),
+]
+
 CONFIG = "src/core/config.h"
 
 
@@ -392,6 +453,20 @@ def main():
             note = f"  {enum_name} = {psize} in config.h"
         print(f"  {label:44s} used {used:6d} / {psize:6d}  free {psize - used}{note}")
 
+    # The spawn service (VICE-150): the one telemetry struct's fields, at the
+    # offsets SpawnService.cpp pins. The counters restart with CCarCtrl's Init
+    # and ReInit, so the rows are the session's own (a save load starts them
+    # over with the world it restores).
+    print()
+    spawn_base = sym.get(SPAWN_SERVICE_STRUCT)
+    if spawn_base is None:
+        print("  the spawn service: symbol missing")
+    else:
+        for label, offset, fmt in SPAWN_SERVICE:
+            v = read(spawn_base + offset, fmt)
+            values["spawn " + label.split(': ')[1]] = v
+            print(f"  {label:44s} {v}")
+
     # The ring scale: ApplyPopulationCaps gives min(45 x the car density x
     # scale^2, 2400), so before the top binds, scale = sqrt(budget / (45 x the
     # density). The traffic uses the same scale, so one derivation covers both.
@@ -404,6 +479,24 @@ def main():
         print(f"  the ring scale: about {(car_budget / (45.0 * density)) ** 0.5:.3f}")
     else:
         print("  the ring scale: not derivable (a symbol is missing)")
+
+    # The spawn service's intake, as one line: what the service was asked for,
+    # what it refused (by reason) and what it placed. The plan rows are the
+    # cost: the last column is the average microseconds a plan call spent.
+    spawn_requests = values.get("spawn requests ambient")
+    spawn_created = values.get("spawn created ambient")
+    spawn_calls = values.get("spawn plan calls")
+    if spawn_requests is None or spawn_created is None or spawn_calls is None:
+        print("  the spawn service: a symbol is missing (the intake cannot be read)")
+    else:
+        refusals = sum(values.get("spawn refused " + r, 0) for r in (
+            "no site", "occupancy", "visibility", "zone", "readiness",
+            "budget", "pool", "reachability"))
+        per_call = (values.get("spawn plan micros total", 0) / spawn_calls) if spawn_calls else 0.0
+        print(f"  the spawn service: ambient requests {spawn_requests}, "
+              f"created {spawn_created}, refusals {refusals}, "
+              f"plan {per_call:.1f} us a call over "
+              f"{values.get('spawn plan candidates', 0)} candidates")
 
     # The acceptance of the near bubble (VICE-127), as one line. The two
     # catchable-zone counters read the zone of VICE-146: in the frustum nearer

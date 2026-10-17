@@ -132,21 +132,29 @@ NearBubbleOccluderSetIsCurrent(void)
 	return true;
 }
 
-/* One candidate of this frame, from the position and the live view. */
+/* One candidate of this frame, from the position and the live view. The
+ * service's planner (SpawnService.cpp) asks the same function for a site's
+ * midpoint: the rank reads the arm from it without spending a ray. */
+void
+CCarCtrl::NearBubbleCandidateFor(const CVector &pos, const CVector &playerCentre, float radius, SNearBubbleCandidate *pOut)
+{
+	pOut->distToPlayer = (pos - playerCentre).Magnitude2D();
+	pOut->distToCamera = (pos - TheCamera.GetPosition()).Magnitude();
+	pOut->visibleRange = CurrentTrafficRings().visibleRange;
+	pOut->onScreenSpawnMin = CurrentTrafficRings().carOnScreenSpawnMin;
+	pOut->inFrustum = TheCamera.IsSphereVisible(pos, radius);
+	pOut->inFrustumMargin = TheCamera.IsSphereVisible(pos, radius + NEAR_BUBBLE_SOFT_MARGIN);
+	pOut->occluded = NearBubbleOccluderSetIsCurrent() && COcclusion::IsPositionOccluded(pos, radius);
+	pOut->fadeHides = FillBurstIsHidden();
+	pOut->bypassView = NearBubbleViewIsBypassed();
+}
+
 static SNearBubbleCandidate
 NearBubbleCandidateAt(const CVector &pos, const CVector &playerCentre, float radius)
 {
 	SNearBubbleCandidate c;
 
-	c.distToPlayer = (pos - playerCentre).Magnitude2D();
-	c.distToCamera = (pos - TheCamera.GetPosition()).Magnitude();
-	c.visibleRange = CurrentTrafficRings().visibleRange;
-	c.onScreenSpawnMin = CurrentTrafficRings().carOnScreenSpawnMin;
-	c.inFrustum = TheCamera.IsSphereVisible(pos, radius);
-	c.inFrustumMargin = TheCamera.IsSphereVisible(pos, radius + NEAR_BUBBLE_SOFT_MARGIN);
-	c.occluded = NearBubbleOccluderSetIsCurrent() && COcclusion::IsPositionOccluded(pos, radius);
-	c.fadeHides = FillBurstIsHidden();
-	c.bypassView = NearBubbleViewIsBypassed();
+	CCarCtrl::NearBubbleCandidateFor(pos, playerCentre, radius, &c);
 	return c;
 }
 

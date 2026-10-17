@@ -143,8 +143,9 @@ CCarCtrl::GenerateRandomCars()
 {
 	/* The near bubble begins its frame here, before any gate can run: the
 	 * line-of-sight budget of the frame and the target of the fill
-	 * (VICE-127). The cutscene gate below must not leave a stale frame. */
-	NearBubbleBeginFrame();
+	 * (VICE-127), through the service's API (VICE-150). The cutscene gate
+	 * below must not leave a stale frame. */
+	CSpawnService::BeginFrame();
 	/* One table read per frame: the rate that fills the ring follows the ring
 	 * scale, exactly as the count target does. */
 	const STrafficRings rings = CurrentTrafficRings();
@@ -290,8 +291,6 @@ CCarCtrl::SpendFillBurstFrame(void)
 void
 CCarCtrl::GenerateOneRandomCar()
 {
-	static int32 unk = 0;
-	bool bTopDownCamera = false;
 	CPlayerInfo* pPlayer = &CWorld::Players[CWorld::PlayerInFocus];
 	CVector vecTargetPos = FindPlayerCentreOfWorld(CWorld::PlayerInFocus);
 	CVector2D vecPlayerSpeed = FindPlayerSpeed();
@@ -299,16 +298,13 @@ CCarCtrl::GenerateOneRandomCar()
 	CTheZones::GetZoneInfoForTimeOfDay(&vecTargetPos, &zone);
 	float trafficDensity = pPlayer->m_fRoadDensity * zone.carDensity;
 	pPlayer->m_nTrafficMultiplier = trafficDensity;
-	if (NumRandomCars >= GetRandomCarTarget())
-		return;
 	/* One table read per call: the spawn rings, the birth culls and the
 	 * camera rule of this call all come from it. */
 	const STrafficRings rings = CurrentTrafficRings();
-	/* The whole car budget, the parked cars included: a random car waits for a
-	 * parked car to be removed, and the parked cars wait for a random car (the
-	 * generator checks the same count, CarGen.cpp). */
-	if (NumCarsInUse() >= MaxNumberOfCarsInUse)
-		return;
+	/* The budget gates of this call moved into the service (VICE-150): one
+	 * request, one gate (the car target, the car budget, the ped pool's
+	 * reserve). What stays here is the requester's policy: the cops, the
+	 * zone's model dice and the ring the call aims at. */
 	CWanted* pWanted = pPlayer->m_pPed->m_pWanted;
 	int carClass;
 	int carModel;
@@ -344,7 +340,6 @@ CCarCtrl::GenerateOneRandomCar()
 		/* Spawn essentially anywhere. */
 		frontX = frontY = 0.707f; /* 45 degrees */
 		angleLimit = -1.0f;
-		bTopDownCamera = true;
 		invertAngleLimitTest = true;
 		preferredDistance = rings.carSideSpawn + 15.0f;
 		/* BUG: testForCollision not initialized in original game. */
@@ -451,81 +446,82 @@ CCarCtrl::GenerateOneRandomCar()
 			break;
 		}
 	}
-	CCarCreationPlacement placements[CAR_SPAWN_ATTEMPTS];
-	int32 numPlacements = ThePaths.CollectCarCreationCoors(vecTargetPos.x, vecTargetPos.y, frontX, frontY,
-		preferredDistance, angleLimit, invertAngleLimitTest, carClass == COPS && pWanted->GetWantedLevel() >= 1,
-		placements, CAR_SPAWN_ATTEMPTS);
-	if (numPlacements == 0)
-		return;
-	/* The boat model is chosen at most once per call, so a retry never re-rolls it. */
-	int32 boatModel = -1;
-	bool bBoatModelChosen = false;
-	for (int32 i = 0; i < numPlacements; i++) {
-		const CCarCreationPlacement& placement = placements[i];
-		int placementClass = carClass;
-		int placementModel = carModel;
-		if (ThePaths.m_pathNodes[placement.node1].bWaterPath) {
-			if (carClass == COPS) {
-				placementClass = COPS_BOAT;
-				placementModel = MI_PREDATOR;
-				if (!CStreaming::HasModelLoaded(MI_PREDATOR)) {
-					CStreaming::RequestModel(MI_PREDATOR, STREAMFLAGS_DEPENDENCY);
-					return;
-				}
-			}
-			else {
-				if (!bBoatModelChosen) {
-					int j;
-					for (j = 10; j > 0 && (boatModel == -1 || !CStreaming::HasModelLoaded(boatModel)); j--)
-						boatModel = ChooseBoatModel(ChooseBoatRating(&zone));
-					if (j == 0)
-						return;
-					bBoatModelChosen = true;
-				}
-				placementModel = boatModel;
-			}
-		}
-		/* A rejection that depends on this placement falls through to the next
-		 * one; at most one vehicle is created per call. */
-		if (CreateCarFromPlacement(placement, placementClass, placementModel, vecTargetPos, vecPlayerSpeed, testForCollision, bTopDownCamera))
-			return;
-	}
+	/* The request (VICE-150): the service plans the site - the index's
+	 * candidates, the live zone, the occupancy, the visibility ladder and
+	 * the reachability - and the primitive creates the car there. The
+	 * class and the model above are the requester's policy; the water
+	 * fallback (the boat model, the cop boat) is the service's per-site
+	 * resolution, kept from this call. */
+	SSpawnCarRequest request;
+	request.purpose = SPAWN_PURPOSE_AMBIENT;
+	request.force = false;
+	request.allowBoats = true;
+	request.requireReach = true;
+	request.carClass = carClass;
+	request.carModel = carModel;
+	request.targetX = vecTargetPos.x;
+	request.targetY = vecTargetPos.y;
+	request.targetZ = vecTargetPos.z;
+	request.playerSpeedX = vecPlayerSpeed.x;
+	request.playerSpeedY = vecPlayerSpeed.y;
+	request.testForCollision = testForCollision;
+	request.spawnDist = preferredDistance;
+	request.dirX = frontX;
+	request.dirY = frontY;
+	request.angleLimit = angleLimit;
+	request.forward = invertAngleLimitTest;
+	request.allowDisabled = carClass == COPS && pWanted->GetWantedLevel() >= 1;
+	CSpawnService::RequestCar(request, nil);
 }
 
-/* A car of the traffic spawner, or - with `bFarTraffic` - a car of the far
- * traffic layer (VICE-128): the same placement, the same model choice and the
- * same path setup, but no driver, no birth cull of the near ring, no accident
- * roll, and the car leaves in the far state (static, no collision, no audio)
- * for the layer to move. `ppCreated` (optional) receives the car. */
-bool
-CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int carClass, int carModel, const CVector& vecTargetPos, const CVector2D& vecPlayerSpeed, bool testForCollision, bool bTopDownCamera, bool bFarTraffic, CVehicle **ppCreated)
+/* The creation primitive (VICE-150). A car of the traffic spawner, of the
+ * spawn service's road-site plan, or - with SPAWN_TIER_FAR - a car of the far
+ * traffic layer (VICE-128). The keep list of the design: the route and the
+ * lane state, the ground and the water height, the physics and the status,
+ * the occupants with the caps and reserves, the final validation and the
+ * counters. The strips: the rarity dice (the planner's weight replaced it)
+ * and the camera decisions (the ladder above owns visibility; the top-down
+ * flag is gone). The tier passes in: the far layer's cars skip the near
+ * ring's birth cull, leave in the far state and skip the occupants. The
+ * refusal is one of ESpawnRefusal, which the service counts by reason;
+ * `ppCreated` (optional) receives the car. The driver contract: SetUpDriver
+ * needs RANDOM_VEHICLE, so the near tier creates with it (the far promotion
+ * sets the tag before its own call). */
+ESpawnRefusal
+CCarCtrl::CreateCarFromPlacement(const SSpawnPlacement& placement, int carClass, int carModel, const CVector& vecTargetPos, const CVector2D& vecPlayerSpeed, bool testForCollision, ESpawnTier tier, CVehicle **ppCreated)
 {
+	bool bFarTraffic = tier == SPAWN_TIER_FAR;
 	CPathNode* pCurNode = &ThePaths.m_pathNodes[placement.node1];
 	CPathNode* pNextNode = &ThePaths.m_pathNodes[placement.node2];
 	bool bBoatGenerated = pCurNode->bWaterPath;
 	/* The birth culls below read the table of this call, exactly like the call
 	 * that asked for the placement. */
 	const STrafficRings rings = CurrentTrafficRings();
-	if ((CGeneral::GetRandomNumber() & 0xF) > Min(pCurNode->spawnRate, pNextNode->spawnRate))
-		return false;
 	if (bBoatGenerated && (pCurNode->bOnlySmallBoats || pNextNode->bOnlySmallBoats) && BoatWithTallMast(carModel))
-		return false;
+		return SPAWN_REFUSAL_NO_SITE;
 	if (pCurNode->numLinks == 1)
 		/* Do not create vehicle if there is nowhere to go. */
-		return false;
+		return SPAWN_REFUSAL_NO_SITE;
 	int16 idInNode = 0;
-
-	while (idInNode < pCurNode->numLinks &&
-		ThePaths.ConnectedNode(idInNode + pCurNode->firstLink) != placement.node2)
-		idInNode++;
-	int16 connectionId = ThePaths.m_carPathConnections[idInNode + pCurNode->firstLink];
+	int16 connectionId;
+	/* A planned site carries the directed connection itself (the site
+	 * index's own key, VICE-148); a raw placement (the far layer's
+	 * collector) resolves it by its node-pair lookup. */
+	if (placement.connection >= 0) {
+		connectionId = placement.connection;
+	} else {
+		while (idInNode < pCurNode->numLinks &&
+			ThePaths.ConnectedNode(idInNode + pCurNode->firstLink) != placement.node2)
+			idInNode++;
+		connectionId = ThePaths.m_carPathConnections[idInNode + pCurNode->firstLink];
+	}
 	CCarPathLink* pPathLink = &ThePaths.m_carPathLinks[connectionId];
 	int16 lanesOnCurrentRoad = pPathLink->pathNodeIndex == placement.node2 ? pPathLink->numLeftLanes : pPathLink->numRightLanes;
 	if (lanesOnCurrentRoad == 0)
 		/* Not spawning vehicle if road is one way and intended direction is opposide to that way. */
-		return false;
-	int16 lane = CGeneral::GetRandomNumber() % lanesOnCurrentRoad;
-	int16 nextDirection = (placement.node1 >= placement.node2) ? 1 : -1;
+		return SPAWN_REFUSAL_NO_SITE;
+	int16 lane = SpawnLaneFromDraw(lanesOnCurrentRoad, CGeneral::GetRandomNumber());
+	int16 nextDirection = SpawnTravelDirection(placement.node1, placement.node2);
 	float nextLinkForwardX = nextDirection * pPathLink->GetDirX();
 	float nextLinkForwardY = nextDirection * pPathLink->GetDirY();
 	/* Test the occupancy of the lane the vehicle is created in, not of the road
@@ -534,20 +530,16 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 	 * used to reject about half of the placements. */
 	float laneOffset = (lane + pPathLink->OneWayLaneOffset()) * LANE_WIDTH;
 	CVector lanePosition(
-		placement.position.x + laneOffset * nextLinkForwardY,
-		placement.position.y - laneOffset * nextLinkForwardX,
-		placement.position.z);
+		placement.x + laneOffset * nextLinkForwardY,
+		placement.y - laneOffset * nextLinkForwardX,
+		placement.z);
 	int16 colliding;
 	CWorld::FindObjectsKindaColliding(lanePosition, bBoatGenerated ? 40.0f : 10.0f, true, &colliding, 2, nil, false, true, false, false, false);
 	if (colliding)
 		/* If something is already present in spawn position, try the next placement. */
-		return false;
-	if (!bBoatGenerated && !bFarTraffic && !ThePaths.TestCoorsCloseness(vecTargetPos, false, placement.position))
-		/* Testing if spawn position can reach target position via valid path.
-		 * The far layer's cars are placed out to the fog, where the route to
-		 * the player is long by design (VICE-128); the test is the near
-		 * ring's own reach, so it is asked for the near cars only. */
-		return false;
+		return SPAWN_REFUSAL_OCCUPANCY;
+	/* The reachability of the target is the planner's contract (VICE-150):
+	 * a planned site was already tested, so no path search runs here. */
 	CVehicle* pVehicle;
 	if (CModelInfo::IsBoatModel(carModel))
 		pVehicle = new CBoat(carModel, bFarTraffic ? FAR_TRAFFIC_VEHICLE : RANDOM_VEHICLE);
@@ -608,13 +600,10 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 	CBox* boundingBox = &CModelInfo::GetColModel(pVehicle->GetModelIndex())->boundingBox;
 	float carLength = 1.0f + (boundingBox->max.y - boundingBox->min.y) / 2;
 	float distanceBetweenNodes = (pCurNode->GetPosition() - pNextNode->GetPosition()).Magnitude2D();
-	float positionBetweenNodes = placement.positionBetweenNodes;
+	float positionBetweenNodes = placement.between;
 	/* If car is so long that it doesn't fit between two car nodes, place it directly in the middle. */
 	/* Otherwise put it at least in a way that full vehicle length fits between two nodes. */
-	if (distanceBetweenNodes / 2 < carLength)
-		positionBetweenNodes = 0.5f;
-	else
-		positionBetweenNodes = Min(1.0f - carLength / distanceBetweenNodes, Max(carLength / distanceBetweenNodes, positionBetweenNodes));
+	positionBetweenNodes = SpawnBetweenNodesClamp(positionBetweenNodes, carLength, distanceBetweenNodes);
 	pVehicle->AutoPilot.m_nNextDirection = nextDirection;
 	int16 nextConnection = pVehicle->AutoPilot.m_nNextPathNodeInfo;
 	int16 newLink;
@@ -749,8 +738,9 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 	CEntity* pEntity;
 	if (bBoatGenerated) {
 		if (!CWaterLevel::GetWaterLevel(finalPosition, &groundZ, true)) {
+			CSpawnService::NoteWaterRejection();
 			delete pVehicle;
-			return false;
+			return SPAWN_REFUSAL_NO_SITE;
 		}
 	}
 	else {
@@ -761,10 +751,18 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 				groundZ = colPoint.point.z;
 		}
 	}
-	if (groundZ == INFINITE_Z || ABS(groundZ - finalPosition.z) > 7.0f) {
-		/* Failed to find ground or too far from expected position. */
+	if (groundZ == INFINITE_Z) {
+		/* Failed to find ground under the placement: the defect row. */
+		CSpawnService::NoteGroundRejection();
 		delete pVehicle;
-		return false;
+		return SPAWN_REFUSAL_NO_SITE;
+	}
+	if (ABS(groundZ - finalPosition.z) > 7.0f) {
+		/* The ground found is too far from the expected position: a car
+		 * placed here would sit in the air. The defect row (VICE-150). */
+		CSpawnService::NoteAirOffsetRejection();
+		delete pVehicle;
+		return SPAWN_REFUSAL_NO_SITE;
 	}
 	if (CModelInfo::IsBoatModel(carModel)) {
 		finalPosition.z = groundZ;
@@ -804,37 +802,38 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 			if ((vecTargetPos - pVehicle->GetPosition()).Magnitude2D() > rings.carDespawn * (pVehicle->bExtendedRange ? rings.extendedRangeFactor : 1.0f)) {
 				/* Too far away cars that are not visible aren't needed. */
 				delete pVehicle;
-				return false;
+				return SPAWN_REFUSAL_VISIBILITY;
 			}
 		}else{
 			if ((vecTargetPos - pVehicle->GetPosition()).Magnitude2D() > rings.carDespawn * (pVehicle->bExtendedRange ? rings.extendedRangeFactor : 1.0f) ||
 				(vecTargetPos - pVehicle->GetPosition()).Magnitude2D() < rings.carOnScreenSpawnMin) {
 				delete pVehicle;
-				return false;
+				return SPAWN_REFUSAL_VISIBILITY;
 			}
-			if ((TheCamera.GetPosition() - pVehicle->GetPosition()).Magnitude2D() < rings.carCameraMin || bTopDownCamera) {
+			if ((TheCamera.GetPosition() - pVehicle->GetPosition()).Magnitude2D() < rings.carCameraMin) {
 				delete pVehicle;
-				return false;
+				return SPAWN_REFUSAL_VISIBILITY;
 			}
 			if (pVehicle->GetModelIndex() == MI_MARQUIS) { // so marquis can only spawn if player doesn't see it?
 				delete pVehicle;
-				return false;
+				return SPAWN_REFUSAL_VISIBILITY;
 			}
 		}
 	}
-	/* The near bubble (VICE-127): a car may only appear where the player
-	 * cannot see it. The gate is asked with the final position, after the
-	 * ground cast in the birth cull above, so the answer is about the spot
-	 * the car really takes: outside the bubble, and hidden now (occluded,
-	 * beyond the fade, or behind a blocked line of sight), or a frame the
-	 * fade covers (the fill burst). A refusal is not an error: the placement
-	 * loop of GenerateOneRandomCar tries its next candidate.
+	/* The near bubble (VICE-127), behind the service's API (VICE-150): a car
+	 * may only appear where the player cannot see it. The gate is asked with
+	 * the final position, after the ground cast in the birth cull above, so
+	 * the answer is about the spot the car really takes: outside the bubble,
+	 * and hidden now (occluded, beyond the fade, or behind a blocked line of
+	 * sight), or a frame the fade covers (the fill burst). A refusal is not
+	 * an error: the plan's next site is tried, and the service counts the
+	 * reason.
 	 * The far layer (VICE-128) asks the same gate with `rayAllowed` false:
 	 * its sites are behind the camera by the margin or beyond the fade, and a
 	 * line-of-sight ray of two kilometres is not the far layer's work. */
-	if (!NearBubbleAllowsCreation(pVehicle->GetPosition(), vecTargetPos, NEAR_BUBBLE_ENTITY_RADIUS, !bFarTraffic)) {
+	if (!CSpawnService::AllowsCreation(pVehicle->GetPosition(), vecTargetPos, NEAR_BUBBLE_ENTITY_RADIUS, !bFarTraffic)) {
 		delete pVehicle;
-		return false;
+		return SPAWN_REFUSAL_VISIBILITY;
 	}
 	/* The fresh-spawn grace: the culls of the frame may not take this car
 	 * before it has lived NEAR_BUBBLE_GRACE_MS. */
@@ -851,13 +850,13 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 		CWorld::FindObjectsKindaColliding(pVehicle->GetPosition(), radiusToTest + 20.0f, true, &colliding, 2, nil, false, true, false, false, false);
 		if (colliding){
 			delete pVehicle;
-			return false;
+			return SPAWN_REFUSAL_OCCUPANCY;
 		}
 	}
 	CWorld::FindObjectsKindaColliding(pVehicle->GetPosition(), radiusToTest, true, &colliding, 2, nil, false, true, false, false, false);
 	if (colliding){
 		delete pVehicle;
-		return false;
+		return SPAWN_REFUSAL_OCCUPANCY;
 	}
 	/* The speed test refuses a spawn that drives away from the player: a near
 	 * car would leave the ring without ever being seen. The far layer's cars
@@ -867,7 +866,7 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 		speedDifferenceWithTarget.x * distanceToTarget.x +
 		speedDifferenceWithTarget.y * distanceToTarget.y >= 0.0f){
 		delete pVehicle;
-		return false;
+		return SPAWN_REFUSAL_VISIBILITY;
 	}
 	pVehicleModel->AvoidSameVehicleColour(&pVehicle->m_currentColour1, &pVehicle->m_currentColour2);
 	CWorld::Add(pVehicle);
@@ -888,7 +887,7 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 	/* The acceptance reads this: the car exists now, and the counter says
 	 * where. The gate above already refused every catchable spot, so this is
 	 * the guard of the paths that bypass it (VICE-127). */
-	NearBubbleCountCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
+	CSpawnService::CountCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 	if (ppCreated)
 		*ppCreated = pVehicle;
 	/* The far car is done here: no occupants, no mad-driver roll, no accident
@@ -896,10 +895,14 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 	 * police bookkeeping. The layer takes it from here, and the promotion
 	 * (CFarTraffic) gives it its driver when the player is near. */
 	if (bFarTraffic)
-		return true;
+		return SPAWN_REFUSAL_NONE;
 	if (carClass == COPS || carClass == COPS_BOAT)
 		CCarAI::AddPoliceCarOccupants(pVehicle);
 	else {
+		/* The driver contract (VICE-150): SetUpDriver needs RANDOM_VEHICLE;
+		 * the near tier creates with it, so the call is legal here and the
+		 * assert pins the contract. */
+		assert(pVehicle->VehicleCreatedBy == RANDOM_VEHICLE);
 		pVehicle->SetUpDriver();
 		int32 passengers = 0;
 		for (int i = 0; i < pVehicle->m_nNumMaxPassengers; i++)
@@ -990,7 +993,7 @@ CCarCtrl::CreateCarFromPlacement(const CCarCreationPlacement& placement, int car
 			}
 		}
 	}
-	return true;
+	return SPAWN_REFUSAL_NONE;
 }
 
 bool
@@ -1227,11 +1230,12 @@ CCarCtrl::RemoveCarsIfThePoolGetsFull(void)
 		return;
 	/* The valve of the pool is the last line behind the budgets: the creation
 	 * paths stop at the pool reserve, so it runs only when something outside
-	 * them filled the pool. The near bubble asks the rule first (a car outside
-	 * the bubble and its reserve, past the grace, hidden); when nothing passes,
-	 * the closest car goes anyway: a full pool would break the whole traffic,
-	 * and NearBubbleCountRemoval records the event. The selection below reads
-	 * the cheap arms itself, so one valve frame asks the gate at most once. */
+	 * them filled the pool. The service's removal gate asks the rule first (a
+	 * car outside the bubble and its reserve, past the grace, hidden); when
+	 * nothing passes, the closest car goes anyway: a full pool would break
+	 * the whole traffic, and the service's CountRemoval records the event.
+	 * The selection below reads the cheap arms itself, so one valve frame
+	 * asks the gate at most once. */
 	CVector vecPlayerPos = FindPlayerCentreOfWorld(CWorld::PlayerInFocus);
 	int i = CPools::GetVehiclePool()->GetSize();
 	float md = 10000000.f;
@@ -1265,19 +1269,22 @@ CCarCtrl::RemoveCarsIfThePoolGetsFull(void)
 			pClosestCandidate = pVehicle;
 		}
 	}
-	if (pClosestCandidate && !NearBubbleAllowsRemoval(pClosestCandidate, vecPlayerPos, 0.0f))
+	if (pClosestCandidate && !CSpawnService::AllowsRemoval(pClosestCandidate, vecPlayerPos, 0.0f))
 		pClosestCandidate = nil;
 	CVehicle* pRemove = pClosestCandidate ? pClosestCandidate : pClosestVehicle;
 	if (pRemove) {
 		if (pClosestCandidate)
-			NearBubbleCountRemoval(pRemove->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, false);
+			CSpawnService::CountRemoval(pRemove->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, false);
 		else
 			/* The fallback: no car passes the rule and the pool is at its
 			 * last slots. The removal is the pool's own line, counted
 			 * apart from the culls the acceptance watches (VICE-127). */
-			NearBubbleCountValveRemoval();
+			CSpawnService::CountValveRemoval();
 		CWorld::Remove(pRemove);
 		delete pRemove;
+		/* The service's own removal ledger (VICE-150): the cull's
+		 * deletions count as the ambient purpose. */
+		CSpawnService::NoteRemoval(SPAWN_PURPOSE_AMBIENT);
 	}
 }
 
@@ -1304,9 +1311,10 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 		if (pVehicle->bFadeOut && CVisibilityPlugins::GetClumpAlpha(pVehicle->GetClump()) == 0){
 			/* The tail of a removal that started hidden: the car is fully
 			 * faded, so the deletion is not an event the player can catch. */
-			NearBubbleCountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, true);
+			CSpawnService::CountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, true);
 			CWorld::Remove(pVehicle);
 			delete pVehicle;
+			CSpawnService::NoteRemoval(SPAWN_PURPOSE_AMBIENT);
 			return;
 		}
 		float distanceToPlayer = (pVehicle->GetPosition() - vecPlayerPos).Magnitude2D();
@@ -1323,13 +1331,14 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 		if (pVehicle->bExtendedRange)
 			threshold *= rings.extendedRangeFactor;
 		if (distanceToPlayer > threshold && !bInsideHideOutGarageAtEntry){
-			/* The near bubble (VICE-127): the threshold is the ring's own
-			 * (already the spawn band plus the reserve), raised by the bubble
-			 * and its reserve; the car must be hidden (off the frustum,
-			 * occluded, or beyond the fade) and past its fresh-spawn grace.
-			 * A car the player can see keeps driving: it fades out only
-			 * where a turn cannot reveal the change. */
-			if (!NearBubbleAllowsRemoval(pVehicle, vecPlayerPos, threshold))
+			/* The near bubble (VICE-127), behind the service's API
+			 * (VICE-150): the threshold is the ring's own (already the
+			 * spawn band plus the reserve), raised by the bubble and its
+			 * reserve; the car must be hidden (off the frustum, occluded,
+			 * or beyond the fade) and past its fresh-spawn grace. A car
+			 * the player can see keeps driving: it fades out only where a
+			 * turn cannot reveal the change. */
+			if (!CSpawnService::AllowsRemoval(pVehicle, vecPlayerPos, threshold))
 				return;
 			if (bOnScreenAtEntry){
 				pVehicle->bFadeOut = true;
@@ -1344,9 +1353,10 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 				 * the cull then deletes as it always did. */
 				if (CFarTraffic::AdoptOnCull(pVehicle, vecPlayerPos))
 					return;
-				NearBubbleCountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, false);
+				CSpawnService::CountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, false);
 				CWorld::Remove(pVehicle);
 				delete pVehicle;
+				CSpawnService::NoteRemoval(SPAWN_PURPOSE_AMBIENT);
 			}
 			return;
 		}
@@ -1362,12 +1372,14 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 		!CTrafficLights::ShouldCarStopForLight(pVehicle, true) &&
 		!CTrafficLights::ShouldCarStopForBridge(pVehicle) &&
 		!bInsideHideOutGarageAtEntry &&
-		/* The near bubble: the jam of a stopped car is cleared outside the
-		 * bubble, hidden, and after the grace (VICE-127). */
-		NearBubbleAllowsRemoval(pVehicle, vecPlayerPos, 22.0f)){
-		NearBubbleCountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, false);
+		/* The near bubble, behind the service's API (VICE-150): the jam of
+		 * a stopped car is cleared outside the bubble, hidden, and after
+		 * the grace (VICE-127). */
+		CSpawnService::AllowsRemoval(pVehicle, vecPlayerPos, 22.0f)){
+		CSpawnService::CountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, false);
 		CWorld::Remove(pVehicle);
 		delete pVehicle;
+		CSpawnService::NoteRemoval(SPAWN_PURPOSE_AMBIENT);
 		return;
 	}
 	if (pVehicle->GetStatus() == STATUS_WRECKED) {
@@ -1377,13 +1389,14 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 				!bOnScreenAtEntry) {
 				if ((pVehicle->GetPosition() - vecPlayerPos).MagnitudeSqr() > SQR(6.5f)) {
 					if (!bInsideHideOutGarageAtEntry &&
-						/* The near bubble: a wreck the player can see (or
-						 * one inside the bubble) stays on the road
-						 * (VICE-127). */
-						NearBubbleAllowsRemoval(pVehicle, vecPlayerPos, 6.5f)) {
-						NearBubbleCountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, false);
+						/* The near bubble, behind the service's API: a wreck
+						 * the player can see (or one inside the bubble)
+						 * stays on the road (VICE-127). */
+						CSpawnService::AllowsRemoval(pVehicle, vecPlayerPos, 6.5f)) {
+						CSpawnService::CountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, false);
 						CWorld::Remove(pVehicle);
 						delete pVehicle;
+						CSpawnService::NoteRemoval(SPAWN_PURPOSE_AMBIENT);
 					}
 				}
 			}
@@ -2435,6 +2448,8 @@ void CCarCtrl::Init(void)
 	ms_nFillBurstEndedBudget = 0;
 	ms_nFillBurstEndedStalls = 0;
 	ms_nFillBurstEndedWindow = 0;
+	/* The service's counters restart with the world (VICE-150). */
+	CSpawnService::ReInit();
 	for (int i = 0; i < MAX_CARS_TO_KEEP; i++)
 		apCarsToKeep[i] = nil;
 	for (int i = 0; i < TOTAL_CUSTOM_CLASSES; i++){
@@ -2471,6 +2486,8 @@ void CCarCtrl::ReInit(void)
 	ms_nFillBurstEndedBudget = 0;
 	ms_nFillBurstEndedStalls = 0;
 	ms_nFillBurstEndedWindow = 0;
+	/* The service's counters restart with the world (VICE-150). */
+	CSpawnService::ReInit();
 	for (int i = 0; i < MAX_CARS_TO_KEEP; i++)
 		apCarsToKeep[i] = nil;
 	for (int i = 0; i < TOTAL_CUSTOM_CLASSES; i++)
@@ -3534,7 +3551,7 @@ bool CCarCtrl::GenerateOneEmergencyServicesCar(uint32 mi, CVector vecPos)
 	 * the ones behind the camera pass. A refusal costs the call (the timer of
 	 * the emergency service asks again in 30 s), which is the same price the
 	 * other rejections of this path pay. */
-	if (!NearBubbleAllowsCreation(pVehicle->GetPosition(), pPlayerPos, NEAR_BUBBLE_ENTITY_RADIUS, true)) {
+	if (!CSpawnService::AllowsCreation(pVehicle->GetPosition(), pPlayerPos, NEAR_BUBBLE_ENTITY_RADIUS, true)) {
 		delete pVehicle;
 		return false;
 	}
@@ -3558,7 +3575,7 @@ bool CCarCtrl::GenerateOneEmergencyServicesCar(uint32 mi, CVector vecPos)
 	}
 	pVehicle->m_bSirenOrAlarm = true;
 	CWorld::Add(pVehicle);
-	NearBubbleCountCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
+	CSpawnService::CountCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 	printf("CREATED EMERGENCY VEHICLE\n");
 	return true;
 }

@@ -841,7 +841,9 @@ leave no phantom. A constructor only registers the handle (it must not read the
 unplaced matrix); the first placement counts it. Each handle remembers the cell
 it was counted in, so a removal is exact whatever the entity did in between.
 `CReplay::RestoreStuffFromMem` and the boot call `CSpawnOccupancy::Resync`, the
-one true rebuild, and `CWorld::ClearForRestart` calls `Reset`.
+one true rebuild, and `CWorld::ClearForRestart` calls `Reset`. The spawn
+service's planner reads the cell counts (the capacity filter) and the site
+reservations since VICE-150; the director is a later reader.
 
 ## Presence grid
 
@@ -895,6 +897,63 @@ index, never a `CZoneInfo` (the zone records are filled by the script after
 boot and replaced by a save load, so the service resolves the info live). The
 rules and the storage are in `SpawnSites.h`/`SpawnSitesIndex.cpp` (engine-free),
 the snapshot out of `ThePaths` and the info-zone indices in `SpawnSites.cpp`
-(the engine side), and `utils/spawn-service` is the evidence program. Nothing
-consumes the index yet (VICE-148); the spawn service's planner is the next
-ticket.
+(the engine side), and `utils/spawn-service` is the evidence program. The
+spawn service's planner reads it (VICE-150); the far layer's migration is a
+later requester.
+
+## Spawn service
+
+The one writer of spawn intent (`src/control/SpawnService.h` and
+`SpawnService.cpp`, VICE-150): a producer requests, the service decides where
+the actor may legally appear and creates it there. The request envelope
+carries two creation kinds: a **road-site placement** (the planner: candidates
+from the site index, filtered by purpose, the live zone, the occupancy store
+and the visibility ladder, ranked, reserved, then created by the primitive)
+and an **explicit** creation (the exact position, model and lifetime given by
+a script or a mission: synchronous, no visibility and no ring, with a force
+bypass over the budgets and the reserves). Both kinds are counted. The
+refusal reasons are the ticket's own - no site, occupancy, visibility, zone,
+readiness, budget, pool, reachability - and every refusal event (a request's
+gate, a plan drop or an attempt's refusal) is counted, so refusals after
+planning are measured, not hidden. The service's telemetry is one static
+`SSpawnServiceTelemetry` instance, `CSpawnService::ms_Telemetry`, read live by
+`utils/caps-audit/live-counters.py`; the near bubble's gates and counters sit
+behind the service's ladder API (`CSpawnService::AllowsCreation`,
+`AllowsRemoval` and the counter notes), so no spawn decision outside
+`SpawnService.cpp` asks them directly. The ambient traffic is the first
+requester (`CCarCtrl::GenerateOneRandomCar`).
+
+## Spawn planner
+
+The road-site half of the spawn service (VICE-150): `SpawnOfferSites` takes
+the candidates of the request's ring band from the site index's hash (the old
+collector's outer distance and cone, the purpose's water policy and the
+disabled flag), the frame resolves the cheap facts of each candidate (the
+ladder's candidate for the site's midpoint, without a ray) and the ranked
+prefix's deep facts (the site's live zone and `CPathFind::
+TestCoorsCloseness`, the path search the primitive used to pay per creation),
+and `SpawnPlanSites` filters by reason, ranks - hidden arms first, then the
+emptier presence cell (spread), then the nearest to the request's ring, then
+the rarity weight, then the site id - and reserves the returned placements in
+the occupancy store, so two requests cannot plan the same connection in the
+same frame. `SpawnRunPlan` tries the plan's sites in order through the
+primitive and counts every post-plan refusal. The rank keeps the first
+`SPAWN_SERVICE_DEEP_CANDIDATES` (8) candidates for the deep facts, and the
+plan returns at most `SPAWN_PLAN_MAX_PLACEMENTS` (4).
+
+## Creation primitive (spawn)
+
+`CCarCtrl::CreateCarFromPlacement` after VICE-150: the one car creation of the
+spawn service and the far layer. It keeps the route and lane state (the lane
+draw on the travelled side, the direction sign, the current and next link,
+the curve), the ground and water height, the physics and status, the occupants
+with the pool caps and reserves, the final ground and collision validation and
+the counters. It no longer rolls the rarity dice (the planner's weight
+replaced it) or makes the camera decisions, and the reachability test moved to
+the planner. An `ESpawnTier` passes in: the near tier creates with
+`RANDOM_VEHICLE` and runs the near ring's birth cull and the occupants; the
+far tier skips the cull, leaves the car in the far state and skips the
+occupants. The driver contract: `SetUpDriver` needs `RANDOM_VEHICLE`, so a
+kind that wants occupants creates with the random tag (the far promotion sets
+the tag before its own call). The return is an `ESpawnRefusal`, so the service
+counts the primitive's refusals by reason.

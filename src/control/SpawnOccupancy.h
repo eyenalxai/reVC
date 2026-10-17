@@ -429,6 +429,11 @@ public:
 	static int32_t CountAtCell(ESpawnOccupancyClass type, int32_t cellX, int32_t cellY);
 	static int32_t TotalCount(ESpawnOccupancyClass type);
 
+	/* The planner's own handle on the store: the capacity reads and the
+	 * reservations run in the engine-free core (SpawnService.h), which takes
+	 * the store itself. */
+	static SSpawnOccupancyStore &Store(void);
+
 	/* The short promise on a site (the planner's reservations). */
 	static bool ReserveSite(int32_t site, uint32_t now);
 	static bool SiteReserved(int32_t site, uint32_t now);

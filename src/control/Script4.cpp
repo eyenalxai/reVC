@@ -1971,7 +1971,7 @@ int8 CRunningScript::ProcessCommands900To999(int32 command)
 		CWorld::Add(car);
 		/* The scripted car park puts the car there (VICE-127): counted apart
 		 * and never in the traffic's fill. */
-		CCarCtrl::NearBubbleCountOtherCreation(car->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
+		CSpawnService::CountOtherCreation(car->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 		return 0;
 	}
 	/*
