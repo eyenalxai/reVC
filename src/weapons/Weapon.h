@@ -63,7 +63,7 @@ public:
 	bool FireAreaEffect       (CEntity *shooter, CVector *fireSource);
 	bool LaserScopeDot        (CVector *pOutPos, float *pOutSize);
 	bool FireSniper           (CEntity *shooter, CVector *fireSource);
-	bool TakePhotograph       (CEntity *shooter);
+	bool TakePhotograph       (CEntity *shooter, CVector *fireSource);
 	// The aimed shot of a vehicle: the shot leaves the driver's right hand and
 	// follows the one aim ray, each fire type with its own shot
 	bool FireAimedFromCar     (CVehicle *shooter);

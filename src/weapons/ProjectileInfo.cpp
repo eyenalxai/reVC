@@ -58,8 +58,26 @@ CProjectileInfo::GetProjectileInfo(int32 id)
 	return &gaProjectileInfo[id];
 }
 
+// The matrix that points its forward along the unit vector dir and sits at pos
+static CMatrix
+AimMatrix(const CVector &dir, const CVector &pos)
+{
+	CMatrix matrix;
+	CVector right = CrossProduct(CVector(0.0f, 0.0f, 1.0f), dir);
+	if (right.MagnitudeSqr() < 0.001f)
+		right = CrossProduct(CVector(0.0f, 1.0f, 0.0f), dir);
+	right.Normalise();
+	matrix.GetForward() = dir;
+	matrix.GetRight() = right;
+	matrix.GetUp() = CrossProduct(dir, right);
+	matrix.GetPosition() = pos;
+	return matrix;
+}
+
+// aimDir, when not nil, is the unit launch direction of a player shot. The
+// projectile keeps the speed the stock launch gives it and leaves along aimDir.
 bool
-CProjectileInfo::AddProjectile(CEntity *entity, eWeaponType weapon, CVector pos, float speed)
+CProjectileInfo::AddProjectile(CEntity *entity, eWeaponType weapon, CVector pos, float speed, const CVector *aimDir)
 {
 	int8 SpecialCollisionResponseCase = COLLRESPONSE_NONE;
 	bool gravity = true;
@@ -81,21 +99,8 @@ CProjectileInfo::AddProjectile(CEntity *entity, eWeaponType weapon, CVector pos,
 				CVector vecSpeed = ((CPhysical*)entity)->m_vecMoveSpeed;
 				vy += Max(0.0f, DotProduct(vecSpeed, entity->GetForward())) + Max(0.0f, DotProduct(vecSpeed, entity->GetUp()));
 			} else {
-				if (ped->IsPlayer()) {
-					// The rocket leaves along the one aim ray: the aimed shot
-					// follows the pose and the reticle, not the camera axis
-					CVector raySource, rayTarget;
-					TheCamera.GetPlayerAimRay(1.0f, ped->GetPosition(), raySource, rayTarget);
-					CVector forward = rayTarget - raySource;
-					forward.Normalise();
-					CVector right = CrossProduct(CVector(0.0f, 0.0f, 1.0f), forward);
-					if (right.MagnitudeSqr() < 0.001f)
-						right = CrossProduct(CVector(0.0f, 1.0f, 0.0f), forward);
-					right.Normalise();
-					matrix.GetForward() = forward;
-					matrix.GetRight() = right;
-					matrix.GetUp() = CrossProduct(forward, right);
-					matrix.GetPosition() = pos;
+				if (aimDir) {
+					matrix = AimMatrix(*aimDir, pos);
 				} else if (ped->m_pSeekTarget != nil) {
 					float ry = CGeneral::GetRadianAngleBetweenPoints(1.0f, ped->m_pSeekTarget->GetPosition().z, 1.0f, pos.z);
 					float rz = Atan2(-ped->GetForward().x, ped->GetForward().y);
@@ -127,26 +132,10 @@ CProjectileInfo::AddProjectile(CEntity *entity, eWeaponType weapon, CVector pos,
 			break;
 		}
 		case WEAPONTYPE_TEARGAS:
-		{
-			time = CTimer::GetTimeInMilliseconds() + 20000;
-			float scale = 0.0f;
-			if (speed != 0.0f)
-				scale = 0.22f * speed + 0.15f;
-			float angle = Atan2(-ped->GetForward().x, ped->GetForward().y);
-			matrix.SetTranslate(0.0f, 0.0f, 0.0f);
-			matrix.RotateZ(angle);
-			matrix.GetPosition() += pos;
-			SpecialCollisionResponseCase = COLLRESPONSE_UNKNOWN5;
-			velocity.x = -1.0f * scale * Sin(angle);
-			velocity.y = scale * Cos(angle);
-			velocity.z = (0.4f * speed + 0.4f) * scale;
-			elasticity = 0.5f;
-			break;
-		}
 		case WEAPONTYPE_GRENADE:
 		case WEAPONTYPE_DETONATOR_GRENADE:
 		{
-			time = CTimer::GetTimeInMilliseconds() + 2000;
+			time = CTimer::GetTimeInMilliseconds() + (weapon == WEAPONTYPE_TEARGAS ? 20000 : 2000);
 			float scale = 0.0f;
 			if (speed != 0.0f)
 				scale = 0.22f * speed + 0.15f;
@@ -165,6 +154,9 @@ CProjectileInfo::AddProjectile(CEntity *entity, eWeaponType weapon, CVector pos,
 		Error("Undefined projectile type, AddProjectile, ProjectileInfo.cpp");
 		break;
 	}
+
+	if (aimDir)
+		velocity = *aimDir * velocity.Magnitude();
 
 	int i = 0;
 #ifdef FIX_BUGS
