@@ -361,7 +361,22 @@ RefStep(SRefMoveState *pRef, const SMoveIntent &intent)
 	return snapshot;
 }
 
-/* The one snapshot comparison every check uses: every field, bit for bit. */
+/* The movement comparison of the parity check: the fields the pre-rework maths
+ * also produced. The tables add outputs the controller never had - the event
+ * bits and the reported movement state - and those are checked against the
+ * tables themselves, not against a reference that cannot know them. */
+static bool
+SameMovement(const SMoveSnapshot &a, const SMoveSnapshot &b)
+{
+	return a.state == b.state && a.stance == b.stance &&
+		a.velocity.x == b.velocity.x && a.velocity.y == b.velocity.y &&
+		a.moved.x == b.moved.x && a.moved.y == b.moved.y &&
+		a.speed == b.speed && a.heading == b.heading &&
+		a.turnScale == b.turnScale && a.capsuleHeight == b.capsuleHeight &&
+		a.inCharge == b.inCharge;
+}
+
+/* The one snapshot comparison the determinism checks use: every field. */
 static bool
 SameSnapshot(const SMoveSnapshot &a, const SMoveSnapshot &b)
 {
@@ -414,7 +429,7 @@ StepParity(CPlayerMoveSolver *pSolver, SRefMoveState *pRef, const SMoveIntent &i
 
 	*pGot = pSolver->Step(intent);
 	want = RefStep(pRef, intent);
-	return SameSnapshot(*pGot, want);
+	return SameMovement(*pGot, want);
 }
 
 /* ---------------------------------------------------------------------- *
@@ -443,7 +458,7 @@ CheckParitySweep(void)
 			intent.vel = liveVelocity;
 		got = solver.Step(intent);
 		want = RefStep(&ref, intent);
-		if (!SameSnapshot(got, want)) {
+		if (!SameMovement(got, want)) {
 			if (mismatches < 3) {
 				printf("  step %d:\n", i);
 				PrintIntent(intent);
@@ -952,6 +967,56 @@ CheckDeterminism(void)
  * rows are zero and whose transitions arrive with VICE-180/VICE-181 - are
  * unreachable in phase 0.
  */
+/* The check's own table set: the module's phase 0 rows in a copy a defect can
+ * be planted in. PlantSet rebuilds every field, so each case starts clean. */
+static tMoveStateRow g_plantStates[MOVE_NUMSTATES];
+static tMoveLadderRow g_plantLadder[TIER_NUM];
+static tMoveStanceRow g_plantStances[STANCE_NUM];
+static tMoveTransitionRow g_plantTransitions[4];
+
+static SMoveTables
+PlantSet(void)
+{
+	SMoveTables t;
+	uint32_t anyState = (1u << MOVE_NUMSTATES) - 1u;
+
+	for (int i = 0; i < MOVE_NUMSTATES; i++) {
+		g_plantStates[i].accel = (i == MOVE_GROUND) ? 20.0f / 50.0f : 4.0f / 50.0f;
+		g_plantStates[i].friction = (i == MOVE_GROUND) ? 20.0f / 50.0f : 0.0f;
+		g_plantStates[i].turnRate = (i == MOVE_GROUND) ? 12.0f : 1.6f;
+		g_plantStates[i].entryBoost = 0.0f;
+		g_plantStates[i].boostDecay = 0.0f;
+		g_plantStates[i].inputScale = 1.0f;
+		g_plantStates[i].flags = MOVEFLAG_STEER_INPUT | ((i == MOVE_AIR) ? MOVEFLAG_KEEP_MOMENTUM : 0u);
+	}
+	for (int i = 0; i < TIER_NUM; i++) {
+		g_plantLadder[i].tier = (eMoveTier)i;
+		g_plantLadder[i].stance = STANCE_STAND;
+		g_plantLadder[i].stateMask = anyState;
+		g_plantLadder[i].speedScale = 1.0f + (float)i;
+		g_plantLadder[i].reportMoveState = MOVE_REPORT_WALK;
+	}
+	for (int i = 0; i < STANCE_NUM; i++) {
+		g_plantStances[i].speedScale = 1.0f;
+		g_plantStances[i].turnScale = 1.0f;
+		g_plantStances[i].capsuleHeight = 0.0f;
+	}
+	g_plantTransitions[0].from = MOVE_GROUND; g_plantTransitions[0].trigger = TRIGGER_AIRBORNE;
+	g_plantTransitions[0].to = MOVE_AIR; g_plantTransitions[0].onEntryEvent = 0;
+	g_plantTransitions[1].from = MOVE_AIR; g_plantTransitions[1].trigger = TRIGGER_LAND;
+	g_plantTransitions[1].to = MOVE_GROUND; g_plantTransitions[1].onEntryEvent = EVENT_LANDED;
+	g_plantTransitions[2].from = MOVE_GROUND; g_plantTransitions[2].trigger = TRIGGER_JUMP;
+	g_plantTransitions[2].to = MOVE_AIR; g_plantTransitions[2].onEntryEvent = 0;
+	g_plantTransitions[3].from = MOVE_AIR; g_plantTransitions[3].trigger = TRIGGER_DIVE;
+	g_plantTransitions[3].to = MOVE_DIVE; g_plantTransitions[3].onEntryEvent = 0;
+
+	t.states = g_plantStates; t.numStates = MOVE_NUMSTATES;
+	t.ladder = g_plantLadder; t.numLadder = TIER_NUM;
+	t.stances = g_plantStances; t.numStances = STANCE_NUM;
+	t.transitions = g_plantTransitions; t.numTransitions = 4;
+	return t;
+}
+
 static void
 CheckTables(void)
 {
@@ -986,9 +1051,45 @@ CheckTables(void)
 		"the slide and the dive are unreachable in phase 0");
 	Check(bad == 0 && offStance == 0,
 		"the state is always one of the four and the stance is the one of phase 0");
-	printf("  the states of the sweep: ground %d, air %d, slide %d, dive %d; PlayerMoveTablesCheck\n",
+	printf("  the states of the sweep: ground %d, air %d, slide %d, dive %d\n",
 		seen[MOVE_GROUND], seen[MOVE_AIR], seen[MOVE_SLIDE], seen[MOVE_DIVE]);
-	printf("  is VICE-171 and not in the tree yet, so the table rows themselves are not read here\n");
+
+	/* The module's tables, then the planted set (VICE-171's SMoveTables
+	 * overload): every rejection the check claims is driven with a defect. */
+	{
+		const char *why = NULL;
+		SMoveTables t = PlantSet();
+
+		Check(PlayerMoveTablesCheck(&why), "the module's own tables hold every invariant");
+		Check(PlayerMoveTablesCheck(t, &why), "the planted set holds before a defect is planted");
+
+		#define REJECTS(plant, text) do { \
+			SMoveTables broken = PlantSet(); \
+			plant; \
+			Check(!PlayerMoveTablesCheck(broken, &why), text); \
+		} while (0)
+
+		REJECTS(broken.numStates = MOVE_NUMSTATES - 1,
+			"a state without a row is refused");
+		REJECTS(g_plantStates[MOVE_AIR].friction = -1.0f,
+			"a state row out of range is refused");
+		REJECTS(broken.numLadder = TIER_NUM - 1,
+			"a ladder without a rung is refused");
+		REJECTS(g_plantLadder[TIER_RUN].tier = TIER_WALK,
+			"a ladder row out of order is refused");
+		REJECTS(g_plantLadder[TIER_SPRINT].speedScale = g_plantLadder[TIER_RUN].speedScale,
+			"a ladder row that does not ascend is refused");
+		REJECTS(g_plantLadder[TIER_WALK].stateMask = 1u << MOVE_AIR,
+			"a state without a rung is refused");
+		REJECTS(broken.numStances = STANCE_NUM - 1,
+			"a stance without a row is refused");
+		REJECTS(g_plantStances[STANCE_CROUCH].turnScale = -1.0f,
+			"a stance row out of range is refused");
+		REJECTS(g_plantTransitions[3].to = MOVE_NUMSTATES,
+			"a transition to a state out of range is refused");
+		REJECTS(g_plantTransitions[3].trigger = 0,
+			"a transition trigger out of range is refused");
+	}
 }
 
 /* ---------------------------------------------------------------------- *
@@ -998,12 +1099,10 @@ CheckTables(void)
 #define EVENT_STREAM_STEPS	60
 
 /*
- * The event list is VICE-173 and the jump counter is VICE-182: the module of
- * phase 0 reports no edge (SMoveSnapshot.events stays the neutral value) and
- * reads no action edge. The check holds what exists - a stream with landings
- * raises no bit yet, the state follows the ground frame by frame, and the jump
- * and dive requests change no output - and it must be extended to "the
- * landing raises EVENT_LANDED exactly once per landing" when VICE-173 lands.
+ * The event bits are VICE-173's list and VICE-171's transition rows raise them:
+ * a landing raises EVENT_LANDED once, and no other bit fires in phase 0. The
+ * rows that carry the jump, the dive and the wall events wait for the states
+ * they move to (VICE-181, VICE-182), and the jump counter is VICE-182's.
  */
 static void
 CheckEvents(void)
@@ -1026,8 +1125,9 @@ CheckEvents(void)
 		CPlayerMoveSolver solver;
 		bool wasGround = true;
 		int landings = 0;
+		int landingsWithTheBit = 0;
 		int stateBad = 0;
-		uint32_t raised = 0;
+		uint32_t otherBits = 0;
 
 		for (int i = 0; i < EVENT_STREAM_STEPS; i++) {
 			bool ground = !(i % 20 >= 6 && i % 20 < 10);
@@ -1039,13 +1139,17 @@ CheckEvents(void)
 			intent.onGround = ground;
 			intent.hasInput = (i % 3) != 2;
 			const SMoveSnapshot &snapshot = solver.Step(intent);
-			raised |= snapshot.events;
+			if (snapshot.events & EVENT_LANDED)
+				landingsWithTheBit++;
+			otherBits |= snapshot.events & ~(uint32_t)EVENT_LANDED;
 			if (snapshot.state != (ground ? MOVE_GROUND : MOVE_AIR))
 				stateBad++;
 		}
 		Check(landings == 3, "the stream holds three landings");
 		Check(stateBad == 0, "the state follows the ground and the air every step");
-		Check(raised == 0, "phase 0 raises no event bit, a landing included: the event list is VICE-173");
+		Check(landingsWithTheBit == landings,
+			"every landing raises the landing event exactly once");
+		Check(otherBits == 0, "no other event bit is raised in phase 0");
 	}
 
 	/* the jump and the dive edges: no reader in phase 0, so they change
@@ -1077,7 +1181,7 @@ CheckEvents(void)
 	}
 
 	printf("  the landings in the stream raise no bit yet, and the jump counter does not exist\n");
-	printf("  in phase 0: the checks must grow when VICE-173 and VICE-182 land\n");
+	printf("  the jump counter and the air extensions arrive with VICE-182\n");
 }
 
 /* ---------------------------------------------------------------------- *
@@ -1141,10 +1245,10 @@ main(void)
 	printf("\n== 3. determinism\n");
 	CheckDeterminism();
 
-	printf("\n== 4. the tables (VICE-171 not in the tree yet)\n");
+	printf("\n== 4. the tables (VICE-171): the invariants and the planted rejections\n");
 	CheckTables();
 
-	printf("\n== 5. the events (the list is VICE-173)\n");
+	printf("\n== 5. the events (VICE-173's list, raised by VICE-171's rows)\n");
 	CheckEvents();
 
 	printf("\n== 6. finiteness\n");

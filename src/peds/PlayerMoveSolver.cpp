@@ -87,22 +87,18 @@ static constexpr tMoveStanceRow moveStanceRows[] = {
 // and the wall triggers have no state to move to yet (the wall run arrives
 // later).
 static constexpr tMoveTransitionRow moveTransitions[] = {
-	// MOVE_GROUND: the actions first, the feet leaving the ground last
-	{ MOVE_GROUND,	TRIGGER_JUMP,		MOVE_AIR,	0 },
-	{ MOVE_GROUND,	TRIGGER_DIVE,		MOVE_DIVE,	0 },
-	{ MOVE_GROUND,	TRIGGER_SLIDE,		MOVE_SLIDE,	0 },
+	// MOVE_GROUND: the feet leaving the ground. The jump and the dive rows
+	// arrive with the tickets that own the impulse and the state (VICE-182,
+	// VICE-181): phase 0 moves on the world fact alone, exactly as the
+	// controller did.
 	{ MOVE_GROUND,	TRIGGER_AIRBORNE,	MOVE_AIR,	0 },
-	// MOVE_AIR
-	{ MOVE_AIR,	TRIGGER_DIVE,		MOVE_DIVE,	0 },
+	// MOVE_AIR: the feet touching the ground again
 	{ MOVE_AIR,	TRIGGER_LAND,		MOVE_GROUND,	EVENT_LANDED },
-	// MOVE_SLIDE
-	{ MOVE_SLIDE,	TRIGGER_JUMP,		MOVE_AIR,	0 },
-	// The slide's exit to the ground. The guard of the row is the speed below
-	// the slide's exit speed, with hysteresis so the exit cannot flap on the
-	// threshold; the guard and the slide's other rows arrive with VICE-180, so
-	// the row must not stand alone: the land trigger by itself would end the
-	// slide at once.
-	{ MOVE_SLIDE,	TRIGGER_LAND,		MOVE_GROUND,	0 },
+	// The rows that enter and leave the slide and the dive arrive with
+	// VICE-180 and VICE-181. A row into a state that still has a zeroed row
+	// would move the ped with a zero acceleration, and the slide's exit needs
+	// its guard (the exit speed, with hysteresis), so the rows land with the
+	// states they move to.
 };
 
 // The row counts and the masks the check reads.
