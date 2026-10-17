@@ -17,6 +17,7 @@
 #include "Pad.h"
 #include "Particle.h"
 #include "Ped.h"
+#include "PlayerPed.h"
 #include "PointLights.h"
 #include "Pools.h"
 #include "ProjectileInfo.h"
@@ -29,6 +30,7 @@
 #include "Automobile.h"
 #include "Boat.h"
 #include "WaterLevel.h"
+#include "WeaponAim.h"
 #include "WeaponInfo.h"
 #include "World.h"
 #include "SurfaceTable.h"
@@ -51,93 +53,65 @@ bool CWeapon::bPhotographHasBeenTaken;
 int32 sniperPirateCheck = 0x00797743; // 'Cwy\0' ???
 #endif
 
-#ifdef FREE_CAM
+// True while the shot leaves along the player's aim ray: the player on foot
+// and the player behind the wheel of a drive-by vehicle (VICE-110). A
+// helicopter or a plane fires its own guns along its nose, not along the ray.
 static bool
-Find3rdPersonCamTargetVectorFromCachedVectors(float dist, CVector pos, CVector& source, CVector& target, CVector camSource, CVector camFront, CVector camUp)
+IsPlayerShot(CEntity *shooter)
 {
-	if (CPad::GetPad(0)->GetLookBehindForPed()) {
-		source = pos;
-		target = dist * FindPlayerPed()->GetForward() + source;
-		return false;
-	} else {
-		float angleX = DEGTORAD((CCamera::m_f3rdPersonCHairMultX - 0.5f) * 1.8f * 0.5f * TheCamera.Cams[TheCamera.ActiveCam].FOV * CDraw::GetAspectRatio());
-		float angleY = DEGTORAD((0.5f - CCamera::m_f3rdPersonCHairMultY) * 1.8f * 0.5f * TheCamera.Cams[TheCamera.ActiveCam].FOV);
-		source = camSource;
-		target = camFront;
-		target += camUp * Tan(angleY);
-		target += CrossProduct(camFront, camUp) * Tan(angleX);
-		target.Normalise();
-		source += DotProduct(pos - source, target) * target;
-		target = dist * target + source;
+	if (shooter == FindPlayerPed())
 		return true;
-	}
-}
-#endif
 
-// The ray of the first person camera: the sight view and hip fire shoot along it
-static void
-GetFirstPersonSightsRay(float range, CVector &source, CVector &target)
-{
-	CCam *cam = &TheCamera.Cams[TheCamera.ActiveCam];
-	source = cam->Source;
-	target = cam->Front*range + source;
+	if (!shooter->IsVehicle())
+		return false;
+
+	CVehicle *vehicle = (CVehicle*)shooter;
+	return vehicle->pDriver == FindPlayerPed() && !vehicle->IsRealHeli() && !vehicle->IsRealPlane();
 }
 
-// The ray of a shot that leaves along the camera: the first person view
-// shoots along the active cam, the mouse-look third person view along the
-// camera's aim solver, and the free camera along the vectors cached for it.
-// firstPerson repeats the view the caller has already picked, so the free
-// camera never drives the first person shot. left, when not nil, receives
-// the camera's left vector.
-static void
-GetCameraShotRay(CEntity *shooter, float range, CVector *fireSource, CVector &source, CVector &target, bool firstPerson, CVector *left = nil)
+// The ped a shot belongs to: the shooter, or the driver of a firing vehicle.
+// The events name them as the criminal, the area fire walks their near peds,
+// and their own body never takes the damage of the shot. An event carries a
+// pool reference of the real type, so a vehicle never passes as a ped.
+static CPed *
+ShotActor(CEntity *shooter)
 {
-	CCam *cam = &TheCamera.Cams[TheCamera.ActiveCam];
+	if (shooter->IsVehicle())
+		return ((CVehicle*)shooter)->pDriver;
+	return (CPed*)shooter;
+}
 
-#ifdef FREE_CAM
-	if (CCamera::bFreeCam && !firstPerson) {
-		CPlayerPed *shooterPed = (CPlayerPed*)shooter;
-		Find3rdPersonCamTargetVectorFromCachedVectors(range, *fireSource, source, target,
-			shooterPed->m_cachedCamSource, shooterPed->m_cachedCamFront, shooterPed->m_cachedCamUp);
-		if (left)
-			*left = CrossProduct(shooterPed->m_cachedCamFront, shooterPed->m_cachedCamUp);
-		return;
+// True while the player holds the weapon aim: the pose, the reticle and the
+// shot are one ray, and the shot is precise.
+static bool
+IsPlayerAiming(CEntity *shooter)
+{
+	return shooter == FindPlayerPed() && ((CPlayerPed*)shooter)->IsAimingWeapon();
+}
+
+// The one ray of a shot. The player follows the aim ray of the view: the
+// first person camera axis, the sight view and the third person crosshair
+// are one ray, and the shot, the pose and the reticle all follow it. A
+// vehicle's shot leaves the driver's right hand along the same ray, so the
+// muzzle never fires from the camera behind the car. left, when not nil,
+// receives the lateral axis of the view for the shotgun spread.
+static void
+GetShotRay(CEntity *shooter, float range, CVector *fireSource, CVector &source, CVector &target, CVector *left = nil)
+{
+	ASSERT(IsPlayerShot(shooter));
+
+	if (shooter->IsVehicle()) {
+		source = *fireSource;
+		CVector aimSource;
+		TheCamera.GetPlayerAimRay(range, *fireSource, aimSource, target);
+	} else {
+		TheCamera.GetPlayerAimRay(range, *fireSource, source, target);
 	}
-#endif
 
-	if (firstPerson)
-		GetFirstPersonSightsRay(range, source, target);
-	else
-		TheCamera.Find3rdPersonCamTargetVector(range, *fireSource, source, target);
-
-	if (left)
+	if (left) {
+		CCam *cam = &TheCamera.Cams[TheCamera.ActiveCam];
 		*left = CrossProduct(cam->Front, cam->Up);
-}
-
-// The camera view a player's shot follows. The instant hits shoot from the
-// hip (the plain first person view) or from the mouse-look third person
-// view; the shotgun pellets and the flamethrower follow the sight view too,
-// because their shots do not go through FireM16_1stPerson.
-struct CameraShotView
-{
-	bool firstPerson;	// a first person view: the hip fire or the sight view
-	bool hipFire;		// the plain first person view, without the sight view
-	bool thirdPerson;	// the mouse-look third person view
-};
-
-static CameraShotView
-GetCameraShotView(CEntity *shooter)
-{
-	CameraShotView view = { false, false, false };
-
-	if (shooter != FindPlayerPed())
-		return view;
-
-	view.firstPerson = TheCamera.UsingFirstPersonSights() || TheCamera.Using1stPersonView();
-	view.hipFire = TheCamera.Using1stPersonView() && !TheCamera.UsingFirstPersonSights();
-	view.thirdPerson = TheCamera.Cams[0].Using3rdPersonMouseCam();
-
-	return view;
+	}
 }
 
 // One particle of a gunflash chain: the step from the flash before it and
@@ -159,6 +133,42 @@ AddGunflashChain(tParticleType type, CVector pos, CVector const &dir, const Gunf
 		pos += chain[i].step * dir;
 		CParticle::AddParticle(type, pos, CVector(0.0f, 0.0f, 0.0f), nil, chain[i].size);
 	}
+}
+
+// The kick of an aimed shot: the stock sight recoil and the view shake, the
+// weapon rate sets the shake frequency. The rifle rounds kick harder than the
+// pistol rounds.
+static void
+KickAimedView(CWeaponInfo *info, eWeaponType type)
+{
+	float mult;
+	switch (type) {
+	case WEAPONTYPE_M4:
+	case WEAPONTYPE_HELICANNON:
+	case WEAPONTYPE_M60:
+		mult = 0.0003f;
+		break;
+	case WEAPONTYPE_RUGER:
+		mult = 0.00015f;
+		break;
+	default:
+		mult = 0.0002f;
+		break;
+	}
+
+	CPlayerPed *player = FindPlayerPed();
+	if (player->bIsDucking || player->m_attachedTo)
+		mult *= 0.3f;
+
+	TheCamera.Cams[TheCamera.ActiveCam].Beta  += float((CGeneral::GetRandomNumber() & 127) - 64) * mult;
+	TheCamera.Cams[TheCamera.ActiveCam].Alpha += float((CGeneral::GetRandomNumber() & 127) - 64) * mult;
+
+	// yes, double
+	double notFiringRate = (20.0 - info->m_nFiringRate) / 80.0;
+	double raisedNotFiringRate = Max(1.0, Max(0.0, notFiringRate));
+
+	uint8 shakeFreq = 80.0 * raisedNotFiringRate + 130.0;
+	CPad::GetPad(0)->StartShake(20000.0f * CTimer::GetTimeStep() / shakeFreq, shakeFreq);
 }
 
 CWeaponInfo *
@@ -311,7 +321,7 @@ CWeapon::Fire(CEntity *shooter, CVector *fireSource)
 			case WEAPONTYPE_LASERSCOPE:
 			{
 				if (shooter == FindPlayerPed())
-					fired = FireSniper(shooter);
+					fired = FireSniper(shooter, source);
 				else
 					fired = FireInstantHit(shooter, source);
 				
@@ -330,14 +340,11 @@ CWeapon::Fire(CEntity *shooter, CVector *fireSource)
 			case WEAPONTYPE_MINIGUN:
 			case WEAPONTYPE_HELICANNON:
 			{
-				if ((TheCamera.PlayerWeaponMode.Mode == CCam::MODE_HELICANNON_1STPERSON || TheCamera.PlayerWeaponMode.Mode == CCam::MODE_M16_1STPERSON)
-					&& shooter == FindPlayerPed()) {
-					addFireRateAsDelay = true;
-					fired = FireM16_1stPerson(shooter);
-				} else {
-					addFireRateAsDelay = false;
-					fired = FireInstantHit(shooter, source);
-				}
+				// The aimed shot keeps the weapon's own rate: the shot and
+				// the sight cycle are one path now. The hip fire leaves the
+				// pace to the attack animation (VICE-136).
+				addFireRateAsDelay = IsPlayerAiming(shooter);
+				fired = FireInstantHit(shooter, source);
 				break;
 			}
 
@@ -560,14 +567,16 @@ CWeapon::FireFromCar(CVehicle *shooter, bool aiming)
 	if ( m_nAmmoInClip <= 0 )
 		return false;
 
-	bool fired;
-	if ( aiming )
-		fired = FireInstantHitFromCarFreeAim(shooter);
-	else
+	bool fired = false;
+	if (!aiming)
 		// The plain fire of a bike keeps the stock drive-by shot, which fires
 		// forward now: the side look keys and their side shot are gone
 		// (VICE-138)
 		fired = FireInstantHitFromCar(shooter);
+	else if (IsAimableWeapon(m_eWeaponType))
+		// The aimed shot of a vehicle: every aiming weapon fires through the
+		// aim ray now, each fire type with its own shot
+		fired = FireAimedFromCar(shooter);
 
 	if ( fired )
 	{
@@ -604,16 +613,19 @@ CWeapon::FireFromCar(CVehicle *shooter, bool aiming)
 			return true;
 		}
 
-		m_nTimer = CTimer::GetTimeInMilliseconds() + 1000;
+		// The aimed shot keeps the weapon's own rate; the stock drive-by
+		// keeps the 1000 ms write for the caller to shorten
+		m_nTimer = CTimer::GetTimeInMilliseconds() + (aiming ? GetInfo()->m_nFiringRate : 1000);
 	}
 
 	return true;
 }
 
-// The drive-by fire attempt of the vehicle callers. The 70 ms drive-by
-// cadence belongs to a real shot, so the timer is written only when the state
-// became FIRING: a failed shot attempt, an empty clip and a started reload
-// leave the timer alone, and the write can never shorten a reload (VICE-90).
+// The vehicle fire attempt of the drive-by callers. The 70 ms drive-by cadence
+// belongs to a real shot, so the timer is written only when the state became
+// FIRING: a failed shot attempt, an empty clip and a started reload leave the
+// timer alone, and the write can never shorten a reload (VICE-90). The aimed
+// shot keeps the weapon's own rate, which FireFromCar set already.
 void
 CWeapon::FireFromCarWithCadence(CVehicle *shooter, bool aiming)
 {
@@ -621,7 +633,7 @@ CWeapon::FireFromCarWithCadence(CVehicle *shooter, bool aiming)
 
 	FireFromCar(shooter, aiming);
 
-	if (stateBefore != WEAPONSTATE_FIRING && m_eWeaponState == WEAPONSTATE_FIRING)
+	if (!aiming && stateBefore != WEAPONSTATE_FIRING && m_eWeaponState == WEAPONSTATE_FIRING)
 		m_nTimer = CTimer::GetTimeInMilliseconds() + 70;
 }
 
@@ -1027,15 +1039,52 @@ CWeapon::FireInstantHit(CEntity *shooter, CVector *fireSource)
 	if ( Abs(vel.x) > 0.0f && Abs(vel.y) > 0.0f )
 		shooterMoving = true;
 
-	if ( shooter == FindPlayerPed() )
+	// The player holds the aim: the shot follows the one aim ray, every gun
+	// alike. The AI and the plain fire keep their own aim.
+	bool aiming = IsPlayerAiming(shooter);
+
+	if ( aiming )
 	{
-		static float prev_heading = 0.0f;
-		prev_heading = ((CPed*)shooter)->m_fRotationCur;
+		// The aimed shot: the ray the view, the pose and the reticle share.
+		// The pointer decides where the shot goes, so there is no spread.
+		GetShotRay(shooter, info->m_fRange, fireSource, source, target);
+
+#ifdef FIX_BUGS
+		// fix muzzleflash rotation
+		heading = CGeneral::GetAngleBetweenPoints(source.x, source.y, target.x, target.y);
+		angle = DEGTORAD(heading);
+
+		ahead = CVector2D(-Sin(angle), Cos(angle));
+		ahead.Normalise();
+#endif
+
+		CWorld::pIgnoreEntity = shooter;
+		CWorld::bIncludeBikers = true;
+		CWorld::bIncludeDeadPeds = true;
+		CWorld::bIncludeCarTyres = true;
+		ProcessLineOfSight(source, target, point, victim, m_eWeaponType, shooter, true, true, true, true, true, false, false);
+		CWorld::pIgnoreEntity = nil;
+		CWorld::bIncludeBikers = false;
+		CWorld::bIncludeDeadPeds = false;
+		CWorld::bIncludeCarTyres = false;
+
+		if (victim)
+			CheckForShootingVehicleOccupant(&victim, &point, m_eWeaponType, source, target);
+
+		int32 rotSpeed = 1;
+		if (m_eWeaponType == WEAPONTYPE_M4)
+			rotSpeed = 4;
+
+		CVector bulletPos;
+		if (CHeli::TestBulletCollision(&source, &target, &bulletPos, 4))
+		{
+			for (int32 i = 0; i < 16; i++)
+				CParticle::AddParticle(PARTICLE_SPARK, bulletPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.0f, rotSpeed);
+		}
+
+		KickAimedView(info, m_eWeaponType);
 	}
-
-	CameraShotView shotView = GetCameraShotView(shooter);
-
-	if ( shooter->IsPed() && ((CPed *)shooter)->m_pPointGunAt )
+	else if ( shooter->IsPed() && ((CPed *)shooter)->m_pPointGunAt )
 	{
 		CPed *shooterPed = (CPed *)shooter;
 		if ( shooterPed->m_pedIK.m_flags & CPedIK::GUN_POINTED_SUCCESSFULLY )
@@ -1109,24 +1158,38 @@ CWeapon::FireInstantHit(CEntity *shooter, CVector *fireSource)
 		ahead.Normalise();
 #endif
 	}
-	else if ( shotView.hipFire )
+	else if ( shooter == FindPlayerPed() )
 	{
-		// Hip fire: the shot leaves along the camera axis with the stock player spread
-		GetCameraShotRay(shooter, info->m_fRange, fireSource, source, target, true);
+		// The hip fire follows the same aim ray. The first person view and
+		// the airborne shot keep the stock player spread; the third person
+		// crosshair fires true.
+		GetShotRay(shooter, info->m_fRange, fireSource, source, target);
 
-		int32 inaccuracy = 100 - ((CPed *)shooter)->m_wepAccuracy;
-		if (inaccuracy != 0)
+		if (!TheCamera.Cams[TheCamera.ActiveCam].Using3rdPersonMouseCam())
 		{
-			float distToTarget = info->m_fRange;
-			float newInaccuracy = fPlayerAimScale * FindPlayerPed()->m_fAttackButtonCounter * (inaccuracy * Min(1.f, fPlayerAimScaleDist / distToTarget));
-			if (FindPlayerPed()->bIsDucking)
-				newInaccuracy *= 0.4f;
+			int32 inaccuracy = 100 - ((CPed *)shooter)->m_wepAccuracy;
+			if (inaccuracy != 0)
+			{
+				float distToTarget = info->m_fRange;
+				float newInaccuracy = fPlayerAimScale * FindPlayerPed()->m_fAttackButtonCounter * (inaccuracy * Min(1.f, fPlayerAimScaleDist / distToTarget));
+				if (FindPlayerPed()->bIsDucking)
+					newInaccuracy *= 0.4f;
 
-			target.x += CGeneral::GetRandomNumberInRange(-0.15f, 0.15f) * newInaccuracy;
-			target.y += CGeneral::GetRandomNumberInRange(-0.15f, 0.15f) * newInaccuracy;
-			target.z += CGeneral::GetRandomNumberInRange(-0.2f, 0.2f) * newInaccuracy;
-			FindPlayerPed()->m_fAttackButtonCounter += info->m_nDamage * 0.04f;
+				target.x += CGeneral::GetRandomNumberInRange(-0.15f, 0.15f) * newInaccuracy;
+				target.y += CGeneral::GetRandomNumberInRange(-0.15f, 0.15f) * newInaccuracy;
+				target.z += CGeneral::GetRandomNumberInRange(-0.2f, 0.2f) * newInaccuracy;
+				FindPlayerPed()->m_fAttackButtonCounter += info->m_nDamage * 0.04f;
+			}
 		}
+
+#ifdef FIX_BUGS
+		// fix muzzleflash rotation
+		heading = CGeneral::GetAngleBetweenPoints(source.x, source.y, target.x, target.y);
+		angle = DEGTORAD(heading);
+
+		ahead = CVector2D(-Sin(angle), Cos(angle));
+		ahead.Normalise();
+#endif
 
 		CWorld::pIgnoreEntity = shooter;
 		CWorld::bIncludeBikers = true;
@@ -1149,53 +1212,6 @@ CWeapon::FireInstantHit(CEntity *shooter, CVector *fireSource)
 		if (CHeli::TestBulletCollision(&source, &target, &bulletPos, 4))
 		{
 			for (int32 i = 0; i < 16; i++)
-				CParticle::AddParticle(PARTICLE_SPARK, bulletPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.0f, rotSpeed);
-		}
-	}
-	else if ( shotView.thirdPerson )
-	{
-		GetCameraShotRay(shooter, info->m_fRange, fireSource, source, target, false);
-#ifdef FREE_CAM
-		if (CCamera::bFreeCam) {
-			CPlayerPed* shooterPed = (CPlayerPed*)shooter;
-
-			if ((shooterPed->m_pedIK.m_flags & CPedIK::GUN_POINTED_SUCCESSFULLY) == 0) {
-				target.x = info->m_fRange;
-				target.y = 0.0f;
-				target.z = 0.0f;
-
-				shooterPed->TransformToNode(target, PED_HANDR);
-			}
-		}
-#endif
-
-#ifdef FIX_BUGS
-		// fix muzzleflash rotation
-		heading = CGeneral::GetAngleBetweenPoints(source.x, source.y, target.x, target.y);
-		angle = DEGTORAD(heading);
-
-		ahead = CVector2D(-Sin(angle), Cos(angle));
-		ahead.Normalise();
-#endif
-		CWorld::bIncludeBikers = true;
-		CWorld::bIncludeDeadPeds = true;
-		CWorld::bIncludeCarTyres = true;
-		ProcessLineOfSight(source, target, point, victim, m_eWeaponType, shooter, true, true, true, true, true, false, false);
-		CWorld::bIncludeBikers = false;
-		CWorld::bIncludeDeadPeds = false;
-		CWorld::bIncludeCarTyres = false;
-
-		if (victim)
-			CheckForShootingVehicleOccupant(&victim, &point, m_eWeaponType, source, target);
-
-		int32 rotSpeed = 1;
-		if ( m_eWeaponType == WEAPONTYPE_M4 )
-			rotSpeed = 4;
-
-		CVector bulletPos;
-		if ( CHeli::TestBulletCollision(&source, &target, &bulletPos, 4) )
-		{
-			for ( int32 i = 0; i < 16; i++ )
 				CParticle::AddParticle(PARTICLE_SPARK, bulletPos, CVector(0.0f, 0.0f, 0.0f), nil, 0.0f, rotSpeed);
 		}
 	}
@@ -1862,7 +1878,11 @@ CWeapon::FireShotgun(CEntity *shooter, CVector *fireSource)
 	CParticle::AddParticle(PARTICLE_GUNSMOKE2, gunsmokePos, CVector(rotOffset.x*0.20f, rotOffset.y*0.20f, 0.0f), nil, 0.1f);
 	CParticle::AddParticle(PARTICLE_GUNSMOKE2, gunsmokePos, CVector(rotOffset.x*0.25f, rotOffset.y*0.25f, 0.0f), nil, 0.1f);
 
-	CEventList::RegisterEvent(EVENT_GUNSHOT, EVENT_ENTITY_PED, shooter, (CPed*)shooter, 1000);
+	// The shot event names the shooter: a ped, or the driver of the vehicle
+	if (shooter->IsPed())
+		CEventList::RegisterEvent(EVENT_GUNSHOT, EVENT_ENTITY_PED, shooter, (CPed*)shooter, 1000);
+	else if (shooter->IsVehicle() && ((CVehicle*)shooter)->pDriver)
+		CEventList::RegisterEvent(EVENT_GUNSHOT, EVENT_ENTITY_VEHICLE, shooter, ((CVehicle*)shooter)->pDriver, 1000);
 
 	CPointLights::AddLight(CPointLights::LIGHT_POINT, *fireSource, CVector(0.0, 0.0, 0.0), 5.0f,
 							1.0f, 0.8f, 0.0f, CPointLights::FOG_NONE, false);
@@ -1907,6 +1927,11 @@ CWeapon::FireShotgun(CEntity *shooter, CVector *fireSource)
 	float halfAngleRange = angleRange / 2.f;
 	float angleBetweenTwoShot = angleRange / (shootsAtOnce - 1.f);
 
+	// A vehicle shot leaves the driver's hand inside the hull: the pellets
+	// must not hit the vehicle that fires them
+	if (shooter->IsVehicle())
+		CWorld::pIgnoreEntity = shooter;
+
 	for ( int32 i = 0; i < shootsAtOnce; i++ )
 	{
 		float shootAngle = DEGTORAD(RADTODEG(halfAngleRange - angleBetweenTwoShot * i) + shooterAngle);
@@ -1917,12 +1942,12 @@ CWeapon::FireShotgun(CEntity *shooter, CVector *fireSource)
 		CColPoint point;
 		CEntity *victim;
 
-		CameraShotView shotView = GetCameraShotView(shooter);
-
-		if ( shotView.firstPerson || shotView.thirdPerson )
+		if ( IsPlayerShot(shooter) )
 		{
+			// The pellets spread around the one aim ray of the player; a
+			// vehicle shot leaves the driver's hand along the same ray
 			CVector Left;
-			GetCameraShotRay(shooter, 1.0f, fireSource, source, target, shotView.firstPerson, &Left);
+			GetShotRay(shooter, 1.0f, fireSource, source, target, &Left);
 
 			float f = (i - (shootsAtOnce / 2)) * angleBetweenTwoShot;
 			target  = f * Left + target - source;
@@ -2026,7 +2051,7 @@ CWeapon::FireShotgun(CEntity *shooter, CVector *fireSource)
 			if ( victim->IsPed() )
 			{
 				CPed *victimPed = (CPed *)victim;
-				if ( !victimPed->DyingOrDead() && victim != shooter )
+				if ( !victimPed->DyingOrDead() && victim != (CEntity*)ShotActor(shooter) )
 				{
 					bool cantStandup = true;
 
@@ -2058,9 +2083,9 @@ CWeapon::FireShotgun(CEntity *shooter, CVector *fireSource)
 					victimPed->InflictDamage(shooter, m_eWeaponType, info->m_nDamage, (ePedPieceTypes)point.pieceB, localDir);
 
 					if ( victimPed->m_nPedType == PEDTYPE_COP )
-						CEventList::RegisterEvent(EVENT_SHOOT_COP, EVENT_ENTITY_PED, victim, (CPed*)shooter, 10000);
+						CEventList::RegisterEvent(EVENT_SHOOT_COP, EVENT_ENTITY_PED, victim, ShotActor(shooter), 10000);
 					else
-						CEventList::RegisterEvent(EVENT_SHOOT_PED, EVENT_ENTITY_PED, victim, (CPed*)shooter, 10000);
+						CEventList::RegisterEvent(EVENT_SHOOT_PED, EVENT_ENTITY_PED, victim, ShotActor(shooter), 10000);
 
 					if ( CGame::nastyGame )
 					{
@@ -2240,6 +2265,10 @@ CWeapon::FireShotgun(CEntity *shooter, CVector *fireSource)
 		}
 	}
 
+	// The hull that carries the muzzle is visible again
+	if (shooter->IsVehicle())
+		CWorld::pIgnoreEntity = nil;
+
 	if ( shooter == FindPlayerPed() )
 		CPad::GetPad(0)->StartShake_Distance(240, 128, FindPlayerPed()->GetPosition().x, FindPlayerPed()->GetPosition().y, FindPlayerPed()->GetPosition().z);
 
@@ -2255,32 +2284,39 @@ CWeapon::FireProjectile(CEntity *shooter, CVector *fireSource, float power)
 	CVector source, target;
 	eWeaponType projectileType = m_eWeaponType;
 
+	// The owner of the projectile. The driver stands in for an aimed vehicle:
+	// the projectile data reads its owner as a ped and takes the aim from the
+	// player, and the driver fires the rocket and owns the explosion.
+	bool playerShot = IsPlayerShot(shooter);
+	CEntity *owner = (playerShot && shooter->IsVehicle()) ? (CEntity*)((CVehicle*)shooter)->pDriver : shooter;
+
 	if ( m_eWeaponType == WEAPONTYPE_ROCKETLAUNCHER )
 	{
 		source = *fireSource;
 		projectileType = WEAPONTYPE_ROCKET;
 
-		if ( shooter->IsPed() && ((CPed*)shooter)->IsPlayer() )
+		if ( playerShot )
 		{
-			// The rocket leaves along the view: the sight camera, or the first
-			// person player camera standing in for it
-			int16 mode = TheCamera.GetSightCameraMode();
-			if (!( mode == CCam::MODE_M16_1STPERSON
-				|| mode == CCam::MODE_SNIPER
-				|| mode == CCam::MODE_ROCKETLAUNCHER
-				|| mode == CCam::MODE_M16_1STPERSON_RUNABOUT
-				|| mode == CCam::MODE_SNIPER_RUNABOUT
-				|| mode == CCam::MODE_ROCKETLAUNCHER_RUNABOUT) )
-			{
-				return false;
-			}
+			// The rocket leaves along the one aim ray: the aim the pose and
+			// the reticle follow
+			CVector raySource, rayTarget;
+			GetShotRay(shooter, GetInfo()->m_fRange, fireSource, raySource, rayTarget);
 
-			*fireSource += TheCamera.Cams[TheCamera.ActiveCam].Front;
+			CVector dir = rayTarget - raySource;
+			dir.Normalise();
+
+			// A vehicle rocket starts clear of the hull that carries the
+			// muzzle, or it would explode in the driver's hand
+			*fireSource += (shooter->IsVehicle() ? shooter->GetBoundRadius() : 1.0f) * dir;
 		}
 		else
 			*fireSource += shooter->GetForward();
 
 		target = *fireSource;
+
+		// The shot check must ignore the hull that carries the muzzle
+		if (shooter->IsVehicle())
+			CWorld::pIgnoreEntity = shooter;
 	}
 	else
 	{
@@ -2302,7 +2338,7 @@ CWeapon::FireProjectile(CEntity *shooter, CVector *fireSource, float power)
 	if ( !CWorld::GetIsLineOfSightClear(source, target, true, true, false, true, false, false, false) )
 	{
 		if ( m_eWeaponType != WEAPONTYPE_GRENADE )
-			CProjectileInfo::RemoveNotAdd(shooter, projectileType, *fireSource);
+			CProjectileInfo::RemoveNotAdd(owner, projectileType, *fireSource);
 		else
 		{
 			if ( shooter->IsPed() )
@@ -2318,7 +2354,7 @@ CWeapon::FireProjectile(CEntity *shooter, CVector *fireSource, float power)
 		}
 	}
 	else
-		CProjectileInfo::AddProjectile(shooter, projectileType, *fireSource, power);
+		CProjectileInfo::AddProjectile(owner, projectileType, *fireSource, power);
 	
 			
 	CWorld::pIgnoreEntity = nil;
@@ -2364,11 +2400,11 @@ CWeapon::FireAreaEffect(CEntity *shooter, CVector *fireSource)
 	CVector target;
 	CVector dir;
 
-	CameraShotView shotView = GetCameraShotView(shooter);
-
-	if ( shotView.firstPerson || shotView.thirdPerson )
+	if ( IsPlayerShot(shooter) )
 	{
-		GetCameraShotRay(shooter, info->m_fRange, fireSource, source, target, shotView.firstPerson);
+		// The flame leaves along the one aim ray of the view; a vehicle flame
+		// leaves the driver's hand along the same ray
+		GetShotRay(shooter, info->m_fRange, fireSource, source, target);
 		float norm = (1.0f / info->m_fRange);
 		dir = (target - source) * norm;
 	}
@@ -2379,7 +2415,9 @@ CWeapon::FireAreaEffect(CEntity *shooter, CVector *fireSource)
 		target      = *fireSource + dir;
 	}
 
-	CShotInfo::AddShot(shooter, m_eWeaponType, *fireSource, target);
+	// The area fire follows a ped: the driver stands in for the firing
+	// vehicle, because the shot info walks the near peds of its source
+	CShotInfo::AddShot(ShotActor(shooter), m_eWeaponType, *fireSource, target);
 	CWeapon::GenerateFlameThrowerParticles(*fireSource, dir);
 		
 	if ( shooter == (CEntity *)FindPlayerPed() )
@@ -2434,26 +2472,10 @@ CWeapon::LaserScopeDot(CVector *pOutPos, float *pOutSize)
 }
 
 bool
-CWeapon::FireSniper(CEntity *shooter)
+CWeapon::FireSniper(CEntity *shooter, CVector *fireSource)
 {
 	ASSERT(shooter!=nil);
-	
-	if ( (CEntity *)FindPlayerPed() == shooter )
-	{
-		// The view the shot leaves from: the sniper fires from the sight camera
-		// or from the first person player camera standing in for it
-		int16 mode = TheCamera.GetSightCameraMode();
-		if (!( mode == CCam::MODE_M16_1STPERSON
-			|| mode == CCam::MODE_SNIPER
-			|| mode == CCam::MODE_CAMERA
-			|| mode == CCam::MODE_ROCKETLAUNCHER
-			|| mode == CCam::MODE_M16_1STPERSON_RUNABOUT
-			|| mode == CCam::MODE_SNIPER_RUNABOUT
-			|| mode == CCam::MODE_ROCKETLAUNCHER_RUNABOUT) )
-		{
-			return false;
-		}
-	}
+	ASSERT(fireSource!=nil);
 
 #ifdef SECUROM
 	if (sniperPirateCheck){
@@ -2462,20 +2484,18 @@ CWeapon::FireSniper(CEntity *shooter)
 	}
 #endif
 
-#ifndef FIX_BUGS
-	CWeaponInfo *info = GetInfo(); //unused
-#endif
+	// The sniper fires along the one aim ray: the scope view and the first
+	// person view are one sight, and a vehicle shot leaves the driver's hand
+	// along the same ray. No sight mode gates the shot any more (VICE-136).
+	CVector source, target;
+	GetShotRay(shooter, GetInfo()->m_fRange, fireSource, source, target);
 
-	CCam *cam = &TheCamera.Cams[TheCamera.ActiveCam];
-	ASSERT(cam!=nil);
-
-	CVector source = cam->Source;
-	CVector dir    = cam->Front;
+	CVector dir = target - source;
+	dir.Normalise();
 
 	if ( DotProduct(dir, CVector(0.0f, -0.9894f, 0.145f)) > 0.997f )
 		CCoronas::MoonSize = (CCoronas::MoonSize+1) & 7;
 
-	dir.Normalise();
 	dir *= 16.0f;
 
 #ifdef SECUROM
@@ -2507,7 +2527,10 @@ CWeapon::FireSniper(CEntity *shooter)
 bool
 CWeapon::TakePhotograph(CEntity *shooter)
 {
-	if ( TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_CAMERA )
+	// The photo camera aims through its own viewfinder. A camera fired from a
+	// vehicle has no viewfinder mode of its own: the aimed shot takes the
+	// photograph from the aim the player holds.
+	if ( TheCamera.Cams[TheCamera.ActiveCam].Mode == CCam::MODE_CAMERA || shooter->IsVehicle() )
 	{
 		CSpecialFX::bSnapShotActive = true;
 		CSpecialFX::SnapShotFrames = 0;
@@ -2556,103 +2579,6 @@ CWeapon::TakePhotograph(CEntity *shooter)
 	}
 	
 	return false;
-}
-
-bool
-CWeapon::FireM16_1stPerson(CEntity *shooter)
-{
-	ASSERT(shooter!=nil);
-
-	// The view the shot leaves from: the first person player camera stands in
-	// for the sight camera of the aimed weapon, so the rifle sight fires from
-	// here in both views (VICE-136)
-	int16 mode = TheCamera.GetSightCameraMode();
-
-	if (!( mode == CCam::MODE_M16_1STPERSON
-		|| mode == CCam::MODE_SNIPER
-		|| mode == CCam::MODE_CAMERA
-		|| mode == CCam::MODE_ROCKETLAUNCHER
-		|| mode == CCam::MODE_M16_1STPERSON_RUNABOUT
-		|| mode == CCam::MODE_SNIPER_RUNABOUT
-		|| mode == CCam::MODE_ROCKETLAUNCHER_RUNABOUT
-		|| mode == CCam::MODE_HELICANNON_1STPERSON
-		) )
-	{
-		return false;
-	}
-
-	CWeaponInfo *info = GetInfo();
-
-	CWorld::bIncludeCarTyres = true;
-	CWorld::bIncludeBikers   = true;
-
-	CColPoint point;
-	CEntity *victim;
-
-	CWorld::pIgnoreEntity = shooter;
-	CWorld::bIncludeDeadPeds = true;
-
-	CCam *cam = &TheCamera.Cams[TheCamera.ActiveCam];
-	ASSERT(cam!=nil);
-
-	CVector source, target;
-	GetFirstPersonSightsRay(info->m_fRange, source, target);
-
-	if (ProcessLineOfSight(source, target, point, victim, m_eWeaponType, shooter, true, true, true, true, true, true, false)) {
-		CheckForShootingVehicleOccupant(&victim, &point, m_eWeaponType, source, target);
-	}
-	CWorld::pIgnoreEntity = nil;
-	CWorld::bIncludeDeadPeds = false;
-	CWorld::bIncludeBikers = false;
-	CWorld::bIncludeCarTyres = false;
-
-	CVector2D front(cam->Front.x, cam->Front.y);
-	front.Normalise();
-
-	DoBulletImpact(shooter, victim, &source, &target, &point, front);
-
-	CVector bulletPos;
-
-	if ( CHeli::TestBulletCollision(&source, &target, &bulletPos, (m_eWeaponType == WEAPONTYPE_M60 || m_eWeaponType == WEAPONTYPE_HELICANNON ? 20 : 4)) )
-	{
-		for ( int32 i = 0; i < 16; i++ )
-			CParticle::AddParticle(PARTICLE_SPARK, bulletPos, CVector(0.0f, 0.0f, 0.0f));
-	}
-
-	if ( shooter == FindPlayerPed() )
-	{
-		float mult;
-		switch (m_eWeaponType) {
-			case WEAPONTYPE_M4:
-				mult = 0.0003f;
-				break;
-			case WEAPONTYPE_RUGER:
-				mult = 0.00015f;
-				break;
-			case WEAPONTYPE_HELICANNON:
-			case WEAPONTYPE_M60:
-				mult = 0.0003f;
-				break;
-			default:
-				mult = 0.0002f;
-				break;
-		}
-
-		if (FindPlayerPed()->bIsDucking || FindPlayerPed()->m_attachedTo)
-			mult *= 0.3f;
-
-		TheCamera.Cams[TheCamera.ActiveCam].Beta  += float((CGeneral::GetRandomNumber() & 127) - 64) * mult;
-		TheCamera.Cams[TheCamera.ActiveCam].Alpha += float((CGeneral::GetRandomNumber() & 127) - 64) * mult;
-
-		// yes, double
-		double notFiringRate = (20.0 - info->m_nFiringRate) / 80.0;
-		double raisedNotFiringRate = Max(1.0, Max(0.0, notFiringRate));
-
-		uint8 shakeFreq = 80.0 * raisedNotFiringRate + 130.0;
-		CPad::GetPad(0)->StartShake(20000.0f * CTimer::GetTimeStep() / shakeFreq, shakeFreq);
-	}
-
-	return true;
 }
 
 // The drive-by shot of a vehicle that fires without the car ADS (a bike): the
@@ -2709,42 +2635,60 @@ CWeapon::FireInstantHitFromCar(CVehicle *shooter)
 
 	DoDriveByAutoAiming(FindPlayerPed(), shooter, &source, &target);
 
-	return FireFromCarAt(shooter, source, target);
+	return FireFromCarAt(shooter, source, target, false);
 }
 
-// The free aim in a car: the target comes from the camera and the shot leaves
-// the right hand like the drive-by. There is no auto aim and no drive-by
-// spread: the crosshair decides where the shot goes.
+// The aimed shot of a vehicle: every aiming weapon fires through here. The
+// shot leaves the driver's right hand and follows the one aim ray of the
+// view; the shot of the weapon's own fire type does the rest.
 bool
-CWeapon::FireInstantHitFromCarFreeAim(CVehicle *shooter)
+CWeapon::FireAimedFromCar(CVehicle *shooter)
 {
 	ASSERT(shooter!=nil);
 	ASSERT(shooter->pDriver!=nil);
 
 	CWeaponInfo *info = GetInfo();
 
-	CVector source, target;
-
-	source = info->m_vecFireOffset;
+	// The muzzle is the driver's right hand, the hand the drive-by fires from
+	CVector source = info->m_vecFireOffset;
 	shooter->pDriver->TransformToNode(source, PED_HANDR);
 	source += CTimer::GetTimeStep() * shooter->m_vecMoveSpeed;
 
-	CVector camSource;
-	if ( TheCamera.InFirstPersonCarView() )
-		GetFirstPersonSightsRay(info->m_fRange, camSource, target);
-	else
-		TheCamera.Find3rdPersonCamTargetVector(info->m_fRange, source, camSource, target);
+	// Each weapon fires the shot of its own fire type: the shotguns spread,
+	// the scope rifles shoot their bullet, the rocket leaves as a projectile,
+	// the flamethrower as a flame and the camera takes its photograph.
+	if (IsShotgun(m_eWeaponType))
+		return FireShotgun(shooter, &source);
+	if (IsScopeRifle(m_eWeaponType))
+		return FireSniper(shooter, &source);
+	if (m_eWeaponType == WEAPONTYPE_ROCKETLAUNCHER)
+		return FireProjectile(shooter, &source, 0.0f);
+	if (IsPhotoCamera(m_eWeaponType))
+		return TakePhotograph(shooter);
+	if (info->m_eWeaponFire == WEAPON_FIRE_AREA_EFFECT)
+		return FireAreaEffect(shooter, &source);
+	if (info->m_eWeaponFire != WEAPON_FIRE_INSTANT_HIT)
+		return false;
 
-	return FireFromCarAt(shooter, source, target);
+	// The instant hit: the shot leaves the hand along the aim ray and the hit
+	// is the weapon's own, not the drive-by one
+	CVector shotSource, target;
+	GetShotRay(shooter, info->m_fRange, &source, shotSource, target);
+
+	return FireFromCarAt(shooter, shotSource, target, true);
 }
 
-// The shot from a car once the source and the target are known: the events, the
-// gun flash, the line of sight and the victim handling are shared by the stock
-// drive-by and the free aim
+// The shot from a car once the source and the target are known: the events,
+// the gun flash, the line of sight and the victim handling are shared by the
+// stock drive-by and the aimed shot. The aimed shot deals the weapon's own
+// damage; the drive-by keeps the shipped UZI_DRIVEBY damage.
 bool
-CWeapon::FireFromCarAt(CVehicle *shooter, CVector &source, CVector &target)
+CWeapon::FireFromCarAt(CVehicle *shooter, CVector &source, CVector &target, bool aimed)
 {
 	CWeaponInfo *info = GetInfo();
+
+	eWeaponType damageWeapon = aimed ? m_eWeaponType : WEAPONTYPE_UZI_DRIVEBY;
+	float damage = (aimed ? 1.0f : 3.0f) * info->m_nDamage;
 
 	CEventList::RegisterEvent(EVENT_GUNSHOT, EVENT_ENTITY_PED, FindPlayerPed(), FindPlayerPed(), 1000);
 
@@ -2805,7 +2749,7 @@ CWeapon::FireFromCarAt(CVehicle *shooter, CVector &source, CVector &target)
 				asoc->blendAmount = 0.0f;
 				asoc->blendDelta  = 8.0f;
 
-				victimPed->InflictDamage(shooter, WEAPONTYPE_UZI_DRIVEBY, 3*info->m_nDamage, (ePedPieceTypes)point.pieceB, localDir);
+				victimPed->InflictDamage(shooter, damageWeapon, damage, (ePedPieceTypes)point.pieceB, localDir);
 
 				pos.z += 0.8f;
 
@@ -2832,7 +2776,7 @@ CWeapon::FireFromCarAt(CVehicle *shooter, CVector &source, CVector &target)
 			}
 		}
 		else if ( victim->IsVehicle() )
-			((CVehicle *)victim)->InflictDamage(FindPlayerPed(), WEAPONTYPE_UZI_DRIVEBY, info->m_nDamage);
+			((CVehicle *)victim)->InflictDamage(FindPlayerPed(), damageWeapon, info->m_nDamage);
 		else
 			CGlass::WasGlassHitByBullet(victim, point.point);
 

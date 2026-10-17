@@ -40,13 +40,13 @@ public:
 	void Shutdown();
 	
 	bool Fire          (CEntity *shooter, CVector *fireSource);
-	// Fires the drive-by of the vehicle; aiming fires the free aim along the
-	// camera instead
+	// Fires the vehicle gun: aiming follows the one aim ray from the driver's
+	// hand, the plain fire keeps the stock forward drive-by
 	bool FireFromCar   (CVehicle *shooter, bool aiming);
-	// The car ADS fire of the vehicle callers: fires and then sets the 70 ms
+	// The vehicle fire of the drive-by callers: fires and then sets the drive-by
 	// cadence only when a shot left the barrel. A failed attempt, an empty clip
 	// or a started reload leaves the timer alone, so the call can never shorten
-	// a running reload (VICE-90). The free aim is along the camera (VICE-110).
+	// a running reload (VICE-90). The aimed shot keeps the weapon's own rate.
 	void FireFromCarWithCadence(CVehicle *shooter, bool aiming);
 	bool FireMelee     (CEntity *shooter, CVector &fireSource);
 	bool FireInstantHit(CEntity *shooter, CVector *fireSource);
@@ -62,15 +62,16 @@ public:
 	
 	bool FireAreaEffect       (CEntity *shooter, CVector *fireSource);
 	bool LaserScopeDot        (CVector *pOutPos, float *pOutSize);
-	bool FireSniper           (CEntity *shooter);
+	bool FireSniper           (CEntity *shooter, CVector *fireSource);
 	bool TakePhotograph       (CEntity *shooter);
-	bool FireM16_1stPerson    (CEntity *shooter);
-	// The free aim from a car: the target comes from the camera and there is no
-	// auto aim
-	bool FireInstantHitFromCar       (CVehicle *shooter);
-	bool FireInstantHitFromCarFreeAim(CVehicle *shooter);
-	// The shot from a car after the source and the target are known
-	bool FireFromCarAt        (CVehicle *shooter, CVector &source, CVector &target);
+	// The aimed shot of a vehicle: the shot leaves the driver's right hand and
+	// follows the one aim ray, each fire type with its own shot
+	bool FireAimedFromCar     (CVehicle *shooter);
+	// The plain forward drive-by of a bike, which the aim does not drive
+	bool FireInstantHitFromCar(CVehicle *shooter);
+	// The shot from a car after the source and the target are known; aimed
+	// picks the weapon's own damage over the stock drive-by damage
+	bool FireFromCarAt        (CVehicle *shooter, CVector &source, CVector &target, bool aimed);
 	
 	static void DoDoomAiming       (CEntity *shooter, CVector *source,   CVector *target);
 	static void DoTankDoomAiming   (CEntity *shooter, CEntity *driver,   CVector *source, CVector *target);
