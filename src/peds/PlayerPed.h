@@ -92,6 +92,12 @@ public:
 	void ClearAimCameraMode(void);
 	void AimAtPosition(const CVector &position);
 	bool IsMoveControllerInCharge(void);
+	// The views in which the body keeps facing the camera: the first person
+	// view and the mouse third person camera. The ped walks sideways and
+	// backwards there, so the strafe and back animation groups are the correct
+	// ones and the legs follow the movement direction. The classic camera
+	// turns the body toward the movement direction instead.
+	bool BodyFacesCamera(void);
 	float GetMoveAnimPlayback(AnimationId animId) const;
 	float GetMoveAnimReferenceSpeed(void);
 	class CPlayerInfo *GetPlayerInfoForThisPlayerPed();
