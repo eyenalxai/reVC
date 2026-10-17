@@ -1242,7 +1242,6 @@ CPed::ClearAimFlag(void)
 		((CPlayerPed*)this)->ReleaseHeldAimPose();
 		((CPlayerPed*)this)->m_fFPSMoveHeading = 0.0f;
 		((CPlayerPed*)this)->m_bWeaponAimActive = false;
-		((CPlayerPed*)this)->m_bFirstPersonAimActive = false;
 	}
 }
 
@@ -3989,9 +3988,9 @@ CPed::CanStrafeOrMouseControl(void)
 	if (CCamera::bFreeCam)
 		return false;
 #endif
-	// First person view: the player walks in the first person weapon mode
-	if (TheCamera.Using1stPersonView() && m_nPedState == PED_SNIPER_MODE)
-		return true;
+	// The aim keeps the normal walk: the scope and the viewfinder views keep
+	// the same states as the plain view, so the player moves in every state
+	// (VICE-137)
 	return m_nPedState == PED_NONE || m_nPedState == PED_IDLE || m_nPedState == PED_FLEE_POS || m_nPedState == PED_FLEE_ENTITY ||
 		m_nPedState == PED_ATTACK || m_nPedState == PED_FIGHT || m_nPedState == PED_AIM_GUN || m_nPedState == PED_JUMP || m_nPedState == PED_ANSWER_MOBILE;
 }
@@ -7408,6 +7407,9 @@ void
 CPed::SetAnswerMobile(void)
 {
 	if (m_nPedState != PED_ANSWER_MOBILE && !DyingOrDead()) {
+		// The phone owns the hands: the on-foot aim ends here
+		if (IsPlayer())
+			((CPlayerPed*)this)->StopWeaponAim();
 		SetPedState(PED_ANSWER_MOBILE);
 #ifdef FIX_BUGS
 		ClearLookFlag();
@@ -9548,6 +9550,9 @@ CPed::AttachPedToEntity(CEntity *ent, CVector offset, uint16 type, float rot, eW
 	m_attachType = type;
 	m_attachRotStep = rot;
 	if (IsPlayer()) {
+		// An attached player aims with the attachment: the on-foot aim ends
+		// here and never runs again while the attachment holds
+		((CPlayerPed*)this)->StopWeaponAim();
 		bUsesCollision = false;
 	} else if (ent->IsVehicle()) {
 		m_pCollidingEntity = ent;
@@ -9596,6 +9601,10 @@ CPed::DettachPedFromEntity(void)
 		RestorePreviousState();
 		CAnimManager::BlendAnimation(GetClump(), m_animGroup, ANIM_STD_IDLE, 1000.0f);
 		bUsesCollision = true;
+		// The attachment owned the weapon mode (the heli cannon); the player
+		// takes the view back
+		if (IsPlayer())
+			TheCamera.ClearPlayerWeaponMode();
 		if (m_storedWeapon != WEAPONTYPE_UNIDENTIFIED) {
 			GetWeapon()->m_nAmmoInClip = 0;
 			GetWeapon()->m_nAmmoTotal = 0;

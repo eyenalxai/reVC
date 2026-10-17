@@ -9,6 +9,7 @@
 #include "Pad.h"
 #include "Camera.h"
 #include "WeaponEffects.h"
+#include "WeaponAim.h"
 #include "ActiveReload.h"
 #include "ModelIndices.h"
 #include "World.h"
@@ -175,7 +176,6 @@ CPlayerPed::CPlayerPed(void) : CPed(PEDTYPE_PLAYER1)
 	m_nLastBusFareCollected = 0;
 	idleAnimBlockIndex = CAnimManager::GetAnimationBlockIndex("playidles");
 	m_bWeaponAimActive = false;
-	m_bFirstPersonAimActive = false;
 }
 
 void
@@ -294,10 +294,9 @@ CPlayerPed::UseSprintEnergy(void)
 void
 CPlayerPed::MakeChangesForNewWeapon(eWeaponType weapon)
 {
-	if (m_nPedState == PED_SNIPER_MODE) {
-		RestorePreviousState();
-		TheCamera.ClearPlayerWeaponMode();
-	}
+	// The aim belongs to the weapon in hand: a switch puts it down and the
+	// next frame decides for the new weapon
+	StopWeaponAim();
 	SetCurrentWeapon(weapon);
 	m_nSelectedWepSlot = m_currentWeapon;
 
@@ -710,8 +709,8 @@ CPlayerPed::DoWeaponSmoothSpray(void)
 void
 CPlayerPed::DoStuffToGoOnFire(void)
 {
-	if (m_nPedState == PED_SNIPER_MODE)
-		TheCamera.ClearPlayerWeaponMode();
+	// The aim goes with the fire: a burning player cannot hold the weapon
+	StopWeaponAim();
 }
 
 bool
@@ -763,42 +762,6 @@ CPlayerPed::IsThisPedAnAimingPriority(CPed *suspect)
 			break;
 	}
 	return suspect->m_nPedState == PED_ABSEIL;
-}
-
-void
-CPlayerPed::PlayerControlSniper(CPad *padUsed)
-{
-	ProcessWeaponSwitch(padUsed);
-	TheCamera.PlayerExhaustion = (1.0f - (m_fCurrentStamina - -150.0f) / 300.0f) * 0.9f + 0.1f;
-
-	if (padUsed->DuckJustDown() && !bIsDucking && m_nMoveState != PEDMOVE_SPRINT) {
-		bCrouchWhenShooting = true;
-		SetDuck(60000, true);
-	} else if (bIsDucking && (padUsed->DuckJustDown() || m_nMoveState == PEDMOVE_SPRINT)) {
-		ClearDuck(true);
-		bCrouchWhenShooting = false;
-	}
-
-	if (!padUsed->GetTarget() && !m_attachedTo) {
-		RestorePreviousState();
-		TheCamera.ClearPlayerWeaponMode();
-		return;
-	}
-
-	int firingRate = GetWeapon()->m_eWeaponType == WEAPONTYPE_LASERSCOPE ? 333 : 266;
-	if (padUsed->WeaponJustDown() && CTimer::GetTimeInMilliseconds() > GetWeapon()->m_nTimer) {
-		CVector firePos(0.0f, 0.0f, 0.6f);
-		firePos = GetMatrix() * firePos;
-		GetWeapon()->Fire(this, &firePos);
-		m_nPadDownPressedInMilliseconds = CTimer::GetTimeInMilliseconds();
-	} else if (CTimer::GetTimeInMilliseconds() > m_nPadDownPressedInMilliseconds + firingRate &&
-		CTimer::GetTimeInMilliseconds() - CTimer::GetTimeStepInMilliseconds() < m_nPadDownPressedInMilliseconds + firingRate && padUsed->GetWeapon()) {
-		
-		if (GetWeapon()->m_nAmmoTotal > 0) {
-			DMAudio.PlayFrontEndSound(SOUND_WEAPON_AK47_BULLET_ECHO, GetWeapon()->m_eWeaponType);
-		}
-	}
-	GetWeapon()->Update(m_audioEntityId, nil);
 }
 
 // I think R* also used goto in here.
@@ -1028,10 +991,10 @@ CPlayerPed::ReleaseHeldAimPose(void)
 	aimAssoc->blendDelta = -4.0f;
 }
 
-#ifdef FIRST_PERSON
-// Aim the aim IK at a world position. The stock CPedIK::PointGunAtPosition works
-// the same way, but this path keeps the aim flag set so that CPed::AimGun applies
-// the pose every frame and CPed::ClearAimFlag releases it.
+// Aim the aim IK at a world position: the yaw the body holds and the pitch of
+// the right arm. The stock CPedIK::PointGunAtPosition works the same way, but
+// this path keeps the aim flag set so that CPed::AimGun applies the pose every
+// frame and CPed::ClearAimFlag releases it.
 void
 CPlayerPed::AimAtPosition(const CVector &position)
 {
@@ -1041,43 +1004,75 @@ CPlayerPed::AimAtPosition(const CVector &position)
 	SetAimFlag(CGeneral::GetRadianAngleBetweenPoints(position.x, position.y, GetPosition().x, GetPosition().y));
 	m_fFPSMoveHeading = CGeneral::GetRadianAngleBetweenPoints(position.z,
 		Distance2D(GetPosition(), position.x, position.y), armPos.z, 0.0f);
-	m_bFirstPersonAimActive = true;
 
 	HoldUpperBodyAimPose();
 }
 
-// The first person aim pose: the sight view holds the pose toward the view, and
-// the third person mouse camera holds it toward the crosshair. The stock lock-on
-// and SYPHON paths never set m_bFirstPersonAimActive, so their aim flag stays.
+// The one aim of the aiming weapon, gun and photo camera alike. The aim button
+// holds it; every on-foot control path runs this each frame, so the aim follows
+// the player through the walk, the run, the sprint, the jump and the fall, in
+// both views. The pose follows the one aim ray: the crosshair of the third
+// person mouse view, the camera of every other view. Only the scope and the
+// viewfinder take a camera mode; a normal gun aims through the view it has.
 void
-CPlayerPed::UpdateFirstPersonAim(CPad *padUsed)
+CPlayerPed::AimWeapon(CPad *padUsed)
 {
-	if (TheCamera.UsingFirstPersonSights()) {
-		// Aiming down the sights: the pose follows the camera front
-		CCam *cam = &TheCamera.Cams[TheCamera.ActiveCam];
-		AimAtPosition(cam->Source + PLAYER_AIM_DISTANCE * cam->Front);
+	eWeaponType weapon = GetWeapon()->m_eWeaponType;
+
+	// The aim ends when the button goes, the weapon cannot aim, or the player
+	// holds the weapon for an attachment instead of aiming it
+	if (!padUsed->GetTarget() || !IsAimableWeapon(weapon) || m_attachedTo) {
+		StopWeaponAim();
 		return;
 	}
 
-	if (CCamera::m_bUseMouse3rdPerson && TheCamera.Cams[0].Using3rdPersonMouseCam()
-#ifdef FREE_CAM
-		&& !CCamera::bFreeCam
-#endif
-		&& !TheCamera.Using1stPersonView() && !m_pPointGunAt && padUsed->GetTarget()
-		&& m_nSelectedWepSlot == m_currentWeapon && m_nMoveState != PEDMOVE_SPRINT
-		&& !TheCamera.Using1stPersonWeaponMode()
-		&& CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_CANAIM)) {
-		// Third person mouse camera: Target raises the gun toward the crosshair
-		CVector source, target;
-		TheCamera.Find3rdPersonCamTargetVector(PLAYER_AIM_DISTANCE, GetPosition(), source, target);
-		AimAtPosition(target);
-		return;
+	if (!m_bWeaponAimActive) {
+		// An aiming weapon never lock-ons: the stock lock-on belongs to the
+		// melee, the thrown weapons and the detonator
+		if (m_pPointGunAt || m_bHasLockOnTarget)
+			ClearWeaponTarget();
+		m_bWeaponAimActive = true;
 	}
 
-	if (m_bFirstPersonAimActive)
-		ClearAimFlag();
+	// The scope and the viewfinder own the camera; the viewfinder keeps its
+	// mode because the photograph reads it. No other weapon changes the camera.
+	if (UsesScopeZoom(weapon)) {
+		if (TheCamera.PlayerWeaponMode.Mode != CCam::MODE_SNIPER)
+			TheCamera.SetNewPlayerWeaponMode(CCam::MODE_SNIPER, 0, 0);
+	} else if (IsPhotoCamera(weapon)) {
+		if (TheCamera.PlayerWeaponMode.Mode != CCam::MODE_CAMERA)
+			TheCamera.SetNewPlayerWeaponMode(CCam::MODE_CAMERA, 0, 0);
+	} else if (TheCamera.PlayerWeaponMode.Mode == CCam::MODE_SNIPER
+		|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_CAMERA) {
+		// The weapon switched under the aim: the scope or the viewfinder goes
+		TheCamera.ClearPlayerWeaponMode();
+	}
+
+	CVector source, target;
+	TheCamera.GetPlayerAimRay(PLAYER_AIM_DISTANCE, GetPosition(), source, target);
+	AimAtPosition(target);
 }
-#endif
+
+// The end of the aim: the stock release puts the pose down, and the scope or
+// the viewfinder leaves with it.
+void
+CPlayerPed::StopWeaponAim(void)
+{
+	ClearAimFlag();
+	ClearAimCameraMode();
+}
+
+// The scope and the viewfinder leave with the aim flag: every end of the aim
+// (the button, a reload that takes the pose, a state that cannot aim) must take
+// its camera mode with it. A mode the aim never sets (the syphon, the heli
+// cannon) stays.
+void
+CPlayerPed::ClearAimCameraMode(void)
+{
+	if (TheCamera.PlayerWeaponMode.Mode == CCam::MODE_SNIPER
+		|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_CAMERA)
+		TheCamera.ClearPlayerWeaponMode();
+}
 
 // The shot of the held fire button: the stationary sights and the airborne
 // player fire straight from the hand, because neither runs the attack
@@ -1106,9 +1101,10 @@ CPlayerPed::FireWeaponWhenHeld(CPad *padUsed)
 	}
 }
 
-// The airborne player keeps firing: the jump state owns the landing, so the
-// attack state and its animation stay off and the weapon fires straight from
-// the hand. The sight views fire along the sight ray through CWeapon::Fire.
+// The airborne player keeps the aim and the fire: the jump and the fall own
+// the landing, so the attack state and its animation stay off and the weapon
+// fires straight from the hand along the one aim ray. The one aim runs here
+// too, so the state and the pose hold through the air (VICE-137).
 void
 CPlayerPed::ProcessAirborneWeapon(CPad *padUsed)
 {
@@ -1118,143 +1114,10 @@ CPlayerPed::ProcessAirborneWeapon(CPad *padUsed)
 	if (weapon->IsTypeMelee() || weapon->GetInfo()->IsFlagSet(WEAPONFLAG_THROW))
 		return;
 
-	// The aim starts in the air too: the first person view serves the weapon's
-	// sight with the player camera, so the sight needs no ground (VICE-137).
-	// The airborne player does not run the weapon control, so the start, the
-	// pose and the release of the aim all happen here.
-	if (!m_pFire)
-		StartWeaponSight(padUsed, true);
-	if (TheCamera.PlayerWeaponMode.Mode != CCam::MODE_NONE && !padUsed->GetTarget() && !m_attachedTo)
-		TheCamera.ClearPlayerWeaponMode();
-
-#ifdef FIRST_PERSON
-	// The aim keeps the weapon pose at the view: nothing else updates it in the
-	// air, so the pose would stay where it was when the jump started.
-	if (TheCamera.Using1stPersonView())
-		UpdateFirstPersonAim(padUsed);
-#endif
+	AimWeapon(padUsed);
 
 	FireWeaponWhenHeld(padUsed);
 	weapon->Update(m_audioEntityId, this);
-}
-
-// The weapons that can aim down a sight: the stock set, and in the first person
-// view every weapon that can aim (the flamethrower aims too, although the
-// weapon data does not give it the CANAIM flag).
-static bool
-CanAimWeapon(eWeaponType weapon, CWeaponInfo *info)
-{
-	switch (weapon) {
-	case WEAPONTYPE_ROCKETLAUNCHER:
-	case WEAPONTYPE_SNIPERRIFLE:
-	case WEAPONTYPE_LASERSCOPE:
-	case WEAPONTYPE_M4:
-	case WEAPONTYPE_RUGER:
-	case WEAPONTYPE_M60:
-	case WEAPONTYPE_CAMERA:
-		return true;
-	default:
-		break;
-	}
-	if (TheCamera.FirstPersonViewEnabled() &&
-	   (info->IsFlagSet(WEAPONFLAG_CANAIM) || weapon == WEAPONTYPE_FLAMETHROWER))
-		return true;
-	return false;
-}
-
-// The weapons that only fire from their sight: no sight, no shot
-static bool
-SightOnlyWeapon(eWeaponType weapon)
-{
-	return weapon == WEAPONTYPE_ROCKETLAUNCHER || weapon == WEAPONTYPE_SNIPERRIFLE ||
-	       weapon == WEAPONTYPE_LASERSCOPE || weapon == WEAPONTYPE_CAMERA;
-}
-
-// The start of the weapon sight: the aim button turns the weapon mode of the
-// sight on. The plain sights use the M16 camera mode (the first person view
-// serves them with the player camera), the sniper and the laser scope the
-// sniper mode, the rocket launcher the rocket mode and the photo camera its
-// own. Returns true when the ped entered the stock stationary sight state, and
-// the caller then stops the weapon control for the frame. The airborne player
-// never enters it: only the sights the first person view serves start in the
-// air, the stock stationary sights need the ground (VICE-137).
-bool
-CPlayerPed::StartWeaponSight(CPad *padUsed, bool airborne)
-{
-	eWeaponType weapon = GetWeapon()->m_eWeaponType;
-
-	if (!CanAimWeapon(weapon, GetWeapon()->GetInfo()))
-		return false;
-	if (!padUsed->TargetJustDown() && !TheCamera.m_bJustJumpedOutOf1stPersonBecauseOfTarget)
-		return false;
-
-	bool stationary = !UsingFirstPersonWeaponSight();
-	if (stationary && airborne)
-		return false;
-
-#ifdef FREE_CAM
-	if (CCamera::bFreeCam && TheCamera.Cams[0].Using3rdPersonMouseCam()) {
-		m_fRotationCur = CGeneral::LimitRadianAngle(-TheCamera.Orientation);
-		SetHeading(m_fRotationCur);
-	}
-#endif
-	if (weapon == WEAPONTYPE_ROCKETLAUNCHER)
-		TheCamera.SetNewPlayerWeaponMode(CCam::MODE_ROCKETLAUNCHER, 0, 0);
-	else if (weapon == WEAPONTYPE_SNIPERRIFLE || weapon == WEAPONTYPE_LASERSCOPE)
-		TheCamera.SetNewPlayerWeaponMode(CCam::MODE_SNIPER, 0, 0);
-	else if (weapon == WEAPONTYPE_CAMERA)
-		TheCamera.SetNewPlayerWeaponMode(CCam::MODE_CAMERA, 0, 0);
-	else
-		TheCamera.SetNewPlayerWeaponMode(CCam::MODE_M16_1STPERSON, 0, 0);
-
-	if (!stationary)
-		return false;
-
-	m_fMoveSpeed = 0.0f;
-	CAnimManager::BlendAnimation(GetClump(), ASSOCGRP_STD, ANIM_STD_IDLE, 1000.0f);
-	SetPedState(PED_SNIPER_MODE);
-	return true;
-}
-
-void
-CPlayerPed::PlayerControlM16(CPad *padUsed)
-{
-	ProcessWeaponSwitch(padUsed);
-	TheCamera.PlayerExhaustion = (1.0f - (m_fCurrentStamina - -150.0f) / 300.0f) * 0.9f + 0.1f;
-
-	if (padUsed->DuckJustDown() && !bIsDucking && m_nMoveState != PEDMOVE_SPRINT) {
-		bCrouchWhenShooting = true;
-		SetDuck(60000, true);
-	} else if (bIsDucking && (padUsed->DuckJustDown() || m_nMoveState == PEDMOVE_SPRINT)) {
-		ClearDuck(true);
-		bCrouchWhenShooting = false;
-	}
-
-	// The sight keeps the player moving: the M16 camera sight runs the movement
-	// controller (the controller checks the weapon itself, so the stationary
-	// sights of the sniper, the rocket launcher and the camera stay put and
-	// keep their stock behaviour). Never sprints, and keeps the weapon aim state.
-	if (IsMoveControllerInCharge()) {
-		UpdatePlayerMovement(padUsed);
-		SetRealMoveAnim();
-	}
-
-	if (!padUsed->GetTarget() && !m_attachedTo) {
-		RestorePreviousState();
-		TheCamera.ClearPlayerWeaponMode();
-	}
-
-#ifdef FIRST_PERSON
-	UpdateFirstPersonAim(padUsed);
-#endif
-
-	// The weapon fires from exactly one place per state: the mobile ADS keeps
-	// the attack state, so its attack animation fires the shot like the hip
-	// fire; only the stationary sight state has no attack animation, and the
-	// sight control fires the weapon itself.
-	if (m_nPedState == PED_SNIPER_MODE)
-		FireWeaponWhenHeld(padUsed);
-	GetWeapon()->Update(m_audioEntityId, nil);
 }
 
 void
@@ -1283,6 +1146,10 @@ CPlayerPed::PlayerControlFighter(CPad *padUsed)
 			SetJump();
 		}
 	}
+
+	// The fight stance keeps the fight weapons; the one aim ends here when the
+	// player holds an aiming weapon (a weapon switch out of the stance)
+	AimWeapon(padUsed);
 }
 
 void
@@ -1297,31 +1164,57 @@ CPlayerPed::PlayerControl1stPersonRunAround(CPad *padUsed)
 		return;
 	}
 
-	if (!CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_HEAVY) && padUsed->GetSprint()) {
+	if (PlayerWantsSprint(padUsed))
 		m_nMoveState = PEDMOVE_SPRINT;
-	}
 	if (m_nPedState != PED_FIGHT)
 		SetRealMoveAnim();
 
-	if (!bIsInTheAir && !(CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_HEAVY)) &&
-		padUsed->JumpJustDown() && m_nPedState != PED_JUMP) {
-
-		ClearAttack();
-		ClearWeaponTarget();
-		if (m_nEvadeAmount != 0 && m_pEvadingFrom) {
-			SetEvasiveDive((CPhysical*)m_pEvadingFrom, 1);
-			m_nEvadeAmount = 0;
-			m_pEvadingFrom = nil;
-		} else {
-			SetJump();
-		}
-	}
+	PlayerJumpOrDive(padUsed);
 
 	// FIX: Fact that PlayIdleAnimations only called through PlayerControlZelda was making it visible to only Classic control players. This isn't fair!
 #ifdef FIX_BUGS
 	if (m_nPedState != PED_FIGHT)
 		PlayIdleAnimations(padUsed);
 #endif
+
+	AimWeapon(padUsed);
+}
+
+// The jump and the evade dive of the on-foot player, shared by the two walk
+// controls. The aim gates the heavy weapons: a heavy weapon refuses the jump,
+// except while the aim is up, where the aim keeps the whole control (VICE-137).
+// The dive owns the whole body, so the aim goes with it; the jump keeps the aim
+// and the pose through the air.
+void
+CPlayerPed::PlayerJumpOrDive(CPad *padUsed)
+{
+	if (bIsInTheAir || m_nPedState == PED_JUMP || !padUsed->JumpJustDown())
+		return;
+	if (!m_bWeaponAimActive && CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_HEAVY))
+		return;
+
+	ClearAttack();
+	if (m_nEvadeAmount != 0 && m_pEvadingFrom) {
+		ClearWeaponTarget();
+		SetEvasiveDive((CPhysical*)m_pEvadingFrom, 1);
+		m_nEvadeAmount = 0;
+		m_pEvadingFrom = nil;
+	} else {
+		// The lock-on target goes with the jump; the aim stays
+		if (!m_bWeaponAimActive)
+			ClearWeaponTarget();
+		SetJump();
+	}
+}
+
+// The sprint request of the on-foot player. The heavy weapons refuse it, except
+// while the aim is up: one control, aiming included (VICE-137).
+bool
+CPlayerPed::PlayerWantsSprint(CPad *padUsed)
+{
+	if (!padUsed->GetSprint())
+		return false;
+	return m_bWeaponAimActive || !CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_HEAVY);
 }
 
 void
@@ -1625,7 +1518,11 @@ void
 CPlayerPed::ProcessPlayerWeapon(CPad *padUsed)
 {
 	CWeaponInfo *weaponInfo = CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType);
-	if (m_bHasLockOnTarget && !m_pPointGunAt) {
+	// The one aim owns every aiming weapon: it keeps the pose, the scope and
+	// the viewfinder, and it never lock-ons
+	bool aimingWeapon = IsAimableWeapon(GetWeapon()->m_eWeaponType);
+
+	if (!aimingWeapon && m_bHasLockOnTarget && !m_pPointGunAt) {
 		TheCamera.ClearPlayerWeaponMode();
 		CWeaponEffects::ClearCrossHair();
 		ClearPointGunAt();
@@ -1657,17 +1554,14 @@ CPlayerPed::ProcessPlayerWeapon(CPad *padUsed)
 		m_wepAccuracy = 100;
 
 	if (!m_pFire) {
-		// The aim button starts the weapon's sight; the stock stationary sight
-		// state stops the weapon control for the frame
-		if (StartWeaponSight(padUsed, false))
-			return;
-
-		// The sight only weapons do not fire from the hip
-		if (SightOnlyWeapon(GetWeapon()->m_eWeaponType) && !TheCamera.Using1stPersonWeaponMode())
-			return;
+		// The aim button raises the weapon: the one aim owns the pose and the
+		// scope in every state, and the attack path below fires from it
+		AimWeapon(padUsed);
 	}
 
-	if (padUsed->GetWeapon() && m_nMoveState != PEDMOVE_SPRINT) {
+	// The sprint stops the hip fire; the aim keeps it, so the aimed player
+	// shoots while running (VICE-137)
+	if (padUsed->GetWeapon() && (m_bWeaponAimActive || m_nMoveState != PEDMOVE_SPRINT)) {
 		if (m_nSelectedWepSlot == m_currentWeapon) {
 			if (m_pPointGunAt) {
 				if (m_nPedState == PED_ATTACK) {
@@ -1710,82 +1604,10 @@ CPlayerPed::ProcessPlayerWeapon(CPad *padUsed)
 		}
 	}
 
-#ifdef FREE_CAM
-	static int8 changedHeadingRate = 0;
-	static int8 pointedGun = 0;
-	if (changedHeadingRate == 2) changedHeadingRate = 1;
-	if (pointedGun == 2) pointedGun = 1;
-
-	// Rotate player/arm when shooting. We don't have auto-rotation anymore
-	if (CCamera::m_bUseMouse3rdPerson && CCamera::bFreeCam &&
-		m_nSelectedWepSlot == m_currentWeapon && m_nMoveState != PEDMOVE_SPRINT) {
-
-#define CAN_AIM_WITH_ARM (weaponInfo->IsFlagSet(WEAPONFLAG_CANAIM_WITHARM) && !bIsDucking && !bCrouchWhenShooting)
-		// Weapons except throwable and melee ones
-		if (weaponInfo->m_nWeaponSlot > 2) {
-			if ((padUsed->GetTarget() && CAN_AIM_WITH_ARM) || padUsed->GetWeapon()) {
-				float limitedCam = CGeneral::LimitRadianAngle(-TheCamera.Orientation);
-
-				m_cachedCamSource = TheCamera.Cams[TheCamera.ActiveCam].Source;
-				m_cachedCamFront = TheCamera.Cams[TheCamera.ActiveCam].Front;
-				m_cachedCamUp = TheCamera.Cams[TheCamera.ActiveCam].Up;
-				
-				// On this one we can rotate arm.
-				if (CAN_AIM_WITH_ARM) {
-					pointedGun = 2;
-					m_bWeaponAimActive = true;
-					SetLookFlag(limitedCam, true, true);
-					SetAimFlag(limitedCam);
-					SetLookTimer(INT32_MAX);
-					((CPlayerPed*)this)->m_fFPSMoveHeading = TheCamera.Find3rdPersonQuickAimPitch();
-					if (m_nPedState != PED_ATTACK && m_nPedState != PED_AIM_GUN && m_nPedState != PED_FIGHT) {
-						// This is a seperate ped state just for pointing gun. Used for target button
-						SetPointGunAt(nil);
-					}
-				} else {
-					m_fRotationDest = limitedCam;
-					changedHeadingRate = 2;
-					m_headingRate = 12.5f;
-
-					// Anim. fix for shotgun, ak47 and m16 (we must finish rot. it quickly)
-					if (weaponInfo->IsFlagSet(WEAPONFLAG_CANAIM) && padUsed->WeaponJustDown()) {
-						m_fRotationCur = CGeneral::LimitRadianAngle(m_fRotationCur);
-						float limitedRotDest = m_fRotationDest;
-
-						if (m_fRotationCur - PI > m_fRotationDest) {
-							limitedRotDest += 2 * PI;
-						} else if (PI + m_fRotationCur < m_fRotationDest) {
-							limitedRotDest -= 2 * PI;
-						}
-
-						m_fRotationCur += (limitedRotDest - m_fRotationCur) / 2;
-					}
-				}
-			}
-		}
-#undef CAN_AIM_WITH_ARM
-	}
-	if (changedHeadingRate == 1) {
-		changedHeadingRate = 0;
-		RestoreHeadingRate();
-	}
-	if (pointedGun == 1) {
-		if (m_nPedState == PED_ATTACK) {
-			if (!padUsed->GetWeapon() && (m_pedIK.m_flags & CPedIK::GUN_POINTED_SUCCESSFULLY) == 0) {
-				float limitedCam = CGeneral::LimitRadianAngle(-TheCamera.Orientation);
-
-				SetAimFlag(limitedCam);
-				((CPlayerPed*)this)->m_fFPSMoveHeading = TheCamera.Find3rdPersonQuickAimPitch();
-				m_bWeaponAimActive = true;
-			}
-		} else {
-			pointedGun = 0;
-			ClearPointGunAt();
-		}
-	}
-#endif
-
-	if (padUsed->GetTarget() && m_nSelectedWepSlot == m_currentWeapon && m_nMoveState != PEDMOVE_SPRINT && !TheCamera.Using1stPersonWeaponMode() && weaponInfo->IsFlagSet(WEAPONFLAG_CANAIM)) {
+	// The stock lock-on belongs to the melee, the thrown weapons and the
+	// detonator; an aiming weapon never picks a target, it aims through the
+	// one aim ray
+	if (!aimingWeapon && padUsed->GetTarget() && m_nSelectedWepSlot == m_currentWeapon && m_nMoveState != PEDMOVE_SPRINT && !TheCamera.Using1stPersonWeaponMode() && weaponInfo->IsFlagSet(WEAPONFLAG_CANAIM)) {
 		if (m_pPointGunAt) {
 			// what??
 			if (!m_pPointGunAt
@@ -1848,10 +1670,6 @@ CPlayerPed::ProcessPlayerWeapon(CPad *padUsed)
 		}
 	}
 	m_bHasLockOnTarget = m_pPointGunAt != nil;
-
-#ifdef FIRST_PERSON
-	UpdateFirstPersonAim(padUsed);
-#endif
 }
 
 bool
@@ -1887,36 +1705,9 @@ CPlayerPed::IsMoveControllerInCharge(void)
 
 		if (RpAnimBlendClumpGetFirstAssociation(GetClump(), ASSOC_BLOCK))
 			return false;
-
-		// The sight camera modes route the input to the weapon controls
-		if (TheCamera.Using1stPersonWeaponMode())
-			return CanMoveInWeaponSight();
 	}
 
 	return CanStrafeOrMouseControl();
-}
-
-// The aim of the weapon runs on the first person player camera: the view holds
-// the sight, keeps the player moving and keeps the aim through every movement
-// state (VICE-137). Only the first person view serves the sight this way; the
-// photo camera never does, because the photograph reads its own camera mode.
-bool
-CPlayerPed::UsingFirstPersonWeaponSight(void)
-{
-	if (TheCamera.FirstPersonViewEnabled())
-		return GetWeapon()->m_eWeaponType != WEAPONTYPE_CAMERA;
-	return false;
-}
-
-// Whether the aiming weapon keeps the player moving. The first person view
-// serves every aiming weapon with the player camera, so all of them move
-// (VICE-137). In the stock view (the setting off) the M16 camera mode of the
-// rifle sight keeps the movement (VICE-65) and the sight only weapons are
-// stationary; the photo camera is stationary in both views.
-bool
-CPlayerPed::CanMoveInWeaponSight(void)
-{
-	return UsingFirstPersonWeaponSight() || !SightOnlyWeapon(GetWeapon()->m_eWeaponType);
 }
 
 // The playback speed the game forces on a movement animation: the adrenaline
@@ -1967,6 +1758,10 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 	float upDown = padUsed->GetPedWalkUpDown();
 	// The smooth spray is a weapon behaviour; the fight stance has its own moves
 	float smoothSprayRate = m_nPedState == PED_FIGHT ? -1.0f : DoWeaponSmoothSpray();
+	// The aim owns the movement while it is up: the spray must not hold the
+	// ped in place or turn the body under the aim (VICE-137)
+	if (m_bWeaponAimActive)
+		smoothSprayRate = -1.0f;
 	bool smoothSprayWithoutMove = false;
 
 	if (MovementDisabledBecauseOfTargeting()) {
@@ -2087,7 +1882,7 @@ CPlayerPed::PlayerControlZelda(CPad *padUsed)
 		return;
 	}
 
-	if (!CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_HEAVY) && padUsed->GetSprint()) {
+	if (PlayerWantsSprint(padUsed)) {
 		if (!m_pCurrentPhysSurface || (!m_pCurrentPhysSurface->bInfiniteMass || m_pCurrentPhysSurface->m_phy_flagA08))
 			m_nMoveState = PEDMOVE_SPRINT;
 	}
@@ -2095,18 +1890,8 @@ CPlayerPed::PlayerControlZelda(CPad *padUsed)
 	if (m_nPedState != PED_FIGHT)
 		SetRealMoveAnim();
 
-	if (!bIsInTheAir && !CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_HEAVY)
-		&& padUsed->JumpJustDown() && m_nPedState != PED_JUMP) {
-		ClearAttack();
-		ClearWeaponTarget();
-		if (m_nEvadeAmount != 0 && m_pEvadingFrom) {
-			SetEvasiveDive((CPhysical*)m_pEvadingFrom, 1);
-			m_nEvadeAmount = 0;
-			m_pEvadingFrom = nil;
-		} else {
-			SetJump();
-		}
-	}
+	PlayerJumpOrDive(padUsed);
+	AimWeapon(padUsed);
 	PlayIdleAnimations(padUsed);
 }
 
@@ -2276,16 +2061,19 @@ CPlayerPed::ProcessControl(void)
 		RestoreSprintEnergy(0.3f);
 
 	if (m_nPedState == PED_DEAD) {
+		StopWeaponAim();
 		ClearWeaponTarget();
 		return;
 	}
 	if (m_nPedState == PED_DIE) {
+		StopWeaponAim();
 		ClearWeaponTarget();
 		if (CTimer::GetTimeInMilliseconds() > m_bloodyFootprintCountOrDeathTime + 4000)
 			SetDead();
 		return;
 	}
 	if (m_nPedState == PED_DRIVING && m_objective != OBJECTIVE_LEAVE_CAR) {
+		StopWeaponAim();
 		if (!CReplay::IsPlayingBack() || m_pMyVehicle) {
 			if (m_pMyVehicle->IsCar() && ((CAutomobile*)m_pMyVehicle)->Damage.GetDoorStatus(DOOR_FRONT_LEFT) == DOOR_STATUS_SWINGING) {
 				CAnimBlendAssociation *rollDoorAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_CAR_CLOSE_DOOR_ROLLING_LHS);
@@ -2339,34 +2127,26 @@ CPlayerPed::ProcessControl(void)
 		case PED_AIM_GUN:
 		case PED_ANSWER_MOBILE:
 			if (!RpAnimBlendClumpGetFirstAssociation(GetClump(), ASSOC_BLOCK) && !m_attachedTo) {
-				if (TheCamera.Using1stPersonWeaponMode()) {
-					if (padUsed) {
-						// The sights the first person view serves keep the
-						// player moving in every state (VICE-137); the sight
-						// only weapons of the stock view and the photo camera
-						// keep the stationary sight.
-						if (CanMoveInWeaponSight())
-							PlayerControlM16(padUsed);
-						else
-							PlayerControlSniper(padUsed);
-					}
-
-				} else if ((TheCamera.Cams[0].Using3rdPersonMouseCam()
-					|| TheCamera.Using1stPersonView()
-					)
+				if (padUsed) {
+					// One on-foot control per view: the camera-facing walk
+					// (the first person and the mouse third person views, and
+					// the scope and the viewfinder views, where the player
+					// keeps moving), then the fight stance and the classic
+					// walk.
+					if (TheCamera.Using1stPersonView()
+						|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_SNIPER
+						|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_CAMERA
 #ifdef FREE_CAM
-					&& !CCamera::bFreeCam
+						|| TheCamera.Cams[0].Using3rdPersonMouseCam() && !CCamera::bFreeCam
+#else
+						|| TheCamera.Cams[0].Using3rdPersonMouseCam()
 #endif
-					) {
-					if (padUsed)
+						)
 						PlayerControl1stPersonRunAround(padUsed);
-
-				} else if (m_nPedState == PED_FIGHT) {
-					if (padUsed)
+					else if (m_nPedState == PED_FIGHT)
 						PlayerControlFighter(padUsed);
-
-				} else if (padUsed) {
-					PlayerControlZelda(padUsed);
+					else
+						PlayerControlZelda(padUsed);
 				}
 			}
 			if (IsPedInControl() && m_nPedState != PED_ANSWER_MOBILE && padUsed)
@@ -2398,16 +2178,12 @@ CPlayerPed::ProcessControl(void)
 			}
 			break;
 		case PED_SNIPER_MODE:
-			// The sniper and the laser scope are stationary; the other sights
-			// keep the M16 control (a normal weapon moves, the rocket launcher
-			// and the camera do not)
-			if (GetWeapon()->m_eWeaponType == WEAPONTYPE_SNIPERRIFLE || GetWeapon()->m_eWeaponType == WEAPONTYPE_LASERSCOPE) {
-				if (padUsed)
-					PlayerControlSniper(padUsed);
-
-			} else if (padUsed) {
-				PlayerControlM16(padUsed);
-			}
+			// The gunner attached to an entity (the heli cannon): the
+			// attachment owns the state and the weapon, the view aims and the
+			// held fire button shoots along it. The on-foot aim never runs for
+			// an attached player.
+			if (m_attachedTo && padUsed)
+				FireWeaponWhenHeld(padUsed);
 			break;
 		case PED_SEEK_CAR:
 		case PED_SEEK_IN_BOAT:
@@ -2437,8 +2213,8 @@ CPlayerPed::ProcessControl(void)
 			if (bIsLanding)
 				break;
 
-			// The airborne player keeps firing: the jump state owns the
-			// landing, so the shot comes straight from the weapon and the
+			// The airborne player keeps the aim and fires: the jump state owns
+			// the landing, so the shot comes straight from the weapon and the
 			// attack state stays off.
 			if (padUsed)
 				ProcessAirborneWeapon(padUsed);
@@ -2446,6 +2222,11 @@ CPlayerPed::ProcessControl(void)
 			// This has been added later it seems
 			return;
 		case PED_FALL:
+			// The falling player keeps the aim and fires: the aim and the pose
+			// hold through the air (VICE-137), and so does the weapon
+			if (padUsed)
+				ProcessAirborneWeapon(padUsed);
+			return;
 		case PED_GETUP:
 		case PED_ENTER_TRAIN:
 		case PED_EXIT_TRAIN:
@@ -2454,6 +2235,8 @@ CPlayerPed::ProcessControl(void)
 		case PED_ENTER_CAR:
 		case PED_STEAL_CAR:
 		case PED_EXIT_CAR:
+			// The aim cannot continue into a scripted move or a car
+			StopWeaponAim();
 			ClearWeaponTarget();
 			break;
 		case PED_ARRESTED:
@@ -2461,6 +2244,8 @@ CPlayerPed::ProcessControl(void)
 				BeingDraggedFromCar();
 			break;
 		default:
+			// Every other state cannot hold the aiming weapon
+			StopWeaponAim();
 			break;
 	}
 	if (padUsed && IsPedShootable() && m_nPedState != PED_ANSWER_MOBILE && m_nLastPedState != PED_ANSWER_MOBILE) {
