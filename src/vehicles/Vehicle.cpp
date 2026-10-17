@@ -2600,6 +2600,41 @@ CVehicle::FireDriverAimedWeapon(CWeapon *weapon)
 	return true;
 }
 
+// The shared start of the three drive-by paths. The aim state comes first, so
+// it clears even when a gate stops the rest; then the script gate, the aiming
+// weapon, the weapon update and the reload input. It answers whether the path
+// continues, with the driver's weapon and whether the driver aims.
+bool
+CVehicle::PrepareDriverShooting(CWeapon **weaponOut, bool *aimingOut)
+{
+	*weaponOut = nil;
+	*aimingOut = UpdateDriverWeaponAim();
+
+	if (pDriver == nil)
+		return false;
+
+	// The stock drive-by gate: a script can forbid the drive-by to the player.
+	if (pDriver->IsPlayer()) {
+		CPlayerInfo *playerInfo = ((CPlayerPed*)pDriver)->GetPlayerInfoForThisPlayerPed();
+		if (playerInfo && !playerInfo->m_bDriveByAllowed)
+			return false;
+	}
+
+	CWeapon *weapon = pDriver->GetWeapon();
+	if (!IsAimableWeapon(weapon->m_eWeaponType))
+		return false;
+
+	weapon->Update(pDriver->m_audioEntityId, nil);
+
+	// The drive-by reload uses the same input as the on-foot path: the player
+	// starts a reload or judges the running one (VICE-90).
+	if (pDriver->IsPlayer())
+		((CPlayerPed*)pDriver)->ProcessActiveReloadInput(CPad::GetPad(0));
+
+	*weaponOut = weapon;
+	return true;
+}
+
 bool
 IsVehiclePointerValid(CVehicle* pVehicle)
 {

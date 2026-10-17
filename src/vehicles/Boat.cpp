@@ -1416,27 +1416,13 @@ CBoat::AddWakePoint(CVector point)
 void
 CBoat::DoDriveByShootings(void)
 {
-	// The aim state comes first: it follows the gun and the aim input, and it
-	// must clear even when the stock gates stop the rest of the drive-by.
-	bool aiming = UpdateDriverWeaponAim();
-
-	// The stock drive-by gate: a script can forbid the drive-by to the player.
-	if (pDriver->IsPlayer() && !((CPlayerPed*)pDriver)->GetPlayerInfoForThisPlayerPed()->m_bDriveByAllowed)
+	CWeapon *weapon;
+	bool aiming;
+	if (!PrepareDriverShooting(&weapon, &aiming))
 		return;
 
-	CWeapon *weapon = pDriver->GetWeapon();
-	if(!IsAimableWeapon(weapon->m_eWeaponType))
-		return;
-
-	weapon->Update(pDriver->m_audioEntityId, nil);
-
-	// The drive-by reload uses the same input as the on-foot path: the
-	// player starts a reload or judges the running one (VICE-90).
-	if (pDriver->IsPlayer())
-		((CPlayerPed*)pDriver)->ProcessActiveReloadInput(CPad::GetPad(0));
-
-	// The car ADS aims and fires every gun from the boat too: the shot
-	// follows the one held pose.
+	// The car aim fires every aiming weapon with the one held pose: the shot
+	// follows the camera ray. The weapon owns the fire type and the rate.
 	if(aiming){
 		FireDriverAimedWeapon(weapon);
 	}else{

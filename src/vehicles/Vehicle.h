@@ -424,6 +424,10 @@ public:
 	// one held pose. Sets or clears the state and answers whether the driver
 	// aims.
 	bool UpdateDriverWeaponAim(void);
+	// The shared start of the three drive-by paths: the aim state, the script
+	// gate, the aiming weapon, its update and the reload input. Answers
+	// whether the path continues, with the weapon and whether it aims.
+	bool PrepareDriverShooting(CWeapon **weaponOut, bool *aimingOut);
 	// The aimed shot of every drive-by vehicle: the fire button and the
 	// weapon's own timer in one place. The weapon picks its fire type.
 	bool FireDriverAimedWeapon(CWeapon *weapon);
