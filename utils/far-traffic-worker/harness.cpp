@@ -20,7 +20,18 @@
  *	   pick and the pose, statement for statement) and drives the real step
  *	   and the reference from the same car state: the route state, the pose,
  *	   the height and the heading must agree bit for bit over a randomized
- *	   sweep (including the u-turn and the clamped-curve cases).
+ *	   sweep (including the u-turn and the clamped-curve cases). The
+ *	   reference reports the paths the original gets wrong (VICE-167: the
+ *	   third round's 1000 sentinel, the give-up's index one past the node's
+ *	   connections, a node with no connections, the flat curve, a zero curve
+ *	   time, a progress outside the curve's span); where one fires equality
+ *	   is not the claim - the original's value there is an out-of-range read
+ *	   or a division by zero - and the case is held to the fix's promises
+ *	   instead. The deterministic states of those guards are driven too (the
+ *	   crash's own: the dead end's u-turn on the car's own link, the third
+ *	   round's acceptance, the give-up's way back, the no-connection node,
+ *	   the zero curve time, the out-of-span progress), every pose finite and
+ *	   inside the world's sector grid.
  *
  *	C. The boundary. The worker's own list is kept beside a model of the
  *	   applicator's list (the engine's own swap-drop and its append), fed the
@@ -88,6 +99,14 @@ typedef int16_t int16;
 typedef uint32_t uint32;
 typedef int32_t int32;
 typedef uint64_t uint64;
+
+/* The world the sector grid covers (World.h): CWorld::RemoveAndAdd indexes a
+ * sector from the position, and a position outside the grid walks a negative
+ * index - the crash's own mechanism. The harness may use the numbers. */
+#define WORLD_MIN_X (-2400.0f)
+#define WORLD_MAX_X 1600.0f
+#define WORLD_MIN_Y (-2000.0f)
+#define WORLD_MAX_Y 2000.0f
 
 /* ---------------------------------------------------------------------- *
  * the synthetic path graph
@@ -180,6 +199,92 @@ BuildWorld(void)
 	}
 }
 
+/*
+ * The shapes the deterministic cases of the pick and the curve need, built
+ * into the same world (the sweep and the cases read one graph): a node with no
+ * connections at all, the dead end whose only connection is the two-way link
+ * the car arrived on, the node whose first connection fails the third round
+ * while its second is the way back, and the node whose connections all fail it
+ * (the give-up), with their own links. The positions stay near (100, 100),
+ * well inside the world's sector grid.
+ */
+#define ZERO_LINK_NODE 150		/* NodeAt(6, 6) */
+#define DEADEND_NODE 501
+#define DEADEND_PREV_NODE 500
+#define DEADEND_LINK (DEADEND_NODE * LINKS_PER_NODE)		/* 1002 */
+#define THIRD_NODE 503
+#define THIRD_PREV_NODE 500
+#define THIRD_DISABLED_NODE 495		/* the grid's own disabled node (495 % 11 == 0) */
+#define THIRD_FAIL_LINK (THIRD_NODE * LINKS_PER_NODE)		/* 1006 */
+#define THIRD_BACK_LINK (THIRD_NODE * LINKS_PER_NODE + 1)	/* 1007 */
+#define GIVEUP_NODE 505
+#define GIVEUP_PREV_NODE 506
+#define GIVEUP_FAIL_LINK (GIVEUP_NODE * LINKS_PER_NODE)		/* 1010 */
+#define GIVEUP_BACK_LINK (GIVEUP_NODE * LINKS_PER_NODE + 1)	/* 1011 */
+
+static void
+ShapeLink(int32 link, float x, float y, float dirX, float dirY, int32 pathNode, int8 leftLanes, int8 rightLanes)
+{
+	SFarSimLink *pLink = &g_world.links[link];
+
+	pLink->x = x;
+	pLink->y = y;
+	pLink->dirX = dirX;
+	pLink->dirY = dirY;
+	pLink->laneOffset = 0.5f + 1.0f / (2.0f * 8.0f * LANE_WIDTH);
+	pLink->pathNodeIndex = (int16)pathNode;
+	pLink->numLeftLanes = leftLanes;
+	pLink->numRightLanes = rightLanes;
+}
+
+static void
+BuildCaseShapes(void)
+{
+	g_world.nodes[ZERO_LINK_NODE].numLinks = 0;
+
+	/* (a) the dead end: one connection, the two-way link the car arrived on,
+	 * back to the previous node. The two nodes sit 8 m apart, so the pick's
+	 * lane draw cannot move the lane (the switch needs 14 m and a draw). */
+	g_world.nodes[DEADEND_NODE].numLinks = 1;
+	g_world.nodes[DEADEND_NODE].firstLink = DEADEND_LINK;
+	g_world.nodes[DEADEND_NODE].flags |= FAR_SIM_NODE_DEADEND;
+	g_world.nodes[DEADEND_PREV_NODE].x = 100.0f;
+	g_world.nodes[DEADEND_PREV_NODE].y = 100.0f;
+	g_world.nodes[DEADEND_NODE].x = 108.0f;
+	g_world.nodes[DEADEND_NODE].y = 100.0f;
+	g_world.connectionNode[DEADEND_LINK] = DEADEND_PREV_NODE;
+	g_world.connectionLink[DEADEND_LINK] = DEADEND_LINK;
+	ShapeLink(DEADEND_LINK, 104.0f, 100.0f, 1.0f, 0.0f, DEADEND_NODE, 1, 1);
+
+	/* (b) the third round: connection 0 reaches a disabled node (the first
+	 * two rounds' tests fail it), connection 1 is the two-way way back. */
+	g_world.nodes[THIRD_NODE].numLinks = 2;
+	g_world.nodes[THIRD_NODE].firstLink = THIRD_FAIL_LINK;
+	g_world.nodes[THIRD_NODE].x = 120.0f;
+	g_world.nodes[THIRD_NODE].y = 100.0f;
+	g_world.connectionNode[THIRD_FAIL_LINK] = THIRD_DISABLED_NODE;
+	g_world.connectionLink[THIRD_FAIL_LINK] = THIRD_FAIL_LINK;
+	g_world.connectionNode[THIRD_BACK_LINK] = THIRD_PREV_NODE;
+	g_world.connectionLink[THIRD_BACK_LINK] = THIRD_BACK_LINK;
+	ShapeLink(THIRD_FAIL_LINK, 120.0f, 100.0f, 1.0f, 0.0f, THIRD_NODE, 1, 0);
+	ShapeLink(THIRD_BACK_LINK, 122.0f, 103.0f, -1.0f, 0.0f, THIRD_NODE, 1, 1);
+
+	/* (d) the give-up: every connection is one-way against the car, and
+	 * connection 1 is the one that leads back to the previous node. */
+	g_world.nodes[GIVEUP_NODE].numLinks = 2;
+	g_world.nodes[GIVEUP_NODE].firstLink = GIVEUP_FAIL_LINK;
+	g_world.nodes[GIVEUP_NODE].x = 130.0f;
+	g_world.nodes[GIVEUP_NODE].y = 100.0f;
+	g_world.nodes[GIVEUP_PREV_NODE].x = 138.0f;
+	g_world.nodes[GIVEUP_PREV_NODE].y = 100.0f;
+	g_world.connectionNode[GIVEUP_FAIL_LINK] = THIRD_DISABLED_NODE;
+	g_world.connectionLink[GIVEUP_FAIL_LINK] = GIVEUP_FAIL_LINK;
+	g_world.connectionNode[GIVEUP_BACK_LINK] = GIVEUP_PREV_NODE;
+	g_world.connectionLink[GIVEUP_BACK_LINK] = GIVEUP_BACK_LINK;
+	ShapeLink(GIVEUP_FAIL_LINK, 130.0f, 100.0f, 1.0f, 0.0f, GIVEUP_NODE, 1, 0);
+	ShapeLink(GIVEUP_BACK_LINK, 132.0f, 103.0f, -1.0f, 0.0f, GIVEUP_NODE, 1, 0);
+}
+
 /* One valid car state at `slot`, wandering a random part of the graph. */
 static void
 MakeCar(SFarSimCar *pCar, uint16 slot, uint32 seed, int variant)
@@ -191,9 +296,10 @@ MakeCar(SFarSimCar *pCar, uint16 slot, uint32 seed, int variant)
 	int link = (s >> 8) % NUM_CONNECTIONS;
 	int other = (s >> 16) % NUM_CONNECTIONS;
 	/* The engine's placement never gives a car the same link for its current
-	 * and next rail (the curve between them would be degenerate: the two
-	 * lane positions coincide and the curve arithmetic divides by zero, in
-	 * the original code exactly as here). Keep the sweep on the valid side. */
+	 * and next rail, but the pick itself can (the dead end that turns around
+	 * on the road it arrived on), so the sweep keeps the general state here
+	 * and adds the same-link states as its own slice below: the curve between
+	 * coincident lane points is one of the paths the fix closes. */
 	if (other == link)
 		other = (link + 1) % NUM_CONNECTIONS;
 
@@ -225,6 +331,25 @@ MakeCar(SFarSimCar *pCar, uint16 slot, uint32 seed, int variant)
 /* ---------------------------------------------------------------------- *
  * the reference implementation (the original CCarCtrl.cpp, pre-VICE-133)
  * ---------------------------------------------------------------------- */
+
+/*
+ * The reference's broken paths, flagged as it runs: the shipped code's own
+ * states where its value is a sentinel index, an out-of-range read or a
+ * division by zero. The sweep uses them to tell the cases it can compare with
+ * the original from the cases it must check against the fix instead. One case
+ * can carry more than one flag.
+ */
+enum {
+	REF_BROKEN_PICK_SENTINEL = 1,	/* the third round's 1000 sentinel: the link read indexes connection[first + 1001] */
+	REF_BROKEN_PICK_GIVEUP = 2,	/* the give-up exit: the read indexes connection[first + totalLinks] */
+	REF_BROKEN_PICK_NO_LINKS = 4,	/* the node has no connections: Random() % 0 (the reference does not run it) */
+	REF_BROKEN_CURVE_FLAT = 8,	/* t1 == t2 == 0: the curve divides 0/0 and takes a NaN cosine */
+	REF_BROKEN_CURVE_ONE_ZERO = 16,	/* one projection is 0: a blend divides by 2 * 0 */
+	REF_BROKEN_CURVE_TIME = 32,	/* the curve time is under the pick's 10 ms floor: the tangent divides by it */
+	REF_BROKEN_CURVE_PROGRESS = 64,	/* the progress is outside [0, 1] (or NaN): the pose extrapolates */
+};
+
+static uint32 g_refBroken;
 
 /* Transcribed from src/control/CarCtrl.cpp at miami (a5b24d8b, before this
  * ticket pulled the rules into CarOnRails.h): CCarCtrl::FindPathDirection,
@@ -263,19 +388,29 @@ RefCurvePoint(float p1x, float p1y, float p2x, float p2y, float d1x, float d1y, 
 	float t1 = fabsf((p2x - p1x) * dir1x + (p2y - p1y) * dir1y);
 	float t2 = fabsf((p1x - p2x) * dir2x + (p1y - p2y) * dir2y);
 	float curveCoef;
+	if (t1 == 0.0f && t2 == 0.0f)
+		g_refBroken |= REF_BROKEN_CURVE_FLAT;
 	if (t1 > t2) {
 		float coef = (t1 - t2) / (t1 + t2);
 		if (between <= coef)
 			curveCoef = 0.0f;
-		else
+		else {
+			if (t2 == 0.0f)
+				g_refBroken |= REF_BROKEN_CURVE_ONE_ZERO;
 			curveCoef = 0.5f - 0.5f * cosf(3.1415f * (between - coef) * (t1 + t2) / (2 * t2));
+		}
 	} else {
 		float coef = 2 * t1 / (t1 + t2);
 		if (coef <= between)
 			curveCoef = 1.0f;
-		else
+		else {
+			if (t1 == 0.0f)
+				g_refBroken |= REF_BROKEN_CURVE_ONE_ZERO;
 			curveCoef = 0.5f - 0.5f * cosf(3.1415f * between * (t1 + t2) / (2 * t1));
+		}
 	}
+	if (timeOnCurve < 10)
+		g_refBroken |= REF_BROKEN_CURVE_TIME;
 	*pOutX = (p1x + between * dir1x) * (1.0f - curveCoef) + (p2x - (1 - between) * dir2x) * curveCoef;
 	*pOutY = (p1y + between * dir1y) * (1.0f - curveCoef) + (p2y - (1 - between) * dir2y) * curveCoef;
 	*pOutDirX = (dir1x * (1.0f - curveCoef) + dir2x * curveCoef) / (timeOnCurve * 0.001f);
@@ -361,6 +496,8 @@ RefPose(SFarSimCar *pCar, uint32 now, float *pX, float *pY, float *pDirX, float 
 		dirNextX = 1.0f;
 	}
 	float between = (float)(now - (uint32)pCar->timeEnteredCurve) / pCar->timeToSpendOnCurrentCurve;
+	if (!(between >= 0.0f && between <= 1.0f))
+		g_refBroken |= REF_BROKEN_CURVE_PROGRESS;
 	RefCurvePoint(posCurX, posCurY, posNextX, posNextY, dirCurX, dirCurY, dirNextX, dirNextY,
 		between, pCar->timeToSpendOnCurrentCurve, pX, pY, pDirX, pDirY);
 }
@@ -374,6 +511,13 @@ RefPickNextNode(SFarSimCar *pCar)
 	int32 curLink = pCar->nextPathNodeInfo;
 	uint8 lanesOnCurrentPath;
 	bool isOnOneWayRoad;
+	if (totalLinks == 0) {
+		/* The original draws Random() % totalLinks and traps (SIGFPE), so the
+		 * reference cannot run that path: it flags it and keeps the route,
+		 * which is what the fix does there too (plus the u-turn). */
+		g_refBroken |= REF_BROKEN_PICK_NO_LINKS;
+		return;
+	}
 	if (g_world.links[curLink].pathNodeIndex == curNode) {
 		lanesOnCurrentPath = g_world.links[curLink].numLeftLanes;
 		isOnOneWayRoad = g_world.links[curLink].numRightLanes == 0;
@@ -444,12 +588,18 @@ RefPickNextNode(SFarSimCar *pCar)
 			if (!goingAgainstOneWayRoad) {
 				int32 candidate = pCar->nextRouteNode;
 				if ((!((g_world.nodes[candidate].flags & FAR_SIM_NODE_DISABLED) != 0) || ((g_world.nodes[prevPathNode].flags & FAR_SIM_NODE_DISABLED) != 0)) &&
-					(!((g_world.nodes[candidate].flags & FAR_SIM_NODE_BETWEENLEVELS) != 0) || ((g_world.nodes[prevPathNode].flags & FAR_SIM_NODE_BETWEENLEVELS) != 0) || !pCar->bStayInCurrentLevel))
+					(!((g_world.nodes[candidate].flags & FAR_SIM_NODE_BETWEENLEVELS) != 0) || ((g_world.nodes[prevPathNode].flags & FAR_SIM_NODE_BETWEENLEVELS) != 0) || !pCar->bStayInCurrentLevel)) {
+					/* the shipped sentinel: the read below indexes first + 1001 */
+					g_refBroken |= REF_BROKEN_PICK_SENTINEL;
 					nextLink = 1000;
+				}
 			}
 		}
-		if (nextLink < 999)
+		if (nextLink < 999) {
+			/* the give-up: the read below indexes first + totalLinks */
+			g_refBroken |= REF_BROKEN_PICK_GIVEUP;
 			pCar->nextRouteNode = prevNode;
+		}
 	}
 	nextPathLink = g_world.connectionLink[nextLink + g_world.nodes[curPathNode].firstLink];
 	if (prevNode == pCar->nextRouteNode)
@@ -589,93 +739,403 @@ ProcessCpuUs(void)
 	return (uint64)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
 }
 
-/* B. the moved arithmetic against the original code, bit for bit. */
+/* The route state both implementations write (everything the pick touches).
+ * bUTurn, the heading and the car's own stream are separate: the pose and a
+ * draw can move them without a route change. */
+static bool
+SameRouteState(const SFarSimCar &a, const SFarSimCar &b)
+{
+	return a.currentRouteNode == b.currentRouteNode &&
+		a.nextRouteNode == b.nextRouteNode &&
+		a.prevRouteNode == b.prevRouteNode &&
+		a.nextPathNodeInfo == b.nextPathNodeInfo &&
+		a.currentPathNodeInfo == b.currentPathNodeInfo &&
+		a.previousPathNodeInfo == b.previousPathNodeInfo &&
+		a.currentDirection == b.currentDirection &&
+		a.nextDirection == b.nextDirection &&
+		a.previousDirection == b.previousDirection &&
+		a.currentLane == b.currentLane &&
+		a.nextLane == b.nextLane &&
+		a.timeEnteredCurve == b.timeEnteredCurve &&
+		a.timeToSpendOnCurrentCurve == b.timeToSpendOnCurrentCurve;
+}
+
+/* True when `link` is one of `node`'s own connections. The fix promises this
+ * for every stored link; the original reads one past them instead. */
+static bool
+IsConnectionLinkOf(int32 node, int32 link)
+{
+	int32 first = g_world.nodes[node].firstLink;
+	int32 total = g_world.nodes[node].numLinks;
+
+	for (int32 i = 0; i < total; i++)
+		if (g_world.connectionLink[first + i] == link)
+			return true;
+	return false;
+}
+
+/* The fix's promises for the cases the original gets wrong: the link the pick
+ * stored is one of the node's own connections and the u-turn flag agrees with
+ * the route; a node with no connections keeps the route and the link it had
+ * (and flags the turn). */
+static bool
+FixedRouteClaims(const SFarSimCar &car, const SFarSimCar &before, uint32 flags)
+{
+	if (flags & REF_BROKEN_PICK_NO_LINKS)
+		return SameRouteState(car, before) && car.bUTurn == 1;
+	if (!IsConnectionLinkOf(car.currentRouteNode, car.nextPathNodeInfo))
+		return false;
+	return car.bUTurn == (car.nextRouteNode == car.prevRouteNode);
+}
+
+/* The crash's own claim: a pose outside the world's sector grid walks a
+ * negative sector index in CPhysical::RemoveAndAdd, and a NaN pose is the
+ * crash's other form. Every pose must be finite, its position inside the
+ * grid. */
+static bool
+PoseIsFinite(const SFarSimPose &pose)
+{
+	return isfinite(pose.x) && isfinite(pose.y) && isfinite(pose.z) &&
+		isfinite(pose.dirX) && isfinite(pose.dirY) &&
+		isfinite(pose.forwardX) && isfinite(pose.forwardY);
+}
+
+static bool
+PoseIsInWorld(const SFarSimPose &pose)
+{
+	return pose.x >= WORLD_MIN_X && pose.x < WORLD_MAX_X &&
+		pose.y >= WORLD_MIN_Y && pose.y < WORLD_MAX_Y;
+}
+
+static bool
+PoseIsFiniteAndInWorld(const SFarSimPose &pose)
+{
+	return PoseIsFinite(pose) && PoseIsInWorld(pose);
+}
+
+/* The same claim, one Check per half so a failure says which one broke. */
+static void
+CheckPoseClaim(const SFarSimPose *pPose, const char *what)
+{
+	char text[160];
+
+	snprintf(text, sizeof(text), "%s: every value finite", what);
+	Check(PoseIsFinite(*pPose), text);
+	snprintf(text, sizeof(text), "%s: the position inside the world's sector grid", what);
+	Check(PoseIsInWorld(*pPose), text);
+}
+
+static void
+PrintCase(int i, const SFarSimCar &sim, const SFarSimCar &ref, const SFarSimPose &simPose, const SFarSimPose &refPose)
+{
+	printf("  case %d:\n", i);
+	printf("    sim route %d/%d/%d links %d/%d/%d dirs %d/%d/%d lanes %d/%d t %d/%d u%d\n",
+		sim.currentRouteNode, sim.nextRouteNode, sim.prevRouteNode,
+		sim.currentPathNodeInfo, sim.nextPathNodeInfo, sim.previousPathNodeInfo,
+		sim.currentDirection, sim.nextDirection, sim.previousDirection,
+		sim.currentLane, sim.nextLane, sim.timeEnteredCurve, sim.timeToSpendOnCurrentCurve, sim.bUTurn);
+	printf("    ref route %d/%d/%d links %d/%d/%d dirs %d/%d/%d lanes %d/%d t %d/%d u%d\n",
+		ref.currentRouteNode, ref.nextRouteNode, ref.prevRouteNode,
+		ref.currentPathNodeInfo, ref.nextPathNodeInfo, ref.previousPathNodeInfo,
+		ref.currentDirection, ref.nextDirection, ref.previousDirection,
+		ref.currentLane, ref.nextLane, ref.timeEnteredCurve, ref.timeToSpendOnCurrentCurve, ref.bUTurn);
+	printf("    sim pose %.6f %.6f %.6f | ref %.6f %.6f %.6f\n",
+		simPose.x, simPose.y, simPose.z, refPose.x, refPose.y, refPose.z);
+	printf("    sim dir %.6f %.6f fwd %.6f %.6f | ref dir %.6f %.6f fwd %.6f %.6f\n",
+		simPose.dirX, simPose.dirY, simPose.forwardX, simPose.forwardY,
+		refPose.dirX, refPose.dirY, refPose.forwardX, refPose.forwardY);
+}
+
+/*
+ * B. the moved arithmetic against the original code, bit for bit - wherever the
+ * original is correct. The reference carries the original's own broken paths
+ * as flags (the 1000 sentinel, the give-up's index one past the connections, a
+ * node with no connections, the flat curve, a curve time under the pick's
+ * floor, a progress outside the span). Where one fires, equality is not the
+ * claim - the original's value there is a sentinel index, an out-of-range read
+ * or a division by zero - so the case is checked against what the fix promises
+ * instead. The counts printed below say exactly which cases are compared and
+ * which are held to the fix, and why.
+ */
 static void
 CheckEquivalence(void)
 {
 	int cases = 20000;
-	int mismatches = 0, uTurns = 0, clamped = 0, picks = 0;
+	int mismatches = 0, compared = 0, poseCompared = 0, uTurns = 0, clamped = 0, picks = 0;
+	int fixedRouteBad = 0, fixedPoseBad = 0;
+	int sentinel = 0, giveUp = 0, noLinks = 0, flat = 0, oneZero = 0, shortTime = 0, progress = 0;
 
 	for (int i = 0; i < cases; i++) {
-		SFarSimCar sim, ref;
+		SFarSimCar sim, before, ref;
 		SFarSimPose simPose, refPose;
 		uint32 now = 2000 + (uint32)(i * 37 % 8000);
 
 		MakeCar(&sim, (uint16)i, (uint32)i, i);
 		/* a quarter of the cases has the curve spent (the pick runs), and a
 		 * tenth is fast enough for the clamped curve */
+		if (i % 10 == 0)
+			sim.maxTrafficSpeed = 5000.0f;	/* the curve time clamps to 10 ms */
 		if (i % 4 != 0)
 			sim.timeEnteredCurve = now - (int32)(i % 500);
 		else
 			sim.timeEnteredCurve = now - sim.timeToSpendOnCurrentCurve - 1;
-		if (i % 10 == 0)
-			sim.maxTrafficSpeed = 5000.0f;	/* the curve time clamps to 10 ms */
+
+		/* The original's own broken states, one slice each, so the classes
+		 * below are exact (a case is never two slices at once). */
+		if (i % 71 == 0) {
+			/* the dead end: the only connection is the two-way link back,
+			 * so the third round accepts it and stores the car's own link */
+			sim.currentRouteNode = DEADEND_PREV_NODE;
+			sim.nextRouteNode = DEADEND_NODE;
+			sim.prevRouteNode = DEADEND_PREV_NODE;
+			sim.nextPathNodeInfo = DEADEND_LINK;
+			sim.timeEnteredCurve = now - sim.timeToSpendOnCurrentCurve - 1;
+		} else if (i % 73 == 0) {
+			/* the give-up: every connection is one-way against the car */
+			sim.currentRouteNode = GIVEUP_PREV_NODE;
+			sim.nextRouteNode = GIVEUP_NODE;
+			sim.prevRouteNode = GIVEUP_PREV_NODE;
+			sim.nextPathNodeInfo = GIVEUP_BACK_LINK;
+			sim.timeEnteredCurve = now - sim.timeToSpendOnCurrentCurve - 1;
+		} else if (i % 97 == 0) {
+			/* the dead-end store the pick itself can make: the same link,
+			 * lane and direction for current and next (the two lane points
+			 * coincide: the flat curve) */
+			sim.nextPathNodeInfo = sim.currentPathNodeInfo;
+			sim.nextLane = sim.currentLane;
+			sim.nextDirection = sim.currentDirection;
+			sim.timeEnteredCurve = now - (int32)(i % 500);
+		} else if (i % 53 == 0) {
+			/* a curve time of 0, with the clock one millisecond past it (the
+			 * pick must not run: its own floor never stores 0) */
+			sim.timeToSpendOnCurrentCurve = 0;
+			sim.timeEnteredCurve = (int32)now + 1;
+		} else if (i % 59 == 0) {
+			/* the clock ahead of a live curve: a progress outside the span */
+			sim.timeToSpendOnCurrentCurve = 1000;
+			sim.timeEnteredCurve = (int32)now + 500;
+		} else if (i % 61 == 0) {
+			/* a node with no connections at all: the pick must run */
+			sim.nextRouteNode = ZERO_LINK_NODE;
+			sim.timeEnteredCurve = now - sim.timeToSpendOnCurrentCurve - 1;
+		}
+
+		before = sim;
 		ref = sim;
 		ref.rng = FarTrafficSimRngSeed(ref.slot, ref.randomSeed, ref.routeSeed);
 		sim.rng = ref.rng;
+		bool pickDue = (uint32)(sim.timeEnteredCurve + sim.timeToSpendOnCurrentCurve) <= now;
 
+		g_refBroken = 0;
 		memset(&simPose, 0, sizeof(simPose));
 		memset(&refPose, 0, sizeof(refPose));
 		FarTrafficSimUpdateCar(&g_world, &sim, now, &simPose);
 		RefUpdateCar(&ref, now, &refPose);
+		uint32 flags = g_refBroken;
 
-		bool sameRoute =
-			sim.currentRouteNode == ref.currentRouteNode &&
-			sim.nextRouteNode == ref.nextRouteNode &&
-			sim.prevRouteNode == ref.prevRouteNode &&
-			sim.currentPathNodeInfo == ref.currentPathNodeInfo &&
-			sim.nextPathNodeInfo == ref.nextPathNodeInfo &&
-			sim.previousPathNodeInfo == ref.previousPathNodeInfo &&
-			sim.currentDirection == ref.currentDirection &&
-			sim.nextDirection == ref.nextDirection &&
-			sim.previousDirection == ref.previousDirection &&
-			sim.currentLane == ref.currentLane &&
-			sim.nextLane == ref.nextLane &&
-			sim.timeEnteredCurve == ref.timeEnteredCurve &&
-			sim.timeToSpendOnCurrentCurve == ref.timeToSpendOnCurrentCurve &&
-			sim.bUTurn == ref.bUTurn;
-		bool samePose =
-			simPose.x == refPose.x && simPose.y == refPose.y && simPose.z == refPose.z &&
-			simPose.dirX == refPose.dirX && simPose.dirY == refPose.dirY &&
-			simPose.forwardX == refPose.forwardX && simPose.forwardY == refPose.forwardY &&
-			simPose.bUTurn == refPose.bUTurn;
-		if ((!sameRoute || !samePose) && mismatches < 3) {
-			printf("  case %d: route %d pose %d\n", i, sameRoute, samePose);
-			printf("    sim route %d/%d/%d links %d/%d/%d dirs %d/%d/%d lanes %d/%d t %d/%d u%d\n",
-				sim.currentRouteNode, sim.nextRouteNode, sim.prevRouteNode,
-				sim.currentPathNodeInfo, sim.nextPathNodeInfo, sim.previousPathNodeInfo,
-				sim.currentDirection, sim.nextDirection, sim.previousDirection,
-				sim.currentLane, sim.nextLane, sim.timeEnteredCurve, sim.timeToSpendOnCurrentCurve, sim.bUTurn);
-			printf("    ref route %d/%d/%d links %d/%d/%d dirs %d/%d/%d lanes %d/%d t %d/%d u%d\n",
-				ref.currentRouteNode, ref.nextRouteNode, ref.prevRouteNode,
-				ref.currentPathNodeInfo, ref.nextPathNodeInfo, ref.previousPathNodeInfo,
-				ref.currentDirection, ref.nextDirection, ref.previousDirection,
-				ref.currentLane, ref.nextLane, ref.timeEnteredCurve, ref.timeToSpendOnCurrentCurve, ref.bUTurn);
-			printf("    sim pose %.6f %.6f %.6f | ref %.6f %.6f %.6f\n",
-				simPose.x, simPose.y, simPose.z, refPose.x, refPose.y, refPose.z);
-			printf("    sim dir %.6f %.6f fwd %.6f %.6f | ref dir %.6f %.6f fwd %.6f %.6f\n",
-				simPose.dirX, simPose.dirY, simPose.forwardX, simPose.forwardY,
-				refPose.dirX, refPose.dirY, refPose.forwardX, refPose.forwardY);
+		bool pickBroken = (flags & (REF_BROKEN_PICK_SENTINEL | REF_BROKEN_PICK_GIVEUP | REF_BROKEN_PICK_NO_LINKS)) != 0;
+		bool curveBroken = (flags & (REF_BROKEN_CURVE_FLAT | REF_BROKEN_CURVE_ONE_ZERO | REF_BROKEN_CURVE_TIME | REF_BROKEN_CURVE_PROGRESS)) != 0;
+
+		if (flags & REF_BROKEN_PICK_SENTINEL) sentinel++;
+		if (flags & REF_BROKEN_PICK_GIVEUP) giveUp++;
+		if (flags & REF_BROKEN_PICK_NO_LINKS) noLinks++;
+		if (flags & REF_BROKEN_CURVE_FLAT) flat++;
+		if (flags & REF_BROKEN_CURVE_ONE_ZERO) oneZero++;
+		if (flags & REF_BROKEN_CURVE_TIME) shortTime++;
+		if (flags & REF_BROKEN_CURVE_PROGRESS) progress++;
+
+		if (!pickBroken) {
+			/* the original's own correct path: the route and the u-turn
+			 * must agree bit for bit */
+			bool sameRoute = SameRouteState(sim, ref) && sim.bUTurn == ref.bUTurn;
+			if (!sameRoute && mismatches < 3)
+				PrintCase(i, sim, ref, simPose, refPose);
+			if (!sameRoute)
+				mismatches++;
+			compared++;
+		} else if (!FixedRouteClaims(sim, before, flags)) {
+			if (fixedRouteBad < 3)
+				printf("  case %d: the fix's route claims fail (flags %x)\n", i, flags);
+			fixedRouteBad++;
 		}
-		if (!sameRoute || !samePose)
-			mismatches++;
+
+		if (!pickBroken && !curveBroken) {
+			bool samePose =
+				simPose.x == refPose.x && simPose.y == refPose.y && simPose.z == refPose.z &&
+				simPose.dirX == refPose.dirX && simPose.dirY == refPose.dirY &&
+				simPose.forwardX == refPose.forwardX && simPose.forwardY == refPose.forwardY &&
+				simPose.bUTurn == refPose.bUTurn;
+			if (!samePose && mismatches < 3)
+				PrintCase(i, sim, ref, simPose, refPose);
+			if (!samePose)
+				mismatches++;
+			poseCompared++;
+		} else if (!PoseIsFiniteAndInWorld(simPose)) {
+			if (fixedPoseBad < 3)
+				printf("  case %d: the fix's pose is not finite/in-world (flags %x) %.3f %.3f %.3f\n",
+					i, flags, simPose.x, simPose.y, simPose.z);
+			fixedPoseBad++;
+		}
+
 		if (sim.bUTurn)
 			uTurns++;
 		if (simPose.bShortCurve)
 			clamped++;
-		if (i % 4 == 0)
+		if (pickDue)
 			picks++;
 	}
-	Check(mismatches == 0, "the real step and the original code agree on every case");
-	printf("  %d cases (%d with the path pick, %d u-turns, %d clamped curves): "
-		"the route state and the pose agree with the original code, bit for bit\n",
-		cases, picks, uTurns, clamped);
+
+	Check(mismatches == 0, "the real step and the original code agree on every case the original is correct on, bit for bit");
+	Check(fixedRouteBad == 0, "every case on the original's broken paths stores one of the node's own connections (or keeps the route) and agrees on the u-turn");
+	Check(fixedPoseBad == 0, "every case on the original's broken paths has a finite pose inside the world");
+	printf("  %d cases (%d with the path pick, %d u-turns, %d clamped curves):\n", cases, picks, uTurns, clamped);
+	printf("    %d ran on a path the original gets right: the route state agrees bit for bit for\n", compared);
+	printf("    all of them, and the pose for the %d of those whose curve is also on a correct\n", poseCompared);
+	printf("    path.\n");
+	printf("    The other %d took a path the original gets wrong, where its value is a sentinel\n", cases - compared);
+	printf("    index, an out-of-range read or a division by zero, so equality is not the claim\n");
+	printf("    there; they are held to the fix instead (the stored link is one of the node's\n");
+	printf("    own connections, the u-turn agrees with the route, the pose is finite and\n");
+	printf("    inside the world). The broken paths the sweep saw:\n");
+	printf("      %d the third round's 1000 sentinel (the shipped read indexes first + 1001),\n", sentinel);
+	printf("      %d the give-up exit (the shipped read indexes first + totalLinks),\n", giveUp);
+	printf("      %d a node with no connections (Random() %% 0: the reference cannot run it),\n", noLinks);
+	printf("      %d the flat curve (t1 == t2 == 0: the shipped pose is NaN),\n", flat);
+	printf("      %d a blend against a zero projection, %d a curve time under the pick's floor,\n", oneZero, shortTime);
+	printf("      %d a progress outside the curve's span; a case can carry more than one class\n", progress);
 	Check(picks > 0 && uTurns > 0, "the sweep exercised the pick and the u-turn");
 	Check(clamped > 0, "the sweep exercised the clamped curve");
+	Check(sentinel > 0 && giveUp > 0 && noLinks > 0 && flat > 0 && progress > 0,
+		"the sweep exercised every broken path the fix closes");
+}
+
+/*
+ * The deterministic states of the pick's and the curve's guards, driven
+ * straight through the real simulation (no reference): the dead end that turns
+ * around on the link it arrived on, the third round's acceptance, the give-up's
+ * way back, a node with no connections, a curve time of 0 and a progress the
+ * curve does not have. These are the states the crash came from; every pose
+ * must be finite and inside the world, and the pick's route claims must hold.
+ */
+static void
+InitCaseCar(SFarSimCar *pCar, uint16 slot, int32 currentRouteNode, int32 nextRouteNode)
+{
+	memset(pCar, 0, sizeof(*pCar));
+	pCar->slot = slot;
+	pCar->currentRouteNode = currentRouteNode;
+	pCar->nextRouteNode = nextRouteNode;
+	pCar->prevRouteNode = currentRouteNode;
+	pCar->currentDirection = 1;
+	pCar->nextDirection = 1;
+	pCar->previousDirection = 1;
+	pCar->currentLane = 0;
+	pCar->nextLane = 0;
+	pCar->randomSeed = (uint16)(1000 + slot);
+	pCar->routeSeed = (int16)(7 + slot);
+	pCar->maxTrafficSpeed = 20.0f;
+	pCar->heightAboveRoad = 0.75f;
+	pCar->forwardX = 1.0f;
+	pCar->forwardY = 0.0f;
+	pCar->timeToSpendOnCurrentCurve = 1000;
+	pCar->rng = FarTrafficSimRngSeed(pCar->slot, pCar->randomSeed, pCar->routeSeed);
+}
+
+static void
+CheckPickAndCurveGuards(void)
+{
+	SFarSimCar car, before;
+	SFarSimPose pose;
+	uint32 now = 50000;
+
+	/* (a) the dead end: its only connection is the two-way link the car
+	 * arrived on, so the pick decides the u-turn and stores that link as the
+	 * car's current and next rail. The two lane points coincide: the curve is
+	 * the flat one, and its pose is the car's own lane point. */
+	InitCaseCar(&car, 0, DEADEND_PREV_NODE, DEADEND_NODE);
+	car.nextPathNodeInfo = DEADEND_LINK;
+	car.currentPathNodeInfo = DEADEND_LINK;
+	car.previousPathNodeInfo = DEADEND_LINK;
+	car.timeEnteredCurve = (int32)now - car.timeToSpendOnCurrentCurve;
+	FarTrafficSimUpdateCar(&g_world, &car, now, &pose);
+	Check(car.nextRouteNode == car.prevRouteNode, "the dead end's pick turns the car around");
+	Check(car.bUTurn == 1, "the dead end's u-turn is flagged for the applicator");
+	Check(car.currentPathNodeInfo == DEADEND_LINK && car.nextPathNodeInfo == DEADEND_LINK,
+		"the dead end's pick stores the car's own link as its current and next rail");
+	CheckPoseClaim(&pose, "the dead end's pose");
+	{
+		const SFarSimLink &link = g_world.links[DEADEND_LINK];
+		float laneX = link.x + ((car.currentLane + link.laneOffset) * LANE_WIDTH) * (link.dirY * car.currentDirection);
+		float laneY = link.y - ((car.currentLane + link.laneOffset) * LANE_WIDTH) * (link.dirX * car.currentDirection);
+		Check(pose.x == laneX && pose.y == laneY, "the dead end's pose is the car's own lane point");
+	}
+
+	/* (b) the third round: both connections fail the first two rounds (the
+	 * first reaches a disabled node, the second is the way back, which those
+	 * rounds skip), and the third round accepts the way back. */
+	InitCaseCar(&car, 1, THIRD_PREV_NODE, THIRD_NODE);
+	car.nextPathNodeInfo = DEADEND_LINK;
+	car.currentPathNodeInfo = DEADEND_LINK;
+	car.previousPathNodeInfo = DEADEND_LINK;
+	car.timeEnteredCurve = (int32)now - car.timeToSpendOnCurrentCurve;
+	FarTrafficSimUpdateCar(&g_world, &car, now, &pose);
+	Check(car.nextRouteNode == car.prevRouteNode, "the third round's way back turns the car around");
+	Check(car.bUTurn == 1, "the third round's u-turn is flagged for the applicator");
+	Check(car.nextPathNodeInfo == THIRD_BACK_LINK, "the third round stores the connection it accepted");
+	Check(IsConnectionLinkOf(THIRD_NODE, car.nextPathNodeInfo),
+		"the third round's link is one of the node's own connections");
+	CheckPoseClaim(&pose, "the third round's pose");
+
+	/* (d) the give-up: every connection is one-way against the car, so the
+	 * third round accepts nothing; the turn's link is the connection that
+	 * leads back to the previous node. */
+	InitCaseCar(&car, 2, GIVEUP_PREV_NODE, GIVEUP_NODE);
+	car.nextPathNodeInfo = DEADEND_LINK;
+	car.currentPathNodeInfo = DEADEND_LINK;
+	car.previousPathNodeInfo = DEADEND_LINK;
+	car.timeEnteredCurve = (int32)now - car.timeToSpendOnCurrentCurve;
+	FarTrafficSimUpdateCar(&g_world, &car, now, &pose);
+	Check(car.nextRouteNode == car.prevRouteNode, "the give-up turns the car around");
+	Check(car.bUTurn == 1, "the give-up's u-turn is flagged for the applicator");
+	Check(car.nextPathNodeInfo == GIVEUP_BACK_LINK, "the give-up's link is the connection back to the previous node");
+	Check(IsConnectionLinkOf(GIVEUP_NODE, car.nextPathNodeInfo),
+		"the give-up's link is one of the node's own connections");
+	CheckPoseClaim(&pose, "the give-up's pose");
+
+	/* (e) a node with no connections at all (the original divides by zero
+	 * there): the pick keeps the route and the link and flags the turn. */
+	InitCaseCar(&car, 3, DEADEND_PREV_NODE, ZERO_LINK_NODE);
+	car.nextPathNodeInfo = DEADEND_LINK;
+	car.currentPathNodeInfo = DEADEND_LINK;
+	car.previousPathNodeInfo = DEADEND_LINK;
+	car.timeEnteredCurve = (int32)now - car.timeToSpendOnCurrentCurve;
+	before = car;
+	FarTrafficSimUpdateCar(&g_world, &car, now, &pose);
+	Check(SameRouteState(car, before), "the no-connection node keeps the car's route and its link");
+	Check(car.bUTurn == 1, "the no-connection node flags the u-turn");
+	CheckPoseClaim(&pose, "the no-connection pose");
+
+	/* (c) a curve time of 0 (a placement's seed carries one: the pick's own
+	 * floor never stores it) with the clock past it, and a clock ahead of a
+	 * live curve: the progress has no scale at all, or is outside the span. */
+	MakeCar(&car, 4, 11, 3);
+	car.timeToSpendOnCurrentCurve = 0;
+	car.timeEnteredCurve = (int32)now + 1;
+	FarTrafficSimUpdateCar(&g_world, &car, now, &pose);
+	CheckPoseClaim(&pose, "the zero curve time's pose");
+
+	MakeCar(&car, 5, 13, 5);
+	car.timeToSpendOnCurrentCurve = 1000;
+	car.timeEnteredCurve = (int32)now + 500;
+	FarTrafficSimUpdateCar(&g_world, &car, now, &pose);
+	CheckPoseClaim(&pose, "the out-of-span progress's pose");
+
+	printf("  the guards, on the crash's own states: the dead end's u-turn on the car's own\n");
+	printf("  link (its pose the lane point), the third round's acceptance, the give-up's\n");
+	printf("  way back, a node with no connections, a zero curve time and an out-of-span\n");
+	printf("  progress: every pose finite and inside the world\n");
 }
 
 /* C. the boundary: the lockstep, the share, the allocation. */
-
 static uint64 g_allocCount;
 static bool g_countAllocs;
 
@@ -1394,6 +1854,7 @@ main(void)
 	printf("== the far traffic layer's worker (VICE-133)\n\n");
 
 	BuildWorld();
+	BuildCaseShapes();
 	printf("== 1. the snapshot\n");
 	printf("  the synthetic graph: %d car nodes, %d connections, %d links, a %dx%d grid\n",
 		g_world.numNodes, g_world.numConnections, g_world.numLinks, GRID, GRID);
@@ -1401,6 +1862,7 @@ main(void)
 
 	printf("\n== 2. the moved arithmetic against the original code\n");
 	CheckEquivalence();
+	CheckPickAndCurveGuards();
 
 	printf("\n== 3. the boundary: the lockstep, the share, the allocations\n");
 	CheckCycleAndLockstep();
