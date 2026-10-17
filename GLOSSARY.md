@@ -158,7 +158,7 @@ they cannot drift apart. It follows the drift snapshot pattern (ADR 0012).
 
 ## Movement state
 
-One of the solver's states (`ePlayerMovementState`): ground, air, slide and dive.
+One of the solver's states (`eMoveStateId`): ground, air, slide and dive.
 Each state has its own acceleration, friction and turn rate row, and the
 transition table decides the moves between them. The ground state moves the
 velocity toward the target speed, turns the direction and slows the ped down with
@@ -188,12 +188,12 @@ change until a cycle, a blend or a callback finishes. The movement rework forbid
 it. The only exceptions are the genuinely scripted states: car entry and exit,
 the get-up, the cutscenes, the mission control flags, being attached and the
 replay. The solver harness checks the rule.
-
 ## Engine velocity unit
 
 The unit of `m_vecMoveSpeed`: one unit per 1/50 second, so one engine velocity
-unit is 50 units per second. The tuning constants in `PlayerPed.cpp` divide the
-measured speeds and accelerations by 50.
+unit is 50 units per second. The tuning constants in `PlayerMoveSolver.cpp`
+and the reference speed in `PlayerPed.cpp` divide the measured speeds and
+accelerations by 50.
 
 ## Reference speed
 
@@ -204,7 +204,6 @@ carry their own speeds, so the reference follows the direction the legs move in
 and the weapon the ped holds. The solver targets it and scales the animation
 playback by (real speed / reference speed), so the legs stay planted while the
 speed changes.
-
 ## Magazine weapon
 
 A weapon that fires instant hits and has a clip of two or more rounds. The

@@ -30,26 +30,18 @@
 
 #define PAD_MOVE_TO_GAME_WORLD_MOVE 60.0f
 
-// The player's movement tuning. m_vecMoveSpeed is in engine velocity units,
-// one unit per 1/50 second, so one engine unit is 50 units per second; the
-// accelerations and the friction below are 20 and 4 units per second squared.
-// The ground turns the direction almost as fast as the body turns toward it, so
-// the ped keeps its speed through a turn and the legs stay with the movement;
-// the air steers with a small authority.
-#define PLAYER_GROUND_ACCEL		(20.0f / 50.0f)
-#define PLAYER_GROUND_FRICTION		(20.0f / 50.0f)
-#define PLAYER_GROUND_TURN_RATE		12.0f	// radians per second
-#define PLAYER_AIR_ACCEL		(4.0f / 50.0f)
-#define PLAYER_AIR_TURN_RATE		1.6f	// radians per second
+// The movement tuning and the state rows live with the solver
+// (PlayerMoveSolver.cpp); this file holds the controller's pad and animation
+// values that the solver never sees.
 
 // The playback the game forces on the movement animations: the adrenaline
 // speeds the legs up while the world runs slow, and the fixed camera slows the
 // sprint animation down. The playback scaling in SetRealMoveAnim applies on top
-// of this, and the controller targets the speed the legs really cover.
+// of this, and the solver targets the speed the legs really cover.
 #define PLAYER_ADRENALINE_ANIM_SPEED		2.0f
 #define PLAYER_FIXED_CAM_SPRINT_ANIM_SPEED	0.7f
 
-// The measured animation speeds are in units per second; the controller and the
+// The measured animation speeds are in units per second; the solver and the
 // playback scaling work in engine units (one unit per 1/50 second).
 #define PLAYER_ENGINE_UNITS_PER_SECOND		50.0f
 
@@ -61,44 +53,15 @@
 // DoWeaponSmoothSpray returns this when no smooth spray runs
 #define PLAYER_NO_SMOOTH_SPRAY		(-1.0f)
 
-// One row per ePlayerMovementState. The slide state will add its own row: a
-// low friction and a high turn rate.
-struct tPlayerMovementState
+// The movement state the controller reports from the solver's snapshot
+// (PlayerPed.h). The solver owns the real state and grows past these two with
+// the state table (VICE-171); until then the report mirrors the two states.
+static ePlayerMovementState
+PlayerMovementStateOf(eMoveStateId state)
 {
-	float accel;		// engine units per second squared
-	float friction;		// engine units per second squared
-	float turnRate;		// radians per second, the air state steers with it
-};
-
-static const tPlayerMovementState playerMovementStates[PLAYERMOVE_NUMSTATES] = {
-	{ PLAYER_GROUND_ACCEL, PLAYER_GROUND_FRICTION, PLAYER_GROUND_TURN_RATE },	// PLAYERMOVE_GROUND
-	{ PLAYER_AIR_ACCEL, 0.0f, PLAYER_AIR_TURN_RATE },	// PLAYERMOVE_AIR
-};
-
-// Move a velocity toward a target, at most maxDelta units per second
-static CVector2D
-MoveVelocityTowards(const CVector2D &velocity, const CVector2D &target, float maxDelta)
-{
-	CVector2D change = target - velocity;
-	float magnitude = change.Magnitude();
-	if (magnitude <= maxDelta)
-		return target;
-	return velocity + change * (maxDelta / magnitude);
-}
-
-// Turn a velocity toward a direction without changing its speed
-static CVector2D
-SteerVelocityTowards(const CVector2D &velocity, const CVector2D &target, float maxTurn)
-{
-	float angle = Atan2(velocity.y, velocity.x);
-	float targetAngle = Atan2(target.y, target.x);
-	float turn = CGeneral::LimitRadianAngle(targetAngle - angle);
-	if (turn > maxTurn)
-		turn = maxTurn;
-	else if (turn < -maxTurn)
-		turn = -maxTurn;
-	float newAngle = angle + turn;
-	return CVector2D(Cos(newAngle), Sin(newAngle)) * velocity.Magnitude();
+	if (state == MOVE_AIR)
+		return PLAYERMOVE_AIR;
+	return PLAYERMOVE_GROUND;
 }
 
 // The player's aim pose aims at a point this far along the aim ray
@@ -384,6 +347,7 @@ CPlayerPed::SetInitialState(void)
 	m_fWalkAngle = 0.0f;
 	m_fMoveHeading = 0.0f;
 	m_nMovementState = PLAYERMOVE_GROUND;
+	m_MoveSolver.Reset();
 	if (m_attachedTo && !bUsesCollision)
 		bUsesCollision = true;
 
@@ -1757,7 +1721,7 @@ CPlayerPed::GetMoveAnimPlayback(AnimationId animId) const
 // speed. The strafe, backward and weapon groups have their own animations with
 // their own measured speeds, so the legs and the movement agree in every
 // direction and with every weapon. SetRealMoveAnim scales the playback by
-// (real speed / this), and the controller moves the ped at this speed.
+// (real speed / this), and the movement solver moves the ped at this speed.
 float
 CPlayerPed::GetMoveAnimReferenceSpeed(void)
 {
@@ -1774,11 +1738,12 @@ CPlayerPed::GetMoveAnimReferenceSpeed(void)
 	return referenceSpeed / PLAYER_ENGINE_UNITS_PER_SECOND;
 }
 
-// One movement controller for the player, called by every on-foot control path
-// in place of its movement block. It owns the player's horizontal velocity
-// (m_vecMoveSpeed x/y) in both views: the camera only sets the view position
-// and the direction basis. The movement state decides the acceleration and the
-// friction, so a jump keeps the momentum and the air steering stays limited.
+// The movement controller of the player, called by every on-foot control path
+// in place of its movement block. It is the adapter of the movement solver
+// (PlayerMoveSolver.h): the pad, the camera and the ped go in as one intent,
+// the solver's snapshot comes back out. The pad block stays here because the
+// fight path reads its side effects while the controller is out of charge, and
+// the surface helpers stay here because the solver cannot see the engine.
 void
 CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 {
@@ -1844,58 +1809,56 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 	if (!IsMoveControllerInCharge())
 		return;
 
-	// The ground and the air tune the acceleration and the friction; the slide
-	// state will plug in here.
-	m_nMovementState = bIsStanding ? PLAYERMOVE_GROUND : PLAYERMOVE_AIR;
-	const tPlayerMovementState &state = playerMovementStates[m_nMovementState];
-
+	// The solver owns the horizontal velocity, and it owns it only from here:
+	// the gates above and the surface helpers below stay in the engine.
+	//
 	// The ped's own velocity is the velocity without the surface it stands on
 	CVector2D surfaceSpeed = GetSurfaceSpeed();
 	CarryWithSurfaceTurn();
 	CVector2D velocity = CVector2D(m_vecMoveSpeed) - surfaceSpeed;
 
-	float dt = CTimer::GetTimeStepInSeconds();
-	float ownSpeed = velocity.Magnitude();
+	// A steep slope pushes the ped off instead of taking the input. The air
+	// branch of the solver takes precedence over the slope, so the push runs
+	// only with the feet down; the helper also pins m_vecMoveSpeed.z, which the
+	// solver does not own.
+	bool bSteepCliff = m_nSurfaceTouched == SURFACE_STEEP_CLIFF
+		&& (m_vecDamageNormal.x != 0.0f || m_vecDamageNormal.y != 0.0f);
+	if (bIsStanding && bSteepCliff)
+		PushOffSteepSlope(velocity);
+
 	// The smooth spray holds the ped in place: the facing turns but the input
 	// does not move it
 	bool bMoving = padMoveInGameUnit > 0.0f;
+
+	// The intent: everything the solver may see, read fresh this frame
+	SMoveIntent intent;
+	intent.dt = CTimer::GetTimeStepInSeconds();
+	intent.vel = SMoveVec2{ velocity.x, velocity.y };
+	intent.surfaceSpeed = SMoveVec2{ surfaceSpeed.x, surfaceSpeed.y };
+	intent.slopeNormal = bSteepCliff
+		? SMoveVec2{ m_vecDamageNormal.x, m_vecDamageNormal.y }
+		: SMoveVec2{ 0.0f, 0.0f };
+	intent.moveHeading = m_fMoveHeading;
 	// The ped moves at the ground speed of the animation it plays, so the legs
 	// stay with the movement in every direction and with every weapon
-	float targetSpeed = bMoving ? GetMoveAnimReferenceSpeed() : 0.0f;
-	CVector2D moveDirection(-Sin(m_fMoveHeading), Cos(m_fMoveHeading));
-	CVector2D targetVelocity = moveDirection * targetSpeed;
+	intent.targetSpeed = bMoving ? GetMoveAnimReferenceSpeed() : 0.0f;
+	intent.onGround = bIsStanding;
+	intent.steepCliff = bSteepCliff;
+	intent.hasInput = bMoving;
+	intent.sprint = padUsed->GetSprint();
+	intent.faceCamera = bFacingCamera;
+	// The jump and the dive gate on more than the pad (PlayerJumpOrDive), so
+	// their edges arrive with VICE-182 and VICE-181.
+	intent.jumpRequested = false;
+	intent.diveRequested = false;
 
-	if (m_nMovementState == PLAYERMOVE_AIR) {
-		if (bMoving) {
-			// Keep the momentum and steer toward the input
-			if (ownSpeed > 0.0f)
-				velocity = SteerVelocityTowards(velocity, moveDirection, state.turnRate * dt);
-			if (ownSpeed < targetSpeed) {
-				// Air control speeds the ped up to the target, never past it
-				velocity = MoveVelocityTowards(velocity, targetVelocity, state.accel * dt);
-				float newSpeed = velocity.Magnitude();
-				if (newSpeed > targetSpeed)
-					velocity *= targetSpeed / newSpeed;
-			}
-		}
-	} else if (m_nSurfaceTouched == SURFACE_STEEP_CLIFF && (m_vecDamageNormal.x != 0.0f || m_vecDamageNormal.y != 0.0f)) {
-		// A steep slope pushes the ped off instead of taking the input
-		PushOffSteepSlope(velocity);
-	} else if (bMoving) {
-		// The direction follows the input at the ground turn rate, so the legs
-		// stay with the movement; the speed follows the target at the
-		// acceleration or the friction.
-		if (ownSpeed > 0.0f)
-			velocity = SteerVelocityTowards(velocity, moveDirection, state.turnRate * dt);
-		float rate = ownSpeed > targetSpeed ? state.friction : state.accel;
-		velocity = MoveVelocityTowards(velocity, targetVelocity, rate * dt);
-	} else {
-		velocity = MoveVelocityTowards(velocity, CVector2D(0.0f, 0.0f), state.friction * dt);
-	}
+	const SMoveSnapshot &snapshot = m_MoveSolver.Step(intent);
 
-	m_vecMoveSpeed.x = velocity.x + surfaceSpeed.x;
-	m_vecMoveSpeed.y = velocity.y + surfaceSpeed.y;
-	m_moved = velocity;
+	// The write-back: the snapshot is exactly what the ped keeps
+	m_vecMoveSpeed.x = snapshot.velocity.x;
+	m_vecMoveSpeed.y = snapshot.velocity.y;
+	m_moved = CVector2D(snapshot.moved.x, snapshot.moved.y);
+	m_nMovementState = PlayerMovementStateOf(snapshot.state);
 }
 
 void
