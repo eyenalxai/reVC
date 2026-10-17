@@ -100,6 +100,10 @@ public:
 	bool BodyFacesCamera(void);
 	float GetMoveAnimPlayback(AnimationId animId) const;
 	float GetMoveAnimReferenceSpeed(void);
+	// The stand-in pose of a movement state the shipped animation block has no
+	// cycle for (VICE-180): the slide plays the low crouch pose until the
+	// authored slide content lands.
+	void UpdateMoveStandInAnim(const SMoveSnapshot &snapshot);
 	class CPlayerInfo *GetPlayerInfoForThisPlayerPed();
 	void SetRealMoveAnim(void);
 	void RestoreSprintEnergy(float);

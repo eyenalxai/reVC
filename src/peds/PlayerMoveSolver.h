@@ -24,14 +24,13 @@
 #define MOVE_ENGINE_UNITS_PER_SECOND	50.0f
 
 // The states of the solver: one row per state in moveStateRows
-// (PlayerMoveSolver.cpp). Phase 0 reaches the ground and the air; the slide and
-// the dive rows are present and their numbers arrive with VICE-180 and
-// VICE-181.
+// (PlayerMoveSolver.cpp). The ground, the air and the slide (VICE-180) are
+// live; the dive row is present and its numbers arrive with VICE-181.
 enum eMoveStateId
 {
 	MOVE_GROUND,		// the feet are on a surface
 	MOVE_AIR,		// in the air: keep the momentum, steer a little
-	MOVE_SLIDE,		// planned: the slide, a low friction and a high turn rate
+	MOVE_SLIDE,		// the sprint's crouch press: the slide, a low friction and a high turn rate
 	MOVE_DIVE,		// planned: the dive
 	MOVE_NUMSTATES,
 };
@@ -42,9 +41,11 @@ enum eMoveStateId
 
 // The rungs of the speed ladder (GLOSSARY.md), the explicit order of the
 // strides: walk < run < sprint < the slide's entry boost < the slide jump. One
-// row per rung in moveLadder, in this order, and the rows strictly ascend; only
-// the rungs the phase-0 states reach are reachable in the step (the slide's two
-// rungs wait for VICE-180).
+// row per rung in moveLadder, in this order, and the rows strictly ascend. The
+// slide reports the entry rung whatever the pad asks (VICE-180, the rung the
+// slide's speed is named by); the slide-jump rung is the ladder's report of the
+// jump out of the slide, which lands with the ladder itself (VICE-184, where
+// the tier becomes the intent's value and the ladder the source of the speeds).
 enum eMoveTier
 {
 	TIER_WALK,
@@ -71,19 +72,20 @@ enum eMoveReport
 };
 
 // The triggers of the transition table: the bits one step collects once and
-// the rows then scan in their priority order. Phase 0 fires the ground fact
-// alone; the action edges and the wall triggers arrive with the states they
-// move to (VICE-180..VICE-182).
+// the rows then scan in their priority order. The ground and the air facts and
+// the action edges the states move on are here; the wall triggers have no state
+// to move to yet (the wall run arrives later).
 enum eMoveTrigger
 {
 	TRIGGER_JUMP = 1,		// the jump action edge
 	TRIGGER_DIVE = 2,		// the dive action edge
-	TRIGGER_SLIDE = 4,		// the slide action edge
+	TRIGGER_SLIDE = 4,		// the slide's entry: the crouch action edge at the sprint tier (VICE-180)
 	TRIGGER_LAND = 8,		// the feet are on a surface this step
-	TRIGGER_AIRBORNE = 16,		// the feet left it this step
+	TRIGGER_AIRBORNE = 16,		// the feet are off a surface this step
 	TRIGGER_WALL_CONTACT = 32,	// the wall contact edge
 	TRIGGER_WALL_LEFT = 64,		// the wall left edge
 	TRIGGER_HEAD_HIT = 128,		// the head hit edge
+	TRIGGER_PRONE = 256,		// the prone action edge: the slide ends on it (VICE-180; the prone stance is VICE-177's)
 };
 
 // The flags of one state row: what the shared step does for the state.
@@ -105,8 +107,8 @@ enum eMoveEvent
 };
 
 // The live contact facts of one step: what the body touches right now. The
-// events above are the edges of these bits; the wall and head bits arrive with
-// the tickets that add the wall and head tests (VICE-178, VICE-180).
+// events above are the edges of these bits; the wall and the head bits arrive
+// with the tests that read them (the wall run).
 enum eMoveContact
 {
 	CONTACT_GROUND = 1,	// the feet rest on a surface
@@ -114,9 +116,9 @@ enum eMoveContact
 	CONTACT_HEAD = 4,	// the head touches an obstacle above
 };
 
-// The row of the state table: what one eMoveStateId moves with. The ground and
-// the air rows carry the controller's own constants, unchanged, and the slide
-// and the dive rows wait for VICE-180 and VICE-181.
+// The row of the state table: what one eMoveStateId moves with. The ground, the
+// air and the slide (VICE-180) rows carry their numbers; the dive row is
+// present and waits for VICE-181.
 struct tMoveStateRow
 {
 	float accel;		// engine units per second squared
@@ -130,10 +132,11 @@ struct tMoveStateRow
 
 // The row of the speed ladder: one rung the step can name. The speed scale is
 // the rung's target speed as a scale of the walk, the ladder's anchor, and the
-// rows strictly ascend in the ladder's order. The phase-0 step reports the
-// rung's eMoveState; the rung's speed is VICE-184's (the reference-speed
-// machinery still names the speed the step targets, so no phase-0 step
-// multiplies by the scale).
+// rows strictly ascend in the ladder's order. The step reports the rung's
+// eMoveState, and the slide's own rows report the slide's entry rung whatever
+// the pad asks (VICE-180); the rung's speed is VICE-184's (the reference-speed
+// machinery still names the speed the step targets, so no step multiplies by
+// the scale yet).
 struct tMoveLadderRow
 {
 	eMoveTier tier;			// the rung
@@ -143,10 +146,10 @@ struct tMoveLadderRow
 	eMoveReport reportMoveState;	// the eMoveState value the rung reports
 };
 
-// The row of the stance table: what one eStance scales. The stand row
-// carries the phase-0 values; the crouch and the prone rows arrive with
-// VICE-176 and VICE-177. The capsule height is what the snapshot reports only:
-// the collision stays the engine's, and VICE-178 fills the heights.
+// The row of the stance table: what one eStance scales. The stand row carries
+// the phase-0 values; the crouch and the prone rows arrive with VICE-176 and
+// VICE-177. The capsule height is what the snapshot reports only: the collision
+// stays the engine's, and VICE-178 fills the heights.
 struct tMoveStanceRow
 {
 	float speedScale;	// scales the step's target speed
@@ -154,15 +157,33 @@ struct tMoveStanceRow
 	float capsuleHeight;	// the capsule height the solver reports, engine units
 };
 
+// The guards of the transition table (VICE-180): the fact of the step a row
+// reads beside its trigger bit, so a threshold lives in the row and no branch
+// in the step carries it. A condition guarded both ways is a pair of rows - the
+// row that enters the condition and the row that leaves it - and the two
+// thresholds differ, the leave threshold lying past the enter one, so a ped
+// that sits on a threshold cannot flap the state every frame (the hysteresis
+// the design asks for; see the slide's entry and exit speeds).
+enum eMoveGuard
+{
+	GUARD_NONE,		// the trigger alone fires the row
+	GUARD_SPEED_ABOVE,	// the ped's own speed is above the row's guardSpeed
+	GUARD_SPEED_BELOW,	// the ped's own speed is below the row's guardSpeed
+	GUARD_NUM,
+};
+
 // The row of the transition table: one move of the state machine. Step collects
 // its trigger bits once and scans the rows in their order; the first row whose
-// state and trigger match fires, so the row order is the priority.
+// state, trigger and guard all match fires, so the row order is the priority
+// and a closed guard lets the next row of the same trigger fire.
 struct tMoveTransitionRow
 {
 	eMoveStateId from;	// the state the move leaves
 	uint32_t trigger;	// the eMoveTrigger bit that fires it
 	eMoveStateId to;	// the state the move enters
 	uint32_t onEntryEvent;	// the eMoveEvent bits set on the entry
+	eMoveGuard guard;	// the eMoveGuard the row reads beside the trigger
+	float guardSpeed;	// the guard's threshold, engine units (MOVE_ENGINE_UNITS_PER_SECOND)
 };
 
 // One table set: the four tables the check reads. The module's own set lives in
@@ -210,6 +231,14 @@ struct SMoveIntent
 	bool faceCamera;	// the body faces the camera; no reader in phase 0
 	bool jumpRequested;	// no reader in phase 0; VICE-182
 	bool diveRequested;	// no reader in phase 0; VICE-181
+	// The crouch action edge (the pad's momentary duck press, CPad::DuckJustDown).
+	// With the sprint tier it is the slide's entry pair - the sprint press and
+	// the crouch press in one frame (VICE-180); the crouch stance the press also
+	// asks for is the stance row of VICE-176.
+	bool crouchRequested;
+	// The prone action edge (PED_PRONE, V by default; VICE-175). The slide ends
+	// on it; the prone stance itself is the stance row of VICE-177.
+	bool proneRequested;
 };
 
 // One read of the solver state, taken by the step. This is the only read
@@ -262,16 +291,20 @@ private:
 	eStance m_Stance;
 	float m_fStateTime;	// seconds spent in the current state
 	float m_fPrevFacing;	// the body facing of the previous step, so the spin survives
+	float m_fEntryBoost;	// the entry boost the current state has left, engine units; 0 when spent
 	bool m_bFirstStep;	// no previous facing to take the spin from yet
 	SMoveSnapshot m_Snapshot;	// written only by Step
 };
 
 // The table check (VICE-171, PlayerMoveSolver.cpp): every state has a row,
-// every transition names a state in range, the ladder ascends and the stance
-// rows are in range. `why` names the broken rule when the check fails and may
-// be null; true means every table holds. The first reads the module's own
-// tables (the harness's entry point, VICE-172), the second the set the caller
-// passes, so the harness can drive each rejection with a planted row.
+// every transition names a state in range and carries an in-range guard, the
+// ladder ascends with the slide's rungs above the sprint's, the slide has an
+// entry row and its exit guard names the exit speed, and the stance rows are in
+// range (VICE-180 grows the slide's rules). `why` names the broken rule when
+// the check fails and may be null; true means every table holds. The first
+// reads the module's own tables (the harness's entry point, VICE-172), the
+// second the set the caller passes, so the harness can drive each rejection
+// with a planted row.
 bool PlayerMoveTablesCheck(const char **why);
 bool PlayerMoveTablesCheck(const SMoveTables &tables, const char **why);
 

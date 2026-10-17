@@ -180,10 +180,37 @@ state is the air state with the prone stance.
 ## Movement trigger
 
 The bit one step collects for the transition table: a fact of the step (the feet
-are on a surface, the feet left it) or an action edge (jump, dive, slide). The
-wall contact, the wall left and the head hit wait for the states that move on
-them. The step collects its bits once and the transition rows are scanned in
-their priority order over that one mask, so a move is a row and never a branch.
+are on a surface, the feet are off it) or an action edge (jump, dive, the crouch
+press at the sprint tier, the prone request). The wall contact, the wall left
+and the head hit wait for the states that move on them. The step collects its
+bits once and the transition rows are scanned in their priority order over that
+one mask, so a move is a row and never a branch. A row may also carry a guard: a
+threshold of the step's speed the row reads beside its trigger bit.
+
+## Slide (on foot)
+
+The movement solver's ground state for the sprint's crouch press: the crouch
+press (the pad's duck edge) at the sprint tier enters it in one frame, and the
+entry boost lifts the speed above the sprint's. The state row then owns the
+feel: the friction curve (the row's friction, with the boost's own decay riding
+on it while any of the boost is left) bleeds the speed, the slope accelerates
+the ped along the horizontal part of the surface normal the intent carries, and
+the input steers it at the row's high turn rate without changing its speed - the
+row's input scale is zero, so the input adds no speed. The slide ends below its
+exit speed (into the ground state, in the crouch when the ped holds the crouch
+stance), on a jump (the air keeps the speed the slide had), on a prone request,
+or when the feet leave the surface. The entry speed and the exit speed are two
+rows' guard thresholds, and the exit sits below the entry, so a ped on the
+threshold cannot flap the state. The stand-in pose of the missing slide cycle is
+the crouch hold (`CPlayerPed::UpdateMoveStandInAnim`).
+
+## Movement stand-in pose
+
+The shipped pose a movement state plays while the content for that state does
+not exist: the slide plays the low crouch hold (`ANIM_STD_DUCK_LOW`), which is
+the pose the stock duck leaves behind and the crouch fire does not use. One
+function of the presentation holds it, the state's end fades it, and the
+authored cycle deletes the one call (VICE-180).
 
 ## Stance
 

@@ -52,7 +52,17 @@
  *
  *	G. The finiteness. Every output is finite for dt in {0, 1/50, 1/10}, the
  *	   pad's extreme (the target speed at 2 engine units) and the zero input,
- *	   on the ground, in the air and on the steep slope.
+ *	   on the ground, in the air, on the steep slope and in the slide.
+ *
+ *	H. The slide (VICE-180). The parity sweep above must never enter the
+ *	   slide - the reference maths of VICE-172 has no slide, so the sweep's
+ *	   intents leave the crouch edge off - and the slide is driven here by
+ *	   hand instead: the entry (the sprint plus the crouch edge, in one frame,
+ *	   with the entry boost above the sprint's speed), the decay (monotonic
+ *	   over flat ground), the exit (below the exit speed and not above it, and
+ *	   no entry below the entry speed: the hysteresis), the jump (the air
+ *	   takes the slide's speed and keeps it), and the two other exits the
+ *	   design names (a prone request, the feet leaving the surface).
  *
  * Build and run (from the repository root; the structural check drives the
  * compiler and nm itself and writes its scratch files under /tmp/opencode):
@@ -167,6 +177,12 @@ MakeIntent(void)
 	intent.faceCamera = RngChance(50);
 	intent.jumpRequested = RngChance(10);
 	intent.diveRequested = RngChance(10);
+	/* The slide's entry pair and the prone request stay off: the parity
+	 * reference of VICE-172 has no slide, so a stream that entered it could
+	 * not be compared. The slide's own checks drive the pair by hand (H,
+	 * VICE-180), and the finiteness sweep sets it for its own slice. */
+	intent.crouchRequested = false;
+	intent.proneRequested = false;
 	return intent;
 }
 
@@ -192,6 +208,8 @@ WalkIntent(float heading, float targetSpeed)
 	intent.faceCamera = false;
 	intent.jumpRequested = false;
 	intent.diveRequested = false;
+	intent.crouchRequested = false;
+	intent.proneRequested = false;
 	return intent;
 }
 
@@ -959,20 +977,21 @@ CheckDeterminism(void)
  * ---------------------------------------------------------------------- */
 
 /*
- * VICE-171 (movement/p0-tables) will export PlayerMoveTablesCheck and this
- * check will call it. It is not in the tree yet (the module keeps its rows in
- * moveStates, a private static array), so the harness holds what exists: the
- * design's four states and three stances are named and distinct, the phase 0
- * stream reaches the ground and the air, and the slide and the dive - whose
- * rows are zero and whose transitions arrive with VICE-180/VICE-181 - are
- * unreachable in phase 0.
+ * VICE-171 (movement/p0-tables) exported PlayerMoveTablesCheck; VICE-180 grew
+ * the slide's rules. The check drives the module's own tables and the harness's
+ * copy - the module's numbers, in a set a defect can be planted in - so every
+ * rejection the check claims can be driven. PlantSet rebuilds every field, so
+ * each case starts clean.
  */
-/* The check's own table set: the module's phase 0 rows in a copy a defect can
- * be planted in. PlantSet rebuilds every field, so each case starts clean. */
 static tMoveStateRow g_plantStates[MOVE_NUMSTATES];
 static tMoveLadderRow g_plantLadder[TIER_NUM];
 static tMoveStanceRow g_plantStances[STANCE_NUM];
-static tMoveTransitionRow g_plantTransitions[4];
+static tMoveTransitionRow g_plantTransitions[7];
+
+/* The module's own slide numbers (PlayerMoveSolver.cpp), so the planted set is
+ * a copy of the real one: the two speeds the guards name. */
+#define PLANT_SLIDE_ENTRY_SPEED	0.18f
+#define PLANT_SLIDE_EXIT_SPEED	0.13f
 
 static SMoveTables
 PlantSet(void)
@@ -989,6 +1008,15 @@ PlantSet(void)
 		g_plantStates[i].inputScale = 1.0f;
 		g_plantStates[i].flags = MOVEFLAG_STEER_INPUT | ((i == MOVE_AIR) ? MOVEFLAG_KEEP_MOMENTUM : 0u);
 	}
+	/* the slide's row as the module carries it */
+	g_plantStates[MOVE_SLIDE].accel = 2.0f / 50.0f;
+	g_plantStates[MOVE_SLIDE].friction = 8.0f / 50.0f;
+	g_plantStates[MOVE_SLIDE].turnRate = 16.0f;
+	g_plantStates[MOVE_SLIDE].entryBoost = 2.0f / 50.0f;
+	g_plantStates[MOVE_SLIDE].boostDecay = 8.0f / 50.0f;
+	g_plantStates[MOVE_SLIDE].inputScale = 0.0f;
+	g_plantStates[MOVE_SLIDE].flags = MOVEFLAG_STEER_INPUT;
+
 	for (int i = 0; i < TIER_NUM; i++) {
 		g_plantLadder[i].tier = (eMoveTier)i;
 		g_plantLadder[i].stance = STANCE_STAND;
@@ -1003,17 +1031,31 @@ PlantSet(void)
 	}
 	g_plantTransitions[0].from = MOVE_GROUND; g_plantTransitions[0].trigger = TRIGGER_AIRBORNE;
 	g_plantTransitions[0].to = MOVE_AIR; g_plantTransitions[0].onEntryEvent = 0;
+	g_plantTransitions[0].guard = GUARD_NONE; g_plantTransitions[0].guardSpeed = 0.0f;
 	g_plantTransitions[1].from = MOVE_AIR; g_plantTransitions[1].trigger = TRIGGER_LAND;
 	g_plantTransitions[1].to = MOVE_GROUND; g_plantTransitions[1].onEntryEvent = EVENT_LANDED;
+	g_plantTransitions[1].guard = GUARD_NONE; g_plantTransitions[1].guardSpeed = 0.0f;
 	g_plantTransitions[2].from = MOVE_GROUND; g_plantTransitions[2].trigger = TRIGGER_JUMP;
 	g_plantTransitions[2].to = MOVE_AIR; g_plantTransitions[2].onEntryEvent = 0;
+	g_plantTransitions[2].guard = GUARD_NONE; g_plantTransitions[2].guardSpeed = 0.0f;
 	g_plantTransitions[3].from = MOVE_AIR; g_plantTransitions[3].trigger = TRIGGER_DIVE;
 	g_plantTransitions[3].to = MOVE_DIVE; g_plantTransitions[3].onEntryEvent = 0;
+	g_plantTransitions[3].guard = GUARD_NONE; g_plantTransitions[3].guardSpeed = 0.0f;
+	/* the slide's rows: the entry, the jump, the prone request and the exit */
+	g_plantTransitions[4].from = MOVE_GROUND; g_plantTransitions[4].trigger = TRIGGER_SLIDE;
+	g_plantTransitions[4].to = MOVE_SLIDE; g_plantTransitions[4].onEntryEvent = 0;
+	g_plantTransitions[4].guard = GUARD_SPEED_ABOVE; g_plantTransitions[4].guardSpeed = PLANT_SLIDE_ENTRY_SPEED;
+	g_plantTransitions[5].from = MOVE_SLIDE; g_plantTransitions[5].trigger = TRIGGER_JUMP;
+	g_plantTransitions[5].to = MOVE_AIR; g_plantTransitions[5].onEntryEvent = EVENT_JUMP;
+	g_plantTransitions[5].guard = GUARD_NONE; g_plantTransitions[5].guardSpeed = 0.0f;
+	g_plantTransitions[6].from = MOVE_SLIDE; g_plantTransitions[6].trigger = TRIGGER_LAND;
+	g_plantTransitions[6].to = MOVE_GROUND; g_plantTransitions[6].onEntryEvent = 0;
+	g_plantTransitions[6].guard = GUARD_SPEED_BELOW; g_plantTransitions[6].guardSpeed = PLANT_SLIDE_EXIT_SPEED;
 
 	t.states = g_plantStates; t.numStates = MOVE_NUMSTATES;
 	t.ladder = g_plantLadder; t.numLadder = TIER_NUM;
 	t.stances = g_plantStances; t.numStances = STANCE_NUM;
-	t.transitions = g_plantTransitions; t.numTransitions = 4;
+	t.transitions = g_plantTransitions; t.numTransitions = 7;
 	return t;
 }
 
@@ -1048,7 +1090,7 @@ CheckTables(void)
 	Check(seen[MOVE_GROUND] > 0 && seen[MOVE_AIR] > 0,
 		"the phase 0 stream uses the ground and the air");
 	Check(seen[MOVE_SLIDE] == 0 && seen[MOVE_DIVE] == 0,
-		"the slide and the dive are unreachable in phase 0");
+		"the parity stream enters neither the slide (its pair is off, VICE-180) nor the dive");
 	Check(bad == 0 && offStance == 0,
 		"the state is always one of the four and the stance is the one of phase 0");
 	printf("  the states of the sweep: ground %d, air %d, slide %d, dive %d\n",
@@ -1081,6 +1123,8 @@ CheckTables(void)
 			"a ladder row that does not ascend is refused");
 		REJECTS(g_plantLadder[TIER_WALK].stateMask = 1u << MOVE_AIR,
 			"a state without a rung is refused");
+		REJECTS(g_plantLadder[TIER_SPRINT].speedScale = g_plantLadder[TIER_SLIDE_ENTRY].speedScale,
+			"a slide rung at or below the sprint's is refused");
 		REJECTS(broken.numStances = STANCE_NUM - 1,
 			"a stance without a row is refused");
 		REJECTS(g_plantStances[STANCE_CROUCH].turnScale = -1.0f,
@@ -1089,6 +1133,18 @@ CheckTables(void)
 			"a transition to a state out of range is refused");
 		REJECTS(g_plantTransitions[3].trigger = 0,
 			"a transition trigger out of range is refused");
+		REJECTS(g_plantTransitions[0].guard = GUARD_NUM,
+			"a transition guard out of range is refused");
+		REJECTS(g_plantTransitions[0].guardSpeed = 1.0f,
+			"an unguarded transition with a threshold is refused");
+		REJECTS(g_plantTransitions[4].guardSpeed = 0.0f,
+			"a guarded transition without its threshold is refused");
+		REJECTS(g_plantTransitions[4].to = MOVE_GROUND,
+			"a slide without an entry row is refused");
+		REJECTS(g_plantTransitions[6].guard = GUARD_NONE; g_plantTransitions[6].guardSpeed = 0.0f,
+			"a slide exit without the exit speed is refused");
+		REJECTS(g_plantTransitions[6].guardSpeed = PLANT_SLIDE_ENTRY_SPEED,
+			"a slide exit speed at or above its entry speed is refused");
 	}
 }
 
@@ -1208,6 +1264,11 @@ CheckFiniteness(void)
 			// the pad's extreme and, every fourth step, the zero input
 			intent.hasInput = (i % 4) != 3;
 			intent.vel = SMoveVec2{ RngFloat(-10.0f, 10.0f), RngFloat(-10.0f, 10.0f) };
+			// the slide's entry pair and the prone request, so the slide's own
+			// outputs are covered too (VICE-180)
+			intent.tier = (i % 4) == 0 ? TIER_SPRINT : intent.tier;
+			intent.crouchRequested = (i % 4) == 0;
+			intent.proneRequested = (i % 8) == 0;
 			const SMoveSnapshot &snapshot = solver.Step(intent);
 			if (!SnapshotIsFinite(snapshot)) {
 				if (bad < 3) {
@@ -1222,7 +1283,275 @@ CheckFiniteness(void)
 	Check(bad == 0, "every output is finite for dt {0, 1/50, 1/10}, the pad's extreme and the zero input");
 	printf("  %d steps: dt {0, 1/50, 1/10} x the targets {0, 2/60, 2, 0.3} x the input and its\n",
 		(int)ARRAY_COUNT(aDt) * FINITE_STEPS);
-	printf("  absence: every velocity, moved, speed, heading, turn scale and capsule finite\n");
+	printf("  absence, over the ground, the air, the steep slope and the slide: every velocity,\n");
+	printf("  moved, speed, heading, turn scale and capsule finite\n");
+}
+
+/* ---------------------------------------------------------------------- *
+ * 7. the slide (VICE-180)
+ * ---------------------------------------------------------------------- */
+
+/*
+ * The slide's own checks, beside the parity sweep and never inside it: the
+ * reference maths of VICE-172 has no slide, so MakeIntent leaves the crouch
+ * edge off and the slide is driven here by hand. The four claims the design
+ * names, plus its exits:
+ *
+ *	* the entry: a sprint holds the shipped sprint_civi cycle's own speed
+ *	  (14.668 units per second, 0.29336 engine units), and the crouch edge
+ *	  enters the slide in that same frame with the entry boost, so the first
+ *	  slide frame is above the sprint's speed;
+ *	* the decay: the slide's speed never rises while it runs over flat ground;
+ *	* the exit: the slide ends below the exit speed (0.13 engine units, the
+ *	  run's own 6.39 units per second) and runs on at or above it, and the
+ *	  entry refuses below the entry speed (0.18): the two thresholds differ,
+ *	  which is the hysteresis the design asks for;
+ *	* the jump: the jump leaves the slide for the air, the air keeps the
+ *	  slide's speed and a slide jump is faster than the sprint's own speed;
+ *	* the other exits: a prone request ends the slide on the ground (VICE-177
+ *	  owns the prone stance), and the feet leaving the surface end it into the
+ *	  fall with the speed it had.
+ *
+ * The tier follows the state: the slide names the ladder's entry rung even
+ * though the pad still holds the sprint.
+ */
+
+#define SLIDE_SPRINT_SPEED	(14.668f / MOVE_ENGINE_UNITS_PER_SECOND)
+#define SLIDE_ENTRY_SPEED	0.18f
+#define SLIDE_EXIT_SPEED	0.13f
+
+/* One step into the slide: the sprint's speed, the sprint tier and the crouch
+ * edge, the entry pair in one frame. */
+static SMoveSnapshot
+StepIntoSlide(CPlayerMoveSolver *pSolver)
+{
+	SMoveIntent intent = WalkIntent(0.0f, SLIDE_SPRINT_SPEED);
+
+	intent.tier = TIER_SPRINT;
+	intent.crouchRequested = true;
+	intent.vel = SMoveVec2{ 0.0f, SLIDE_SPRINT_SPEED };
+	return pSolver->Step(intent);
+}
+
+/* One slide frame at a given own speed, the input held and the crouch edge off,
+ * so nothing re-enters the slide. */
+static SMoveSnapshot
+StepSlideAt(CPlayerMoveSolver *pSolver, float speed)
+{
+	SMoveIntent intent = WalkIntent(0.0f, SLIDE_SPRINT_SPEED);
+
+	intent.tier = TIER_SPRINT;
+	intent.vel = SMoveVec2{ 0.0f, speed };
+	return pSolver->Step(intent);
+}
+
+static void
+CheckSlide(void)
+{
+	/* (a) the entry: the sprint settles on the shipped sprint cycle's own
+	 *     speed, the crouch edge enters the slide in that frame, and the entry
+	 *     boost puts the slide's first frame above the sprint's speed. */
+	{
+		CPlayerMoveSolver solver;
+		SMoveIntent intent = WalkIntent(0.0f, SLIDE_SPRINT_SPEED);
+		SMoveSnapshot snapshot = solver.Step(intent);
+		float sprintSpeed;
+
+		intent.tier = TIER_SPRINT;
+		for (int i = 0; i < 200; i++) {
+			intent.vel = snapshot.moved;
+			snapshot = solver.Step(intent);
+		}
+		sprintSpeed = snapshot.speed;
+		Check(snapshot.state == MOVE_GROUND && fabsf(sprintSpeed - SLIDE_SPRINT_SPEED) < 1e-6f,
+			"the sprint settles on the shipped sprint cycle's own speed");
+
+		intent.crouchRequested = true;
+		intent.vel = snapshot.moved;
+		snapshot = solver.Step(intent);
+		Check(snapshot.state == MOVE_SLIDE,
+			"the sprint plus the crouch edge enters the slide in one frame");
+		Check(snapshot.speed > sprintSpeed,
+			"the entry boost puts the slide's first frame above the sprint's speed");
+		Check(snapshot.tier == TIER_SLIDE_ENTRY,
+			"the slide reports the ladder's entry rung, not the pad's sprint");
+		Check(snapshot.reportMoveState == MOVE_REPORT_SPRINT,
+			"the slide's rung reports the sprint movement state");
+		printf("  the sprint holds %.5f engine units; the slide's first frame holds %.5f\n",
+			sprintSpeed, snapshot.speed);
+	}
+
+	/* (b) the decay: the speed never rises over flat ground, every frame the
+	 *     guard keeps in the slide runs at or above the exit speed, and the
+	 *     step that ends it runs below that speed. */
+	{
+		CPlayerMoveSolver solver;
+		SMoveSnapshot snapshot = StepIntoSlide(&solver);
+		float previous = snapshot.speed;
+		float guardIn = 0.0f;	// the speed the guard of the last frame kept in the slide
+		float exitIn = 0.0f;	// the speed the guard of the frame that ended it read
+		int rises = 0;
+		int frames = 0;
+
+		while (frames < 600 && snapshot.state == MOVE_SLIDE) {
+			float own = snapshot.speed;
+
+			snapshot = StepSlideAt(&solver, snapshot.moved.y);
+			frames++;
+			if (snapshot.state != MOVE_SLIDE) {
+				exitIn = own;
+				break;
+			}
+			if (snapshot.speed > previous + 1e-6f)
+				rises++;
+			previous = snapshot.speed;
+			guardIn = own;
+		}
+		Check(frames < 600, "the slide reaches its exit: it does not run forever");
+		Check(snapshot.state == MOVE_GROUND, "the slide ends on the ground");
+		Check(rises == 0, "the slide's speed decays monotonically over flat ground");
+		Check(guardIn >= SLIDE_EXIT_SPEED,
+			"every frame the slide keeps runs at or above the exit speed");
+		Check(exitIn < SLIDE_EXIT_SPEED,
+			"the exit fires on a step below the exit speed and not above it");
+		printf("  the slide ran %d frames and ended on a step of %.5f, below the exit's %.2f\n",
+			frames, exitIn, SLIDE_EXIT_SPEED);
+	}
+
+	/* (c) the two thresholds: the exit fires strictly below its speed, and the
+	 *     entry refuses below its own: the hysteresis band between them keeps
+	 *     a ped from flapping in and out of the slide. */
+	{
+		CPlayerMoveSolver solver;
+		SMoveSnapshot snapshot = StepIntoSlide(&solver);
+
+		Check(snapshot.state == MOVE_SLIDE, "the entry at the sprint's speed starts the slide");
+		snapshot = StepSlideAt(&solver, SLIDE_EXIT_SPEED + 0.01f);
+		Check(snapshot.state == MOVE_SLIDE, "a slide above the exit speed runs on");
+		snapshot = StepSlideAt(&solver, SLIDE_EXIT_SPEED);
+		Check(snapshot.state == MOVE_SLIDE, "a slide at the exit speed runs on: the guard reads below it");
+		snapshot = StepSlideAt(&solver, SLIDE_EXIT_SPEED - 0.01f);
+		Check(snapshot.state == MOVE_GROUND, "a slide below the exit speed ends on the ground");
+
+		// the entry refuses inside the hysteresis band, and at any tier but
+		// the sprint's
+		{
+			SMoveIntent intent = WalkIntent(0.0f, SLIDE_SPRINT_SPEED);
+
+			intent.tier = TIER_SPRINT;
+			intent.crouchRequested = true;
+			intent.vel = SMoveVec2{ 0.0f, SLIDE_ENTRY_SPEED - 0.01f };
+			snapshot = solver.Step(intent);
+			Check(snapshot.state == MOVE_GROUND,
+				"the crouch edge below the entry speed does not start the slide (the hysteresis)");
+
+			intent.vel = SMoveVec2{ 0.0f, SLIDE_SPRINT_SPEED };
+			intent.tier = TIER_RUN;
+			snapshot = solver.Step(intent);
+			Check(snapshot.state == MOVE_GROUND,
+				"the crouch edge at the run tier does not start the slide: the pair needs the sprint");
+		}
+	}
+
+	/* (d) the slide jump: the transition leaves for the air, no row resets the
+	 *     velocity, the air keeps the slide's speed, and the jump is faster
+	 *     than the sprint's own speed. */
+	{
+		CPlayerMoveSolver solver;
+		SMoveIntent intent = WalkIntent(0.0f, SLIDE_SPRINT_SPEED);
+		SMoveSnapshot snapshot;
+		float slideSpeed;
+
+		snapshot = StepIntoSlide(&solver);
+		snapshot = StepSlideAt(&solver, snapshot.moved.y);
+		slideSpeed = snapshot.speed;
+		Check(snapshot.state == MOVE_SLIDE && slideSpeed > SLIDE_SPRINT_SPEED,
+			"the slide runs above the sprint's speed before the jump");
+
+		intent.tier = TIER_SPRINT;
+		intent.jumpRequested = true;
+		intent.vel = SMoveVec2{ 0.0f, slideSpeed };
+		snapshot = solver.Step(intent);
+		Check(snapshot.state == MOVE_AIR, "the jump from the slide moves to the air");
+		Check((snapshot.events & EVENT_JUMP) != 0, "the slide's jump reports the jump event");
+		Check(fabsf(snapshot.speed - slideSpeed) < 1e-6f,
+			"the slide jump carries the slide's speed: the transition resets no velocity");
+		Check(snapshot.speed > SLIDE_SPRINT_SPEED, "the slide jump is faster than the sprint's speed");
+
+		// the air's keep-momentum holds it: no input, no ground, no change
+		intent.jumpRequested = false;
+		intent.hasInput = false;
+		intent.onGround = false;
+		for (int i = 0; i < 30 && snapshot.state == MOVE_AIR; i++) {
+			intent.vel = snapshot.moved;
+			snapshot = solver.Step(intent);
+		}
+		Check(snapshot.state == MOVE_AIR && fabsf(snapshot.speed - slideSpeed) < 1e-6f,
+			"the air keeps the slide jump's momentum, bit for bit");
+	}
+
+	/* (e) the two other exits the design names: a prone request ends the slide
+	 *     on the ground (the prone stance itself is VICE-177's row), and the
+	 *     feet leaving the surface end it into the fall with the speed it
+	 *     had. */
+	{
+		CPlayerMoveSolver solver;
+		SMoveIntent intent = WalkIntent(0.0f, SLIDE_SPRINT_SPEED);
+		SMoveSnapshot snapshot = StepIntoSlide(&solver);
+		float slideSpeed = snapshot.speed;
+
+		intent.tier = TIER_SPRINT;
+		intent.proneRequested = true;
+		intent.vel = SMoveVec2{ 0.0f, snapshot.moved.y };
+		snapshot = solver.Step(intent);
+		Check(snapshot.state == MOVE_GROUND, "a prone request ends the slide on the ground");
+		Check(snapshot.stance == STANCE_STAND,
+			"the prone stance the request asks for is VICE-177's row, not the slide's");
+
+		solver.Reset();
+		snapshot = StepIntoSlide(&solver);
+		intent.proneRequested = false;
+		intent.onGround = false;
+		intent.vel = SMoveVec2{ 0.0f, snapshot.moved.y };
+		snapshot = solver.Step(intent);
+		Check(snapshot.state == MOVE_AIR,
+			"the feet leaving the surface end the slide into the fall");
+		Check(fabsf(snapshot.speed - slideSpeed) < 1e-6f,
+			"the fall takes the slide's speed on");
+	}
+
+	/* (f) the slide keeps its whole state on the instance: two solvers driven
+	 *     with the same slide stream - the sprint, the entry, the decay, the
+	 *     jump - agree field for field, the entry boost between frames
+	 *     included. */
+	{
+		CPlayerMoveSolver first, second;
+		SMoveIntent intent = WalkIntent(0.0f, SLIDE_SPRINT_SPEED);
+		SMoveVec2 liveFirst = SMoveVec2{ 0.0f, 0.0f };
+		SMoveVec2 liveSecond = SMoveVec2{ 0.0f, 0.0f };
+		int diffs = 0;
+
+		intent.tier = TIER_SPRINT;
+		for (int i = 0; i < 80; i++) {
+			SMoveSnapshot a, b;
+
+			if (i > 0 && !SameSnapshot(first.GetSnapshot(), second.GetSnapshot()))
+				diffs++;
+			intent.crouchRequested = (i == 10);
+			intent.jumpRequested = (i == 50);
+			intent.onGround = i < 55;
+			intent.vel = liveFirst;
+			a = first.Step(intent);
+			intent.vel = liveSecond;
+			b = second.Step(intent);
+			liveFirst = a.moved;
+			liveSecond = b.moved;
+		}
+		Check(diffs == 0, "two solvers driven with the same slide stream agree field for field");
+	}
+
+	printf("  the slide names the entry rung, keeps the sprint's lane out of it, and ends on the\n");
+	printf("  ground, the air or the prone request; authored slide content is the follow-up\n");
 }
 
 /* ---------------------------------------------------------------------- *
@@ -1253,6 +1582,9 @@ main(void)
 
 	printf("\n== 6. finiteness\n");
 	CheckFiniteness();
+
+	printf("\n== 7. the slide (VICE-180): the entry, the curve, the exits and the jump\n");
+	CheckSlide();
 
 	printf("\nRESULT: %s (%d checks, %d failures)\n",
 		g_failures == 0 ? "every check passed" : "FAILURES", g_checks, g_failures);
