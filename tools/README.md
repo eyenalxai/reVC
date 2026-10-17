@@ -10,3 +10,10 @@ data and re-derive a computation on their own, without linking game code.
   plain scan, over the real collision models.
 * `pathfind_check` (VICE-130): the path searches and the closest-node lookup
   against the base revision, over a graph snapshot from a running game.
+* `ifp` (VICE-185): the animation block reader, writer and validator for the
+  movement content. Standalone, with its own model of the format: it dumps a
+  block, checks it against the loader's rules, round trips the shipped
+  `anim/ped.ifp` byte for byte, extracts the animations of a new movement set,
+  and plants defects for the validator. See `tools/ifp/ifp.h`; `self_test.sh`
+  runs the close-out evidence, `verify_keys.py` is the independent reader of
+  the raw bytes it compares against.
