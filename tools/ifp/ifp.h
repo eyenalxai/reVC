@@ -66,6 +66,14 @@ typedef uint32_t uint32;
 
 namespace ifp {
 
+// The number of entries of a table, so a table and the count of it never drift
+// apart. The one array count of the tool.
+template <typename T, int N>
+constexpr int CountOf(const T (&)[N])
+{
+	return N;
+}
+
 // printf into a std::string, for the plain one-line messages the tool prints.
 std::string Format(const char *fmt, ...);
 
@@ -168,6 +176,11 @@ HierarchyView ComputeView(const Hierarchy &h);
 bool IsRootSequence(const Sequence &seq);
 float RootCycleSpeed(const Sequence &seq);
 
+// The index of an animation by name, -1 when the block has no such name. The
+// tool's one block lookup: the commands, the validator and the generators name
+// their animations through it (file.cpp, so every build links it).
+int FindHierarchy(const Block &block, const std::string &name);
+
 // ---------------------------------------------------------------- reading
 
 // A parse result. problems holds one plain line per defect, most of them fatal
@@ -225,9 +238,6 @@ extern const int NumMovementSlots;
 // Human-readable view. only, when non-empty, selects animations by name.
 // withKeys adds every key of every sequence.
 void DumpBlock(const Block &block, std::vector<std::string> *only, bool withKeys, std::ostream &out);
-
-// The index of an animation by name, -1 when the block has no such name.
-int FindHierarchy(const Block &block, const std::string &name);
 
 // ---------------------------------------------------------------- compare
 

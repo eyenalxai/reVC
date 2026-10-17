@@ -132,6 +132,15 @@ Block::Block(void)
 {
 }
 
+int
+FindHierarchy(const Block &block, const std::string &name)
+{
+	for(size_t i = 0; i < block.hierarchies.size(); i++)
+		if(block.hierarchies[i].name == name)
+			return (int)i;
+	return -1;
+}
+
 bool
 IsRootSequence(const Sequence &seq)
 {

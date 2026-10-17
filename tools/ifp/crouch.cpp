@@ -41,8 +41,12 @@
 // The names of the block and its cycles are the shipped names with a _crouch
 // suffix (WALK_player -> walk_crouch), so the shipped block and the crouch block
 // never collide and the groups pick theirs by name.
+//
+// The rotation machinery and the bone-name lookup are shared with the prone
+// generator: tools/ifp/pose.h. The pose table and the roster below are this
+// generator's own.
 
-#include "ifp.h"
+#include "pose.h"
 
 #include <math.h>
 #include <ostream>
@@ -73,7 +77,7 @@ static const CrouchPoseRow CrouchPose[] = {
 	{ "Spine",   { -0.342f, -0.149f,  0.928f },  20.1f, "lean: the lower spine comes forward over the knees" },
 	{ "Spine1",  { -0.381f,  0.387f,  0.840f },  34.3f, "lean: the upper spine rounds the shoulders forward" },
 };
-static const int NumCrouchPoseRows = (int)(sizeof(CrouchPose)/sizeof(CrouchPose[0]));
+static const int NumCrouchPoseRows = CountOf(CrouchPose);
 
 // The crouch body height: the root key z of the shipped crouch pose's settled
 // key (WEAPON_crouch, root z -0.587; its standing first key is -0.026, so the
@@ -130,7 +134,7 @@ static const CrouchCycle CrouchCycles[] = {
 	{ "sprint_right_crouch",	"run_right",		0.75f,	0.62f },
 	{ "walk_start_right_crouch",	"walk_start_right",	1.0f,	0.50f },
 };
-static const int NumCrouchCycles = (int)(sizeof(CrouchCycles)/sizeof(CrouchCycles[0]));
+static const int NumCrouchCycles = CountOf(CrouchCycles);
 
 // The four movement sets, in the group order of the engine's table
 // (ASSOCGRP_CROUCH, CROUCHBACK, CROUCHLEFT, CROUCHRIGHT). The five names of a
@@ -139,7 +143,7 @@ static const int NumCrouchCycles = (int)(sizeof(CrouchCycles)/sizeof(CrouchCycle
 static const char *const CrouchSetNames[] = {
 	"crouch", "crouchback", "crouchleft", "crouchright",
 };
-static const int NumCrouchSets = (int)(sizeof(CrouchSetNames)/sizeof(CrouchSetNames[0]));
+static const int NumCrouchSets = CountOf(CrouchSetNames);
 static const char *const CrouchSets[][5] = {
 	{ "walk_crouch", "run_crouch", "sprint_crouch", "IDLE_crouch", "walk_start_crouch" },
 	{ "walk_back_crouch", "run_back_crouch", "sprint_back_crouch", "IDLE_crouch", "walk_start_back_crouch" },
@@ -149,12 +153,13 @@ static const char *const CrouchSets[][5] = {
 
 // --------------------------------------------------------------- the transform
 
-// One rotation. The tool stores the pose rotation the loader ends up with, so
-// the composition lives in that space and the writer conjugates it again.
-struct Quat {
-	float x, y, z, w;
-};
-
+// One rotation of the table, about the axis the row gives, which lives in the
+// parent frame of the bone. The axis is normalised on use, so only its
+// direction matters. This constructor stays in this file rather than moving to
+// pose.h: the two generators round the same rotation differently (this one
+// divides the axis length into the sine, the prone generator's normalises the
+// axis and the result), and a single shared constructor changed the bytes of
+// the committed gamefiles/anim/crouch.ifp. The composition itself is shared.
 static Quat
 FromAxisAngle(const float *axis, float degrees)
 {
@@ -171,77 +176,23 @@ FromAxisAngle(const float *axis, float degrees)
 	return q;
 }
 
-// a then b: the rotation b applied first, then a, both in the same frame. The
-// pose offset pre-multiplies a key (q' = offset * q) to rotate the bone in its
-// parent's frame, the frame the key's quaternion is expressed in.
-static Quat
-Multiply(const Quat &a, const Quat &b)
-{
-	Quat q;
-	q.x = a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y;
-	q.y = a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x;
-	q.z = a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w;
-	q.w = a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z;
-	return q;
-}
-
-static void
-Normalise(Quat *q)
-{
-	float length = sqrtf(q->x*q->x + q->y*q->y + q->z*q->z + q->w*q->w);
-	if(length > 0.0f){
-		q->x /= length;
-		q->y /= length;
-		q->z /= length;
-		q->w /= length;
-	}
-}
-
-static const CrouchPoseRow *
-FindPoseRow(const std::string &bone)
-{
-	for(int i = 0; i < NumCrouchPoseRows; i++)
-		if(bone == CrouchPose[i].bone)
-			return &CrouchPose[i];
-	return 0;
-}
-
-// The crouch pose on every key of the bones of the table. A row the hierarchy
-// has no sequence for is a defect: the pose would be half applied, and the
-// table and the shipped skeleton would have drifted apart.
+// The crouch pose on every key of the bones of the table, one row at a time. A
+// row the hierarchy has no sequence for is a defect: the pose would be half
+// applied, and the table and the shipped skeleton would have drifted apart.
 static void
 ApplyPose(Hierarchy *hier, float depth, std::vector<std::string> *problems)
 {
-	for(size_t s = 0; s < hier->sequences.size(); s++){
-		Sequence &seq = hier->sequences[s];
-		const CrouchPoseRow *row = FindPoseRow(seq.name);
-		if(row == 0)
-			continue;
-		Quat offset = FromAxisAngle(row->axis, row->degrees * depth);
-		for(size_t k = 0; k < seq.keys.size(); k++){
-			Key &key = seq.keys[k];
-			Quat q;
-			q.x = key.rotation[0];
-			q.y = key.rotation[1];
-			q.z = key.rotation[2];
-			q.w = key.rotation[3];
-			q = Multiply(offset, q);
-			Normalise(&q);
-			key.rotation[0] = q.x;
-			key.rotation[1] = q.y;
-			key.rotation[2] = q.z;
-			key.rotation[3] = q.w;
-		}
-	}
-
 	for(int i = 0; i < NumCrouchPoseRows; i++){
-		bool found = false;
-		for(size_t s = 0; s < hier->sequences.size(); s++)
-			if(hier->sequences[s].name == CrouchPose[i].bone)
-				found = true;
-		if(!found)
+		int s = FindSequence(*hier, CrouchPose[i].bone);
+		if(s < 0){
 			problems->push_back(Format("animation \"%s\": the pose bone \"%s\" (%s) has no sequence",
 				hier->name.c_str(), CrouchPose[i].bone, CrouchPose[i].what));
+			continue;
+		}
+		Quat offset = FromAxisAngle(CrouchPose[i].axis, CrouchPose[i].degrees * depth);
+		Sequence &seq = hier->sequences[s];
+		for(size_t k = 0; k < seq.keys.size(); k++)
+			ComposeKeyOffset(&seq.keys[k], offset);
 	}
 }
 

@@ -20,7 +20,7 @@ const MovementSlot MovementSlots[] = {
 	{ "idle",      false, false },
 	{ "startwalk", true,  false },
 };
-const int NumMovementSlots = 5;
+const int NumMovementSlots = CountOf(MovementSlots);
 
 // The loader's name fields, from CAnimManager (strncpy limits) and
 // CAnimBlendSequence::SetName.
