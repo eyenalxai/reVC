@@ -20,6 +20,7 @@
 #include "Weather.h"
 #include "ZoneCull.h"
 #include "Population.h"
+#include "SpawnOccupancy.h"
 #include "Pad.h"
 #include "Phones.h"
 #include "TrafficLights.h"
@@ -367,6 +368,7 @@ CPed::CPed(uint32 pedType) : m_pedIK(this)
 	m_delayedSoundID = -1;
 	m_delayedSoundTimer = 0;
 	CPopulation::UpdatePedCount((ePedType)m_nPedType, false);
+	CSpawnOccupancy::PedRegistered(this);
 	m_lastComment = UINT32_MAX;
 }
 
@@ -403,6 +405,7 @@ CPed::~CPed(void)
 	if (bMiamiViceCop)
 		CPopulation::NumMiamiViceCops--;
 	CPopulation::UpdatePedCount((ePedType)m_nPedType, true);
+	CSpawnOccupancy::PedRemoved(this);
 	DMAudio.DestroyEntity(m_audioEntityId);
 
 	// Because of the nature of ped lists in GTA, it can sometimes be outdated.
@@ -7941,6 +7944,9 @@ CPed::SetPedPositionInCar(void)
 		m_fRotationCur = m_pMyVehicle->GetForward().Heading();
 	}
 	SetMatrix(newMat);
+	/* The occupancy store follows a carried pedestrian (VICE-149): its
+	 * position is the seat matrix, written here and nowhere else. */
+	CSpawnOccupancy::EntityMoved(this);
 }
 
 void

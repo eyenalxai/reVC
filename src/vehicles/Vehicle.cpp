@@ -14,6 +14,7 @@
 #include "CarCtrl.h"
 #include "FillBurst.h"
 #include "Population.h"
+#include "SpawnOccupancy.h"
 #include "ModelIndices.h"
 #include "World.h"
 #include "Lights.h"
@@ -92,6 +93,7 @@ CVehicle::CVehicle(uint8 CreatedBy)
 	bIsHandbrakeOn = false;
 #endif
 	CCarCtrl::UpdateCarCount(this, false);
+	CSpawnOccupancy::VehicleRegistered(this);
 	m_fHealth = 1000.0f;
 	bEngineOn = true;
 	bFreebies = true;
@@ -212,6 +214,7 @@ CVehicle::~CVehicle()
 	if (m_pCarFire)
 		m_pCarFire->Extinguish();
 	CCarCtrl::UpdateCarCount(this, true);
+	CSpawnOccupancy::VehicleRemoved(this);
 	if (bIsAmbulanceOnDuty){
 		CCarCtrl::NumAmbulancesOnDuty--;
 		bIsAmbulanceOnDuty = false;

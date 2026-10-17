@@ -13,6 +13,7 @@
 #include "PathFind.h"
 #include "Ped.h"
 #include "Pools.h"
+#include "SpawnOccupancy.h"
 #include "Streaming.h"
 #include "Timer.h"
 #include "Vehicle.h"
@@ -592,6 +593,10 @@ FarTrafficApplyPose(const SFarSimPose &pose)
 	/* The sector lists follow the position (the renderer and the occupancy
 	 * tests read them), and the RW frame follows the matrix. */
 	pVehicle->RemoveAndAdd();
+	/* The occupancy store follows the layer's own movement (VICE-149): the
+	 * far car is static and off the moving list, so the physics step never
+	 * re-homes it, and its re-pose does not pass CWorld::Add. */
+	CSpawnOccupancy::EntityMoved(pVehicle);
 	pVehicle->GetMatrix().UpdateRW();
 	pVehicle->UpdateRwFrame();
 	/* The reveal of a creation (VICE-127): an off-screen car holds alpha 0

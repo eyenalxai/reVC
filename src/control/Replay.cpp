@@ -40,6 +40,7 @@
 #include "RwHelper.h"
 #include "CutsceneMgr.h"
 #include "Skidmarks.h"
+#include "SpawnOccupancy.h"
 #include "Stinger.h"
 #include "Streaming.h"
 #include "Timer.h"
@@ -1659,6 +1660,11 @@ void CReplay::RestoreStuffFromMem(void)
 	DMAudio.ChangeMusicMode(MUSICMODE_FRONTEND);
 	DMAudio.SetRadioInCar(OldRadioStation);
 	DMAudio.ChangeMusicMode(MUSICMODE_GAME);
+	/* The pool images came back by memcpy - no constructor ran - and the
+	 * sector lists were restored wholesale, so no hook saw any of it: the
+	 * one true rebuild counts the live slots where they now stand
+	 * (VICE-149). */
+	CSpawnOccupancy::Resync();
 }
 
 void CReplay::EmptyPedsAndVehiclePools(void)

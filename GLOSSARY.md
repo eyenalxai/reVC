@@ -825,3 +825,37 @@ documented and on the safe side (`PopulationBudget.h`). `CCarCtrl::ReInit`
 zeroes every counter, and the save load calls it before the vehicle pool
 restore; each restored vehicle counts once in the class the save carries
 (VICE-163). The offline check is `utils/save-vehicle-count`.
+
+## Occupancy store
+
+The spawn service's memory of where the population is (`src/control/
+SpawnOccupancy.h`, VICE-149): the presence grid of what stands where, and the
+short reservations of the sites the planner promised. The store holds no
+placement and makes no decision; it is fed from the entity lifecycle (the
+vehicle and pedestrian constructors and destructors, the world add, the physics
+step, the aircraft, the far layer, the crane, the respray and the carried
+pedestrian's seat), so the paths that remove or move entities outside any spawn
+call - a world clear, the pool valve, a cull, a replay restore, a save load -
+leave no phantom. A constructor only registers the handle (it must not read the
+unplaced matrix); the first placement counts it. Each handle remembers the cell
+it was counted in, so a removal is exact whatever the entity did in between.
+`CReplay::RestoreStuffFromMem` and the boot call `CSpawnOccupancy::Resync`, the
+one true rebuild, and `CWorld::ClearForRestart` calls `Reset`.
+
+## Presence grid
+
+The 16 m cell grid inside the occupancy store (VICE-149): 250 x 250 cells over
+the world, a vehicle count and a pedestrian count per cell. The planner reads a
+cell for its capacity check and the director for its density; the grid cannot
+express lanes, two-way occupancy or the ground, so it is a coarse filter and
+the final collision query at creation stays the true guard.
+
+## Site reservation
+
+The occupancy store's short promise on a site (VICE-149): the planner reserves
+a site id - the site index's directed connection - before it creates the actor
+there, so two requests cannot plan the same connection in the same frame. The
+reservation expires after two seconds (`SPAWN_OCCUPANCY_RESERVE_MS`), so an
+abandoned plan frees the site by itself. A held entry is one whose remaining
+lifetime is inside the reserve window: a clock that moved backwards (a load)
+reads the site free, and a stale entry cannot read held.
