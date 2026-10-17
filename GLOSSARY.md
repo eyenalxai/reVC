@@ -686,6 +686,14 @@ drive heading, so the body never turns sideways. The bullets ignore the
 player's own car. The stock sideways drive-by of the look keys is gone
 (VICE-138); a bike keeps its stock forward drive-by on the plain fire button.
 
+## Car weapon cycle
+
+The driver's switch to the next or the previous aimable weapon with the car
+cycle keys (`VEHICLE_CYCLE_WEAPON_LEFT` and `VEHICLE_CYCLE_WEAPON_RIGHT`). Only
+the guns and the photo camera with ammo count (`IsAimableWeapon`). When the seat
+stored the weapon of the foot, the choice replaces the stored weapon, so the
+exit brings back the weapon the driver last chose.
+
 ## Aim state
 
 `CPlayerPed::m_bWeaponAimActive`, the one state the aim button raises for every
