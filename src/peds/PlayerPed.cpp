@@ -2104,7 +2104,8 @@ CPlayerPed::ProcessControl(void)
 		return;
 	}
 	if (m_nPedState == PED_DRIVING && m_objective != OBJECTIVE_LEAVE_CAR) {
-		StopWeaponAim();
+		// The seat owns the aim: the vehicle branch starts and stops it, so
+		// this path must not clear the state the vehicle just set.
 		if (!CReplay::IsPlayingBack() || m_pMyVehicle) {
 			if (m_pMyVehicle->IsCar() && ((CAutomobile*)m_pMyVehicle)->Damage.GetDoorStatus(DOOR_FRONT_LEFT) == DOOR_STATUS_SWINGING) {
 				CAnimBlendAssociation *rollDoorAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_CAR_CLOSE_DOOR_ROLLING_LHS);

@@ -940,14 +940,18 @@ CCamera::CamControl(void)
 				if(vehType == VEHICLE_TYPE_CAR && !m_bPlayerIsInGarage){
 					if(CCullZones::Cam1stPersonForPlayer() && 
 					   pTargetEntity->GetColModel()->boundingBox.GetSize().z >= 3.026f &&
-					   pToGarageWeAreInForHackAvoidFirstPerson == nil){
+					   pToGarageWeAreInForHackAvoidFirstPerson == nil &&
+					   !IsSightCameraMode(PlayerWeaponMode.Mode)){
 						ReqMode = CCam::MODE_1STPERSON;
 						m_bInATunnelAndABigVehicle = true;
 					}
 				}
 
-				// The first person view serves the vehicle too
-				if(!m_bPlayerIsInGarage && UpdateFirstPersonView(false))
+				// The first person view serves the vehicle too. The scope and
+				// the viewfinder keep their own camera in the first person
+				// setting as well.
+				if(!m_bPlayerIsInGarage && UpdateFirstPersonView(false) &&
+				   !IsSightCameraMode(PlayerWeaponMode.Mode))
 					ReqMode = CCam::MODE_1STPERSON;
 
 				// Fallen into water

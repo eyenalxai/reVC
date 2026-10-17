@@ -710,10 +710,11 @@ throwables keep the stock behavior. The rule lives in `WeaponAim.h`
 
 ## First person sights
 
-The first person view with the weapon at the sights:
-`CCamera::UsingFirstPersonSights` is true while the first person view holds
-and the player aims a gun. The view keeps the player FOV; there is no sight
-zoom and no sight camera, the reticle and the aim ray alone serve the aim.
+The first person view with the weapon at the sights: `CPlayerPed::IsAimingWeapon`
+is true while the player aims, and the first person view keeps the player FOV.
+There is no sight zoom and no sight camera; the reticle and the aim ray alone
+serve the aim.
+
 ## Aim pose
 
 The pose of the player's upper body while the sights are up: the weapon's fire
