@@ -250,7 +250,6 @@ struct SMoveIntent
 	bool steepCliff;	// the touched surface is a steep cliff with a normal
 	bool hasInput;		// the pad moves the ped this frame (the controller's bMoving)
 	eMoveTier tier;		// the rung of the ladder the pad asks for
-	bool faceCamera;	// the body faces the camera; no reader in phase 0
 	bool jumpRequested;	// the jump press: the jump action edge (VICE-182) and the stance's stand-up (VICE-176)
 	bool diveRequested;	// no reader in phase 0; VICE-181
 	// The crouch action edge (the pad's momentary duck press, CPad::DuckJustDown).
@@ -289,7 +288,6 @@ struct SMoveSnapshot
 	float heading;		// the world heading of the movement direction
 	float turnScale;	// the stance turn scale
 	float capsuleHeight;	// the stance capsule height, the top of its collision set in the ped's own frame; signed
-	bool inCharge;		// the controller owned the velocity this step
 	uint32_t events;	// the eMoveEvent bits of this step; the event list is VICE-173
 	uint8_t reportMoveState;	// the eMoveState value the ladder's rung reports
 };
@@ -317,7 +315,6 @@ private:
 	// The solver state. The readers use the snapshot (see SMoveSnapshot).
 	eMoveStateId m_State;
 	eStance m_Stance;
-	float m_fStateTime;	// seconds spent in the current state
 	float m_fPrevFacing;	// the body facing of the previous step, so the spin survives
 	float m_fEntryBoost;	// the entry boost the current state has left, engine units; 0 when spent
 	bool m_bFirstStep;	// no previous facing to take the spin from yet

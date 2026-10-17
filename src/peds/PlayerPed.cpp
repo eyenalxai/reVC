@@ -1529,6 +1529,28 @@ static const tStanceAnimSet aProneAnimSet = {
 	PRONE_ANIM_BLOCK, "prone", "proneleft", "proneright", "proneback"
 };
 
+// The four sectors of the walk angle the movement groups are chosen in: the
+// forward sector inside 50 degrees, the side sectors up to 130, the back sector
+// beyond it. The two thresholds live here alone, and the standing selection and
+// the stance sets both ask this.
+enum eWalkSector
+{
+	WALK_SECTOR_FORWARD,
+	WALK_SECTOR_LEFT,
+	WALK_SECTOR_RIGHT,
+	WALK_SECTOR_BACK,
+};
+
+static eWalkSector
+WalkSectorOf(float walkAngle)
+{
+	if (walkAngle >= -DEGTORAD(50.0f) && walkAngle <= DEGTORAD(50.0f))
+		return WALK_SECTOR_FORWARD;
+	if (walkAngle >= -DEGTORAD(130.0f) && walkAngle <= DEGTORAD(130.0f))
+		return walkAngle > 0.0f ? WALK_SECTOR_LEFT : WALK_SECTOR_RIGHT;
+	return WALK_SECTOR_BACK;
+}
+
 // The group of one name, gated as above. `minAssociations` is how many slots
 // the caller looks up by id: the movement slots start at ANIM_STD_WALK in every
 // shipped table and the chooser indexes them by animation id, so a list that
@@ -1547,7 +1569,8 @@ FindStanceAnimGroup(const char *blockName, const char *groupName, int minAssocia
 		CAnimBlendAssocGroup &group = groups[i];
 		if (group.assocList == nil)
 			continue;
-		if (strcmp(CAnimManager::GetAnimGroupName((AssocGroupId)i), groupName) != 0)
+		// the engine's own lookups are case insensitive
+		if (strcasecmp(CAnimManager::GetAnimGroupName((AssocGroupId)i), groupName) != 0)
 			continue;
 		if (group.numAssociations < minAssociations)
 			return (AssocGroupId)-1;
@@ -1556,19 +1579,23 @@ FindStanceAnimGroup(const char *blockName, const char *groupName, int minAssocia
 	return (AssocGroupId)-1;
 }
 
-// The group of one walk angle, in the standing selection's own sectors:
-// forward below 50 degrees, the side sector up to 130, the back sector beyond
-// it. The angle is 0 unless the camera faces the body (UpdatePlayerMovement
-// writes it), so a view that turns the body toward the movement always lands
-// in the forward group. -1 when the content is not in the game.
+// The group of one walk angle, in the sectors above. The angle is 0 unless the
+// camera faces the body (UpdatePlayerMovement writes it), so a view that turns
+// the body toward the movement always lands in the forward group. -1 when the
+// content is not in the game.
 static AssocGroupId
 StanceAnimGroupForWalkAngle(const tStanceAnimSet &set, float walkAngle)
 {
-	if (walkAngle >= -DEGTORAD(50.0f) && walkAngle <= DEGTORAD(50.0f))
+	switch (WalkSectorOf(walkAngle)) {
+	case WALK_SECTOR_FORWARD:
 		return FindStanceAnimGroup(set.block, set.forward, ANIM_STD_STARTWALK + 1);
-	if (walkAngle >= -DEGTORAD(130.0f) && walkAngle <= DEGTORAD(130.0f))
-		return FindStanceAnimGroup(set.block, walkAngle > 0.0f ? set.left : set.right, ANIM_STD_STARTWALK + 1);
-	return FindStanceAnimGroup(set.block, set.back, ANIM_STD_STARTWALK + 1);
+	case WALK_SECTOR_LEFT:
+		return FindStanceAnimGroup(set.block, set.left, ANIM_STD_STARTWALK + 1);
+	case WALK_SECTOR_RIGHT:
+		return FindStanceAnimGroup(set.block, set.right, ANIM_STD_STARTWALK + 1);
+	default:
+		return FindStanceAnimGroup(set.block, set.back, ANIM_STD_STARTWALK + 1);
+	}
 }
 
 // The prone aim pose (VICE-177): the stance's own aim content is VICE-187's
@@ -2103,7 +2130,6 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 	intent.onGround = bIsStanding;
 	intent.steepCliff = bSteepCliff;
 	intent.hasInput = bMoving;
-	intent.faceCamera = BodyFacesCamera();
 	// The jump press is the jump's action edge and the crouch's stand-up
 	// trigger alike: the state rows have no row on it yet - the gates, the
 	// impulse and the state are VICE-182's, and the dive's edge arrives with

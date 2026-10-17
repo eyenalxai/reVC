@@ -194,7 +194,6 @@ MakeIntent(void)
 		intent.slopeNormal = SMoveVec3{ RngFloat(-1.0f, 1.0f), RngFloat(-1.0f, 1.0f), 0.0f };
 	intent.hasInput = RngChance(80);
 	intent.tier = !RngChance(40) ? TIER_WALK : RngChance(50) ? TIER_RUN : TIER_SPRINT;
-	intent.faceCamera = RngChance(50);
 	intent.jumpRequested = RngChance(10);
 	intent.diveRequested = RngChance(10);
 	/* The slide's entry pair, the prone request and the stance's edges stay off:
@@ -229,7 +228,6 @@ WalkIntent(float heading, float targetSpeed)
 	intent.steepCliff = false;
 	intent.hasInput = true;
 	intent.tier = TIER_WALK;
-	intent.faceCamera = false;
 	intent.jumpRequested = false;
 	intent.diveRequested = false;
 	intent.crouchRequested = false;
@@ -420,7 +418,6 @@ RefStep(SRefMoveState *pRef, const SMoveIntent &intent)
 	snapshot.heading = intent.moveHeading;
 	snapshot.turnScale = 1.0f;
 	snapshot.capsuleHeight = 0.0f;
-	snapshot.inCharge = true;
 	snapshot.events = 0;
 	snapshot.reportMoveState = 0;
 	return snapshot;
@@ -437,8 +434,7 @@ SameMovement(const SMoveSnapshot &a, const SMoveSnapshot &b)
 		a.velocity.x == b.velocity.x && a.velocity.y == b.velocity.y &&
 		a.moved.x == b.moved.x && a.moved.y == b.moved.y &&
 		a.speed == b.speed && a.heading == b.heading &&
-		a.turnScale == b.turnScale && a.capsuleHeight == b.capsuleHeight &&
-		a.inCharge == b.inCharge;
+		a.turnScale == b.turnScale && a.capsuleHeight == b.capsuleHeight;
 }
 
 /* The one snapshot comparison the determinism checks use: every field. */
@@ -450,7 +446,7 @@ SameSnapshot(const SMoveSnapshot &a, const SMoveSnapshot &b)
 		a.moved.x == b.moved.x && a.moved.y == b.moved.y &&
 		a.speed == b.speed && a.heading == b.heading &&
 		a.turnScale == b.turnScale && a.capsuleHeight == b.capsuleHeight &&
-		a.inCharge == b.inCharge && a.events == b.events &&
+		a.events == b.events &&
 		a.reportMoveState == b.reportMoveState;
 }
 
@@ -470,9 +466,9 @@ PrintIntent(const SMoveIntent &intent)
 		intent.dt, intent.vel.x, intent.vel.y,
 		intent.surfaceSpeed.x, intent.surfaceSpeed.y,
 		intent.moveHeading, intent.targetSpeed);
-	printf("      ground %d steep %d input %d sprint %d faceCamera %d jump %d dive %d\n",
+	printf("      ground %d steep %d input %d tier %d jump %d dive %d\n",
 		intent.onGround, intent.steepCliff, intent.hasInput,
-		intent.tier, intent.faceCamera, intent.jumpRequested, intent.diveRequested);
+		intent.tier, intent.jumpRequested, intent.diveRequested);
 }
 
 static void
@@ -481,9 +477,9 @@ PrintSnapshot(const char *name, const SMoveSnapshot &snapshot)
 	printf("    %s: state %d stance %d velocity (%.9g, %.9g) moved (%.9g, %.9g)\n",
 		name, snapshot.state, snapshot.stance,
 		snapshot.velocity.x, snapshot.velocity.y, snapshot.moved.x, snapshot.moved.y);
-	printf("      speed %.9g heading %.9g turnScale %.9g capsule %.9g inCharge %d events %u report %u\n",
+	printf("      speed %.9g heading %.9g turnScale %.9g capsule %.9g events %u report %u\n",
 		snapshot.speed, snapshot.heading, snapshot.turnScale, snapshot.capsuleHeight,
-		snapshot.inCharge, snapshot.events, snapshot.reportMoveState);
+		snapshot.events, snapshot.reportMoveState);
 }
 
 /* One parity step against the reference; false on a mismatch. */

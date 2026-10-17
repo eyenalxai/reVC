@@ -484,7 +484,6 @@ CPlayerMoveSolver::Reset(void)
 {
 	m_State = MOVE_GROUND;
 	m_Stance = STANCE_STAND;
-	m_fStateTime = 0.0f;
 	m_fPrevFacing = 0.0f;
 	m_fEntryBoost = 0.0f;
 	m_bFirstStep = true;
@@ -548,13 +547,11 @@ CPlayerMoveSolver::Step(const SMoveIntent &intent)
 	const tMoveTransitionRow *transition = MoveTransitionFor(m_State, triggers, ownSpeed);
 	if (transition != NULL) {
 		m_State = transition->to;
-		m_fStateTime = 0.0f;
 		// The old state's boost goes with it: a boost belongs to the frame the
 		// state that carries it was entered.
 		m_fEntryBoost = 0.0f;
 		events = transition->onEntryEvent;
 	}
-	m_fStateTime += intent.dt;
 
 	// The stance move: the same scan over the stance's own rows, on the same
 	// mask, before the rows are read, so a stance the step enters already
@@ -694,7 +691,6 @@ CPlayerMoveSolver::Step(const SMoveIntent &intent)
 	m_Snapshot.heading = intent.moveHeading;
 	m_Snapshot.turnScale = stanceRow.turnScale;
 	m_Snapshot.capsuleHeight = stanceRow.capsuleHeight;
-	m_Snapshot.inCharge = true;
 	// The entry event of the move and the rung of the step.
 	m_Snapshot.events = events;
 	m_Snapshot.reportMoveState = MoveLadderRowOf(m_State, m_Stance, tier).reportMoveState;
