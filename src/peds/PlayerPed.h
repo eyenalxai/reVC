@@ -61,11 +61,6 @@ public:
 	// views and in every movement state. The on-foot control paths start,
 	// update and stop it through AimWeapon (PlayerPed.cpp).
 	bool m_bWeaponAimActive;
-#ifdef FREE_CAM
-	CVector m_cachedCamSource;
-	CVector m_cachedCamFront;
-	CVector m_cachedCamUp;
-#endif
 
 	static bool bDontAllowWeaponChange;
 #ifndef MASTER
