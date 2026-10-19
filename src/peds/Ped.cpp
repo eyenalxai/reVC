@@ -2670,6 +2670,21 @@ CPed::ProcessControl(void)
 					bHeadStuckInCollision = false;
 			}
 			ProcessObjective();
+
+			// The aim and the look read the HAnim matrix array through
+			// GetComponentPosition, GetNodePosition and TransformToNode, and
+			// the array is only rebuilt by UpdateRpHAnim: without this refresh
+			// the reads see the previous frame's pose, so the arm pitch and the
+			// IK's targets lag a frame. The camera refreshes its target the
+			// same way before its own reads (Cam.cpp). Only the peds that read
+			// pay for it, and only their own body: everything below in the
+			// frame (the render, the camera) rebuilds the array again anyway.
+			if (bIsAimingGun || bIsRestoringGun || bIsLooking || bIsRestoringLook) {
+				GetMatrix().UpdateRW();
+				UpdateRwFrame();
+				UpdateRpHAnim();
+			}
+
 			if (!bIsAimingGun) {
 				if (bIsRestoringGun)
 					RestoreGunPosition();
