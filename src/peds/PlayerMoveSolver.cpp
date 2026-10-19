@@ -15,7 +15,9 @@
 // turn and the legs stay with the movement; the air keeps the momentum and
 // steers with a small authority; the slide (VICE-180) starts from a sprint plus
 // the crouch press, decays over its friction curve and steers hard while it
-// lasts.
+// lasts; the dive (VICE-181) is the prone action in the air: it keeps the
+// momentum it was entered with, is aimed by the look over the row's own turn
+// rate, and lands in the slide's friction curve as the prone.
 //
 // The rows are constexpr, so a wrong row count, an id out of range or a rung
 // out of order fails the build here (the static_asserts below the tables) and
@@ -55,11 +57,30 @@ static const char *moveTierNames[TIER_NUM] = {
 //	  steep and its tail is the friction alone,
 //	* the input scale is zero: the input steers the slide and adds no speed, so
 //	  the friction always wins and the slide reaches its exit.
+// The dive row is VICE-181's:
+//	* the acceleration is low - 2 units per second squared, half the air's own
+//	  air control: the dive is steered by the input and pushed by it only a
+//	  little, so a slow fall can still be thrown into a dive,
+//	* the friction is zero because the row keeps its momentum (the air's own
+//	  flag): the dive carries the speed it was entered with, bit for bit, which
+//	  is the acceptance's carried speed. The bleed the design asks for is not
+//	  the dive's: it is the slide's friction, and it runs on the landing, where
+//	  the dive enters the slide state and that row's curve does the bleeding
+//	  (the landing row in moveTransitions below - the curve is never copied),
+//	* the turn rate is twice the air's own 1.6: the dive is aimed by the look,
+//	  and a quarter turn of the path takes about half a second - the length of
+//	  a dive - while the ground's 12 stays the ground's,
+//	* no entry boost: the dive adds no speed of its own, so a dive off a jump,
+//	  a slide jump and a fall all land with the speed they were entered with.
+//	  The design leaves the boost open ("if the design wants one") and the
+//	  carried speed answers it better than a kick would,
+//	* the input scale is 1: the input's target speed is the air's own air
+//	  control, and the row's flag keeps the momentum above it.
 static constexpr tMoveStateRow moveStateRows[] = {
 	{ 20.0f / 50.0f, 20.0f / 50.0f, 12.0f, 0.0f, 0.0f, 1.0f, MOVEFLAG_STEER_INPUT },	// MOVE_GROUND
 	{ 4.0f / 50.0f, 0.0f, 1.6f, 0.0f, 0.0f, 1.0f, MOVEFLAG_STEER_INPUT | MOVEFLAG_KEEP_MOMENTUM },	// MOVE_AIR
 	{ 2.0f / 50.0f, 8.0f / 50.0f, 16.0f, 2.0f / 50.0f, 8.0f / 50.0f, 0.0f, MOVEFLAG_STEER_INPUT },	// MOVE_SLIDE
-	{ 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, MOVEFLAG_STEER_INPUT | MOVEFLAG_KEEP_MOMENTUM },	// MOVE_DIVE: the row arrives with VICE-181
+	{ 2.0f / 50.0f, 0.0f, 3.2f, 0.0f, 0.0f, 1.0f, MOVEFLAG_STEER_INPUT | MOVEFLAG_KEEP_MOMENTUM },	// MOVE_DIVE
 };
 
 // The mask of every eMoveStateId bit; the ladder rows use it for the states a
@@ -154,21 +175,38 @@ static constexpr tMoveStanceRow moveStanceRows[] = {
 // The transition table, in priority order: Step collects the step's trigger
 // bits once and the first row whose state, trigger and guard match fires.
 // VICE-180 adds the slide: the sprint's crouch press enters it, the jump, a
-// prone request, the feet leaving the surface and the exit speed end it. The
-// rows that carry the jump from the ground, the dive and the wall run wait for
-// their tickets (VICE-182, VICE-181, the wall run).
+// prone request, the feet leaving the surface and the exit speed end it.
+// VICE-181 adds the dive: the prone action in the air enters it, and its feet
+// touching the ground land it in the slide - the slide-out - whose own rows
+// then own it, the prone stance included (the stance rows below). The rows
+// that carry the jump from the ground and the wall run wait for their tickets
+// (VICE-182, the wall run).
 static constexpr tMoveTransitionRow moveTransitions[] = {
 	// MOVE_GROUND: the slide's entry, one frame: the crouch press at the
 	// sprint tier, at or above the speed a sprint holds. The entry boost then
 	// lifts the speed over the sprint's in the same frame (see Step).
 	{ MOVE_GROUND,	TRIGGER_SLIDE,		MOVE_SLIDE,	0, GUARD_SPEED_ABOVE, MOVE_SLIDE_ENTRY_SPEED },
-	// MOVE_GROUND: the feet leaving the ground. The jump and the dive rows
-	// arrive with the tickets that own the impulse and the state (VICE-182,
-	// VICE-181): the ground moves on the world fact alone, exactly as the
-	// controller did.
+	// MOVE_GROUND: the feet leaving the ground. The jump row arrives with the
+	// tickets that own the impulse and the state (VICE-182): the ground moves
+	// on the world fact alone, exactly as the controller did.
 	{ MOVE_GROUND,	TRIGGER_AIRBORNE,	MOVE_AIR,	0, GUARD_NONE, 0.0f },
-	// MOVE_AIR: the feet touching the ground again
+	// MOVE_AIR: the feet touching the ground again. This row sits above the
+	// dive's entry, so a dive pressed on the frame the feet touch is the
+	// landing it is: the ground fact wins the frame and the prone action's own
+	// ground rule lies the ped down.
 	{ MOVE_AIR,	TRIGGER_LAND,		MOVE_GROUND,	EVENT_LANDED, GUARD_NONE, 0.0f },
+	// MOVE_AIR: the dive's entry (VICE-181): the prone action with the feet
+	// off the ground. No guard and no boost: the dive carries the speed the
+	// ped was falling at, whatever direction it faces (the row reads no
+	// facing), and the look aims it in the air (the row's own turn rate).
+	{ MOVE_AIR,	TRIGGER_DIVE,		MOVE_DIVE,	0, GUARD_NONE, 0.0f },
+	// MOVE_DIVE: the dive's landing (VICE-181). The row lands the ped in the
+	// slide state and the slide's own row and step do the rest: the friction
+	// curve bleeds the dive's speed, the exit guard below ends the slide-out,
+	// and the stance rows put a standing or crouching ped in the prone. No
+	// velocity is reset, so the slide-out starts from the speed the dive had
+	// (the slide's own entry boost lifts its head, the machinery's own kick).
+	{ MOVE_DIVE,	TRIGGER_LAND,		MOVE_SLIDE,	EVENT_LANDED, GUARD_NONE, 0.0f },
 	// MOVE_SLIDE: the jump leaves the slide for the air and keeps the slide's
 	// speed: no row resets a velocity, and the air row's keep-momentum holds
 	// what the slide had, so a slide jump is faster than a sprint jump.
@@ -182,32 +220,40 @@ static constexpr tMoveTransitionRow moveTransitions[] = {
 	{ MOVE_SLIDE,	TRIGGER_AIRBORNE,	MOVE_AIR,	0, GUARD_NONE, 0.0f },
 	// MOVE_SLIDE: the friction has bled the speed to the exit speed, so the
 	// slide ends on the ground - in the crouch when the ped holds the crouch
-	// stance (VICE-176's), else standing. The exit threshold is below the
-	// entry's: the guard cannot flap on its own entry frame.
+	// stance (VICE-176's), in the prone when the slide is a dive's slide-out
+	// (VICE-181), else standing. The exit threshold is below the entry's: the
+	// guard cannot flap on its own entry frame.
 	{ MOVE_SLIDE,	TRIGGER_LAND,		MOVE_GROUND,	0, GUARD_SPEED_BELOW, MOVE_SLIDE_EXIT_SPEED },
 };
 
-// The stance transition table (VICE-176, VICE-177), in priority order like the
-// state one: the same trigger mask, the first row whose stance and trigger
-// matches fires. The stance is the solver's, so its moves are rows: the Duck
-// edge crouches the ped and stands him up again, the prone action lies him
-// down and stands him up again, the sprint, the jump press and the exit-vehicle
-// press stand him up, and every one of those stand-ups is held back while the
-// body cannot rise - VICE-178's headroom test sits on top of the stand-up
-// rows, so a low body under a low ceiling stays down. The sprint's own gate is
-// a row too: the sprint holds the stance standing, so a Duck edge inside a
-// sprint does not crouch.
+// The stance transition table (VICE-176, VICE-177, VICE-181), in priority
+// order like the state one: the same trigger mask, the first row whose stance
+// and trigger matches fires. The stance is the solver's, so its moves are rows:
+// the Duck edge crouches the ped and stands him up again, the prone action lies
+// him down and stands him up again, the sprint, the jump press and the
+// exit-vehicle press stand him up, and every one of those stand-ups is held
+// back while the body cannot rise - VICE-178's headroom test sits on top of the
+// stand-up rows, so a low body under a low ceiling stays down. The sprint's own
+// gate is a row too: the sprint holds the stance standing, so a Duck edge inside
+// a sprint does not crouch. The dive's landing (VICE-181) sits above all of it:
+// lying down needs no headroom, and the sprint that launched the dive cannot
+// stand the landing body up.
 static constexpr tMoveStanceTransitionRow moveStanceTransitions[] = {
-	// STANCE_STAND: the sprint owns the body, so a Duck edge inside a sprint
-	// does not crouch the ped (the stock gate); otherwise the Duck edge
-	// crouches him and the prone action lies him down
+	// STANCE_STAND: the dive's own landing lies the ped down before anything
+	// else reads the frame (VICE-181), then the sprint owns the body, so a
+	// Duck edge inside a sprint does not crouch the ped (the stock gate);
+	// otherwise the Duck edge crouches him and the prone action lies him down
+	{ STANCE_STAND,		TRIGGER_DIVE_LAND,		STANCE_PRONE },
 	{ STANCE_STAND,		TRIGGER_SPRINT,			STANCE_STAND },
 	{ STANCE_STAND,		TRIGGER_CROUCH,			STANCE_CROUCH },
 	{ STANCE_STAND,		TRIGGER_PRONE,			STANCE_PRONE },
-	// STANCE_CROUCH: no headroom, the crouch holds; with it, the crouch's own
-	// edge stands the ped up, the sprint, the jump and the exit-vehicle press
-	// stand him up, and the prone action lies him down - the prone is reachable
-	// from the crouch as well as from the stand
+	// STANCE_CROUCH: the dive's own landing lies the ped down from the crouch
+	// as well (a dive off a crouch fall), then no headroom keeps the crouch
+	// (lying down is always allowed), the crouch's own edge stands the ped up,
+	// the sprint, the jump and the exit-vehicle press stand him up, and the
+	// prone action lies him down - the prone is reachable from the crouch as
+	// well as from the stand
+	{ STANCE_CROUCH,	TRIGGER_DIVE_LAND,		STANCE_PRONE },
 	{ STANCE_CROUCH,	TRIGGER_HEADROOM_BLOCKED,	STANCE_CROUCH },
 	{ STANCE_CROUCH,	TRIGGER_CROUCH,			STANCE_STAND },
 	{ STANCE_CROUCH,	TRIGGER_SPRINT,			STANCE_STAND },
@@ -218,7 +264,8 @@ static constexpr tMoveStanceTransitionRow moveStanceTransitions[] = {
 	// exit, so a body under a ceiling stays down; with it, the prone action
 	// stands the ped up, the Duck edge lifts him into the crouch (so the low
 	// ladder is prone, crouch, stand), and the sprint, the jump and the
-	// exit-vehicle press stand him up
+	// exit-vehicle press stand him up. A body that is already prone has no row
+	// on the dive's landing: a dive from a prone fall lands prone
 	{ STANCE_PRONE,		TRIGGER_HEADROOM_BLOCKED,	STANCE_PRONE },
 	{ STANCE_PRONE,		TRIGGER_PRONE,			STANCE_STAND },
 	{ STANCE_PRONE,		TRIGGER_CROUCH,			STANCE_CROUCH },
@@ -237,7 +284,7 @@ static constexpr int MOVE_STANCE_TRANSITION_ROW_COUNT =
 static constexpr uint32_t MOVE_TRIGGER_ALL = TRIGGER_JUMP | TRIGGER_DIVE | TRIGGER_SLIDE | TRIGGER_LAND
 	| TRIGGER_AIRBORNE | TRIGGER_WALL_CONTACT | TRIGGER_WALL_LEFT | TRIGGER_HEAD_HIT
 	| TRIGGER_CROUCH | TRIGGER_SPRINT | TRIGGER_EXIT_VEHICLE | TRIGGER_HEADROOM_BLOCKED
-	| TRIGGER_PRONE;
+	| TRIGGER_PRONE | TRIGGER_DIVE_LAND;
 
 // Every transition of the table names a state and a trigger in range, and its
 // guard is one of the guards: an unguarded row carries no threshold and a
@@ -309,6 +356,28 @@ static_assert(MOVE_SLIDE_EXIT_SPEED < MOVE_SLIDE_ENTRY_SPEED,
 static_assert(moveLadder[TIER_SPRINT].speedScale < moveLadder[TIER_SLIDE_ENTRY].speedScale
 	&& moveLadder[TIER_SPRINT].speedScale < moveLadder[TIER_SLIDE_JUMP].speedScale,
 	"the slide's rungs must sit above the sprint's");
+
+// The dive's own compile-time rules (VICE-181): the entry leaves the air, the
+// landing enters the slide (so the slide-out is the slide's own machinery and
+// the curve is never copied into the dive), and the dive's row keeps the
+// momentum it was entered with. PlayerMoveTablesCheck holds the first two over
+// a planted set at run time.
+static constexpr bool
+MoveHasTransition(eMoveStateId from, eMoveStateId to, uint32_t trigger)
+{
+	for (int i = 0; i < MOVE_TRANSITION_ROW_COUNT; i++)
+		if (moveTransitions[i].from == from && moveTransitions[i].to == to
+			&& (moveTransitions[i].trigger & trigger) != 0)
+			return true;
+	return false;
+}
+
+static_assert(MoveHasTransition(MOVE_AIR, MOVE_DIVE, TRIGGER_DIVE),
+	"the dive must enter from the air on its own edge");
+static_assert(MoveHasTransition(MOVE_DIVE, MOVE_SLIDE, TRIGGER_LAND),
+	"the dive's landing must enter the slide: the slide-out is the slide's own machinery");
+static_assert((moveStateRows[MOVE_DIVE].flags & MOVEFLAG_KEEP_MOMENTUM) != 0,
+	"the dive must keep the momentum it was entered with");
 
 // The engine does not reach this module, so the few functions the maths needs
 // live here, with the engine's own implementations beside them.
@@ -441,7 +510,9 @@ MoveStanceTransitionFor(eStance from, uint32_t triggers)
 
 // The rung of the step. The slide moves at its entry rung whatever the pad
 // asks: the ladder names the slide's own speed, not the sprint that fed it, and
-// there is no sprint tier inside the slide (VICE-180). Every other state keeps
+// there is no sprint tier inside the slide (VICE-180). The dive reports the
+// pad's own rung: it is no stride of the ladder, and the speed it moves at is
+// the one it was entered with, not a rung's (VICE-181). Every other state keeps
 // the rung the adapter names from the pad ramp - the tier becomes the intent's
 // own value and the ladder the source of the speeds with VICE-184.
 static eMoveTier
@@ -504,10 +575,10 @@ CPlayerMoveSolver::Step(const SMoveIntent &intent)
 	float ownSpeed = Vec2Magnitude(velocity);
 
 	// The trigger bits of this step, collected once (eMoveTrigger): the ground
-	// fact, the action edges the intent carries, and the slide's entry pair -
-	// the crouch press at the sprint tier, the two facts in one frame
-	// (VICE-180). The wall and the head bits arrive with the tests that read
-	// them.
+	// fact, the action edges the intent carries, the slide's entry pair - the
+	// crouch press at the sprint tier, the two facts in one frame (VICE-180) -
+	// and the dive's own touchdown (VICE-181). The wall and the head bits
+	// arrive with the tests that read them.
 	uint32_t triggers = intent.onGround ? TRIGGER_LAND : TRIGGER_AIRBORNE;
 	if (intent.jumpRequested)
 		triggers |= TRIGGER_JUMP;
@@ -528,10 +599,19 @@ CPlayerMoveSolver::Step(const SMoveIntent &intent)
 	if (intent.crouchRequested && intent.tier == TIER_SPRINT)
 		triggers |= TRIGGER_SLIDE;
 	// The prone action is a ground action (VICE-177): the body lies down on a
-	// surface, so with the feet off the ground the edge does nothing. The
-	// slide's own request already stands on the ground.
+	// surface, so with the feet off the ground the edge is the dive's instead
+	// (VICE-181, the intent's own dive edge). The slide's own request already
+	// stands on the ground.
 	if (intent.proneRequested && intent.onGround)
 		triggers |= TRIGGER_PRONE;
+
+	// The dive's own touchdown (VICE-181): a dive is the prone request made in
+	// the air, so the frame its feet touch is the request's own ground frame -
+	// the state row lands it in the slide-out and the stance rows lie the body
+	// down. The bit is the state's own fact, read before the move below, so the
+	// step that lands the dive is the step the prone entry happens in.
+	if (m_State == MOVE_DIVE && intent.onGround)
+		triggers |= TRIGGER_DIVE_LAND;
 
 	// The slide's entry consumes the crouch edge: the one press cannot both
 	// start the slide and toggle the crouch stance (the slide is a state of its
@@ -541,8 +621,8 @@ CPlayerMoveSolver::Step(const SMoveIntent &intent)
 
 	// The move: the first transition row whose state, trigger and guard match
 	// fires, so the table's order is the priority and the thresholds live in the
-	// rows. The slide reaches the ground and the air, and the slide leaves them
-	// (VICE-180).
+	// rows. The air reaches the ground and the dive (VICE-181), and the dive
+	// lands in the slide, whose own rows end it (VICE-180).
 	uint32_t events = 0;
 	const tMoveTransitionRow *transition = MoveTransitionFor(m_State, triggers, ownSpeed);
 	if (transition != NULL) {
@@ -609,6 +689,10 @@ CPlayerMoveSolver::Step(const SMoveIntent &intent)
 		if ((stateRow.flags & MOVEFLAG_STEER_INPUT) && intent.hasInput && ownSpeed > 0.0f)
 			velocity = SteerVelocityTowards(velocity, moveDirection, turnRate * intent.dt);
 	} else if (stateRow.flags & MOVEFLAG_KEEP_MOMENTUM) {
+		// The states that keep their momentum: the air and the dive (VICE-181).
+		// The row's own acceleration is the air control and its turn rate the
+		// state's own authority, so the dive steers toward the input while the
+		// speed it was entered with is kept, bit for bit.
 		if (intent.hasInput) {
 			// Keep the momentum and steer toward the input
 			if ((stateRow.flags & MOVEFLAG_STEER_INPUT) && ownSpeed > 0.0f)
@@ -706,14 +790,16 @@ MoveTablesFail(const char **why, const char *rule)
 	return false;
 }
 
-// The table check (VICE-171, VICE-180): every table to its invariants. The
-// rules are the ones the harness (VICE-172) needs: a state without a row, a
-// transition to an id out of range or to a guard out of range, a ladder row
-// that does not ascend, a stance row out of range or one whose capsule top
-// sinks under the ground (VICE-177: the height is signed, the prone body lies
-// below the origin), and the slide's own rules - an entry row, an exit guard
-// that names the exit speed, the exit speed below the entry's, and the slide's
-// rungs above the sprint's (VICE-180).
+// The table check (VICE-171, VICE-180, VICE-181): every table to its
+// invariants. The rules are the ones the harness (VICE-172) needs: a state
+// without a row, a transition to an id out of range or to a guard out of range,
+// a ladder row that does not ascend, a stance row out of range or one whose
+// capsule top sinks under the ground (VICE-177: the height is signed, the prone
+// body lies below the origin), the slide's own rules - an entry row, an exit
+// guard that names the exit speed, the exit speed below the entry's, and the
+// slide's rungs above the sprint's (VICE-180) - and the dive's (VICE-181): its
+// entry from the air, its landing in the slide-out, and the prone the landing
+// enters.
 bool
 PlayerMoveTablesCheck(const SMoveTables &tables, const char **why)
 {
@@ -819,7 +905,9 @@ PlayerMoveTablesCheck(const SMoveTables &tables, const char **why)
 	// That order is the hysteresis the design asks for: a slide that has just
 	// started - at or above its entry speed - cannot end on its entry frame,
 	// and a ped that sits on the exit threshold cannot flap the state, because
-	// leaving needs the slow speed and entering needs the fast one.
+	// leaving needs the slow speed and entering needs the fast one. The entry
+	// row is the ground's own (the sprint's crouch press): the dive's landing
+	// enters the slide too (VICE-181), but it is not the slide's entry.
 	{
 		bool hasEntry = false;
 		bool hasExit = false;
@@ -827,7 +915,7 @@ PlayerMoveTablesCheck(const SMoveTables &tables, const char **why)
 
 		for (int i = 0; i < tables.numTransitions; i++) {
 			const tMoveTransitionRow &row = tables.transitions[i];
-			if (row.to == MOVE_SLIDE)
+			if (row.from == MOVE_GROUND && row.to == MOVE_SLIDE && (row.trigger & TRIGGER_SLIDE) != 0)
 				hasEntry = true;
 			if (row.from == MOVE_SLIDE && row.guard == GUARD_SPEED_BELOW) {
 				hasExit = true;
@@ -858,6 +946,50 @@ PlayerMoveTablesCheck(const SMoveTables &tables, const char **why)
 			return MoveTablesFail(why, "a stance move to a stance out of range");
 		if (row.trigger == 0 || (row.trigger & ~MOVE_TRIGGER_ALL) != 0)
 			return MoveTablesFail(why, "a stance move trigger out of range");
+	}
+
+	// The dive's rows (VICE-181): the entry leaves the air on the dive's own
+	// edge, the landing enters the slide - the slide-out, whose own friction
+	// curve bleeds the dive's speed, so the curve is never copied into the
+	// dive - and the landing's stance rows put a standing and a crouching body
+	// in the prone. A dive whose landing leads anywhere but the slide is a
+	// second friction curve, which the design refuses.
+	{
+		bool hasEntry = false;
+		bool hasLanding = false;
+		bool landingLeadsToSlide = true;
+		bool landsProneFromStand = false;
+		bool landsProneFromCrouch = false;
+
+		for (int i = 0; i < tables.numTransitions; i++) {
+			const tMoveTransitionRow &row = tables.transitions[i];
+
+			if (row.from == MOVE_AIR && row.to == MOVE_DIVE && (row.trigger & TRIGGER_DIVE) != 0)
+				hasEntry = true;
+			if (row.from == MOVE_DIVE && (row.trigger & TRIGGER_LAND) != 0) {
+				hasLanding = true;
+				if (row.to != MOVE_SLIDE)
+					landingLeadsToSlide = false;
+			}
+		}
+		if (!hasEntry)
+			return MoveTablesFail(why, "a dive without its entry row");
+		if (!hasLanding)
+			return MoveTablesFail(why, "a dive without its landing row");
+		if (!landingLeadsToSlide)
+			return MoveTablesFail(why, "a dive whose landing is not the slide-out");
+		for (int i = 0; i < tables.numStanceTransitions; i++) {
+			const tMoveStanceTransitionRow &row = tables.stanceTransitions[i];
+
+			if ((row.trigger & TRIGGER_DIVE_LAND) == 0 || row.to != STANCE_PRONE)
+				continue;
+			if (row.from == STANCE_STAND)
+				landsProneFromStand = true;
+			if (row.from == STANCE_CROUCH)
+				landsProneFromCrouch = true;
+		}
+		if (!landsProneFromStand || !landsProneFromCrouch)
+			return MoveTablesFail(why, "a dive whose landing does not enter the prone");
 	}
 
 	return true;
