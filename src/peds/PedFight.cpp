@@ -201,7 +201,7 @@ CPed::SetPointGunAt(CEntity *to)
 	// lower body (VICE-141). The crouch pose keeps its crouched legs, and the
 	// AI aim poses stay exactly as they are.
 	if (IsPlayer() && aimAssoc->animId == ANIM_WEAPON_FIRE)
-		aimAssoc->MakeUpperBodyOnly(RidesBike());
+		aimAssoc->MakeUpperBodyOnly(RidesBike(), InVehicle());
 
 	if (to && !IsPlayer())
 		Say(SOUND_PED_ATTACK);

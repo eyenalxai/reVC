@@ -63,10 +63,11 @@ public:
 	// Drop every sequence that drives the lower body: the root, the pelvis and
 	// the legs. The association then drives only the upper body (the spine,
 	// the arms and the head), and the legs keep the animation underneath it
-	// (VICE-141). A seated rider also keeps the seat's spine, so the spine
-	// sequence is dropped too. A no-op when the association is upper body only
-	// already.
-	void MakeUpperBodyOnly(bool seated);
+	// (VICE-141). A bike rider also keeps the seat's spine, so the spine
+	// sequence is dropped too. A seated rider (car or bike) also keeps the
+	// left arm of the seat pose: the handlebar on a bike, the driving pose in
+	// a car. A no-op when the association is upper body only already.
+	void MakeUpperBodyOnly(bool bikeRider, bool seated);
 
 	float GetBlendAmount(float weight) { return IsPartial() ? blendAmount : blendAmount*weight; }
 	CAnimBlendNode *GetNode(int i) { return &nodes[i]; }

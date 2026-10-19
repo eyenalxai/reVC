@@ -133,19 +133,40 @@ IsLowerBodyBone(int16 boneTag)
 	}
 }
 
+// Whether a sequence drives the left arm, from the clavicle to the fingers.
+static bool
+IsLeftArmBone(int16 boneTag)
+{
+	switch(boneTag){
+	case BONE_l_clavicle:
+	case BONE_l_upperarm:
+	case BONE_l_forearm:
+	case BONE_l_hand:
+	case BONE_l_finger:
+		return true;
+	default:
+		return false;
+	}
+}
+
 // Keep only the sequences that drive the upper body. A partial association
 // whose data covers the whole body otherwise overrides the legs of the
 // movement animation it layers over; dropping the lower body keys leaves the
-// legs to that animation (VICE-141). A seated rider also keeps the spine of
+// legs to that animation (VICE-141). A bike rider also keeps the spine of
 // the seat pose: the standing aim pose bends the spine away from the bike seat
-// (VICE-141 follow-up).
+// (VICE-141 follow-up). A seated rider keeps the left arm of the seat pose
+// too: the fire clip moves that arm, and the aim must move only the right arm.
 void
-CAnimBlendAssociation::MakeUpperBodyOnly(bool seated)
+CAnimBlendAssociation::MakeUpperBodyOnly(bool bikeRider, bool seated)
 {
 	int i;
-	for(i = 0; i < numNodes; i++)
-		if(nodes[i].sequence && (IsLowerBodyBone(nodes[i].sequence->boneTag) || (seated && nodes[i].sequence->boneTag == BONE_spine)))
+	for(i = 0; i < numNodes; i++){
+		if(nodes[i].sequence == nil)
+			continue;
+		int16 boneTag = nodes[i].sequence->boneTag;
+		if(IsLowerBodyBone(boneTag) || (bikeRider && boneTag == BONE_spine) || (seated && IsLeftArmBone(boneTag)))
 			nodes[i].sequence = nil;
+	}
 }
 
 void
