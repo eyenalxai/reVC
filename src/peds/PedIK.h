@@ -2,27 +2,9 @@
 #define __GTA_PEDIK_H__
 #include "common.h"
 #include "AnimBlendClumpData.h"
-
-struct LimbOrientation
-{
-	float yaw;
-	float pitch;
-};
-
-struct LimbMovementInfo {
-	float maxYaw;
-	float minYaw;
-	float yawD;
-	float maxPitch;
-	float minPitch;
-	float pitchD;
-};
-
-enum LimbMoveStatus {
-	ANGLES_SET_TO_MAX, // because given angles were unreachable
-	ONE_ANGLE_COULDNT_BE_SET_EXACTLY, // because it can't be reached in a jiffy
-	ANGLES_SET_EXACTLY
-};
+// The limb orientations, the limiter rows and the limiter step itself; the
+// engine free module (LimbRate.cpp) so the harness can drive it (VICE-194).
+#include "LimbRate.h"
 
 class CPed;
 
@@ -43,14 +25,6 @@ public:
 	// Sideways lean of the upper body out of the car; yaw is the lean angle
 	LimbOrientation m_leanOrient;
 	int32 m_flags;
-
-	static LimbMovementInfo ms_torsoInfo;
-	static LimbMovementInfo ms_seatTorsoInfo;
-	static LimbMovementInfo ms_leanInfo;
-	static LimbMovementInfo ms_headInfo;
-	static LimbMovementInfo ms_headRestoreInfo;
-	static LimbMovementInfo ms_upperArmInfo;
-	static LimbMovementInfo ms_lowerArmInfo;
 
 	CPedIK(CPed *ped);
 	bool PointGunInDirection(float targetYaw, float targetPitch);

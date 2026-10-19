@@ -238,6 +238,14 @@ change until a cycle, a blend or a callback finishes. The movement rework forbid
 it. The only exceptions are the genuinely scripted states: car entry and exit,
 the get-up, the cutscenes, the mission control flags, being attached and the
 replay. The solver harness checks the rule.
+## Reference frame rate
+
+The 50 frames per second the engine's clock is calibrated against:
+`CTimer::GetTimeStep()` is 1.0 there and `CTimer::GetTimeStepInSeconds()` is a
+fiftieth of a second. Every per-second rate stated in the tree is a rate at
+this frame rate, and a stock constant the original code applied once per call
+is its per-frame value.
+
 ## Engine velocity unit
 
 The unit of `m_vecMoveSpeed`: one unit per 1/50 second, so one engine velocity
@@ -913,6 +921,15 @@ The pose of the player's upper body while the sights are up: the weapon's fire
 animation held at its loop start, the way the stock third person aim holds it.
 On the player it drives only the upper body, so the arms and the torso hold the
 aim while the legs keep the movement animation, the sprint cycle included.
+
+## Limb rate
+
+A row of the aim IK's limiter (`LimbMovementInfo`, `src/peds/LimbRate.h`): the
+yaw and pitch range a limb may hold - the torso, a driver's lean, the head, an
+arm - and the rate in radians per second its limiter closes on a target at. The
+stock rows advanced a fixed angle per call, and one call is one frame of the
+reference frame rate, so every rate is the stock per-call angle times 50 and
+`MoveLimbStep` scales it by the frame step its caller hands in (VICE-194).
 
 ## Partial association
 

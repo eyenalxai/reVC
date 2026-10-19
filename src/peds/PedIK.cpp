@@ -7,15 +7,7 @@
 #include "Vehicle.h"
 #include "General.h"
 #include "RwHelper.h"
-
-LimbMovementInfo CPedIK::ms_torsoInfo = { DEGTORAD(50.0f), DEGTORAD(-50.0f), DEGTORAD(8.0f), DEGTORAD(45.0f), DEGTORAD(-45.0f), DEGTORAD(5.0f) };
-// The seated player turns the torso further: the body heading is pinned to the seat
-LimbMovementInfo CPedIK::ms_seatTorsoInfo = { DEGTORAD(90.0f), DEGTORAD(-90.0f), DEGTORAD(8.0f), DEGTORAD(45.0f), DEGTORAD(-45.0f), DEGTORAD(5.0f) };
-LimbMovementInfo CPedIK::ms_leanInfo = { DEGTORAD(20.0f), DEGTORAD(-20.0f), DEGTORAD(3.0f), 0.0f, 0.0f, DEGTORAD(1.0f) };
-LimbMovementInfo CPedIK::ms_headInfo = { DEGTORAD(90.0f), DEGTORAD(-90.0f), DEGTORAD(15.0f), DEGTORAD(45.0f), DEGTORAD(-45.0f), DEGTORAD(8.0f) };
-LimbMovementInfo CPedIK::ms_headRestoreInfo = { DEGTORAD(90.0f), DEGTORAD(-90.0f), DEGTORAD(10.0f), DEGTORAD(45.0f), DEGTORAD(-45.0f), DEGTORAD(5.0f) };
-LimbMovementInfo CPedIK::ms_upperArmInfo = { DEGTORAD(5.0f), DEGTORAD(-120.0f), DEGTORAD(20.0f), DEGTORAD(70.0f), DEGTORAD(-70.0f), DEGTORAD(20.0f) };
-LimbMovementInfo CPedIK::ms_lowerArmInfo = { DEGTORAD(60.0f), DEGTORAD(0.0f), DEGTORAD(15.0f), DEGTORAD(90.0f), DEGTORAD(-90.0f), DEGTORAD(10.0f) };
+#include "Timer.h"
 
 const RwV3d XaxisIK = { 1.0f, 0.0f, 0.0f};
 const RwV3d YaxisIK = { 0.0f, 1.0f, 0.0f};
@@ -108,47 +100,14 @@ CPedIK::GetComponentPosition(RwV3d &pos, uint32 node)
 	pos = GetComponentMatrix(m_ped, node)->pos;
 }
 
+// The limiter over the frame's step: the rows are per second (LimbRate.cpp),
+// so the limb closes at the same angular speed at any frame rate. The clock
+// cannot change inside a frame - CTimer sets the step once - so reading it per
+// call is reading the one step of the frame.
 LimbMoveStatus
 CPedIK::MoveLimb(LimbOrientation &limb, float targetYaw, float targetPitch, LimbMovementInfo &moveInfo)
 {
-	LimbMoveStatus result = ONE_ANGLE_COULDNT_BE_SET_EXACTLY;
-
-	// yaw
-
-	if(Abs(limb.yaw-targetYaw) < moveInfo.yawD){
-		limb.yaw = targetYaw;
-		result = ANGLES_SET_EXACTLY;
-	}else{
-		if (limb.yaw > targetYaw) {
-			limb.yaw -= moveInfo.yawD;
-		} else if (limb.yaw < targetYaw) {
-			limb.yaw += moveInfo.yawD;
-		}
-	}
-
-	if (limb.yaw > moveInfo.maxYaw || limb.yaw < moveInfo.minYaw) {
-		limb.yaw = Clamp(limb.yaw, moveInfo.minYaw, moveInfo.maxYaw);
-		result = ANGLES_SET_TO_MAX;
-	}
-
-	// pitch
-
-	if (Abs(limb.pitch - targetPitch) < moveInfo.pitchD){
-		limb.pitch = targetPitch;
-	}else{
-		if (limb.pitch > targetPitch) {
-			limb.pitch -= moveInfo.pitchD;
-		} else if (limb.pitch < targetPitch) {
-			limb.pitch += moveInfo.pitchD;
-		}
-		result = ONE_ANGLE_COULDNT_BE_SET_EXACTLY;
-	}
-
-	if (limb.pitch > moveInfo.maxPitch || limb.pitch < moveInfo.minPitch) {
-		limb.pitch = Clamp(limb.pitch, moveInfo.minPitch, moveInfo.maxPitch);
-		result = ANGLES_SET_TO_MAX;
-	}
-	return result;
+	return MoveLimbStep(limb, targetYaw, targetPitch, moveInfo, CTimer::GetTimeStepInSeconds());
 }
 
 bool
