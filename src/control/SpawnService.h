@@ -6,7 +6,7 @@
  * of spawn intent. A producer requests; the service decides where the actor
  * may legally appear and creates it there.
  *
- * The request envelope carries two creation kinds:
+ * The request envelope carries the creation kinds:
  *
  *	road-site placement	the planner: candidates from the site index
  *				(VICE-148), filtered by purpose, the live
@@ -23,8 +23,14 @@
  *				covers the budgets and the reserves too, so a
  *				mission never fails on a scheduling decision.
  *				The caller gets the vehicle in the same frame.
+ *	parked			a car generator's own position and model
+ *				(VICE-155): the spot's own validity (the
+ *				blockage, the ground, the near bubble without
+ *				rays) - not a road link. The generator keeps
+ *				its timer, range and target policy; the service
+ *				owns the placement and the setup.
  *
- * Both kinds are counted, and every refusal is counted by its reason. The
+ * Every kind is counted, and every refusal is counted by its reason. The
  * ambient traffic is the first requester (CCarCtrl::GenerateOneRandomCar ->
  * CSpawnService::RequestCar): the same rings and gates, drawn from the same
  * tables, with the old dice gone. The reversal of the merge is the branch's
@@ -168,11 +174,15 @@ enum ESpawnPurpose
 	SPAWN_PURPOSE_COUNT
 };
 
-/* The two creation kinds of the design's section 4. */
+/* The creation kinds of the design's section 4. The parked kind (VICE-155) is
+ * the third: the generator's own position and model with the spot's own
+ * validity (the blockage, the ground, the near bubble without rays) - not a
+ * road link and not a script's exact placement. */
 enum ESpawnKind
 {
 	SPAWN_KIND_ROAD_SITE = 0,	/* the planner: sites, occupancy, visibility */
 	SPAWN_KIND_EXPLICIT,		/* the exact position, model and lifetime */
+	SPAWN_KIND_PARKED,		/* the generator's spot: blockage, ground, bubble */
 	SPAWN_KIND_COUNT
 };
 
@@ -212,8 +222,11 @@ enum ESpawnSiteWater
 };
 
 /* The vehicle tag the driver contract needs (Vehicle.h: RANDOM_VEHICLE).
- * SpawnService.cpp pins it to the engine's own value. */
+ * SpawnService.cpp pins it to the engine's own value. The parked tag
+ * (PARKED_VEHICLE) is what a generator's car carries: no driver, and the game
+ * counts it in NumParkedCars. */
 #define SPAWN_VEHICLE_TAG_RANDOM 1
+#define SPAWN_VEHICLE_TAG_PARKED 3
 
 /* --- The telemetry ------------------------------------------------------ */
 
@@ -225,16 +238,16 @@ enum ESpawnSiteWater
  *
  * The refusal rows count one event per increment: a request's own gate, a
  * candidate the plan dropped, or an attempt the primitive refused. The
- * request rows count every RequestCar/RequestExplicit call; the created and
- * removed rows count the placements, by purpose; the covered-fill row counts
- * the creations the screen fade covered (the fill burst's own work, its own
- * row of the ticket). The plan rows are the cost: one call row per plan, the
- * candidates examined, the placements returned and the total microseconds
- * (the caller times the call; the core only accumulates). The conservation
- * rows are set by the check (the director calls it later); a breach is a
- * defect row. The defect rows are the primitive's own: the ground casts that
- * found nothing, the offsets over the air guard, and the water casts that
- * failed.
+ * request rows count every RequestCar/RequestExplicit/RequestParked call; the
+ * created and removed rows count the placements, by purpose; the covered-fill
+ * row counts the creations the screen fade covered (the fill burst's own
+ * work, its own row of the ticket). The plan rows are the cost: one call row
+ * per plan, the candidates examined, the placements returned and the total
+ * microseconds (the caller times the call; the core only accumulates). The
+ * conservation rows are set by the check (the director calls it later); a
+ * breach is a defect row. The defect rows are the primitive's own: the ground
+ * casts that found nothing, the offsets over the air guard, and the water
+ * casts that failed.
  */
 struct SSpawnServiceTelemetry
 {
@@ -889,6 +902,323 @@ SpawnDecideExplicit(const SSpawnExplicitRequest &request, SSpawnExplicitDecision
 	decision->createdBy = request.createdBy ? request.createdBy : SPAWN_VEHICLE_TAG_RANDOM;
 }
 
+/* --- The parked kind (VICE-155) ------------------------------------------ */
+
+/*
+ * The parked request: a car generator's own position, model and setup policy.
+ * The generator keeps the policy it had (when it asks - the timer and the
+ * range gate - the uses, the handle and the state the save file carries); the
+ * service owns the placement: the target gate, the model policy, the spot's
+ * validity (the blockage, the ground, the near bubble without rays) and the
+ * creation with its setup. The generator dice are gone: the dynamic model's
+ * draw and the alarm and lock rolls are here, the parked kind's own policy,
+ * with the generator's numbers passed in.
+ *
+ * The model state is the one thing the request moves: a dynamic generator
+ * (modelIndex < 0) names a model to reuse; when the field is -1 or the stored
+ * model is not resident, the requester's policy draws a fresh one (the
+ * engine's call: CCarCtrl::ChooseCarModel(CCarCtrl::ChooseCarRating(zone)),
+ * the old one). The decision carries the new field back (modelIndex =
+ * -chosen) and the re-choice flag; the generator stores it and resets its
+ * colours, the old policy. Every other field of the request is read-only: the
+ * service cannot move the state the save file carries.
+ */
+
+/* One parked request. */
+struct SSpawnParkedRequest
+{
+	ESpawnPurpose purpose;
+	int32_t modelIndex;	/* the generator's field: >= 0 fixed, < 0 dynamic */
+	float x, y, z;
+	float angle;		/* degrees, the generator's own */
+	int16_t color1, color2;	/* -1: the model's own colours */
+	uint8_t alarm;		/* the alarm threshold (the generator's policy) */
+	uint8_t doorlock;	/* the lock threshold (the generator's policy) */
+};
+
+/* The model policy of a dynamic generator: a fresh model from the requester's
+ * own tables (the engine's zone draw; the evidence program scripts it).
+ * Negative: nothing to place. */
+typedef int32_t (*SpawnParkedModelFn)(void *user);
+
+/* The parked path's own answer beyond the created car: the model state the
+ * dynamic resolution moved, and the placement's contract (the position, the
+ * angle, the parked tag, the fresh-spawn grace). The generator stores the
+ * model state back into its fields on every call; the placement is the
+ * service's. */
+struct SSpawnParkedDecision
+{
+	int32_t modelIndex;	/* the generator's new m_nModelIndex */
+	bool modelRechosen;	/* a fresh dynamic model was chosen: the colours reset */
+	float x, y, z;		/* the placement (the ground plus the base offset) */
+	float angle;
+	uint8_t createdBy;	/* SPAWN_VEHICLE_TAG_PARKED */
+	uint32_t protectMs;	/* NEAR_BUBBLE_GRACE_MS */
+};
+
+/* The parked kind's own budget facts: the parked target (ParkedCarTarget, the
+ * ring's own count) and the car budget (CCarCtrl::NumCarsInUse against
+ * MaxNumberOfCarsInUse). The generator's own early return was the same two
+ * counts. */
+struct SSpawnParkedBudget
+{
+	int32_t parkedCars;
+	int32_t parkedTarget;
+	int32_t carsInUse;
+	int32_t carBudget;
+};
+
+/* The world's answers of one parked request, stage by stage. The engine
+ * resolves them (the casts, the model request, the vehicle, the ladder); the
+ * evidence program scripts them. */
+struct SSpawnParkedFacts
+{
+	bool storedModelLoaded;	/* the stored dynamic model is resident */
+	bool blocked;		/* the spot's blockage check */
+	bool modelLoaded;	/* the resolved model is resident */
+	bool groundFound;	/* the ground cast found a surface (boats: always) */
+	float x, y, z;		/* the placement the ground resolved */
+	uint8_t arm;		/* the ladder's arm at the final position, rays off */
+};
+
+/*
+ * The world work of one stage of the parked path, in the path's own order:
+ *
+ *	the model	the stored dynamic model's residency (HasModelLoaded)
+ *	the blockage	the spot's own check (the model's col model against
+ *			the world)
+ *	the readiness	the fixed model's request (STREAMFLAGS_DEPENDENCY)
+ *			and the residency
+ *	the ground	the casts and the car (the boats first, the cars
+ *			after the ground: the constructor's colour draw is
+ *			the RNG stream), the base offset, the placement
+ *	the bubble	the ladder at the final position, rays off
+ *
+ * The core asks one stage at a time, so the order of the world work is the
+ * path's own and cannot drift; the engine (SpawnService.cpp) fills the facts
+ * from the world, the evidence program scripts them. `model` is the model the
+ * stage works with: the request's own field for the model stage (the
+ * resolution has not run yet), the resolved model for the rest.
+ */
+enum ESpawnParkedStage
+{
+	SPAWN_PARKED_STAGE_MODEL = 0,
+	SPAWN_PARKED_STAGE_BLOCKAGE,
+	SPAWN_PARKED_STAGE_READY,
+	SPAWN_PARKED_STAGE_GROUND,
+	SPAWN_PARKED_STAGE_BUBBLE,
+	SPAWN_PARKED_STAGE_COUNT
+};
+
+typedef void (*SpawnParkedStageFn)(void *user, ESpawnParkedStage stage, int32_t model, SSpawnParkedFacts *facts);
+
+/* The request's start: the decision carries the request's own state until a
+ * gate moves it. */
+static inline void
+SpawnParkedDecisionBegin(const SSpawnParkedRequest &request, SSpawnParkedDecision *decision)
+{
+	decision->modelIndex = request.modelIndex;
+	decision->modelRechosen = false;
+	decision->x = request.x;
+	decision->y = request.y;
+	decision->z = request.z;
+	decision->angle = request.angle;
+	decision->createdBy = SPAWN_VEHICLE_TAG_PARKED;
+	decision->protectMs = NEAR_BUBBLE_GRACE_MS;
+}
+
+/* The facts' start: every gate's fact at its refusing side, so a stage that
+ * does not fill one cannot pass it by accident. */
+static inline void
+SpawnParkedFactsBegin(SSpawnParkedFacts *facts)
+{
+	facts->storedModelLoaded = false;
+	facts->blocked = false;
+	facts->modelLoaded = false;
+	facts->groundFound = false;
+	facts->x = 0.0f;
+	facts->y = 0.0f;
+	facts->z = 0.0f;
+	facts->arm = NEAR_BUBBLE_ARM_NONE;
+}
+
+/* The parked target and the car budget, the generator's own first check. */
+static inline ESpawnRefusal
+SpawnParkedBudgetGate(const SSpawnParkedBudget &budget, SSpawnServiceTelemetry *tel)
+{
+	if (budget.parkedCars >= budget.parkedTarget || budget.carsInUse >= budget.carBudget) {
+		SpawnNoteRefusal(tel, SPAWN_REFUSAL_BUDGET);
+		return SPAWN_REFUSAL_BUDGET;
+	}
+	return SPAWN_REFUSAL_NONE;
+}
+
+/*
+ * The model resolution: the fixed model passes through; a dynamic generator
+ * reuses its stored model while it is resident (the field is not -1 and the
+ * fact says so), else the policy draws a fresh one. The re-choice stores the
+ * new field and asks the caller to reset the colours; a policy with nothing
+ * to place refuses READINESS (the old `if (mi < 0) return`).
+ */
+static inline ESpawnRefusal
+SpawnParkedResolveModel(const SSpawnParkedRequest &request, bool storedModelLoaded,
+	SpawnParkedModelFn chooseModel, void *chooseUser,
+	SSpawnParkedDecision *decision, SSpawnServiceTelemetry *tel)
+{
+	if (request.modelIndex >= 0)
+		return SPAWN_REFUSAL_NONE;
+	if (request.modelIndex != -1 && storedModelLoaded)
+		/* The field stands (SpawnParkedDecisionBegin carried it). */
+		return SPAWN_REFUSAL_NONE;
+	{
+		int32_t model = chooseModel ? chooseModel(chooseUser) : -1;
+		if (model < 0) {
+			/* Nothing to place: the field stands (the caller must not store
+			 * the decision's model on a refusal). */
+			SpawnNoteRefusal(tel, SPAWN_REFUSAL_READINESS);
+			return SPAWN_REFUSAL_READINESS;
+		}
+		decision->modelIndex = -model;
+		decision->modelRechosen = true;
+	}
+	return SPAWN_REFUSAL_NONE;
+}
+
+/* The spot's blockage: an entity overlaps the model's box. The generator's
+ * own flag and timer policy read the refusal (OCCUPANCY). */
+static inline ESpawnRefusal
+SpawnParkedBlockageGate(bool blocked, SSpawnServiceTelemetry *tel)
+{
+	if (blocked) {
+		SpawnNoteRefusal(tel, SPAWN_REFUSAL_OCCUPANCY);
+		return SPAWN_REFUSAL_OCCUPANCY;
+	}
+	return SPAWN_REFUSAL_NONE;
+}
+
+/* The readiness: the resolved model is resident. The fixed path requests it
+ * in the stage first (the old call's order: the request is what loads it for
+ * a later frame). */
+static inline ESpawnRefusal
+SpawnParkedReadinessGate(bool modelLoaded, SSpawnServiceTelemetry *tel)
+{
+	if (!modelLoaded) {
+		SpawnNoteRefusal(tel, SPAWN_REFUSAL_READINESS);
+		return SPAWN_REFUSAL_READINESS;
+	}
+	return SPAWN_REFUSAL_NONE;
+}
+
+/* The ground: the cast under the spot found a surface (the boats keep the
+ * water the generator gave, so the fact is always true for them). A failure
+ * is the primitive's own defect row and NO_SITE. */
+static inline ESpawnRefusal
+SpawnParkedGroundGate(bool groundFound, SSpawnServiceTelemetry *tel)
+{
+	if (!groundFound) {
+		SpawnNoteGroundRejection(tel);
+		SpawnNoteRefusal(tel, SPAWN_REFUSAL_NO_SITE);
+		return SPAWN_REFUSAL_NO_SITE;
+	}
+	return SPAWN_REFUSAL_NONE;
+}
+
+/* The near bubble at the final position, without rays: the ladder's ray-free
+ * arms (NearBubbleArmAllowsWithoutRay). The engine's gate resolved the arm and
+ * counted its own refusal; the core counts the service's row. */
+static inline ESpawnRefusal
+SpawnParkedBubbleGate(uint8_t arm, SSpawnServiceTelemetry *tel)
+{
+	if (!NearBubbleArmAllowsWithoutRay((ENearBubbleArm)arm)) {
+		SpawnNoteRefusal(tel, SPAWN_REFUSAL_VISIBILITY);
+		return SPAWN_REFUSAL_VISIBILITY;
+	}
+	return SPAWN_REFUSAL_NONE;
+}
+
+/* The placement the path decided: the position the ground resolved, the
+ * generator's angle, the parked tag and the fresh-spawn grace. No driver is
+ * part of the contract: the parked kind creates with PARKED_VEHICLE and never
+ * calls SetUpDriver. */
+static inline void
+SpawnDecideParked(const SSpawnParkedRequest &request, const SSpawnParkedFacts &facts, SSpawnParkedDecision *decision)
+{
+	decision->x = facts.x;
+	decision->y = facts.y;
+	decision->z = facts.z;
+	decision->angle = request.angle;
+	decision->createdBy = SPAWN_VEHICLE_TAG_PARKED;
+	decision->protectMs = NEAR_BUBBLE_GRACE_MS;
+}
+
+/*
+ * The whole parked path, in the old order, one gate at a time:
+ *
+ *	the budget	the parked target and the car budget
+ *	the model	the dynamic resolution (the request's own policy)
+ *	the blockage	the spot
+ *	the readiness	the model
+ *	the ground	the casts and the car
+ *	the bubble	the ladder, rays off
+ *	the decision	the placement's contract
+ *
+ * Every stage's world work runs between the gates (the stage callback), so a
+ * refusal costs exactly the work the old path spent before it. The return is
+ * NONE on a creation, else the first gate's reason; the decision is filled on
+ * every call (a budget refusal leaves it at the request's own state).
+ */
+static inline ESpawnRefusal
+SpawnRunParked(const SSpawnParkedRequest &request, const SSpawnParkedBudget &budget,
+	SpawnParkedModelFn chooseModel, void *chooseUser,
+	SpawnParkedStageFn stage, void *stageUser,
+	SSpawnParkedDecision *decision, SSpawnServiceTelemetry *tel)
+{
+	SSpawnParkedFacts facts;
+	int32_t model;
+	ESpawnRefusal refusal;
+
+	SpawnParkedDecisionBegin(request, decision);
+	SpawnParkedFactsBegin(&facts);
+
+	refusal = SpawnParkedBudgetGate(budget, tel);
+	if (refusal != SPAWN_REFUSAL_NONE)
+		return refusal;
+
+	if (stage)
+		stage(stageUser, SPAWN_PARKED_STAGE_MODEL, request.modelIndex, &facts);
+	refusal = SpawnParkedResolveModel(request, facts.storedModelLoaded, chooseModel, chooseUser, decision, tel);
+	if (refusal != SPAWN_REFUSAL_NONE)
+		return refusal;
+	model = decision->modelIndex >= 0 ? decision->modelIndex : -decision->modelIndex;
+
+	if (stage)
+		stage(stageUser, SPAWN_PARKED_STAGE_BLOCKAGE, model, &facts);
+	refusal = SpawnParkedBlockageGate(facts.blocked, tel);
+	if (refusal != SPAWN_REFUSAL_NONE)
+		return refusal;
+
+	if (stage)
+		stage(stageUser, SPAWN_PARKED_STAGE_READY, model, &facts);
+	refusal = SpawnParkedReadinessGate(facts.modelLoaded, tel);
+	if (refusal != SPAWN_REFUSAL_NONE)
+		return refusal;
+
+	if (stage)
+		stage(stageUser, SPAWN_PARKED_STAGE_GROUND, model, &facts);
+	refusal = SpawnParkedGroundGate(facts.groundFound, tel);
+	if (refusal != SPAWN_REFUSAL_NONE)
+		return refusal;
+
+	if (stage)
+		stage(stageUser, SPAWN_PARKED_STAGE_BUBBLE, model, &facts);
+	refusal = SpawnParkedBubbleGate(facts.arm, tel);
+	if (refusal != SPAWN_REFUSAL_NONE)
+		return refusal;
+
+	SpawnDecideParked(request, facts, decision);
+	return SPAWN_REFUSAL_NONE;
+}
+
 /* --- The primitive's own decisions --------------------------------------- */
 
 /* The lane the primitive takes on the travelled side: the lane dice of the
@@ -1004,6 +1334,13 @@ public:
 	 * the force bypass covers the budgets and the reserves. True and the
 	 * vehicle in the same frame when it was created. */
 	static bool RequestExplicit(const SSpawnExplicitRequest &request, CVehicle **ppCreated);
+
+	/* One parked creation (VICE-155): the generator's request through the
+	 * parked path (SpawnRunParked). The refusal is the reason (NONE:
+	 * created, in *ppCreated); the decision carries the model state the
+	 * dynamic resolution moved on every call, so the generator can store it
+	 * back. */
+	static ESpawnRefusal RequestParked(const SSpawnParkedRequest &request, SSpawnParkedDecision *pDecision, CVehicle **ppCreated);
 
 	/* The ladder's API (NearBubble.cpp's gates, behavior preserved): the
 	 * creation and removal gates and the acceptance counters. Every caller

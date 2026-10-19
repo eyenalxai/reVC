@@ -371,6 +371,28 @@ enum ENearBubbleAnswer
 					 * a blocked ray allows it, a clear one refuses */
 };
 
+/* The arms that answer without a ray: the hidden ones and the in-view band.
+ * The arms that are not here - the refusal and the two that ask for the
+ * confirmation ray - are refused when the frame cannot spend a ray, exactly
+ * what the resolution does with `rayAllowed` false (the parked cars of the
+ * generators and the far layer). One truth, so the two cannot drift apart:
+ * NearBubbleResolve (NearBubble.cpp) and the service's parked path both read
+ * this predicate. */
+static inline bool
+NearBubbleArmAllowsWithoutRay(ENearBubbleArm arm)
+{
+	switch (arm) {
+	case NEAR_BUBBLE_ARM_BYPASS:
+	case NEAR_BUBBLE_ARM_FADE_DISTANCE:
+	case NEAR_BUBBLE_ARM_SOFT:
+	case NEAR_BUBBLE_ARM_FADE:
+	case NEAR_BUBBLE_ARM_ONSCREEN_BAND:
+		return true;
+	default:
+		return false;
+	}
+}
+
 static inline ENearBubbleAnswer
 NearBubbleAnswerFor(const SNearBubbleCandidate &c)
 {

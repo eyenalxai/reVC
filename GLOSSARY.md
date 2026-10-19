@@ -543,6 +543,18 @@ and the car stays until the car despawn, so the curbs fill along the route the
 player drives. A parked car counts in the car budget (`NumParkedCars`) and
 carries no driver while it is parked.
 
+Since VICE-155 the creation is the spawn service's **parked kind**: the
+generator makes one `CSpawnService::RequestParked` call per attempt, and the
+service owns the placement - the parked target gate (`ParkedCarTarget`), the
+model policy (a fixed model, or the dynamic generator's draw from the zone's
+loaded class arrays), the spot's own validity (the blockage, the ground, the
+near bubble without rays) and the creation with its setup (the `PARKED_VEHICLE`
+tag, `STATUS_ABANDONED`, the colours, the alarm and lock rolls). The generator
+keeps the policy it always had: when it asks (the timer and the range gate),
+the uses, the handle, the blocking flag and the state the save file carries;
+the OCCUPANCY refusal is its blockage's flag and `m_nTimer += 4`. No placement
+decision or dice is left in `CarGen.cpp`.
+
 ## Pedestrian node network
 
 The ped path nodes (`PATH_PED`): the walkable network of the map. The game
@@ -953,12 +965,15 @@ later requester.
 The one writer of spawn intent (`src/control/SpawnService.h` and
 `SpawnService.cpp`, VICE-150): a producer requests, the service decides where
 the actor may legally appear and creates it there. The request envelope
-carries two creation kinds: a **road-site placement** (the planner: candidates
-from the site index, filtered by purpose, the live zone, the occupancy store
-and the visibility ladder, ranked, reserved, then created by the primitive)
-and an **explicit** creation (the exact position, model and lifetime given by
-a script or a mission: synchronous, no visibility and no ring, with a force
-bypass over the budgets and the reserves). Both kinds are counted. The
+carries three creation kinds: a **road-site placement** (the planner:
+candidates from the site index, filtered by purpose, the live zone, the
+occupancy store and the visibility ladder, ranked, reserved, then created by
+the primitive), an **explicit** creation (the exact position, model and
+lifetime given by a script or a mission: synchronous, no visibility and no
+ring, with a force bypass over the budgets and the reserves) and the **parked
+kind** (VICE-155: a car generator's own position and model with the spot's own
+validity - the blockage, the ground, the near bubble without rays - and the
+`PARKED_VEHICLE` tag; see the parked car entry). Every kind is counted. The
 refusal reasons are the ticket's own - no site, occupancy, visibility, zone,
 readiness, budget, pool, reachability - and every refusal event (a request's
 gate, a plan drop or an attempt's refusal) is counted, so refusals after

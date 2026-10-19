@@ -184,25 +184,12 @@ NearBubbleResolve(const SNearBubbleCandidate &c, const CVector &pos, bool rayAll
 	ENearBubbleArm arm = NearBubbleArmFor(c);
 	*pArm = arm;
 
-	switch (arm) {
-	case NEAR_BUBBLE_ARM_NONE:
-		return false;
-	case NEAR_BUBBLE_ARM_FADE:
-	case NEAR_BUBBLE_ARM_BYPASS:
-	case NEAR_BUBBLE_ARM_FADE_DISTANCE:
-	case NEAR_BUBBLE_ARM_SOFT:
-	case NEAR_BUBBLE_ARM_ONSCREEN_BAND:
+	/* The arms that answer without a ray (NearBubbleArmAllowsWithoutRay). */
+	if (NearBubbleArmAllowsWithoutRay(arm))
 		return true;
-	case NEAR_BUBBLE_ARM_OCCLUDER:
-	case NEAR_BUBBLE_ARM_RAY:
-	default:
-		break;
-	}
-
-	/* The confirmation ray, from the frame's budget. A candidate that finds
-	 * the budget spent is refused: the placement loop of the caller tries
-	 * its next candidate, and the frame's work stays bounded. */
-	if (!rayAllowed || CCarCtrl::ms_nNearBubbleRaysLeft <= 0)
+	/* What is left - the refusal and the two arms that ask for the
+	 * confirmation ray - is refused when the frame cannot spend one. */
+	if (arm == NEAR_BUBBLE_ARM_NONE || !rayAllowed || CCarCtrl::ms_nNearBubbleRaysLeft <= 0)
 		return false;
 	CCarCtrl::ms_nNearBubbleRaysLeft--;
 	CCarCtrl::ms_nNearBubbleRays++;

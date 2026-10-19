@@ -2,23 +2,31 @@
 
 #include "CarGen.h"
 
-#include "Automobile.h"
-#include "Bike.h"
-#include "Boat.h"
 #include "Camera.h"
-#include "CarCtrl.h"
 #include "CutsceneMgr.h"
-#include "General.h"
+#include "ModelInfo.h"
+#include "Occlusion.h"
 #include "Pools.h"
-#include "Streaming.h"
+#include "SpawnService.h"
 #include "Timer.h"
 #include "TrafficRings.h"
 #include "Vehicle.h"
-#include "VisibilityPlugins.h"
 #include "World.h"
-#include "Zones.h"
-#include "Occlusion.h"
 #include "SaveBuf.h"
+
+/*
+ * The car generators (VICE-155). This file is the generator's own policy: when
+ * it asks (the round-robin of CTheCarGenerators::Process, the timer and the
+ * range gate of CCarGenerator::Process and CheckIfWithinRangeOfAnyPlayers),
+ * the uses, the handle, the blocking flag, and the state the save file carries
+ * (CTheCarGenerators::SaveAllCarGenerators). The placement - the parked target
+ * gate, the model policy, the spot's validity (the blockage, the ground, the
+ * near bubble without rays) and the creation with its setup - is the spawn
+ * service's parked kind (SpawnService.h and .cpp). Every
+ * CCarGenerator::DoInternalProcessing is one CSpawnService::RequestParked
+ * call; no placement decision and no dice is left here. The generators the
+ * scripts create and the save/load rebuild are this file's own and unchanged.
+ */
 
 uint8 CTheCarGenerators::ProcessCounter;
 uint32 CTheCarGenerators::NumOfCarGenerators;
@@ -51,127 +59,61 @@ uint32 CCarGenerator::CalcNextGen()
 
 void CCarGenerator::DoInternalProcessing()
 {
-	int mi;
-	/* The parked cars follow the ring area like the traffic (PopulationBudget.h,
-	 * ParkedCarTarget): 20 at the stock ring, the map's generator count at the
-	 * top. They share the car budget with the traffic, so a full curb trades
-	 * with the random cars, and the whole budget stays inside the vehicle pool
-	 * (CCarCtrl::NumCarsInUse counts them all). */
-	if (CCarCtrl::NumParkedCars >= ParkedCarTarget(CurrentTrafficRings().scale) ||
-		CCarCtrl::NumCarsInUse() >= CCarCtrl::MaxNumberOfCarsInUse)
-		return;
-	if (m_nModelIndex >= 0) {
-		if (CheckForBlockage(m_nModelIndex)) {
-			m_nTimer += 4;
-			return;
-		}
-		CStreaming::RequestModel(m_nModelIndex, STREAMFLAGS_DEPENDENCY);
-		mi = m_nModelIndex;
-	}
-	else {
-		mi = -m_nModelIndex;
-		if (m_nModelIndex == -1 || !CStreaming::HasModelLoaded(mi)) {
-			CZoneInfo pZone;
-			CVector pos = FindPlayerCoors();
-			CTheZones::GetZoneInfoForTimeOfDay(&pos, &pZone);
-			mi = CCarCtrl::ChooseCarModel(CCarCtrl::ChooseCarRating(&pZone));
-			if (mi < 0)
-				return;
-			m_nModelIndex = -mi;
-			m_nColor1 = -1;
-			m_nColor2 = -1;
-		}
-		if (CheckForBlockage(mi)) {
-			m_nTimer += 4;
-			return;
-		}
-	}
-	if (!CStreaming::HasModelLoaded(mi))
-		return;
-	CVehicle* pVehicle;
+	SSpawnParkedRequest request;
+	SSpawnParkedDecision decision;
+	CVehicle *pVehicle = nil;
+	ESpawnRefusal refusal;
 
-	CVector pos;
-	if (CModelInfo::IsBoatModel(mi)){
-		CBoat* pBoat = new CBoat(mi, PARKED_VEHICLE);
-		pos = m_vecPos;
-		pVehicle = pBoat;
-		if (pos.z <= -100.0f)
-			pos.z = CWorld::FindGroundZForCoord(pos.x, pos.y);
-		pBoat->bExtendedRange = true;
-	}else{
-		bool groundFound;
-		pos = m_vecPos;
-		if (pos.z > -100.0f){
-			pos.z = CWorld::FindGroundZFor3DCoord(pos.x, pos.y, pos.z, &groundFound);
-		}else{
-			groundFound = false;
-			CColPoint cp;
-			CEntity* pEntity;
-			groundFound = CWorld::ProcessVerticalLine(CVector(pos.x, pos.y, 1000.0f), -1000.0f,
-				cp, pEntity, true, false, false, false, false, false, nil);
-			if (groundFound)
-				pos.z = cp.point.z;
-		}
-		if (!groundFound) {
-			debug("CCarGenerator::DoInternalProcessing - can't find ground z for new car x = %f y = %f \n", m_vecPos.x, m_vecPos.y);
-			return;
-		}
-		if (((CVehicleModelInfo*)CModelInfo::GetModelInfo(mi))->m_vehicleType == VEHICLE_TYPE_BIKE) {
-			CBike* pBike = new CBike(mi, PARKED_VEHICLE);
-			pBike->bIsStanding = true;
-			pVehicle = pBike;
-		}
-		else {
-			CAutomobile* pCar = new CAutomobile(mi, PARKED_VEHICLE);
-			pVehicle = pCar;
-		}
-		// pVehicle->GetDistanceFromCentreOfMassToBaseOfModel();
-		pVehicle->bLightsOn = false;
+	/* The parked request (VICE-155): this generator's position, model state
+	 * and setup policy, through the service's parked path. The target gate,
+	 * the model draw, the spot's validity and the creation are the service's;
+	 * the refusal comes back by reason, because two of them are this
+	 * generator's policy (the blockage's flag and timer below). */
+	request.purpose = SPAWN_PURPOSE_PARKED;
+	request.modelIndex = m_nModelIndex;
+	request.x = m_vecPos.x;
+	request.y = m_vecPos.y;
+	request.z = m_vecPos.z;
+	request.angle = m_fAngle;
+	request.color1 = m_nColor1;
+	request.color2 = m_nColor2;
+	request.alarm = m_nAlarm;
+	request.doorlock = m_nDoorlock;
+
+	refusal = CSpawnService::RequestParked(request, &decision, &pVehicle);
+
+	/* The dynamic model policy's own state: a re-choice stores the new field
+	 * and resets the colours (the service made the draw). */
+	if (decision.modelRechosen) {
+		m_nModelIndex = decision.modelIndex;
+		m_nColor1 = -1;
+		m_nColor2 = -1;
 	}
-	pVehicle->bIsStatic = false;
-	pVehicle->bEngineOn = false;
-	pos.z += pVehicle->GetDistanceFromCentreOfMassToBaseOfModel();
-	pVehicle->SetPosition(pos);
-	pVehicle->SetOrientation(0.0f, 0.0f, DEGTORAD(m_fAngle));
-	pVehicle->SetStatus(STATUS_ABANDONED);
-	pVehicle->m_nDoorLock = CARLOCK_UNLOCKED;
-	/* The near bubble (VICE-127): a parked car may appear only where the
-	 * player cannot see it. The gate is the ladder of the traffic, but its
-	 * blind-spot arm is off: an empty generator retries every four frames for
-	 * as long as it is in range, and the generators run before the traffic in
-	 * the frame, so a ray per candidate would eat the budget the traffic
-	 * needs. A spot behind the camera that no occluder covers waits for the
-	 * next look (a refusal does not advance the generator's timer, so
-	 * CCarGenerator::Process retries). */
-	if (!CSpawnService::AllowsCreation(pos, FindPlayerCentreOfWorld(CWorld::PlayerInFocus), NEAR_BUBBLE_ENTITY_RADIUS, false)) {
-		delete pVehicle;
+
+	if (refusal == SPAWN_REFUSAL_OCCUPANCY) {
+		/* The spot is blocked: the generator waits it out. The flag holds
+		 * the spawns until the player leaves the ring (the range gate
+		 * clears it) and the timer moves on, the old behavior. */
+		m_bIsBlocking = true;
+		m_nTimer += 4;
 		return;
 	}
-	pVehicle->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + NEAR_BUBBLE_GRACE_MS;
-	CWorld::Add(pVehicle);
-	CSpawnService::CountCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
-	if (CGeneral::GetRandomNumberInRange(0, 100) < m_nAlarm)
-		pVehicle->m_nAlarmState = -1;
-	if (CGeneral::GetRandomNumberInRange(0, 100) < m_nDoorlock)
-		pVehicle->m_nDoorLock = CARLOCK_LOCKED;
-	if (m_nColor1 != -1 && m_nColor2 != -1) {
-		pVehicle->m_currentColour1 = m_nColor1;
-		pVehicle->m_currentColour2 = m_nColor2;
-	}
-	else if (m_nModelIndex < -1) {
+	if (refusal != SPAWN_REFUSAL_NONE)
+		return;
+
+	/* The dynamic generator remembers the colours of its own first car. */
+	if ((m_nColor1 == -1 || m_nColor2 == -1) && m_nModelIndex < -1) {
 		m_nColor1 = pVehicle->m_currentColour1;
 		m_nColor2 = pVehicle->m_currentColour2;
 	}
-	CVisibilityPlugins::SetClumpAlpha(pVehicle->GetClump(), 0);
 	m_nVehicleHandle = CPools::GetVehiclePool()->GetIndex(pVehicle);
 	/* I don't think this is a correct comparasion */
 #ifdef FIX_BUGS
 	if (m_nUsesRemaining < UINT16_MAX)
-		--m_nUsesRemaining;
 #else
 	if (m_nUsesRemaining < ~0)
-		--m_nUsesRemaining;
 #endif
+		--m_nUsesRemaining;
 	m_nTimer = CalcNextGen();
 	if (m_nUsesRemaining == 0)
 		--CTheCarGenerators::CurrentActiveCount;
@@ -217,22 +159,6 @@ void CCarGenerator::Setup(float x, float y, float z, float angle, int32 mi, int1
 	m_nTimer = CTimer::GetTimeInMilliseconds() + 1;
 	m_nUsesRemaining = 0;
 	m_bIsBlocking = false;
-}
-
-bool CCarGenerator::CheckForBlockage(int32 mi)
-{
-	int16 entities;
-	CEntity* pEntities[8];
-	CColModel* pColModel = CModelInfo::GetColModel(mi);
-	CWorld::FindObjectsKindaColliding(CVector(m_vecPos), pColModel->boundingSphere.radius, 1, &entities, 8, pEntities, false, true, true, false, false);
-	for (int i = 0; i < entities; i++) {
-		if (m_vecPos.z + pColModel->boundingBox.min.z < pEntities[i]->GetPosition().z + pEntities[i]->GetColModel()->boundingBox.max.z + 1.0f &&
-			m_vecPos.z + pColModel->boundingBox.max.z > pEntities[i]->GetPosition().z + pEntities[i]->GetColModel()->boundingBox.min.z - 1.0f) {
-			m_bIsBlocking = true;
-			return true;
-		}
-	}
-	return false;
 }
 
 bool CCarGenerator::CheckIfWithinRangeOfAnyPlayers()
