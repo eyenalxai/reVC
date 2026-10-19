@@ -351,34 +351,6 @@ CPlayerPed::SetInitialState(void)
 	m_attachWepAmmo = 0;
 }
 
-// The stand-in look of the slide (VICE-180). The shipped anim/ped.ifp carries
-// no slide cycle, so the slide plays a shipped pose instead: the low crouch the
-// duck holds, the body low over the legs while it goes along the ground. The
-// pose is held for the slide and faded out with it. No other path plays
-// ANIM_STD_DUCK_LOW (the stock duck plays ANIM_STD_DUCK_DOWN and the crouch
-// fire ANIM_STD_DUCK_WEAPON), so the stand-in lives here alone - the authored
-// slide cycle replaces this one call and nothing else blends the pose. The
-// stock duck's own clear still fades whatever crouch pose it finds, which only
-// ends a slide's stand-in a moment early. The solver state is all this reads,
-// and animation is all it writes.
-void
-CPlayerPed::UpdateMoveStandInAnim(const SMoveSnapshot &snapshot)
-{
-	CAnimBlendAssociation *assoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_DUCK_LOW);
-
-	if (snapshot.state == MOVE_SLIDE) {
-		if (assoc == nil || assoc->blendDelta < 0.0f)
-			CAnimManager::BlendAnimation(GetClump(), ASSOCGRP_STD, ANIM_STD_DUCK_LOW, 8.0f);
-		return;
-	}
-	// The state the pose stood in for is over: fade the pose out. A fade that
-	// is already running is left alone.
-	if (assoc != nil && assoc->blendDelta >= 0.0f) {
-		assoc->flags |= ASSOC_DELETEFADEDOUT;
-		assoc->blendDelta = -8.0f;
-	}
-}
-
 void
 CPlayerPed::SetRealMoveAnim(void)
 {
@@ -1613,6 +1585,12 @@ StanceAnimGroupForWalkAngle(const tStanceAnimSet &set, float walkAngle)
 // looks up by id.
 #define PRONE_AIM_VARIANTS	3
 
+// The group's whole register, the movement poses included (VICE-181): the three
+// aim variants, the dive pose and the landing pose. The movement presentation
+// asks for all five, so a block that carries the aim variants alone leaves the
+// dive and the landing without their poses.
+#define PRONE_AIM_POSES		(PRONE_AIM_VARIANTS + 2)
+
 // The pose of one relative angle between the body and the aim, in the movement
 // selection's own sectors.
 static AnimationId
@@ -1709,6 +1687,83 @@ CPlayerPed::ReleaseProneAimPose(void)
 			assoc->flags |= ASSOC_DELETEFADEDOUT;
 			assoc->blendDelta = -4.0f;
 		}
+	}
+}
+
+// The poses of the movement states (VICE-180, VICE-181). Two movement states
+// have no cycle of their own to play, so the presentation seats a pose over
+// them:
+//	* the slide (VICE-180) plays the low crouch the duck holds (the shipped
+//	  ANIM_STD_DUCK_LOW): the body low over the legs while it goes along the
+//	  ground. No other path plays that pose (the stock duck plays
+//	  ANIM_STD_DUCK_DOWN, the crouch fire ANIM_STD_DUCK_WEAPON), so the stand-in
+//	  lives here alone and the authored slide cycle replaces the one call,
+//	* the dive and its landing (VICE-181) play the prone block's own poses
+//	  (VICE-187's ANIM_PRONE_DIVE and ANIM_PRONE_LAND), looked up in the group
+//	  the stance sets are found by (FindStanceAnimGroup), so a block that is
+//	  not in the game leaves the state with its movement animation alone.
+// A pose is held while its state holds and faded out when the state is over,
+// the shape the slide's stand-in follows; the content's own poses are one key
+// set each and are held where they sit, so a state that outlasts them keeps
+// them. The dive's pose is the whole body's: the content authors the dive's
+// head down attitude in the root, which is the pose's whole read, and there is
+// no movement cycle of the dive underneath to keep. The landing's pose drives
+// the upper body alone (MakeUpperBodyOnly, the rule the prone aim pose keeps):
+// the legs keep the crawl the slide-out runs on. The solver state is all this
+// reads, and animation is all it writes.
+static void
+HoldMovePose(RpClump *clump, AssocGroupId group, AnimationId pose, bool held, bool upperBodyOnly)
+{
+	CAnimBlendAssociation *assoc;
+
+	if (group == (AssocGroupId)-1)
+		return;
+
+	assoc = RpAnimBlendClumpGetAssociation(clump, pose);
+	if (held) {
+		if (assoc == nil || assoc->blendDelta < 0.0f)
+			assoc = CAnimManager::BlendAnimation(clump, group, pose, 8.0f);
+		if (assoc == nil)
+			return;
+		// A pose the content marks as fading when done (VICE-187's dive and
+		// landing, one key set each) is an attitude, not a cycle: it is held
+		// where it sits, so a state that outlasts the pose - a long fall, a
+		// long slide-out - keeps it instead of losing it to the fade the pose
+		// would run on its own. The slide's stand-in carries no such flag and
+		// runs to its own hold, exactly as VICE-180 seated it.
+		if (assoc->flags & ASSOC_FADEOUTWHENDONE)
+			assoc->flags &= ~ASSOC_RUNNING;
+		// The movement poses belong to a ped on foot, so the aim pose's own
+		// seated rule (a rider keeps the seat's spine) is out of scope here
+		if (upperBodyOnly)
+			assoc->MakeUpperBodyOnly(false);
+		return;
+	}
+	// The state the pose stood in for is over: fade the pose out. A fade that
+	// is already running is left alone.
+	if (assoc != nil && assoc->blendDelta >= 0.0f) {
+		assoc->flags |= ASSOC_DELETEFADEDOUT;
+		assoc->blendDelta = -8.0f;
+	}
+}
+
+void
+CPlayerPed::UpdateMovePoses(const SMoveSnapshot &snapshot)
+{
+	// The slide's stand-in: held by a crouching slide and by nothing else. The
+	// dive's own slide-out is prone and plays the landing pose below, so the
+	// crouch hold is not seated over it.
+	HoldMovePose(GetClump(), ASSOCGRP_STD, ANIM_STD_DUCK_LOW,
+		snapshot.state == MOVE_SLIDE && snapshot.stance != STANCE_PRONE, false);
+
+	// The dive and its landing: the prone block's own poses, the landing one
+	// the upper body's alone over the crawl.
+	{
+		AssocGroupId group = FindStanceAnimGroup(PRONE_ANIM_BLOCK, PRONE_AIM_GROUP, PRONE_AIM_POSES);
+
+		HoldMovePose(GetClump(), group, ANIM_PRONE_DIVE, snapshot.state == MOVE_DIVE, false);
+		HoldMovePose(GetClump(), group, ANIM_PRONE_LAND,
+			snapshot.state == MOVE_SLIDE && snapshot.stance == STANCE_PRONE, true);
 	}
 }
 
@@ -2132,10 +2187,15 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 	intent.hasInput = bMoving;
 	// The jump press is the jump's action edge and the crouch's stand-up
 	// trigger alike: the state rows have no row on it yet - the gates, the
-	// impulse and the state are VICE-182's, and the dive's edge arrives with
-	// VICE-181 - and the stance table reads it (VICE-176).
+	// impulse and the state are VICE-182's - and the stance table reads it
+	// (VICE-176).
 	intent.jumpRequested = padUsed->JumpJustDown();
-	intent.diveRequested = false;
+	// The dive's edge is the prone action with the feet off the ground
+	// (VICE-181): the one press lies the ped down on a surface (VICE-177) and
+	// dives with the feet off it. The check is the pad's own edge against the
+	// same bIsStanding the intent's onGround carries, so the two edges can
+	// never fire on the same frame.
+	intent.diveRequested = padUsed->ProneJustDown() && !bIsStanding;
 	// The crouch press is the momentary duck action, the same edge the stock
 	// duck reads (ProcessPlayerWeapon); it toggles the crouch stance (VICE-176)
 	// and, with the sprint tier, it is the slide's entry pair in this one frame
@@ -2157,8 +2217,9 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 		: true;
 
 	const SMoveSnapshot &snapshot = m_MoveSolver.Step(intent);
-	// The slide has no shipped cycle yet: its stand-in pose (VICE-180)
-	UpdateMoveStandInAnim(snapshot);
+	// The movement states' poses, in the one place they are seated: the slide's
+	// stand-in and the dive's and the landing's own (VICE-180, VICE-181)
+	UpdateMovePoses(snapshot);
 
 	// The mirror for the engine. The camera (Cam.cpp), the aim pose
 	// (HoldUpperBodyAimPose), the weapon spread (Weapon.cpp) and the idle

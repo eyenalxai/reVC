@@ -84,6 +84,26 @@
  *	   parity stream keeps the prone out of it for the same reason as the
  *	   crouch.
  *
+ *	J. The dive (VICE-181). The dive is the prone action with the feet off the
+ *	   ground, so its edge is the PED_PRONE edge against the grounded flag and
+ *	   the dive enters from the air and never from the ground. The row keeps
+ *	   the momentum the dive was entered with (a dive off a jump, a slide jump
+ *	   and a fall all carry their speed through it, bit for bit with the pad
+ *	   released) and steers the velocity direction at its own turn rate -
+ *	   twice the air's, a small authority against the ground's 12. The body's
+ *	   own yaw adds no rule: it is the engine's one (the body faces the camera
+ *	   in every view and TurnTargetPed sets it outright in the first person
+ *	   view), and the snapshot's spin reports the turn, so the dive spins with
+ *	   the look and the solver only reads the facing in and reports the turn
+ *	   out. The feet touching the ground land the dive in the slide - the
+ *	   slide-out, whose own row and step bleed the speed, so no curve is
+ *	   copied into the dive - and the stance rows of the touchdown put the
+ *	   body in the prone on the same frame. A wall or a head hit has no row:
+ *	   those triggers have no producer in the tree yet (the tests that read
+ *	   them arrive with the wall run), so the dive has no exit but the ground.
+ *	   The parity stream leaves the dive's edge off: the reference maths of
+ *	   VICE-172 has no dive.
+ *
  * Build and run (from the repository root; the structural check drives the
  * compiler and nm itself and writes its scratch files under /tmp/opencode):
  *
@@ -195,12 +215,17 @@ MakeIntent(void)
 	intent.hasInput = RngChance(80);
 	intent.tier = !RngChance(40) ? TIER_WALK : RngChance(50) ? TIER_RUN : TIER_SPRINT;
 	intent.jumpRequested = RngChance(10);
-	intent.diveRequested = RngChance(10);
+	/* The dive's own edge stays off: the reference maths of VICE-172 has no
+	 * dive, so a stream that entered it could not be compared. The dive's own
+	 * checks drive the edge by hand (10, VICE-181), and the finiteness sweep
+	 * sets it for its own slice. */
+	intent.diveRequested = false;
 	/* The slide's entry pair, the prone request and the stance's edges stay off:
 	 * the parity reference of VICE-172 has no slide and no stance row, so a
 	 * stream that entered either could not be compared. The slide's own checks
 	 * drive the pair by hand (7, VICE-180), the stance has its own section (8,
-	 * VICE-176), and the finiteness sweep sets them for its own slice. */
+	 * VICE-176) and the dive its own (10, VICE-181), and the finiteness sweep
+	 * sets them for its own slice. */
 	intent.crouchRequested = false;
 	intent.proneRequested = false;
 	intent.sprintRequested = false;
@@ -1029,18 +1054,21 @@ CheckDeterminism(void)
 static tMoveStateRow g_plantStates[MOVE_NUMSTATES];
 static tMoveLadderRow g_plantLadder[TIER_NUM];
 static tMoveStanceRow g_plantStances[STANCE_NUM];
-static tMoveTransitionRow g_plantTransitions[7];
-static tMoveStanceTransitionRow g_plantStanceTransitions[15];
+static tMoveTransitionRow g_plantTransitions[8];
+static tMoveStanceTransitionRow g_plantStanceTransitions[17];
 
-/* The module's own slide and prone numbers (PlayerMoveSolver.cpp), so the
- * planted set is a copy of the real one: the two speeds the slide's guards
- * name and the prone row - the crawl as a share of the walk, the half turn and
- * the signed capsule top of the set that hangs below the origin (VICE-177). */
+/* The module's own slide, prone and dive numbers (PlayerMoveSolver.cpp), so
+ * the planted set is a copy of the real one: the two speeds the slide's guards
+ * name, the prone row - the crawl as a share of the walk, the half turn and
+ * the signed capsule top of the set that hangs below the origin (VICE-177) -
+ * and the dive's own acceleration and turn rate (VICE-181). */
 #define PLANT_SLIDE_ENTRY_SPEED	0.18f
 #define PLANT_SLIDE_EXIT_SPEED	0.13f
 #define PRONE_SPEED_SCALE	0.4f
 #define PRONE_TURN_SCALE	0.5f
 #define PRONE_CAPSULE_HEIGHT	-0.44f
+#define PLANT_DIVE_ACCEL	(2.0f / 50.0f)
+#define PLANT_DIVE_TURN_RATE	3.2f
 
 static SMoveTables
 PlantSet(void)
@@ -1065,6 +1093,17 @@ PlantSet(void)
 	g_plantStates[MOVE_SLIDE].boostDecay = 8.0f / 50.0f;
 	g_plantStates[MOVE_SLIDE].inputScale = 0.0f;
 	g_plantStates[MOVE_SLIDE].flags = MOVEFLAG_STEER_INPUT;
+
+	/* the dive's row as the module carries it (VICE-181): the low air control,
+	 * no friction (the row keeps its momentum; the slide's curve does the
+	 * bleeding on the landing), twice the air's turn rate and no boost */
+	g_plantStates[MOVE_DIVE].accel = PLANT_DIVE_ACCEL;
+	g_plantStates[MOVE_DIVE].friction = 0.0f;
+	g_plantStates[MOVE_DIVE].turnRate = PLANT_DIVE_TURN_RATE;
+	g_plantStates[MOVE_DIVE].entryBoost = 0.0f;
+	g_plantStates[MOVE_DIVE].boostDecay = 0.0f;
+	g_plantStates[MOVE_DIVE].inputScale = 1.0f;
+	g_plantStates[MOVE_DIVE].flags = MOVEFLAG_STEER_INPUT | MOVEFLAG_KEEP_MOMENTUM;
 
 	for (int i = 0; i < TIER_NUM; i++) {
 		g_plantLadder[i].tier = (eMoveTier)i;
@@ -1108,46 +1147,57 @@ PlantSet(void)
 	g_plantTransitions[6].from = MOVE_SLIDE; g_plantTransitions[6].trigger = TRIGGER_LAND;
 	g_plantTransitions[6].to = MOVE_GROUND; g_plantTransitions[6].onEntryEvent = 0;
 	g_plantTransitions[6].guard = GUARD_SPEED_BELOW; g_plantTransitions[6].guardSpeed = PLANT_SLIDE_EXIT_SPEED;
+	/* the dive's landing row (VICE-181): the entry row of the air above is the
+	 * planted set's own (index 3), and this row lands the dive in the
+	 * slide-out with the speed carried, no guard and no reset */
+	g_plantTransitions[7].from = MOVE_DIVE; g_plantTransitions[7].trigger = TRIGGER_LAND;
+	g_plantTransitions[7].to = MOVE_SLIDE; g_plantTransitions[7].onEntryEvent = EVENT_LANDED;
+	g_plantTransitions[7].guard = GUARD_NONE; g_plantTransitions[7].guardSpeed = 0.0f;
 
-	/* the stance moves of the module's own table (VICE-176, VICE-177), the
-	 * sprint's own gate row, the prone's entries and exits and the headroom
-	 * refusals included */
-	g_plantStanceTransitions[0].from = STANCE_STAND; g_plantStanceTransitions[0].trigger = TRIGGER_SPRINT;
-	g_plantStanceTransitions[0].to = STANCE_STAND;
-	g_plantStanceTransitions[1].from = STANCE_STAND; g_plantStanceTransitions[1].trigger = TRIGGER_CROUCH;
-	g_plantStanceTransitions[1].to = STANCE_CROUCH;
-	g_plantStanceTransitions[2].from = STANCE_STAND; g_plantStanceTransitions[2].trigger = TRIGGER_PRONE;
-	g_plantStanceTransitions[2].to = STANCE_PRONE;
-	g_plantStanceTransitions[3].from = STANCE_CROUCH; g_plantStanceTransitions[3].trigger = TRIGGER_HEADROOM_BLOCKED;
-	g_plantStanceTransitions[3].to = STANCE_CROUCH;
-	g_plantStanceTransitions[4].from = STANCE_CROUCH; g_plantStanceTransitions[4].trigger = TRIGGER_CROUCH;
-	g_plantStanceTransitions[4].to = STANCE_STAND;
-	g_plantStanceTransitions[5].from = STANCE_CROUCH; g_plantStanceTransitions[5].trigger = TRIGGER_SPRINT;
-	g_plantStanceTransitions[5].to = STANCE_STAND;
-	g_plantStanceTransitions[6].from = STANCE_CROUCH; g_plantStanceTransitions[6].trigger = TRIGGER_JUMP;
+	/* the stance moves of the module's own table (VICE-176, VICE-177,
+	 * VICE-181), in its order: the dive's touchdown rows first in the stand's
+	 * and the crouch's groups, the sprint's own gate row, the prone's entries
+	 * and exits and the headroom refusals included */
+	g_plantStanceTransitions[0].from = STANCE_STAND; g_plantStanceTransitions[0].trigger = TRIGGER_DIVE_LAND;
+	g_plantStanceTransitions[0].to = STANCE_PRONE;
+	g_plantStanceTransitions[1].from = STANCE_STAND; g_plantStanceTransitions[1].trigger = TRIGGER_SPRINT;
+	g_plantStanceTransitions[1].to = STANCE_STAND;
+	g_plantStanceTransitions[2].from = STANCE_STAND; g_plantStanceTransitions[2].trigger = TRIGGER_CROUCH;
+	g_plantStanceTransitions[2].to = STANCE_CROUCH;
+	g_plantStanceTransitions[3].from = STANCE_STAND; g_plantStanceTransitions[3].trigger = TRIGGER_PRONE;
+	g_plantStanceTransitions[3].to = STANCE_PRONE;
+	g_plantStanceTransitions[4].from = STANCE_CROUCH; g_plantStanceTransitions[4].trigger = TRIGGER_DIVE_LAND;
+	g_plantStanceTransitions[4].to = STANCE_PRONE;
+	g_plantStanceTransitions[5].from = STANCE_CROUCH; g_plantStanceTransitions[5].trigger = TRIGGER_HEADROOM_BLOCKED;
+	g_plantStanceTransitions[5].to = STANCE_CROUCH;
+	g_plantStanceTransitions[6].from = STANCE_CROUCH; g_plantStanceTransitions[6].trigger = TRIGGER_CROUCH;
 	g_plantStanceTransitions[6].to = STANCE_STAND;
-	g_plantStanceTransitions[7].from = STANCE_CROUCH; g_plantStanceTransitions[7].trigger = TRIGGER_EXIT_VEHICLE;
+	g_plantStanceTransitions[7].from = STANCE_CROUCH; g_plantStanceTransitions[7].trigger = TRIGGER_SPRINT;
 	g_plantStanceTransitions[7].to = STANCE_STAND;
-	g_plantStanceTransitions[8].from = STANCE_CROUCH; g_plantStanceTransitions[8].trigger = TRIGGER_PRONE;
-	g_plantStanceTransitions[8].to = STANCE_PRONE;
-	g_plantStanceTransitions[9].from = STANCE_PRONE; g_plantStanceTransitions[9].trigger = TRIGGER_HEADROOM_BLOCKED;
-	g_plantStanceTransitions[9].to = STANCE_PRONE;
-	g_plantStanceTransitions[10].from = STANCE_PRONE; g_plantStanceTransitions[10].trigger = TRIGGER_PRONE;
-	g_plantStanceTransitions[10].to = STANCE_STAND;
-	g_plantStanceTransitions[11].from = STANCE_PRONE; g_plantStanceTransitions[11].trigger = TRIGGER_CROUCH;
-	g_plantStanceTransitions[11].to = STANCE_CROUCH;
-	g_plantStanceTransitions[12].from = STANCE_PRONE; g_plantStanceTransitions[12].trigger = TRIGGER_SPRINT;
+	g_plantStanceTransitions[8].from = STANCE_CROUCH; g_plantStanceTransitions[8].trigger = TRIGGER_JUMP;
+	g_plantStanceTransitions[8].to = STANCE_STAND;
+	g_plantStanceTransitions[9].from = STANCE_CROUCH; g_plantStanceTransitions[9].trigger = TRIGGER_EXIT_VEHICLE;
+	g_plantStanceTransitions[9].to = STANCE_STAND;
+	g_plantStanceTransitions[10].from = STANCE_CROUCH; g_plantStanceTransitions[10].trigger = TRIGGER_PRONE;
+	g_plantStanceTransitions[10].to = STANCE_PRONE;
+	g_plantStanceTransitions[11].from = STANCE_PRONE; g_plantStanceTransitions[11].trigger = TRIGGER_HEADROOM_BLOCKED;
+	g_plantStanceTransitions[11].to = STANCE_PRONE;
+	g_plantStanceTransitions[12].from = STANCE_PRONE; g_plantStanceTransitions[12].trigger = TRIGGER_PRONE;
 	g_plantStanceTransitions[12].to = STANCE_STAND;
-	g_plantStanceTransitions[13].from = STANCE_PRONE; g_plantStanceTransitions[13].trigger = TRIGGER_JUMP;
-	g_plantStanceTransitions[13].to = STANCE_STAND;
-	g_plantStanceTransitions[14].from = STANCE_PRONE; g_plantStanceTransitions[14].trigger = TRIGGER_EXIT_VEHICLE;
+	g_plantStanceTransitions[13].from = STANCE_PRONE; g_plantStanceTransitions[13].trigger = TRIGGER_CROUCH;
+	g_plantStanceTransitions[13].to = STANCE_CROUCH;
+	g_plantStanceTransitions[14].from = STANCE_PRONE; g_plantStanceTransitions[14].trigger = TRIGGER_SPRINT;
 	g_plantStanceTransitions[14].to = STANCE_STAND;
+	g_plantStanceTransitions[15].from = STANCE_PRONE; g_plantStanceTransitions[15].trigger = TRIGGER_JUMP;
+	g_plantStanceTransitions[15].to = STANCE_STAND;
+	g_plantStanceTransitions[16].from = STANCE_PRONE; g_plantStanceTransitions[16].trigger = TRIGGER_EXIT_VEHICLE;
+	g_plantStanceTransitions[16].to = STANCE_STAND;
 
 	t.states = g_plantStates; t.numStates = MOVE_NUMSTATES;
 	t.ladder = g_plantLadder; t.numLadder = TIER_NUM;
 	t.stances = g_plantStances; t.numStances = STANCE_NUM;
-	t.transitions = g_plantTransitions; t.numTransitions = 7;
-	t.stanceTransitions = g_plantStanceTransitions; t.numStanceTransitions = 15;
+	t.transitions = g_plantTransitions; t.numTransitions = 8;
+	t.stanceTransitions = g_plantStanceTransitions; t.numStanceTransitions = 17;
 	return t;
 }
 
@@ -1182,7 +1232,7 @@ CheckTables(void)
 	Check(seen[MOVE_GROUND] > 0 && seen[MOVE_AIR] > 0,
 		"the phase 0 stream uses the ground and the air");
 	Check(seen[MOVE_SLIDE] == 0 && seen[MOVE_DIVE] == 0,
-		"the parity stream enters neither the slide (its pair is off, VICE-180) nor the dive");
+		"the parity stream enters neither the slide (its pair is off, VICE-180) nor the dive (its edge is off, VICE-181)");
 	Check(bad == 0 && offStance == 0,
 		"the state is always one of the four and the stance is the one of phase 0");
 	printf("  the states of the sweep: ground %d, air %d, slide %d, dive %d\n",
@@ -1239,10 +1289,18 @@ CheckTables(void)
 			"a slide exit without the exit speed is refused");
 		REJECTS(g_plantTransitions[6].guardSpeed = PLANT_SLIDE_ENTRY_SPEED,
 			"a slide exit speed at or above its entry speed is refused");
-		REJECTS(g_plantStanceTransitions[2].to = STANCE_NUM,
+		REJECTS(g_plantTransitions[3].to = MOVE_GROUND,
+			"a dive without its entry row is refused");
+		REJECTS(g_plantTransitions[7].trigger = TRIGGER_AIRBORNE,
+			"a dive without its landing row is refused");
+		REJECTS(g_plantTransitions[7].to = MOVE_GROUND,
+			"a dive whose landing is not the slide-out is refused");
+		REJECTS(g_plantStanceTransitions[3].to = STANCE_NUM,
 			"a stance move to a stance out of range is refused");
-		REJECTS(g_plantStanceTransitions[2].trigger = 0,
+		REJECTS(g_plantStanceTransitions[3].trigger = 0,
 			"a stance move trigger out of range is refused");
+		REJECTS(g_plantStanceTransitions[0].to = STANCE_STAND,
+			"a dive whose landing does not enter the prone is refused");
 	}
 }
 
@@ -1254,9 +1312,10 @@ CheckTables(void)
 
 /*
  * The event bits are VICE-173's list and VICE-171's transition rows raise them:
- * a landing raises EVENT_LANDED once, and no other bit fires in phase 0. The
- * rows that carry the jump, the dive and the wall events wait for the states
- * they move to (VICE-181, VICE-182), and the jump counter is VICE-182's.
+ * a landing raises EVENT_LANDED once, the dive's landing raises it once too
+ * (VICE-181, section 10), and no other bit fires. The row that carries the jump
+ * event waits for the state it moves to (VICE-182), and the jump counter is
+ * VICE-182's. The wall and the head bits wait for the tests that read them.
  */
 static void
 CheckEvents(void)
@@ -1306,8 +1365,9 @@ CheckEvents(void)
 		Check(otherBits == 0, "no other event bit is raised in phase 0");
 	}
 
-	/* the jump and the dive edges: no reader in phase 0, so they change
-	 * nothing (the jump counter arrives with VICE-182) */
+	/* the jump edge: no row reads it yet, so it changes nothing over the mixed
+	 * ground and air stream (the gates, the impulse and the jump counter arrive
+	 * with VICE-182) */
 	{
 		CPlayerMoveSolver quiet, edged;
 		SMoveVec2 liveQuiet = { 0.7f, 0.2f };
@@ -1323,6 +1383,31 @@ CheckEvents(void)
 			intentEdged = intentQuiet;
 			intentEdged.vel = liveEdged;
 			intentEdged.jumpRequested = true;
+			const SMoveSnapshot &snapshotQuiet = quiet.Step(intentQuiet);
+			const SMoveSnapshot &snapshotEdged = edged.Step(intentEdged);
+			liveQuiet = snapshotQuiet.moved;
+			liveEdged = snapshotEdged.moved;
+			if (!SameSnapshot(snapshotQuiet, snapshotEdged))
+				edgeDiffs++;
+		}
+		Check(edgeDiffs == 0, "the jump edge changes no output: the row arrives with VICE-182");
+	}
+
+	/* the dive's edge is an air action (VICE-181): with the feet on the ground
+	 * it changes nothing, and its own entry from the air is section 10's */
+	{
+		CPlayerMoveSolver quiet, edged;
+		SMoveVec2 liveQuiet = { 0.7f, 0.2f };
+		SMoveVec2 liveEdged = { 0.7f, 0.2f };
+		int edgeDiffs = 0;
+
+		for (int i = 0; i < EVENT_STREAM_STEPS; i++) {
+			SMoveIntent intentQuiet = WalkIntent(0.25f, 0.3f);
+			SMoveIntent intentEdged;
+
+			intentQuiet.vel = liveQuiet;
+			intentEdged = intentQuiet;
+			intentEdged.vel = liveEdged;
 			intentEdged.diveRequested = true;
 			const SMoveSnapshot &snapshotQuiet = quiet.Step(intentQuiet);
 			const SMoveSnapshot &snapshotEdged = edged.Step(intentEdged);
@@ -1331,11 +1416,11 @@ CheckEvents(void)
 			if (!SameSnapshot(snapshotQuiet, snapshotEdged))
 				edgeDiffs++;
 		}
-		Check(edgeDiffs == 0, "the jump and the dive edges change no output in phase 0");
+		Check(edgeDiffs == 0, "the dive's edge with the feet on the ground changes no output: the dive is an air action");
 	}
 
-	printf("  the landings in the stream raise no bit yet, and the jump counter does not exist\n");
-	printf("  the jump counter and the air extensions arrive with VICE-182\n");
+	printf("  every landing raises the landing bit exactly once; the jump's own bit waits for VICE-182\n");
+	printf("  and the dive's edge is an air action: the ground reads nothing from it\n");
 }
 
 /* ---------------------------------------------------------------------- *
@@ -1364,10 +1449,12 @@ CheckFiniteness(void)
 			intent.vel = SMoveVec2{ RngFloat(-10.0f, 10.0f), RngFloat(-10.0f, 10.0f) };
 			// the slide's entry pair and the prone request, so the slide's
 			// own outputs and the low stances' rows are covered too
-			// (VICE-180, VICE-176, VICE-177)
+			// (VICE-180, VICE-176, VICE-177), the dive's own edge as well
+			// (VICE-181): the dive and its slide-out are driven here
 			intent.tier = (i % 4) == 0 ? TIER_SPRINT : intent.tier;
 			intent.crouchRequested = (i % 4) == 0;
 			intent.proneRequested = (i % 8) == 0;
+			intent.diveRequested = (i % 8) == 4;
 			const SMoveSnapshot &snapshot = solver.Step(intent);
 			if (!SnapshotIsFinite(snapshot)) {
 				if (bad < 3) {
@@ -1382,8 +1469,8 @@ CheckFiniteness(void)
 	Check(bad == 0, "every output is finite for dt {0, 1/50, 1/10}, the pad's extreme and the zero input");
 	printf("  %d steps: dt {0, 1/50, 1/10} x the targets {0, 2/60, 2, 0.3} x the input and its\n",
 		(int)ARRAY_COUNT(aDt) * FINITE_STEPS);
-	printf("  absence, over the ground, the air, the steep slope, the slide, the crouch and the\n");
-	printf("  prone: every velocity, moved, speed, heading, turn scale and capsule finite\n");
+	printf("  absence, over the ground, the air, the steep slope, the slide, the crouch, the prone\n");
+	printf("  and the dive: every velocity, moved, speed, heading, turn scale and capsule finite\n");
 }
 
 /* ---------------------------------------------------------------------- *
@@ -2035,7 +2122,6 @@ CheckProneEdges(void)
 	 *     edge lifts him into the crouch */
 	{
 		CPlayerMoveSolver solver;
-		SMoveIntent intent = WalkIntent(0.0f, 0.3f);
 
 		(void)solver.Step(ProneIntent(0.0f, 0.3f));
 		Check(solver.Step(CrouchIntent(0.0f, 0.3f)).stance == STANCE_CROUCH, "the Duck edge lifts the prone into the crouch");
@@ -2153,6 +2239,470 @@ CheckProne(void)
 }
 
 /* ---------------------------------------------------------------------- *
+ * 10. the dive (VICE-181)
+ * ---------------------------------------------------------------------- */
+
+/*
+ * The dive is the prone action with the feet off the ground: its edge enters it
+ * from the air alone (the adapter reads the PED_PRONE edge against the grounded
+ * flag, so the two edges can never fire on one frame), its row keeps the
+ * momentum it was entered with and steers the velocity direction at its own
+ * small authority, the feet touching the ground land it in the slide - the
+ * slide-out, whose own row and step bleed the speed, so no curve is copied into
+ * the dive - and the stance rows of that touchdown put the body in the prone.
+ * The body's own yaw adds no rule of its own: the engine's one rule turns the
+ * body to the camera in every view (TurnTargetPed sets it outright in the first
+ * person view), and the snapshot's spin is that turn - so the dive spins with
+ * the look and the solver only reads the facing in and reports the turn out. A
+ * wall or a head hit has no row: those triggers have no producer in the tree
+ * yet (the tests that read them arrive with the wall run), so the dive's only
+ * exit is the ground. The digits below are the module's dive row
+ * (PlayerMoveSolver.cpp, moveStateRows); the harness pins them so a table edit
+ * cannot pass unnoticed, exactly as the slide's and the prone's sections do.
+ */
+
+#define DIVE_ACCEL		(2.0f / 50.0f)	/* the dive row: half the air's own air control */
+#define DIVE_TURN_RATE		3.2f		/* the dive row: twice the air's own authority */
+#define AIR_TURN_RATE		1.6f		/* the air row: the authority the dive is measured against */
+#define DIVE_SPRINT_SPEED	(14.668f / MOVE_ENGINE_UNITS_PER_SECOND)	/* sprint_civi, the dive's carried case */
+
+/* The air step of the dive section: the walk intent with the feet off the
+ * ground, so the dive's edge has the state it needs (VICE-181). */
+static SMoveIntent
+AirIntent(float heading, float targetSpeed)
+{
+	SMoveIntent intent = WalkIntent(heading, targetSpeed);
+
+	intent.onGround = false;
+	return intent;
+}
+
+/* One step into the dive: the fall's own frame (the row the feet leaving the
+ * ground enters) and then the frame the dive's edge rides. The pad is released,
+ * so the fall's velocity crosses the two frames bit for bit. */
+static SMoveSnapshot
+StepIntoDive(CPlayerMoveSolver *pSolver, float heading, float targetSpeed, SMoveVec2 velocity)
+{
+	SMoveIntent intent = AirIntent(heading, targetSpeed);
+
+	intent.facing = heading;
+	intent.hasInput = false;
+	intent.vel = velocity;
+	(void)pSolver->Step(intent);	/* the frame the feet leave the ground: the air's row */
+	intent.diveRequested = true;
+	return pSolver->Step(intent);
+}
+
+/* Put a solver in the air: the one frame the feet leaving the ground takes, the
+ * row the dive's own checks read the state from. */
+static void
+PrimeAir(CPlayerMoveSolver *pSolver)
+{
+	SMoveIntent intent = AirIntent(0.0f, 0.0f);
+
+	intent.hasInput = false;
+	intent.vel = SMoveVec2{ 0.0f, 0.0f };
+	(void)pSolver->Step(intent);
+}
+
+/* The entry: the air plus the dive's own edge enters the dive in one frame,
+ * whatever the direction the ped falls in and whatever way it faces (the row
+ * reads neither), the entry carries the fall's velocity bit for bit, the stance
+ * stays where it is (the body lies down on the landing, not in the air), the
+ * ground refuses the edge, and the dive holds while the feet are off the
+ * ground: only the ground ends it. */
+static void
+CheckDiveEntry(void)
+{
+	/* (a) the entry, at four directions and facings, in one frame */
+	for (int i = 0; i < 4; i++) {
+		CPlayerMoveSolver solver;
+		float heading = -3.0f + 1.9f * (float)i;
+		SMoveIntent intent = AirIntent(heading, 0.3f);
+		SMoveVec2 fall = SMoveVec2{ -sinf(heading) * 0.25f, cosf(heading) * 0.25f };
+		SMoveSnapshot snapshot;
+
+		/* no input, so the entry's own row does not touch the speed and the
+		 * velocity that lands is bit for bit the fall's */
+		intent.facing = 3.0f - 1.9f * (float)i;
+		intent.hasInput = false;
+		intent.vel = fall;
+		snapshot = solver.Step(intent);	/* the frame the feet leave the ground: the air */
+		Check(snapshot.state == MOVE_AIR, "the ped falls before the dive: the air's own frame");
+		intent.diveRequested = true;
+		snapshot = solver.Step(intent);
+		Check(snapshot.state == MOVE_DIVE, "the air plus the dive edge enters the dive in one frame");
+		Check(snapshot.moved.x == fall.x && snapshot.moved.y == fall.y,
+			"the dive's entry carries the fall's velocity bit for bit, whatever the direction and the facing");
+		Check(snapshot.stance == STANCE_STAND,
+			"the dive's entry keeps the stance: the body lies down on the landing, not in the air");
+	}
+
+	/* (b) the ground: the dive is an air action, so its edge with the feet on
+	 *     the ground enters nothing (the prone's own ground rule is VICE-177's) */
+	{
+		CPlayerMoveSolver solver;
+		SMoveIntent intent = WalkIntent(0.0f, 0.3f);
+
+		intent.diveRequested = true;
+		intent.vel = SMoveVec2{ 0.0f, 0.2f };
+		Check(solver.Step(intent).state == MOVE_GROUND,
+			"the dive's edge with the feet on the ground does not enter the dive");
+	}
+
+	/* (c) the dive holds while the feet are off the ground: a stream of falling
+	 *     frames, the look and the pad moving, the jump edge pressing (its rows
+	 *     are VICE-182's) - nothing moves the state but the ground */
+	{
+		CPlayerMoveSolver solver;
+		SMoveIntent intent = AirIntent(0.0f, 0.3f);
+		int leaves = 0;
+
+		(void)StepIntoDive(&solver, 0.0f, 0.3f, SMoveVec2{ 0.0f, 0.25f });
+		for (int i = 0; i < 60; i++) {
+			intent.facing = 0.1f * (float)i;
+			intent.hasInput = (i % 3) != 2;
+			intent.jumpRequested = (i % 9) == 4;
+			intent.vel = solver.GetSnapshot().moved;
+			if (solver.Step(intent).state != MOVE_DIVE)
+				leaves++;
+		}
+		Check(leaves == 0, "the dive holds while the feet are off the ground: only the ground ends it");
+	}
+}
+
+/* The speed carried: the dive keeps the speed it was entered with (with the pad
+ * released, bit for bit; with the pad held the row's own low air control is the
+ * air's), and the entry off a fall, a jump and a slide jump all carry theirs -
+ * the slide jump's all the way from the slide's own speed. */
+static void
+CheckDiveCarriedSpeed(void)
+{
+	/* (a) off a fall: the velocity is the fall's, bit for bit, for the whole
+	 *     dive */
+	{
+		CPlayerMoveSolver solver;
+		SMoveSnapshot snapshot = StepIntoDive(&solver, 0.0f, 0.3f, SMoveVec2{ 0.0f, 0.25f });
+		SMoveIntent intent = AirIntent(0.0f, 0.3f);
+		SMoveVec2 entered = snapshot.moved;
+
+		intent.hasInput = false;
+		for (int i = 0; i < 30 && snapshot.state == MOVE_DIVE; i++) {
+			intent.vel = snapshot.moved;
+			snapshot = solver.Step(intent);
+		}
+		Check(snapshot.state == MOVE_DIVE, "the fall's dive is still diving after thirty frames");
+		Check(snapshot.moved.x == entered.x && snapshot.moved.y == entered.y,
+			"the dive keeps the fall's velocity bit for bit while the feet are off the ground");
+	}
+
+	/* (b) off a slide jump: the slide's speed crosses the jump, the dive and
+	 *     the landing without a reset - a dive off the fastest launch there is */
+	{
+		CPlayerMoveSolver solver;
+		SMoveIntent intent = WalkIntent(0.0f, SLIDE_SPRINT_SPEED);
+		SMoveSnapshot snapshot = StepIntoSlide(&solver);
+		float slideSpeed;
+
+		snapshot = StepSlideAt(&solver, snapshot.moved.y);
+		slideSpeed = snapshot.speed;
+		intent.tier = TIER_SPRINT;
+		intent.jumpRequested = true;
+		intent.vel = SMoveVec2{ 0.0f, slideSpeed };
+		snapshot = solver.Step(intent);
+		Check(snapshot.state == MOVE_AIR && snapshot.speed == slideSpeed,
+			"the slide jump carries the slide's speed into the air");
+
+		intent.jumpRequested = false;
+		intent.onGround = false;
+		intent.hasInput = false;
+		intent.diveRequested = true;
+		intent.vel = snapshot.moved;
+		snapshot = solver.Step(intent);
+		Check(snapshot.state == MOVE_DIVE && snapshot.speed == slideSpeed,
+			"a dive off the slide jump carries the slide's speed through the dive");
+
+		/* the feet touch: the slide-out's own row is what touches the speed,
+		 * and its entry boost only lifts the head */
+		intent.diveRequested = false;
+		intent.onGround = true;
+		intent.vel = snapshot.moved;
+		{
+			float diveSpeed = snapshot.speed;
+
+			snapshot = solver.Step(intent);
+			Check(snapshot.state == MOVE_SLIDE,
+				"the slide-jump dive's landing enters the slide-out: the slide's own machinery");
+			Check(snapshot.stance == STANCE_PRONE, "the slide-jump dive lands prone");
+			Check(snapshot.speed >= diveSpeed,
+				"the landing starts from the dive's speed: the slide's own entry boost only adds");
+			Check(snapshot.speed > SLIDE_SPRINT_SPEED, "the dive-out is faster than the sprint's own speed");
+		}
+	}
+
+	/* (c) the row's own numbers, against the reference maths: the dive's step is
+	 *     the air's branch with the dive's acceleration and turn rate, and the
+	 *     dive's authority sits between the air's small one and the ground's 12 */
+	{
+		const float dt = 1.0f / 50.0f;
+		const float heading = -1.5707963267948966f;	/* -PI / 2: the move direction is (1, 0) */
+		const float targetSpeed = 0.05f;
+		SMoveVec2 velocity = { 0.0f, 0.3f };
+		SMoveVec2 moveDirection = { -sinf(heading), cosf(heading) };
+		CPlayerMoveSolver diveSolver, airSolver, slowSolver;
+		SMoveIntent dive = AirIntent(heading, targetSpeed);
+		SMoveIntent air = AirIntent(heading, targetSpeed);
+		SMoveIntent slow = AirIntent(heading, targetSpeed);
+		SMoveVec2 diveGot, airGot, slowGot, want;
+		float diveTurn, airTurn;
+
+		/* the solvers are in the state their row is read from first: the dive's
+		 * own entry frame and the air's first frame */
+		(void)StepIntoDive(&diveSolver, heading, targetSpeed, SMoveVec2{ 0.0f, 0.0f });
+		(void)StepIntoDive(&slowSolver, heading, targetSpeed, SMoveVec2{ 0.0f, 0.0f });
+		PrimeAir(&airSolver);
+
+		dive.vel = velocity;
+		air.vel = velocity;
+		diveGot = diveSolver.Step(dive).moved;
+		airGot = airSolver.Step(air).moved;
+
+		/* the dive: the steer at the row's own rate and nothing else - the
+		 * speed is above the target, so no air control runs */
+		want = RefSteerVelocityTowards(velocity, moveDirection, DIVE_TURN_RATE * dt);
+		Check(diveGot.x == want.x && diveGot.y == want.y,
+			"the dive's step steers at the dive row's own rate, bit for bit against the reference maths");
+
+		want = RefSteerVelocityTowards(velocity, moveDirection, AIR_TURN_RATE * dt);
+		Check(airGot.x == want.x && airGot.y == want.y,
+			"the air's step steers at the air row's own rate: the dive's number is the dive's own");
+
+		/* the authority as the angle actually turned: above the air's small one,
+		 * below the ground's own */
+		diveTurn = fabsf(RefLimitRadianAngle(atan2f(diveGot.y, diveGot.x) - atan2f(velocity.y, velocity.x)));
+		airTurn = fabsf(RefLimitRadianAngle(atan2f(airGot.y, airGot.x) - atan2f(velocity.y, velocity.x)));
+		Check(diveTurn > airTurn && diveTurn < 12.0f * dt,
+			"the dive's authority sits between the air's and the ground's");
+		printf("  one step's turn: the dive %.6f rad, the air %.6f rad, the ground's own %.6f rad\n",
+			diveTurn, airTurn, 12.0f * dt);
+
+		/* the row's low air control: a dive slower than the target is sped up
+		 * toward it at the dive's own rate, the air's branch maths bit for bit */
+		{
+			SMoveVec2 slowSpeed = { 0.0f, 0.02f };
+			SMoveVec2 target = { moveDirection.x * targetSpeed, moveDirection.y * targetSpeed };
+
+			slow.vel = slowSpeed;
+			slowGot = slowSolver.Step(slow).moved;
+			want = RefMoveVelocityTowards(RefSteerVelocityTowards(slowSpeed, moveDirection, DIVE_TURN_RATE * dt),
+				target, DIVE_ACCEL * dt);
+			Check(slowGot.x == want.x && slowGot.y == want.y,
+				"a slow dive is pushed toward the target at the dive row's own low acceleration");
+		}
+	}
+}
+
+/* The yaw: the body's turn is the engine's one rule (the body faces the camera
+ * in every view, and TurnTargetPed sets the yaw outright in the first person
+ * view), so the dive adds no rotation rule - the snapshot's spin is the facing
+ * delta of the step in every state, and a reader that adds the spins up holds
+ * the body's yaw. The look's own stream here turns and wraps past PI, so the
+ * delta is the wrapped one the spin is built from. */
+static void
+CheckDiveSpin(void)
+{
+	CPlayerMoveSolver diveSolver, groundSolver;
+	SMoveIntent dive = AirIntent(0.0f, 0.3f);
+	SMoveIntent ground = WalkIntent(0.0f, 0.3f);
+	float facing = 0.0f, previous = 0.0f;
+	int diveDiffs = 0, groundDiffs = 0;
+
+	/* both solvers see the same facing stream from the same frame: the dive
+	 * entered at facing 0, the ground's own first step also at facing 0 */
+	dive.vel = SMoveVec2{ 0.0f, 0.25f };
+	(void)StepIntoDive(&diveSolver, 0.0f, 0.3f, dive.vel);
+	ground.vel = SMoveVec2{ 0.0f, 0.25f };
+	(void)groundSolver.Step(ground);
+
+	for (int i = 0; i < 60; i++) {
+		float delta;
+
+		/* the look turns at a constant rate and wraps: a body that faces the
+		 * camera crosses the half turn without a snap */
+		facing += 0.25f;
+		if (facing > 3.0f)
+			facing -= 6.28f;
+		delta = RefLimitRadianAngle(facing - previous);
+		previous = facing;
+
+		dive.facing = facing;
+		dive.vel = SMoveVec2{ 0.0f, 0.25f };
+		if (diveSolver.Step(dive).spin != delta)
+			diveDiffs++;
+		ground.facing = facing;
+		ground.vel = SMoveVec2{ 0.0f, 0.25f };
+		if (groundSolver.Step(ground).spin != delta)
+			groundDiffs++;
+	}
+	Check(diveDiffs == 0,
+		"the dive's spin is the facing delta of the step, bit for bit: the solver reports the body's turn and adds none");
+	Check(groundDiffs == 0,
+		"the ground's spin is the same facing delta: the state adds no rotation rule");
+	printf("  the look turned 60 frames and wrapped: the dive's spin and the ground's are the one facing delta\n");
+}
+
+/* The landing: the feet touching the ground leave the dive for the slide - the
+ * slide-out, whose own row and step bleed the speed - and the stance rows of
+ * the touchdown put the body in the prone on the same frame. The slide-out
+ * decays with the slide's own curve, its own exit ends it and the body is prone
+ * on the ground when it does. */
+static void
+CheckDiveLanding(void)
+{
+	CPlayerMoveSolver solver;
+	SMoveIntent intent = AirIntent(0.0f, 0.3f);
+	SMoveSnapshot snapshot = StepIntoDive(&solver, 0.0f, 0.3f, SMoveVec2{ 0.0f, DIVE_SPRINT_SPEED });
+	float diveSpeed = snapshot.speed;
+	float previous, exitIn = 0.0f;
+	int frames = 0, rises = 0;
+
+	Check(snapshot.state == MOVE_DIVE, "the dive holds while the feet are off the ground");
+	Check(snapshot.stance == STANCE_STAND, "the dive keeps the standing stance in the air");
+
+	/* the feet touch: the slide-out and the prone, in the one frame */
+	intent.vel = snapshot.moved;
+	intent.onGround = true;
+	snapshot = solver.Step(intent);
+	Check(snapshot.state == MOVE_SLIDE,
+		"the dive's feet touching the ground land it in the slide-out: the slide's own row and step");
+	Check(snapshot.stance == STANCE_PRONE,
+		"the same frame's stance rows lie the body down: the dive's touchdown is the prone entry");
+	Check((snapshot.events & EVENT_LANDED) != 0, "the dive's landing raises the landing event once");
+	Check(snapshot.speed >= diveSpeed, "the landing starts from the speed the dive had");
+
+	/* the slide-out: the slide's own curve, its own exit speed and the prone
+	 * at the end of it */
+	previous = snapshot.speed;
+	while (frames < 600 && snapshot.state == MOVE_SLIDE) {
+		float own = snapshot.speed;
+
+		intent.vel = snapshot.moved;
+		snapshot = solver.Step(intent);
+		frames++;
+		if (snapshot.state != MOVE_SLIDE) {
+			exitIn = own;
+			break;
+		}
+		if (snapshot.speed > previous + 1e-6f)
+			rises++;
+		previous = snapshot.speed;
+	}
+	Check(frames < 600, "the dive's slide-out reaches its exit: it does not run forever");
+	Check(rises == 0, "the dive's slide-out decays monotonically with the slide's own curve");
+	Check(exitIn < SLIDE_EXIT_SPEED, "the slide-out's exit fires below the slide's own exit speed");
+	Check(snapshot.state == MOVE_GROUND, "the dive's slide-out ends on the ground");
+	Check(snapshot.stance == STANCE_PRONE,
+		"the body is prone when the slide-out ends: a dive reaches the prone on landing");
+	printf("  the dive at %.5f landed and slid out over %d frames, ending on a step of %.5f below %.2f\n",
+		diveSpeed, frames, exitIn, SLIDE_EXIT_SPEED);
+}
+
+/* The exits: the state leaves the dive on the ground alone (a wall and a head
+ * hit have no rows - those triggers have no producer in the tree yet), and the
+ * slide-out's own exits are the slide's: the jump leaves for the air with its
+ * speed, and the prone request ends it on the ground with the prone's own
+ * toggle standing the body up (VICE-177). */
+static void
+CheckDiveExits(void)
+{
+	/* (a) the jump out of the dive-out: the slide's own row, and the air keeps
+	 *     the speed the slide-out had */
+	{
+		CPlayerMoveSolver solver;
+		SMoveIntent intent = AirIntent(0.0f, 0.3f);
+		SMoveSnapshot snapshot = StepIntoDive(&solver, 0.0f, 0.3f, SMoveVec2{ 0.0f, DIVE_SPRINT_SPEED });
+		float outSpeed;
+
+		intent.vel = snapshot.moved;
+		intent.onGround = true;
+		snapshot = solver.Step(intent);
+		outSpeed = snapshot.speed;
+		Check(snapshot.state == MOVE_SLIDE && snapshot.stance == STANCE_PRONE,
+			"the dive-out holds the body prone before the jump");
+
+		intent.jumpRequested = true;
+		intent.vel = snapshot.moved;
+		snapshot = solver.Step(intent);
+		Check(snapshot.state == MOVE_AIR, "the jump leaves the dive-out for the air");
+		Check(snapshot.speed == outSpeed, "the dive-out's jump carries its speed into the air, bit for bit");
+		Check(snapshot.stance == STANCE_STAND,
+			"the jump stands the prone body up: the prone's own jump rule (VICE-177) applies to the dive-out too");
+	}
+
+	/* (b) the prone request: the slide-out ends on the ground and the prone's
+	 *     own edge stands the body up (the toggle, VICE-177) */
+	{
+		CPlayerMoveSolver solver;
+		SMoveIntent intent = AirIntent(0.0f, 0.3f);
+		SMoveSnapshot snapshot = StepIntoDive(&solver, 0.0f, 0.3f, SMoveVec2{ 0.0f, DIVE_SPRINT_SPEED });
+
+		intent.vel = snapshot.moved;
+		intent.onGround = true;
+		snapshot = solver.Step(intent);
+		Check(snapshot.state == MOVE_SLIDE && snapshot.stance == STANCE_PRONE, "the dive-out holds the body prone");
+
+		intent.proneRequested = true;
+		intent.vel = snapshot.moved;
+		snapshot = solver.Step(intent);
+		Check(snapshot.state == MOVE_GROUND, "a prone request ends the dive-out on the ground");
+		Check(snapshot.stance == STANCE_STAND,
+			"the prone's own edge stands the body up: the request is the toggle it is on the ground");
+	}
+}
+
+/* The dive's own determinism: two solvers driven with the same dive stream -
+ * the entry, the turn, the landing and the slide-out - agree field for field,
+ * the slide-out's entry boost between the frames included. */
+static void
+CheckDiveDeterminism(void)
+{
+	CPlayerMoveSolver first, second;
+	SMoveVec2 liveFirst = SMoveVec2{ 0.0f, 0.25f };
+	SMoveVec2 liveSecond = SMoveVec2{ 0.0f, 0.25f };
+	int diffs = 0;
+
+	for (int i = 0; i < DETERMINISM_STEPS; i++) {
+		SMoveIntent intent = AirIntent(0.0f, 0.3f);
+		SMoveSnapshot a, b;
+
+		if (i > 0 && !SameSnapshot(first.GetSnapshot(), second.GetSnapshot()))
+			diffs++;
+		intent.facing = 0.07f * (float)i;
+		intent.diveRequested = (i == 5);
+		intent.onGround = i >= 30;
+		intent.hasInput = (i % 2) == 0;
+		intent.vel = liveFirst;
+		a = first.Step(intent);
+		intent.vel = liveSecond;
+		b = second.Step(intent);
+		liveFirst = a.moved;
+		liveSecond = b.moved;
+	}
+	Check(diffs == 0, "two solvers driven with the same dive stream agree field for field");
+}
+
+static void
+CheckDive(void)
+{
+	CheckDiveEntry();
+	CheckDiveCarriedSpeed();
+	CheckDiveSpin();
+	CheckDiveLanding();
+	CheckDiveExits();
+	CheckDiveDeterminism();
+}
+
+/* ---------------------------------------------------------------------- *
  * main
  * ---------------------------------------------------------------------- */
 
@@ -2187,6 +2737,8 @@ main(void)
 	CheckStance();
 	printf("\n== 9. the prone (VICE-177): the crawl row, the ground entry, the low ladder and the headroom\n");
 	CheckProne();
+	printf("\n== 10. the dive (VICE-181): the entry, the spin, the landing and the slide-out\n");
+	CheckDive();
 
 	printf("\nRESULT: %s (%d checks, %d failures)\n",
 		g_failures == 0 ? "every check passed" : "FAILURES", g_checks, g_failures);

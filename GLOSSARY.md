@@ -178,17 +178,35 @@ transition table decides the moves between them. The ground state moves the
 velocity toward the target speed, turns the direction and slows the ped down with
 the friction. The air state keeps the momentum and steers with a smaller
 authority. The slide state adds its entry boost and its friction curve. The dive
-state is the air state with the prone stance.
+state (VICE-181) is the prone action with the feet off the ground: it keeps the
+momentum it was entered with and steers it with an authority of its own.
 
 ## Movement trigger
 
 The bit one step collects for the transition table: a fact of the step (the feet
-are on a surface, the feet are off it) or an action edge (jump, dive, the crouch
-press at the sprint tier, the prone request). The wall contact, the wall left
-and the head hit wait for the states that move on them. The step collects its
-bits once and the transition rows are scanned in their priority order over that
-one mask, so a move is a row and never a branch. A row may also carry a guard: a
-threshold of the step's speed the row reads beside its trigger bit.
+are on a surface, the feet are off it, the dive's own feet touching the ground)
+or an action edge (jump, dive, the crouch press at the sprint tier, the prone
+request). The wall contact, the wall left and the head hit wait for the states
+that move on them. The step collects its bits once and the transition rows are
+scanned in their priority order over that one mask, so a move is a row and never
+a branch. A row may also carry a guard: a threshold of the step's speed the row
+reads beside its trigger bit.
+
+## Dive (on foot)
+
+The movement solver's airborne state for the prone action: the PED_PRONE edge
+with the feet off the ground (so one press lies the body down on a surface and
+dives off it). The state row keeps the momentum the dive was entered with - a
+dive off a jump, a slide jump or a fall carries that launch's speed, bit for bit
+with the pad released - and steers the direction at its own turn rate, twice the
+air's own small authority, so the look aims the dive while the body's own yaw
+stays the engine's one rule (the body faces the camera in every view). The
+dive's feet touching the ground enter the slide state - the slide-out - so the
+slide's own row and friction curve bleed the speed and the curve is never copied
+into the dive, and the stance rows of the touchdown put the body in the prone on
+the same frame. The presentation plays the prone block's `prone_dive` pose over
+the fall and its `prone_land` pose over the crawl of the slide-out
+(`CPlayerPed::UpdateMovePoses`).
 
 ## Slide (on foot)
 
@@ -210,10 +228,12 @@ the crouch hold (`CPlayerPed::UpdateMoveStandInAnim`).
 ## Movement stand-in pose
 
 The shipped pose a movement state plays while the content for that state does
-not exist: the slide plays the low crouch hold (`ANIM_STD_DUCK_LOW`), which is
-the pose the stock duck leaves behind and the crouch fire does not use. One
-function of the presentation holds it, the state's end fades it, and the
-authored cycle deletes the one call (VICE-180).
+not exist, and the authored pose it plays when the content does: the slide plays
+the low crouch hold (`ANIM_STD_DUCK_LOW`), which is the pose the stock duck
+leaves behind and the crouch fire does not use, and the dive and its landing
+play the prone block's `prone_dive` and `prone_land` poses (VICE-181). One
+function of the presentation holds them, the state's end fades them, and the
+authored slide cycle deletes the one stand-in call (VICE-180).
 
 ## Stance
 

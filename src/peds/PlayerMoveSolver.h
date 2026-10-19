@@ -24,14 +24,14 @@
 #define MOVE_ENGINE_UNITS_PER_SECOND	50.0f
 
 // The states of the solver: one row per state in moveStateRows
-// (PlayerMoveSolver.cpp). The ground, the air and the slide (VICE-180) are
-// live; the dive row is present and its numbers arrive with VICE-181.
+// (PlayerMoveSolver.cpp). The ground, the air, the slide (VICE-180) and the
+// dive (VICE-181) all carry their numbers.
 enum eMoveStateId
 {
 	MOVE_GROUND,		// the feet are on a surface
 	MOVE_AIR,		// in the air: keep the momentum, steer a little
 	MOVE_SLIDE,		// the sprint's crouch press: the slide, a low friction and a high turn rate
-	MOVE_DIVE,		// planned: the dive
+	MOVE_DIVE,		// the prone request in the air: keep the momentum, steer it with the look
 	MOVE_NUMSTATES,
 };
 
@@ -74,13 +74,14 @@ enum eMoveReport
 
 // The triggers of the transition table: the bits one step collects once and
 // the rows then scan in their priority order. The ground and the air facts, the
-// action edges the states move on, and the stance's own edges (the crouch, the
-// sprint and the exit-vehicle press, and the headroom refusal) are here; the
-// wall triggers have no state to move to yet (the wall run arrives later).
+// action edges the states move on, the stance's own edges (the crouch, the
+// sprint and the exit-vehicle press, and the headroom refusal) and the dive's
+// touchdown (VICE-181) are here; the wall triggers have no state to move to yet
+// (the wall run arrives later).
 enum eMoveTrigger
 {
 	TRIGGER_JUMP = 1,		// the jump action edge
-	TRIGGER_DIVE = 2,		// the dive action edge
+	TRIGGER_DIVE = 2,		// the dive action edge: the prone action with the feet off the ground (VICE-181)
 	TRIGGER_SLIDE = 4,		// the slide's entry: the crouch action edge at the sprint tier (VICE-180)
 	TRIGGER_LAND = 8,		// the feet are on a surface this step
 	TRIGGER_AIRBORNE = 16,		// the feet are off a surface this step
@@ -92,6 +93,7 @@ enum eMoveTrigger
 	TRIGGER_EXIT_VEHICLE = 1024,	// the exit-vehicle press: it stands the crouch up
 	TRIGGER_HEADROOM_BLOCKED = 2048,	// the body cannot rise here: every stand-up holds (VICE-178's test)
 	TRIGGER_PRONE = 4096,		// the prone action edge: a ground action, it toggles the prone and ends the slide
+	TRIGGER_DIVE_LAND = 8192,	// the dive's feet touching the ground: the dive's own prone entry (VICE-181)
 };
 
 // The flags of one state row: what the shared step does for the state.
@@ -122,9 +124,9 @@ enum eMoveContact
 	CONTACT_HEAD = 4,	// the head touches an obstacle above
 };
 
-// The row of the state table: what one eMoveStateId moves with. The ground, the
-// air and the slide (VICE-180) rows carry their numbers; the dive row is
-// present and waits for VICE-181.
+// The row of the state table: what one eMoveStateId moves with. Every row
+// carries its numbers: the ground, the air, the slide (VICE-180) and the dive
+// (VICE-181).
 struct tMoveStateRow
 {
 	float accel;		// engine units per second squared
@@ -251,7 +253,7 @@ struct SMoveIntent
 	bool hasInput;		// the pad moves the ped this frame (the controller's bMoving)
 	eMoveTier tier;		// the rung of the ladder the pad asks for
 	bool jumpRequested;	// the jump press: the jump action edge (VICE-182) and the stance's stand-up (VICE-176)
-	bool diveRequested;	// no reader in phase 0; VICE-181
+	bool diveRequested;	// the dive action edge: the prone action with the feet off the ground (VICE-181)
 	// The crouch action edge (the pad's momentary duck press, CPad::DuckJustDown).
 	// It toggles the crouch stance (VICE-176) and, with the sprint tier, it is
 	// the slide's entry pair: the sprint press and the crouch press in one
@@ -264,7 +266,8 @@ struct SMoveIntent
 	bool headroomClear;	// CPed::IsHeadroomClear (VICE-178): the body can rise here
 	// The prone action edge (PED_PRONE, V by default; VICE-175). A ground
 	// action: it lies the ped down (VICE-177) and ends the slide (VICE-180);
-	// with the feet off the ground it does nothing.
+	// with the feet off the ground the same press is the dive's edge
+	// (intent.diveRequested, VICE-181).
 	bool proneRequested;
 };
 
@@ -281,7 +284,7 @@ struct SMoveSnapshot
 	float targetSpeed;	// the speed the step targeted, engine units
 	eMoveTier tier;		// the tier the step moved at
 	SMoveVec2 facingDir;	// the input direction in the body frame: x forward, y side; (0, 0) with no input
-	float spin;		// the body turn of the step: the facing delta, radians, signed
+	float spin;		// the body turn of the step: the facing delta, radians, signed. The body yaw itself is the engine's one rule (the body faces the camera, TurnTargetPed in the first person view), so a reader adds the spins up to hold the yaw and the dive spins with the look (VICE-181)
 	uint32_t contacts;	// the eMoveContact bits of the step
 	float slope;		// the tilt of the slope the step saw from the horizontal, radians; 0 while flat
 	uint8_t surface;	// the eSurfaceType the step touched (SurfaceTable.h)
@@ -324,8 +327,9 @@ private:
 // The table check (VICE-171, PlayerMoveSolver.cpp): every state has a row,
 // every transition names a state in range and carries an in-range guard, the
 // ladder ascends with the slide's rungs above the sprint's, the slide has an
-// entry row and its exit guard names the exit speed, the stance rows are in
-// range and above the ground and every stance move names a stance and a
+// entry row and its exit guard names the exit speed, the dive enters from the
+// air, lands on the slide-out and lands prone (VICE-181), the stance rows are
+// in range and above the ground and every stance move names a stance and a
 // trigger. `why` names the broken rule when the check fails and may be null;
 // true means every table holds. The first reads the module's own tables (the
 // harness's entry point, VICE-172), the second the set the caller passes, so
