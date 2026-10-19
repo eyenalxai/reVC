@@ -59,6 +59,7 @@ public:
 	void GetComponentPosition(RwV3d &pos, uint32 node);
 	void RotateTorso(AnimBlendFrameData* animBlend, LimbOrientation* limb, bool changeRoll);
 	LimbMovementInfo &TorsoInfo(void);
+	bool SeatedInVehicle(void);
 	bool SeatedInCar(void);
 	void GetTorsoBendAxis(RwV3d &axis);
 	void RotateLean(RtQuat *q, const RwV3d &bendAxis);

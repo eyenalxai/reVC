@@ -63,14 +63,22 @@ CPedIK::RotateTorso(AnimBlendFrameData *node, LimbOrientation *limb, bool change
 LimbMovementInfo &
 CPedIK::TorsoInfo(void)
 {
-	return SeatedInCar() ? ms_seatTorsoInfo : ms_torsoInfo;
+	return SeatedInVehicle() ? ms_seatTorsoInfo : ms_torsoInfo;
 }
 
-// The player at the wheel of a car. A bike rider keeps the stock torso limits.
+// The player in any vehicle seat. The body heading is pinned to the seat, so
+// a rider turns the torso the same way a driver does.
+bool
+CPedIK::SeatedInVehicle(void)
+{
+	return m_ped->IsPlayer() && m_ped->InVehicle();
+}
+
+// The player at the wheel of a car. Only the car lean uses this.
 bool
 CPedIK::SeatedInCar(void)
 {
-	return m_ped->IsPlayer() && m_ped->InVehicle() && m_ped->m_pMyVehicle->IsCar();
+	return SeatedInVehicle() && m_ped->m_pMyVehicle->IsCar();
 }
 
 // The axis the torso pitches about, in the spine's frame
