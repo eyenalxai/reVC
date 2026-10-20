@@ -2239,7 +2239,7 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 	// The movement debug readout and the telemetry record (see
 	// MovementTelemetry.h); both are inert while the flag is off.
 	if (gMovementDebug)
-		CMovementTelemetry::Tick(snapshot);
+		CMovementTelemetry::Tick(intent, snapshot);
 
 	// The write-back: the snapshot is exactly what the ped keeps
 	m_vecMoveSpeed.x = snapshot.velocity.x;

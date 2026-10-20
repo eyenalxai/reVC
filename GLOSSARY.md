@@ -163,12 +163,33 @@ they cannot drift apart. It follows the drift snapshot pattern (ADR 0012).
 
 The module `src/peds/MovementTelemetry.*`. It writes the movement snapshot to
 `movement-telemetry.csv` while the movement debug flag is on, so a played session
-can be read back and replayed into the solver harness (VICE-172). The rows are
-the snapshot and nothing else: the game millisecond, the state, the stance, the
-speed and the target speed, the tier, the input direction in the body frame
-(forward and side), the body turn of the step, the surface, the slope and an
-event token. The game frame thread only appends text to a buffer; one writer
-thread owns the file. It changes nothing in the movement.
+can be read back and replayed into the solver harness (VICE-172, VICE-193). One
+row is one solver step: the snapshot the step returned and the intent the step
+consumed. The snapshot columns are the state, the stance, the speed and the
+target speed, the tier, the input direction in the body frame (forward and
+side), the body turn of the step, the contact bits, the surface, the slope and
+an event token. The intent columns are the frame time step, the velocity, the
+surface speed, the heading, the facing, the target speed, the tier, the
+surface, the slope normal and a flags mask for the ground and steep facts and
+the action edges. A state change and the step's events write extra rows that
+share the step number, and a live row lands for every step. The game frame
+thread only appends text to a buffer; one writer thread owns the file. It
+changes nothing in the movement. The columns and their masks live in
+`src/peds/MovementTelemetryFormat.h`, which the harness shares.
+
+## Movement telemetry replay
+
+The harness mode `movement-solver <file>` (`utils/movement-solver/harness.cpp`):
+it reads a movement telemetry CSV, steps one solver over the intent columns,
+and compares the state, the stance, the speed and the target with the snapshot
+columns. The rows of one step share the step number, so the solver steps once
+per distinct step and every row of it is compared with the same snapshot. It
+stops at the first divergent row and prints the row number; a step number that
+jumps is a gap the writer's drop count left, and the replay reports it as a
+divergence. The replay starts from the solver's reset state (ground, standing),
+so a session recorded from a standing start replays bit for bit. The harness's
+round-trip check writes a scripted session with every state and every stance,
+reads it back and requires the same rows.
 
 ## Movement state
 
