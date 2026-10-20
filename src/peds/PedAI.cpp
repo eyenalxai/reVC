@@ -970,19 +970,34 @@ CPed::ProcessObjective(void)
 										int chosenModel = CCarCtrl::ChooseModel(&zoneInfo, &chosenCarClass);
 										CVehicle *newVeh = nil;
 										if (chosenModel != -1) {
-											if (CModelInfo::IsBikeModel(chosenModel)) {
-												newVeh = new CBike(chosenModel, RANDOM_VEHICLE);
-											} else {
-												newVeh = new CAutomobile(chosenModel, RANDOM_VEHICLE);
-											}
+											/* The ped's self-car is a scenario actor: the
+											 * purpose SCENARIO, forced because a pedestrian
+											 * fetching a car cannot fail on a budget. The
+											 * service creates at the node, four metres up,
+											 * and inserts it; the door, the reference and
+											 * the objective follow. */
+											CVector nodePos = ThePaths.m_pathNodes[closestNode].GetPosition();
+											float heading = DEGTORAD(200.0f);
+											SSpawnExplicitRequest request;
+											request.purpose = SPAWN_PURPOSE_SCENARIO;
+											request.force = true;
+											request.carModel = chosenModel;
+											request.x = nodePos.x;
+											request.y = nodePos.y;
+											request.z = nodePos.z + 4.0f;
+											request.dirX = cosf(heading);
+											request.dirY = sinf(heading);
+											request.lifetimeMs = 0;
+											request.createdBy = 0;
+											request.ground = SPAWN_EXPLICIT_GROUND_EXACT;
+											request.groundProbeZ = 0.0f;
+											request.groundNoHitZ = 0.0f;
+											request.groundDummies = false;
+											request.clearSpace = false;
+											CSpawnService::RequestExplicit(request, &newVeh);
 										}
 										if (newVeh) {
-											newVeh->GetMatrix().GetPosition() = ThePaths.m_pathNodes[closestNode].GetPosition();
-											newVeh->GetMatrix().GetPosition().z += 4.0f;
-											newVeh->SetHeading(DEGTORAD(200.0f));
-											newVeh->SetStatus(STATUS_ABANDONED);
 											newVeh->m_nDoorLock = CARLOCK_UNLOCKED;
-											CWorld::Add(newVeh);
 											m_pMyVehicle = newVeh;
 											if (m_pMyVehicle) {
 												m_pMyVehicle->RegisterReference((CEntity **) &m_pMyVehicle);

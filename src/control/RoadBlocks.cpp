@@ -19,6 +19,39 @@
 #define ROADBLOCKDIST (90.0f)
 #define ROADBLOCK_OBJECT_WIDTH (4.0f)
 
+/*
+ * The roadblock car's tilt validity, the old PlaceOnRoadProperly check run
+ * before the car exists: the front and rear ground casts (buildings only, the
+ * constructor's map-height fallbacks are zero) and the cosine the car's up
+ * vector would take. The old path constructed the car, placed it on the road
+ * and deleted it when the tilt was too steep; the service inserts at once, so
+ * this precheck keeps the rejected spot out of the ledger and the pop-in
+ * count. The real PlaceOnRoadProperly still runs after the handle for the
+ * placement's own matrix; its check stays as the last-word guard.
+ */
+static bool
+RoadBlockTiltIsValid(const CVector &pos, const CVector &forward, int model)
+{
+	CColModel *colModel = CModelInfo::GetColModel(model);
+	float lenFwd = colModel->boundingBox.max.y;
+	float lenBack = -colModel->boundingBox.min.y;
+	CColPoint point;
+	CEntity *pEntity;
+	float frontZ = 0.0f, rearZ = 0.0f;
+	float angle;
+
+	CVector front(pos.x + forward.x * lenFwd, pos.y + forward.y * lenFwd, pos.z + 5.0f);
+	CVector rear(pos.x - forward.x * lenBack, pos.y - forward.y * lenBack, pos.z + 5.0f);
+	if (CWorld::ProcessVerticalLine(front, pos.z - 5.0f, point, pEntity,
+		true, false, false, false, false, false, nil))
+		frontZ = point.point.z;
+	if (CWorld::ProcessVerticalLine(rear, pos.z - 5.0f, point, pEntity,
+		true, false, false, false, false, false, nil))
+		rearZ = point.point.z;
+	angle = Atan((frontZ - rearZ) / (lenFwd + lenBack));
+	return Cos(angle) > 0.94f;
+}
+
 int16 CRoadBlocks::NumRoadBlocks;
 int16 CRoadBlocks::RoadBlockNodes[NUMROADBLOCKS];
 bool CRoadBlocks::InOrOut[NUMROADBLOCKS];
@@ -84,11 +117,32 @@ CRoadBlocks::GenerateRoadBlockCopsForCar(CVehicle* pVehicle, int32 roadBlockType
 		}
 		if (!CStreaming::HasModelLoaded(modelInfoId))
 			copType = COP_STREET;
-		CCopPed* pCopPed = new CCopPed(copType);
+		CPedPlacement::FindZCoorForPed(&posForZ);
+		/* The roadblock's crew is the police/wanted response: the POLICE
+		 * purpose, forced because the roadblock cannot fail on a budget. The
+		 * exact spot and heading are the old code's; the population's cop
+		 * constructor is the service's ped arm. */
+		SSpawnExplicitPedRequest request;
+		request.purpose = SPAWN_PURPOSE_POLICE;
+		request.force = true;
+		request.place = SPAWN_PED_PLACE_STANDING;
+		request.pedType = PEDTYPE_COP;
+		request.pedModel = copType;
+		request.modifier = 0;
+		request.x = posForZ.x;
+		request.y = posForZ.y;
+		request.z = posForZ.z;
+		request.heading = -HALFPI;
+		request.createdBy = 0;	/* a random character, the old constructor's class */
+		request.missionFlags = false;
+		request.vehicle = nil;
+		CCopPed* pCopPed;
+		CPed* pCreated;
+		if (!CSpawnService::RequestExplicitPed(request, &pCreated))
+			continue;
+		pCopPed = (CCopPed*)pCreated;
 		if (copType == COP_STREET)
 			pCopPed->SetCurrentWeapon(WEAPONTYPE_COLT45);
-		CPedPlacement::FindZCoorForPed(&posForZ);
-		pCopPed->SetPosition(posForZ);
 		pCopPed->SetOrientation(0.0f, 0.0f, -HALFPI);
 		pCopPed->m_bIsDisabledCop = true;
 		pCopPed->SetIdle();
@@ -106,7 +160,6 @@ CRoadBlocks::GenerateRoadBlockCopsForCar(CVehicle* pVehicle, int32 roadBlockType
 		pVehicle->RegisterReference((CEntity**)&pCopPed->m_pMyVehicle);
 		pCopPed->bCullExtraFarAway = true;
 		CVisibilityPlugins::SetClumpAlpha(pCopPed->GetClump(), 0);
-		CWorld::Add(pCopPed);
 	}
 }
 
@@ -235,35 +288,63 @@ CRoadBlocks::CreateRoadBlockBetween2Points(CVector point1, CVector point2)
 		int16 colliding = 0;
 		CWorld::FindObjectsKindaColliding(tmp.GetPosition(), fModelRadius, 0, &colliding, 2, nil, false, true, true, false, false);
 		if (!colliding) {
-			CAutomobile* pVehicle = new CAutomobile(vehicleId, RANDOM_VEHICLE);
-			pVehicle->SetStatus(STATUS_ABANDONED);
-			// pVehicle->GetHeightAboveRoad(); // called but return value is ignored?
+			/* The roadblock car is the police/wanted response: the POLICE
+			 * purpose, forced because the blockade cannot fail on a budget.
+			 * The service creates at the matrix's exact position and
+			 * heading; the tilt precheck above and the post-creation
+			 * PlaceOnRoadProperly are the old placement's own work. */
 			tmp.GetPosition().z += fModelRadius - 0.6f;
-			pVehicle->SetMatrix(tmp);
+			if (!RoadBlockTiltIsValid(tmp.GetPosition(), tmp.GetForward(), vehicleId))
+				continue;
+			SSpawnExplicitRequest request;
+			request.purpose = SPAWN_PURPOSE_POLICE;
+			request.force = true;
+			request.carModel = vehicleId;
+			request.x = tmp.GetPosition().x;
+			request.y = tmp.GetPosition().y;
+			request.z = tmp.GetPosition().z;
+			request.dirX = tmp.GetForward().x;
+			request.dirY = tmp.GetForward().y;
+			request.lifetimeMs = 0;
+			request.createdBy = 0;	/* the traffic's tag, the old constructor's */
+			request.ground = SPAWN_EXPLICIT_GROUND_EXACT;
+			request.groundProbeZ = 0.0f;
+			request.groundNoHitZ = 0.0f;
+			request.groundDummies = false;
+			request.clearSpace = false;
+			CVehicle* pCreated;
+			if (!CSpawnService::RequestExplicit(request, &pCreated))
+				continue;
+			CAutomobile* pVehicle = (CAutomobile*)pCreated;
 			pVehicle->PlaceOnRoadProperly();
-			pVehicle->SetIsStatic(false);
-			pVehicle->GetMatrix().UpdateRW();
-			pVehicle->m_nDoorLock = CARLOCK_UNLOCKED;
-			CCarCtrl::JoinCarWithRoadSystem(pVehicle);
-			pVehicle->bIsLocked = false;
-			pVehicle->AutoPilot.m_nCarMission = MISSION_NONE;
-			pVehicle->AutoPilot.m_nTempAction = TEMPACT_NONE;
-			pVehicle->AutoPilot.m_nNextLane = pVehicle->AutoPilot.m_nCurrentLane = 0;
-			pVehicle->AutoPilot.m_nCruiseSpeed = pVehicle->AutoPilot.m_fMaxTrafficSpeed = 0;
-			pVehicle->bExtendedRange = true;
-			if (pVehicle->UsesSiren() && CGeneral::GetRandomNumber() & 1)
-				pVehicle->m_bSirenOrAlarm = true;
 			if (pVehicle->GetUp().z > 0.94f) {
+				pVehicle->SetIsStatic(false);
+				pVehicle->GetMatrix().UpdateRW();
+				pVehicle->m_nDoorLock = CARLOCK_UNLOCKED;
+				CCarCtrl::JoinCarWithRoadSystem(pVehicle);
+				pVehicle->bIsLocked = false;
+				pVehicle->AutoPilot.m_nCarMission = MISSION_NONE;
+				pVehicle->AutoPilot.m_nTempAction = TEMPACT_NONE;
+				pVehicle->AutoPilot.m_nNextLane = pVehicle->AutoPilot.m_nCurrentLane = 0;
+				pVehicle->AutoPilot.m_nCruiseSpeed = pVehicle->AutoPilot.m_fMaxTrafficSpeed = 0;
+				pVehicle->bExtendedRange = true;
+				if (pVehicle->UsesSiren() && CGeneral::GetRandomNumber() & 1)
+					pVehicle->m_bSirenOrAlarm = true;
 				CVisibilityPlugins::SetClumpAlpha(pVehicle->GetClump(), 0);
-				CWorld::Add(pVehicle);
 				/* The blockade is created outside the traffic spawner (VICE-127):
-				 * counted apart, and never in the traffic's fill. */
-				CSpawnService::CountOtherCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
+				 * the service counted it apart, never in the traffic's fill. */
 				pVehicle->bCreateRoadBlockPeds = true;
 				pVehicle->m_nRoadblockType = DotProduct(pVehicle->GetRight(), pVehicle->GetPosition() - FindPlayerCoors()) >= 0.0f;
 				pVehicle->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + 7000;
 			}
 			else {
+				/* The precheck already rejected the steep spots; this is
+				 * the last-word guard (a floating-point disagreement with
+				 * the precheck). The old path deleted before the world
+				 * insert; the service has already inserted and counted it,
+				 * so this cleanup takes it back out. The car never draws:
+				 * the reject and the delete are in this call. */
+				CWorld::Remove(pVehicle);
 				delete pVehicle;
 			}
 		}

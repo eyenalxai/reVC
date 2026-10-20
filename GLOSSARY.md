@@ -1029,8 +1029,11 @@ carries three creation kinds: a **road-site placement** (the planner:
 candidates from the site index, filtered by purpose, the live zone, the
 occupancy store and the visibility ladder, ranked, reserved, then created by
 the primitive), an **explicit** creation (the exact position, model and
-lifetime given by a script or a mission: synchronous, no visibility and no
-ring, with a force bypass over the budgets and the reserves) and the **parked
+lifetime given by a script, a mission, a set piece or a special actor:
+synchronous, no visibility and no ring, with a force bypass over the budgets
+and the reserves, and the same-frame handle; the ped arm creates the roadblock
+and set piece cops, the accident's dead pedestrian and the scripts' characters
+through `CPopulation::AddPed`/`AddPedInCar`) and the **parked
 kind** (VICE-155: a car generator's own position and model with the spot's own
 validity - the blockage, the ground, the near bubble without rays - and the
 `PARKED_VEHICLE` tag; see the parked car entry). Every kind is counted. The
@@ -1044,6 +1047,17 @@ behind the service's ladder API (`CSpawnService::AllowsCreation`,
 `AllowsRemoval` and the counter notes), so no spawn decision outside
 `SpawnService.cpp` asks them directly. The ambient traffic is the first
 requester (`CCarCtrl::GenerateOneRandomCar`).
+
+Since VICE-158 the remaining direct creators are explicit requests with a
+purpose: the set pieces are MISSION, the roadblocks and their cops are POLICE
+(the wanted response), the garage restores, the cheats, the taxi shortcut, the
+RC car and the accident's dead pedestrian are SPECIAL, and the PedAI self-car
+is SCENARIO. Every one forces, because the old path could not fail on a
+scheduling decision (the creators' own guards - a model's residency, a
+collision, a tilt - stay and run around the request). No creator outside the
+service constructs a vehicle or a pedestrian: the vehicle primitive is
+`CCarCtrl::CreateCarFromPlacement` plus the explicit constructor, and the
+pedestrian primitive is `CPopulation::AddPed` (`AddPedInCar` for a seat).
 
 The service states its deltas from the old spawner, rather than hiding them:
 the plan's candidates are the sites whose **midpoint** is in the ring band,

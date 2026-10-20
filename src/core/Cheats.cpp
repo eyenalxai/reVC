@@ -258,21 +258,36 @@ void VehicleCheat(int model)
 		int32 node = ThePaths.FindNodeClosestToCoors(FindPlayerCoors(), PATH_CAR, 100.0f);
 		if (node < 0) return;
 
+		/* The cheat's car is a special actor: the purpose SPECIAL, forced so
+		 * a cheat cannot fail on a budget. The old path only checked the
+		 * model's load (above) and the node; the service owns the
+		 * constructor, the exact node position and heading, and the insert. */
+		CVector pos = ThePaths.m_pathNodes[node].GetPosition();
+		pos.z += 4.0f;
+		float heading = DEGTORAD(200.0f);
+		SSpawnExplicitRequest request;
+		request.purpose = SPAWN_PURPOSE_SPECIAL;
+		request.force = true;
+		request.carModel = model;
+		request.x = pos.x;
+		request.y = pos.y;
+		request.z = pos.z;
+		request.dirX = cosf(heading);
+		request.dirY = sinf(heading);
+		request.lifetimeMs = 0;
 #ifdef FIX_BUGS
-		CAutomobile* vehicle = new CAutomobile(model, RANDOM_VEHICLE);
+		request.createdBy = 0;	/* the traffic's tag, the old FIX_BUGS constructor's */
 #else
-		CAutomobile* vehicle = new CAutomobile(model, MISSION_VEHICLE);
+		request.createdBy = SPAWN_VEHICLE_TAG_MISSION;
 #endif
-		if (vehicle != nil) {
-			CVector pos = ThePaths.m_pathNodes[node].GetPosition();
-			pos.z += 4.0f;
-			vehicle->SetPosition(pos);
-			vehicle->SetOrientation(0.0f, 0.0f, DEGTORAD(200.0f));
-
-			vehicle->SetStatus(STATUS_ABANDONED);
+		request.ground = SPAWN_EXPLICIT_GROUND_EXACT;
+		request.groundProbeZ = 0.0f;
+		request.groundNoHitZ = 0.0f;
+		request.groundDummies = false;
+		request.clearSpace = false;
+		CVehicle* vehicle;
+		if (CSpawnService::RequestExplicit(request, &vehicle)) {
 			vehicle->m_nDoorLock = CARLOCK_UNLOCKED;
-			CWorld::Add(vehicle);
-			CSpawnService::CountOtherCreation(vehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 		}
 	}
 	CStats::CheatedCount += 1000;

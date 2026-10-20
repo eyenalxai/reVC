@@ -472,11 +472,34 @@ CGameLogic::UpdateShortCut()
 			CStreaming::RequestModel(MI_KAUFMAN, 0);
 			return;
 		}
-		pShortCutTaxi = new CAutomobile(MI_KAUFMAN, RANDOM_VEHICLE);
-		if (!pShortCutTaxi)
-			return;
-		pShortCutTaxi->SetPosition(ShortCutStart);
-		pShortCutTaxi->SetHeading(DEGTORAD(ShortCutStartOrientation));
+		/* The taxi shortcut is a special actor: the purpose SPECIAL, forced
+		 * because the shortcut cannot fail on a budget. The service creates
+		 * with the traffic's tag and clears the spot before the insert (the
+		 * old SetUpDriver below refuses a car that is not RANDOM, so the
+		 * mission tag follows the driver, the old order). */
+		{
+			float heading = DEGTORAD(ShortCutStartOrientation);
+			SSpawnExplicitRequest request;
+			request.purpose = SPAWN_PURPOSE_SPECIAL;
+			request.force = true;
+			request.carModel = MI_KAUFMAN;
+			request.x = ShortCutStart.x;
+			request.y = ShortCutStart.y;
+			request.z = ShortCutStart.z;
+			request.dirX = cosf(heading);
+			request.dirY = sinf(heading);
+			request.lifetimeMs = 0;
+			request.createdBy = 0;	/* the traffic's tag; the mission tag follows the driver */
+			request.ground = SPAWN_EXPLICIT_GROUND_EXACT;
+			request.groundProbeZ = 0.0f;
+			request.groundNoHitZ = 0.0f;
+			request.groundDummies = false;
+			request.clearSpace = true;
+			CVehicle* pTaxi;
+			if (!CSpawnService::RequestExplicit(request, &pTaxi))
+				return;
+			pShortCutTaxi = (CAutomobile*)pTaxi;
+		}
 		pShortCutTaxi->PlaceOnRoadProperly();
 		pShortCutTaxi->SetStatus(STATUS_PHYSICS);
 		pShortCutTaxi->AutoPilot.m_nCarMission = MISSION_STOP_FOREVER;
@@ -485,9 +508,6 @@ CGameLogic::UpdateShortCut()
 		pShortCutTaxi->VehicleCreatedBy = MISSION_VEHICLE;
 		++CCarCtrl::NumMissionCars;
 		--CCarCtrl::NumRandomCars;
-		CTheScripts::ClearSpaceForMissionEntity(ShortCutStart, pShortCutTaxi);
-		CWorld::Add(pShortCutTaxi);
-		CSpawnService::CountOtherCreation(pShortCutTaxi->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 		CRadar::SetEntityBlip(BLIP_CAR, CPools::GetVehiclePool()->GetIndex(pShortCutTaxi), 0, BLIP_DISPLAY_MARKER_ONLY);
 		ShortCutState = SHORTCUT_IDLE;
 		break;

@@ -12,13 +12,32 @@
 void
 CRemote::GivePlayerRemoteControlledCar(float x, float y, float z, float rot, uint16 model)
 {
-	CAutomobile *car = new CAutomobile(model, MISSION_VEHICLE);
-	bool found;
+	/* The RC car is a special actor: the purpose SPECIAL, forced so the
+	 * remote session cannot fail on a budget. The service creates at the
+	 * caller's spot with the model's base height over the ground (the old
+	 * GetDistanceFromCentreOfMassToBaseOfModel) and inserts it; the session's
+	 * own status, lock, route and engine setup follow. */
+	SSpawnExplicitRequest request;
+	request.purpose = SPAWN_PURPOSE_SPECIAL;
+	request.force = true;
+	request.carModel = model;
+	request.x = x;
+	request.y = y;
+	request.z = z;
+	request.dirX = cosf(rot);
+	request.dirY = sinf(rot);
+	request.lifetimeMs = 0;
+	request.createdBy = SPAWN_VEHICLE_TAG_MISSION;
+	request.ground = SPAWN_EXPLICIT_GROUND_BASE;
+	request.groundProbeZ = z + 2.0f;
+	request.groundNoHitZ = 0.0f;
+	request.groundDummies = false;
+	request.clearSpace = false;
+	CVehicle *created;
+	if (!CSpawnService::RequestExplicit(request, &created))
+		return;
+	CAutomobile *car = (CAutomobile*)created;
 
-	z = car->GetDistanceFromCentreOfMassToBaseOfModel() + CWorld::FindGroundZFor3DCoord(x, y, z + 2.0f, &found);
-
-	car->GetMatrix().SetRotateZOnly(rot);
-	car->SetPosition(x, y, z);
 	car->SetStatus(STATUS_PLAYER_REMOTE);
 	car->bIsLocked = true;
 
@@ -29,8 +48,6 @@ CRemote::GivePlayerRemoteControlledCar(float x, float y, float z, float rot, uin
 	car->AutoPilot.m_nCruiseSpeed = car->AutoPilot.m_fMaxTrafficSpeed = 9.0f;
 	car->AutoPilot.m_nNextLane = car->AutoPilot.m_nCurrentLane = 0;
 	car->bEngineOn = true;
-	CWorld::Add(car);
-	CSpawnService::CountOtherCreation(car->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 	if (FindPlayerVehicle() != nil) 
 		FindPlayerVehicle()->SetStatus(STATUS_PLAYER_DISABLED);
 

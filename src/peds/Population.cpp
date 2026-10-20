@@ -886,6 +886,10 @@ CPopulation::PedCreationDistMultiplier()
 	return Clamp(vehSpeed - 0.1f + 1.0f, 1.0f, 1.5f);
 }
 
+/* The pedestrian creation primitive (VICE-158): the spawn service's explicit
+ * ped arm and the population's own paths call this one constructor switch. A
+ * creator outside this file requests through CSpawnService::RequestExplicitPed;
+ * it does not construct a ped itself. */
 CPed*
 CPopulation::AddPed(ePedType pedType, uint32 miOrCopType, CVector const &coors, int32 modifier)
 {
@@ -1690,7 +1694,29 @@ CPopulation::AddDeadPedInFrontOfCar(const CVector& pos, CVehicle* pCulprit)
 	z = Max(z, pos.z);
 	if (!CModelInfo::GetModelInfo(MI_MALE01)->GetRwObject())
 		return nil;
-	CPed* pPed = CPopulation::AddPed(PEDTYPE_CIVMALE, MI_MALE01, pos);
+	/* The accident's dead pedestrian is a special actor: the purpose SPECIAL
+	 * (the caller is the ambient accident, not a mission), forced because
+	 * the accident cannot fail on a budget. The service's ped arm calls the
+	 * population's own primitive, so the civilian's weapon policy and setup
+	 * stay the old AddPed's; the request carries the caller's position
+	 * unchanged (the old AddPed call passed `pos`, not the ground-resolved z). */
+	SSpawnExplicitPedRequest request;
+	request.purpose = SPAWN_PURPOSE_SPECIAL;
+	request.force = true;
+	request.place = SPAWN_PED_PLACE_STANDING;
+	request.pedType = PEDTYPE_CIVMALE;
+	request.pedModel = MI_MALE01;
+	request.modifier = 0;
+	request.x = pos.x;
+	request.y = pos.y;
+	request.z = pos.z;
+	request.heading = 0.0f;
+	request.createdBy = 0;		/* a random character, the old AddPed's class */
+	request.missionFlags = false;
+	request.vehicle = nil;
+	CPed* pPed;
+	if (!CSpawnService::RequestExplicitPed(request, &pPed))
+		return nil;
 	pPed->SetDie();
 	pPed->m_nPedMoney = 0;
 	pPed->bDeadPedInFrontOfCar = true;

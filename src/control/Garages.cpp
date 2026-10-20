@@ -1862,22 +1862,32 @@ CVehicle* CStoredCar::RestoreCar()
 	{
 		CVehicleModelInfo::SetComponentsToUse(m_nVariationA, m_nVariationB);
 	}
+	/* The garage's stored car is a special actor: the purpose SPECIAL, forced
+	 * because the old restore could not fail on a budget (only on the model's
+	 * residency, kept above). The service creates at the stored position and
+	 * heading and inserts the car; the garage's own paint, radio, bomb and
+	 * proof state are the post-creation setup below. */
+	SSpawnExplicitRequest request;
+	request.purpose = SPAWN_PURPOSE_SPECIAL;
+	request.force = true;
+	request.carModel = m_nModelIndex;
+	request.x = m_vecPos.x;
+	request.y = m_vecPos.y;
+	request.z = m_vecPos.z;
+	request.dirX = m_vecAngle.x;
+	request.dirY = m_vecAngle.y;
+	request.lifetimeMs = 0;
+	request.createdBy = 0;		/* the traffic's tag: the old restore's RANDOM_VEHICLE */
+	request.ground = SPAWN_EXPLICIT_GROUND_EXACT;
+	request.groundProbeZ = 0.0f;
+	request.groundNoHitZ = 0.0f;
+	request.groundDummies = false;
+	request.clearSpace = false;
 	CVehicle* pVehicle;
-	if (CModelInfo::IsBoatModel(m_nModelIndex))
-		pVehicle = new CBoat(m_nModelIndex, RANDOM_VEHICLE);
-	else if (CModelInfo::IsBikeModel(m_nModelIndex))
-	{
-		CBike* pBike = new CBike(m_nModelIndex, RANDOM_VEHICLE);
-		pBike->bIsStanding = true;
-		pVehicle = pBike;
-	}
-	else
-		pVehicle = new CAutomobile(m_nModelIndex, RANDOM_VEHICLE);
-	pVehicle->SetPosition(m_vecPos);
-	pVehicle->SetStatus(STATUS_ABANDONED);
-	pVehicle->GetForward() = m_vecAngle;
-	pVehicle->GetRight() = CVector(m_vecAngle.y, -m_vecAngle.x, 0.0f);
-	pVehicle->GetUp() = CVector(0.0f, 0.0f, 1.0f);
+	if (!CSpawnService::RequestExplicit(request, &pVehicle))
+		return nil;
+	if (pVehicle->IsBike())
+		((CBike*)pVehicle)->bIsStanding = true;
 	pVehicle->pDriver = nil;
 	pVehicle->m_currentColour1 = m_nPrimaryColor;
 	pVehicle->m_currentColour2 = m_nSecondaryColor;
@@ -1932,11 +1942,9 @@ bool CGarage::RestoreCarsForThisHideout(CStoredCar* aCars)
 		if (aCars[i].HasCar()) {
 			CVehicle* pVehicle = aCars[i].RestoreCar();
 			if (pVehicle) {
-				CWorld::Add(pVehicle);
-				/* The stored car comes out of the garage (VICE-127): a car
-				 * created outside the traffic spawner, counted apart and
+				/* The stored car comes out of the garage (VICE-127): the
+				 * service's explicit kind inserted it and counted it apart,
 				 * never in the traffic's fill. */
-				CSpawnService::CountOtherCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 				aCars[i].Clear();
 			}
 		}

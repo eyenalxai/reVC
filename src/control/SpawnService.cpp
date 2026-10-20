@@ -10,9 +10,12 @@
 #include "General.h"
 #include "ModelIndices.h"
 #include "ModelInfo.h"
+#include "Ped.h"
 #include "PlayerInfo.h"
 #include "Pools.h"
+#include "Population.h"
 #include "PopulationBudget.h"
+#include "Script.h"
 #include "SpawnReadiness.h"
 #include "Streaming.h"
 #include "Timer.h"
@@ -23,7 +26,7 @@
 #include "Zones.h"
 
 /*
- * The engine side of the spawn service (VICE-150). The planner, the two
+ * The engine side of the spawn service (VICE-150). The planner, the three
  * creation kinds and the primitive's decisions live in SpawnService.h (the
  * engine-free core) and in CCarCtrl::CreateCarFromPlacement (CarCtrl.cpp);
  * this file is the frame's half:
@@ -38,6 +41,9 @@
  *				the primitive used to pay per creation;
  *	the attempt		the per-site model resolution (the ambient's
  *				water fallback, verbatim) and the primitive;
+ *	the explicit kind	the constructor, the ground facts and the world
+ *				insert for the exact creators; the ped arm creates
+ *				through CPopulation::AddPed/AddPedInCar;
  *	the ladder API		the near bubble's gates and counters, so every
  *				spawn decision goes through this class (the
  *				counters stay CCarCtrl's own);
@@ -73,6 +79,7 @@ static_assert(sizeof(SSpawnServiceTelemetry) == 232, "the telemetry's size is th
  * parked tag is the engine's PARKED_VEHICLE: the game counts the car in
  * NumParkedCars and the parked path never calls SetUpDriver. */
 static_assert(SPAWN_VEHICLE_TAG_RANDOM == RANDOM_VEHICLE, "the random tag must be the engine's own");
+static_assert(SPAWN_VEHICLE_TAG_MISSION == MISSION_VEHICLE, "the mission tag must be the engine's own");
 static_assert(SPAWN_VEHICLE_TAG_PARKED == PARKED_VEHICLE, "the parked tag must be the engine's own");
 
 /*
@@ -355,81 +362,156 @@ CSpawnService::RequestCar(const SSpawnCarRequest &request, CVehicle **ppCreated)
 		&ms_Telemetry, request.purpose) == SPAWN_REFUSAL_NONE;
 }
 
+static CVehicle *SpawnCreateExplicitCar(void *user, const SSpawnExplicitRequest &request,
+	SSpawnExplicitWorld *world, ESpawnRefusal *refusal);
+static void SpawnPlaceExplicitCar(void *user, CVehicle *pVehicle, const SSpawnExplicitDecision &decision);
+static CPed *SpawnCreateExplicitPed(void *user, const SSpawnExplicitPedRequest &request,
+	ESpawnRefusal *refusal);
+
 bool
 CSpawnService::RequestExplicit(const SSpawnExplicitRequest &request, CVehicle **ppCreated)
 {
-	SSpawnExplicitDecision decision;
-	SSpawnBudgetFacts budget;
+	SSpawnExplicitFacts facts;
+
+	facts.budget.randomCars = CCarCtrl::NumRandomCars;
+	facts.budget.randomTarget = CCarCtrl::GetRandomCarTarget();
+	facts.budget.carsInUse = CCarCtrl::NumCarsInUse();
+	facts.budget.carBudget = CCarCtrl::MaxNumberOfCarsInUse;
+	facts.budget.pedFreeSpaces = CPools::GetPedPool()->GetNoOfFreeSpaces();
+	facts.poolHasSpace = CPools::GetVehiclePool()->GetNoOfFreeSpaces() > 0;
+	return SpawnRunExplicit(request, facts, SpawnCreateExplicitCar, SpawnPlaceExplicitCar,
+		nil, ppCreated, &ms_Telemetry);
+}
+
+/*
+ * The car arm's engine side: the constructor (the boat/bike/car choice the
+ * old explicit kind made) and the ground facts the decision adds. The
+ * constructor's colour draw is the RNG stream's own, so it stays where the
+ * old kind had it: before the placement. A pool refusal is the only answer
+ * the constructor can give; the admission's free-space check already ran, so
+ * it is the last-slot race.
+ */
+static CVehicle *
+SpawnCreateExplicitCar(void *user, const SSpawnExplicitRequest &request, SSpawnExplicitWorld *world,
+	ESpawnRefusal *refusal)
+{
 	CVehicle *pVehicle;
-	float dirX, dirY, len;
+	uint8_t tag = request.createdBy ? request.createdBy : RANDOM_VEHICLE;
 
-	SpawnRequestBegin(&ms_Telemetry, request.purpose, SPAWN_KIND_EXPLICIT);
-
-	/* The force bypass covers the budgets and the reserves. The pool's last
-	 * slots are physical, not a reserve: even a mission cannot put a vehicle
-	 * in a full pool, and the request refuses with the pool's reason. */
-	budget.randomCars = CCarCtrl::NumRandomCars;
-	budget.randomTarget = CCarCtrl::GetRandomCarTarget();
-	budget.carsInUse = CCarCtrl::NumCarsInUse();
-	budget.carBudget = CCarCtrl::MaxNumberOfCarsInUse;
-	budget.pedFreeSpaces = CPools::GetPedPool()->GetNoOfFreeSpaces();
-	if (SpawnFunctionGate(budget, request.force, &ms_Telemetry) != SPAWN_REFUSAL_NONE)
-		return false;
-	if (CPools::GetVehiclePool()->GetNoOfFreeSpaces() <= 0) {
-		SpawnNoteRefusal(&ms_Telemetry, SPAWN_REFUSAL_POOL);
-		return false;
-	}
-	if (request.carModel < 0) {
-		/* No model is a bad request, not a streaming wait: NO_SITE (there
-		 * is no car to place); a model that is merely not resident is not
-		 * refused here - the force bypass's own contract is that the
-		 * streaming cannot fail a mission, so the creation asks for it. */
-		SpawnNoteRefusal(&ms_Telemetry, SPAWN_REFUSAL_NO_SITE);
-		return false;
-	}
-
-	SpawnDecideExplicit(request, &decision);
-
+	(void)user;
 	if (CModelInfo::IsBoatModel(request.carModel))
-		pVehicle = new CBoat(request.carModel, decision.createdBy);
+		pVehicle = new CBoat(request.carModel, tag);
 	else if (CModelInfo::IsBikeModel(request.carModel))
-		pVehicle = new CBike(request.carModel, decision.createdBy);
+		pVehicle = new CBike(request.carModel, tag);
 	else
-		pVehicle = new CAutomobile(request.carModel, decision.createdBy);
+		pVehicle = new CAutomobile(request.carModel, tag);
 	if (pVehicle == nil) {
-		/* The constructor's own pool refusal (the free-space check above
-		 * passed, so this is the pool's last slot going to another path in
-		 * between): the pool's reason, counted. */
-		SpawnNoteRefusal(&ms_Telemetry, SPAWN_REFUSAL_POOL);
-		return false;
+		*refusal = SPAWN_REFUSAL_POOL;
+		return nil;
 	}
+	if (request.ground != SPAWN_EXPLICIT_GROUND_EXACT) {
+		if (request.groundDummies) {
+			/* The set piece's old cast checked dummies as well as the
+			 * buildings; a dummy's top is the surface there. */
+			CColPoint point;
+			CEntity *pEntity;
 
-	/* The exact position and heading the caller gave: no plan, no ring, no
-	 * visibility (the script asks for the car; where it stands is the
-	 * script's). The lifetime is floored by the fresh-spawn grace, so the
-	 * culls cannot take the car on its way in. */
-	pVehicle->SetPosition(CVector(decision.x, decision.y, decision.z));
-	len = sqrtf(decision.dirX * decision.dirX + decision.dirY * decision.dirY);
-	if (len > 0.0001f) {
-		dirX = decision.dirX / len;
-		dirY = decision.dirY / len;
-	} else {
-		dirX = 1.0f;
-		dirY = 0.0f;
+			world->groundFound = CWorld::ProcessVerticalLine(
+				CVector(request.x, request.y, request.groundProbeZ), -1000.0f,
+				point, pEntity, true, false, false, false, true, false, nil);
+			if (world->groundFound)
+				world->groundZ = point.point.z;
+		} else {
+			bool found;
+
+			world->groundZ = CWorld::FindGroundZFor3DCoord(request.x, request.y,
+				request.groundProbeZ, &found);
+			world->groundFound = found;
+		}
+		if (request.ground == SPAWN_EXPLICIT_GROUND_BASE)
+			world->heightAboveRoad = pVehicle->GetDistanceFromCentreOfMassToBaseOfModel();
+		else
+			world->heightAboveRoad = pVehicle->GetHeightAboveRoad();
 	}
-	pVehicle->GetForward() = CVector(dirX, dirY, 0.0f);
-	pVehicle->GetRight() = CVector(dirY, -dirX, 0.0f);
+	return pVehicle;
+}
+
+/*
+ * The car arm's placement: the exact position and heading (or the ground
+ * policy's final one), the abandoned status and the fresh-spawn grace, the
+ * mission's clear-space rule and the world insert. The service is the one
+ * owner of the insert and of the pop-in counter; the caller's post-creation
+ * setup (the autopilot, the occupants, the lock) runs after the handle
+ * returns.
+ */
+static void
+SpawnPlaceExplicitCar(void *user, CVehicle *pVehicle, const SSpawnExplicitDecision &decision)
+{
+	(void)user;
+	pVehicle->SetPosition(CVector(decision.x, decision.y, decision.z));
+	pVehicle->GetForward() = CVector(decision.dirX, decision.dirY, 0.0f);
+	pVehicle->GetRight() = CVector(decision.dirY, -decision.dirX, 0.0f);
 	pVehicle->GetUp() = CVector(0.0f, 0.0f, 1.0f);
 	pVehicle->SetStatus(STATUS_ABANDONED);
 	pVehicle->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + decision.protectMs;
+	/* The mission's own rule: a mission car takes the spot from the world
+	 * before it joins it (the old opcode cleared the space first). */
+	if (decision.clearSpace)
+		CTheScripts::ClearSpaceForMissionEntity(pVehicle->GetPosition(), pVehicle);
 	CWorld::Add(pVehicle);
 	/* The live numbers of the pop-in ticket carry the scripted cars apart:
 	 * the explicit kind is one of them. */
 	CCarCtrl::NearBubbleCountOtherCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
-	SpawnNoteCreated(&ms_Telemetry, request.purpose);
-	if (ppCreated)
-		*ppCreated = pVehicle;
-	return true;
+}
+
+/*
+ * The ped arm's engine side: the population's one primitive (CPopulation::
+ * AddPed for a standing pedestrian, AddPedInCar for a seat) constructs and
+ * inserts the actor; the service's admission, ledger and handle are the
+ * core's. The request's tag, heading and mission flags are the caller's
+ * policy and are applied here, after the population's own setup.
+ */
+static CPed *
+SpawnCreateExplicitPed(void *user, const SSpawnExplicitPedRequest &request, ESpawnRefusal *refusal)
+{
+	CPed *pPed;
+
+	(void)user;
+	if (request.place != SPAWN_PED_PLACE_STANDING)
+		pPed = CPopulation::AddPedInCar(request.vehicle, request.place == SPAWN_PED_PLACE_DRIVER);
+	else
+		pPed = CPopulation::AddPed((ePedType)request.pedType, request.pedModel,
+			CVector(request.x, request.y, request.z), request.modifier);
+	if (pPed == nil) {
+		*refusal = SPAWN_REFUSAL_POOL;
+		return nil;
+	}
+	if (request.createdBy)
+		pPed->CharCreatedBy = request.createdBy;
+	if (request.heading != 0.0f)
+		pPed->SetOrientation(0.0f, 0.0f, request.heading);
+	if (request.missionFlags) {
+		pPed->bRespondsToThreats = false;
+		pPed->bAllowMedicsToReviveMe = false;
+		pPed->bIsPlayerFriend = false;
+		if (request.place != SPAWN_PED_PLACE_STANDING && request.vehicle->bIsBus)
+			pPed->bRenderPedInCar = false;
+	}
+	return pPed;
+}
+
+bool
+CSpawnService::RequestExplicitPed(const SSpawnExplicitPedRequest &request, CPed **ppCreated)
+{
+	SSpawnExplicitFacts facts;
+
+	facts.budget.randomCars = CCarCtrl::NumRandomCars;
+	facts.budget.randomTarget = CCarCtrl::GetRandomCarTarget();
+	facts.budget.carsInUse = CCarCtrl::NumCarsInUse();
+	facts.budget.carBudget = CCarCtrl::MaxNumberOfCarsInUse;
+	facts.budget.pedFreeSpaces = CPools::GetPedPool()->GetNoOfFreeSpaces();
+	facts.poolHasSpace = CPools::GetPedPool()->GetNoOfFreeSpaces() > 0;
+	return SpawnRunExplicitPed(request, facts, SpawnCreateExplicitPed, nil, ppCreated, &ms_Telemetry);
 }
 
 /* --- The parked kind (VICE-155) ------------------------------------------ */

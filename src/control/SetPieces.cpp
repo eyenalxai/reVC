@@ -6,6 +6,7 @@
 #include "CarCtrl.h"
 #include "CopPed.h"
 #include "GenericGameStorage.h"
+#include "ModelInfo.h"
 #include "PlayerPed.h"
 #include "Timer.h"
 #include "Vehicle.h"
@@ -283,47 +284,97 @@ void CSetPiece::Update(void)
 
 CVehicle* CSetPiece::TryToGenerateCopCar(CVector2D vSpawn, CVector2D vTarget)
 {
-	CVehicle* pVehicle = new CAutomobile(MI_POLICE, RANDOM_VEHICLE);
-	CVector pos(vSpawn.x, vSpawn.y, 1000.0f);
-	CColPoint point;
-	CEntity* pEntity;
-	if (CWorld::ProcessVerticalLine(pos, -1000.0f, point, pEntity, true, false, false, false, true, false, nil))
-		pos.z = point.point.z + pVehicle->GetHeightAboveRoad();
+	/* The set piece is a mission-style scenario actor: the ticket names its
+	 * purpose MISSION, and it forces because the old path could not fail on a
+	 * scheduling decision (only on the collision guard below). The service
+	 * owns the constructor, the ground cast (the model's own height above the
+	 * road) and the world insert. */
+	CColModel *pColModel = CModelInfo::GetColModel(MI_POLICE);
 	CVector vDirection(vTarget.x - vSpawn.x, vTarget.y - vSpawn.y, 0.0f);
-	vDirection.Normalise();
-	pVehicle->GetForward() = CVector(vDirection.x, vDirection.y, 0.0f);
-	pVehicle->GetRight() = CVector(vDirection.y, -vDirection.x, 0.0f);
-	pVehicle->GetUp() = CVector(0.0f, 0.0f, 1.0f);
-	pVehicle->SetPosition(pos);
+	CColPoint groundPoint;
+	CEntity *groundEntity;
+	CVector checkPos(vSpawn.x, vSpawn.y, 1000.0f);
 	int16 total;
-	CWorld::FindObjectsKindaColliding(pos, pVehicle->GetColModel()->spheres->radius, false, &total, 16, nil, false, true, true, false, false);
-	if (total != 0) {
-		delete pVehicle;
+
+	/* The old guard ran before the world insert; the service inserts at
+	 * once, so the guard runs here at the model's base over the ground the
+	 * ground policy will use (the same dummies-inclusive cast). The exact
+	 * final height is the constructor's (the suspension), which only the
+	 * service can read after it creates. */
+	if (CWorld::ProcessVerticalLine(checkPos, -1000.0f, groundPoint, groundEntity,
+		true, false, false, false, true, false, nil))
+		checkPos.z = groundPoint.point.z;
+	checkPos.z -= pColModel->boundingBox.min.z;
+	CWorld::FindObjectsKindaColliding(checkPos, pColModel->spheres->radius, false, &total, 16, nil,
+		false, true, true, false, false);
+	if (total != 0)
 		return nil;
-	}
+
+	vDirection.Normalise();
+
+	SSpawnExplicitRequest request;
+	request.purpose = SPAWN_PURPOSE_MISSION;
+	request.force = true;
+	request.carModel = MI_POLICE;
+	request.x = vSpawn.x;
+	request.y = vSpawn.y;
+	request.z = 1000.0f;
+	request.dirX = vDirection.x;
+	request.dirY = vDirection.y;
+	request.lifetimeMs = 0;
+	request.createdBy = 0;		/* the traffic's tag: AddPoliceCarOccupants needs RANDOM_VEHICLE */
+	request.ground = SPAWN_EXPLICIT_GROUND_HEIGHT;
+	request.groundProbeZ = 1000.0f;
+	request.groundNoHitZ = 1000.0f;
+	request.groundDummies = true;
+	request.clearSpace = false;
+
+	CVehicle* pVehicle;
+	if (!CSpawnService::RequestExplicit(request, &pVehicle))
+		return nil;
 	pVehicle->ChangeLawEnforcerState(true);
-	CWorld::Add(pVehicle);
-	/* The chase car is created outside the traffic spawner (VICE-127): it is
-	 * counted apart and never moves the traffic's own counters. */
-	CSpawnService::CountOtherCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 	return pVehicle;
 }
 
 CCopPed* CSetPiece::TryToGenerateCopPed(CVector2D vSpawn)
 {
-	CCopPed* pCop = new CCopPed(COP_STREET);
+	/* A set piece's cop on foot: the same MISSION purpose and force, and the
+	 * population's own cop constructor through the ped arm. The old guard
+	 * (the collision at the resolved spot) runs before the request because
+	 * the service inserts at once; the request carries the exact resolved z,
+	 * so the service does not ground it a second time. */
+	CColModel *pColModel = CModelInfo::GetColModel(MI_COP);
 	CVector pos(vSpawn.x, vSpawn.y, 1000.0f);
 	CColPoint point;
 	CEntity* pEntity;
+	int16 total;
+
 	if (CWorld::ProcessVerticalLine(pos, -1000.0f, point, pEntity, true, false, false, false, true, false, nil))
 		pos.z = point.point.z + 0.9f;
-	pCop->SetPosition(pos);
-	int16 total;
-	CWorld::FindObjectsKindaColliding(pos, pCop->GetColModel()->spheres->radius, false, &total, 16, nil, false, true, true, false, false);
-	if (total != 0) {
-		delete pCop;
+	CWorld::FindObjectsKindaColliding(pos, pColModel->spheres->radius, false, &total, 16, nil,
+		false, true, true, false, false);
+	if (total != 0)
 		return nil;
-	}
-	CWorld::Add(pCop);
+
+	SSpawnExplicitPedRequest request;
+	request.purpose = SPAWN_PURPOSE_MISSION;
+	request.force = true;
+	request.place = SPAWN_PED_PLACE_STANDING;
+	request.pedType = PEDTYPE_COP;
+	request.pedModel = COP_STREET;
+	request.modifier = 0;
+	request.x = pos.x;
+	request.y = pos.y;
+	request.z = pos.z;
+	request.heading = 0.0f;
+	request.createdBy = 0;		/* a random character, the old constructor's class */
+	request.missionFlags = false;
+	request.vehicle = nil;
+
+	CCopPed* pCop;
+	CPed* pCreated;
+	if (!CSpawnService::RequestExplicitPed(request, &pCreated))
+		return nil;
+	pCop = (CCopPed*)pCreated;
 	return pCop;
 }
