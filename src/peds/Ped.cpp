@@ -2533,7 +2533,12 @@ CPed::ProcessControl(void)
 						}
 					}
 				} else if ((CTimer::GetFrameCounter() + m_randomSeed % 256 + 3) & 7) {
-					if (IsPlayer() && m_nPedState != PED_JUMP && pad0->JumpJustDown()) {
+					// The player's jump is a ground action of the movement
+					// solver's (VICE-182): an in-air press only turns the body
+					// here, so no launch callback can add a second impulse.
+					// The glide pose fades for every ped, and a player still in
+					// the jump state in the air belongs to the idle state.
+					if (IsPlayer()) {
 						int16 padWalkX = pad0->GetPedWalkLeftRight();
 						int16 padWalkY = pad0->GetPedWalkUpDown();
 						if (Abs(padWalkX) > 0.0f || Abs(padWalkY) > 0.0f) {
@@ -2542,45 +2547,20 @@ CPed::ProcessControl(void)
 							m_fRotationDest = CGeneral::LimitRadianAngle(m_fRotationDest);
 							m_fRotationCur = m_fRotationDest;
 							SetHeading(m_fRotationCur);
-						}
-						SetJump();
-						m_nPedStateTimer = 0;
-						m_vecHitLastPos = GetPosition();
-
-						// Why? forceDir is unused after this point.
-						forceDir = CVector(0.0f, 0.0f, 0.0f);
-					} else if (IsPlayer()) {
-						int16 padWalkX = pad0->GetPedWalkLeftRight();
-						int16 padWalkY = pad0->GetPedWalkUpDown();
-						if (Abs(padWalkX) > 0.0f || Abs(padWalkY) > 0.0f) {
-							m_fRotationDest = CGeneral::GetRadianAngleBetweenPoints(0.0f, 0.0f, -padWalkX, padWalkY);
-							m_fRotationDest -= TheCamera.Orientation;
-							m_fRotationDest = CGeneral::LimitRadianAngle(m_fRotationDest);
-							m_fRotationCur = m_fRotationDest;
-							SetHeading(m_fRotationCur);
-						}
-						CAnimBlendAssociation *jumpAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_JUMP_GLIDE);
-
-						if (!jumpAssoc)
-							jumpAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_FALL_GLIDE);
-
-						if (jumpAssoc) {
-							jumpAssoc->blendDelta = -3.0f;
-							jumpAssoc->flags |= ASSOC_DELETEFADEDOUT;
-						}
-						if (m_nPedState == PED_JUMP)
-							m_nPedState = PED_IDLE;
-					} else {
-						CAnimBlendAssociation *jumpAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_JUMP_GLIDE);
-
-						if (!jumpAssoc)
-							jumpAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_FALL_GLIDE);
-
-						if (jumpAssoc) {
-							jumpAssoc->blendDelta = -3.0f;
-							jumpAssoc->flags |= ASSOC_DELETEFADEDOUT;
 						}
 					}
+
+					CAnimBlendAssociation *jumpAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_JUMP_GLIDE);
+
+					if (!jumpAssoc)
+						jumpAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_FALL_GLIDE);
+
+					if (jumpAssoc) {
+						jumpAssoc->blendDelta = -3.0f;
+						jumpAssoc->flags |= ASSOC_DELETEFADEDOUT;
+					}
+					if (IsPlayer() && m_nPedState == PED_JUMP)
+						m_nPedState = PED_IDLE;
 				} else {
 					offsetToCheck = GetPosition();
 					offsetToCheck.z += 0.5f;
@@ -9396,7 +9376,12 @@ CPed::CanPedJumpThis(CEntity *unused, CVector *damageNormal)
 	return CWorld::GetIsLineOfSightClear(pos, forwardPos, true, false, false, true, false, false, false);
 }
 
-void
+// Starts the jump: the state and its launch animation. The return value says
+// whether the jump started - the launch refuses in a vehicle, in the jump state
+// or already launching, and on a steep cliff the ped faces into. The player's
+// adapter applies the jump's impulse only when this returned true, so the state
+// and the movement cannot disagree (VICE-182); the AI's callers ignore it.
+bool
 CPed::SetJump(void)
 {
 	if (!bInVehicle && m_nPedState != PED_JUMP && !RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_JUMP_LAUNCH) &&
@@ -9407,7 +9392,9 @@ CPed::SetJump(void)
 		CAnimBlendAssociation *jumpAssoc = CAnimManager::BlendAnimation(GetClump(), ASSOCGRP_STD, ANIM_STD_JUMP_LAUNCH, 8.0f);
 		jumpAssoc->SetFinishCallback(FinishLaunchCB, this);
 		m_fRotationDest = m_fRotationCur;
+		return true;
 	}
+	return false;
 }
 
 void
@@ -9441,38 +9428,51 @@ CPed::FinishLaunchCB(CAnimBlendAssociation *animAssoc, void *arg)
 		return;
 	}
 
-	float velocityFromAnim = 0.1f;
-	CAnimBlendAssociation *sprintAssoc = RpAnimBlendClumpGetAssociation(ped->GetClump(), ANIM_STD_RUNFAST);
+	// The AI's jump impulse stays with its launch: the AI's movement is the
+	// animation's, so the launch owns the vertical force and the horizontal
+	// speed the jump takes from the run cycle. The player's jump leaves the
+	// ground on the input frame instead - the adapter writes the impulse on the
+	// step the jump edge enters the air (CPlayerPed::PlayerJumpOrDive,
+	// MOVE_PLAYER_JUMP_IMPULSE, VICE-182) - so this callback has no player
+	// impulse, and the player's half below is the glide pose and the blood.
+	if (!ped->IsPlayer()) {
+		float velocityFromAnim = 0.1f;
+		CAnimBlendAssociation *sprintAssoc = RpAnimBlendClumpGetAssociation(ped->GetClump(), ANIM_STD_RUNFAST);
 
-	if (sprintAssoc) {
-		velocityFromAnim = 0.05f * sprintAssoc->blendAmount + 0.17f;
-	} else {
-		CAnimBlendAssociation *runAssoc = RpAnimBlendClumpGetAssociation(ped->GetClump(), ANIM_STD_RUN);
-		if (runAssoc) {
-			velocityFromAnim = 0.07f * runAssoc->blendAmount + 0.1f;
+		if (sprintAssoc) {
+			velocityFromAnim = 0.05f * sprintAssoc->blendAmount + 0.17f;
+		} else {
+			CAnimBlendAssociation *runAssoc = RpAnimBlendClumpGetAssociation(ped->GetClump(), ANIM_STD_RUN);
+			if (runAssoc) {
+				velocityFromAnim = 0.07f * runAssoc->blendAmount + 0.1f;
+			}
 		}
-	}
 
-	if (ped->IsPlayer() || ped->m_pedInObjective && ped->m_pedInObjective->IsPlayer())
-		ped->ApplyMoveForce(0.0f, 0.0f, 8.5f);
-	else
-		ped->ApplyMoveForce(0.0f, 0.0f, 4.5f);
+		// The stock rule keeps the ped that hunts the player at the player's
+		// own 8.5, and every other AI ped at 4.5
+		if (ped->m_pedInObjective && ped->m_pedInObjective->IsPlayer())
+			ped->ApplyMoveForce(0.0f, 0.0f, 8.5f);
+		else
+			ped->ApplyMoveForce(0.0f, 0.0f, 4.5f);
 
-	// The player's horizontal momentum carries through the jump: the movement
-	// controller owns it (CPlayerPed::UpdatePlayerMovement). The animation still
-	// sets the horizontal speed of every other ped.
-	if (!ped->IsPlayer() && (sq(velocityFromAnim) > ped->m_vecMoveSpeed.MagnitudeSqr2D() || ped->m_pCurrentPhysSurface)) {
-		ped->m_vecMoveSpeed.x = -velocityFromAnim * Sin(ped->m_fRotationCur);
-		ped->m_vecMoveSpeed.y = velocityFromAnim * Cos(ped->m_fRotationCur);
+		// The animation still sets the horizontal speed of every ped but the
+		// player: the player's momentum is the movement solver's
+		if (sq(velocityFromAnim) > ped->m_vecMoveSpeed.MagnitudeSqr2D() || ped->m_pCurrentPhysSurface) {
+			ped->m_vecMoveSpeed.x = -velocityFromAnim * Sin(ped->m_fRotationCur);
+			ped->m_vecMoveSpeed.y = velocityFromAnim * Cos(ped->m_fRotationCur);
 
-		if (ped->m_pCurrentPhysSurface) {
-			ped->m_vecMoveSpeed.x += ped->m_pCurrentPhysSurface->m_vecMoveSpeed.x;
-			ped->m_vecMoveSpeed.y += ped->m_pCurrentPhysSurface->m_vecMoveSpeed.y;
+			if (ped->m_pCurrentPhysSurface) {
+				ped->m_vecMoveSpeed.x += ped->m_pCurrentPhysSurface->m_vecMoveSpeed.x;
+				ped->m_vecMoveSpeed.y += ped->m_pCurrentPhysSurface->m_vecMoveSpeed.y;
+			}
 		}
-	}
 
-	ped->bIsStanding = false;
-	ped->bIsInTheAir = true;
+		// The AI's air facts start with its impulse. The player's were written
+		// on the input frame with the impulse, and a landing that beats the
+		// launch must not be undone here.
+		ped->bIsStanding = false;
+		ped->bIsInTheAir = true;
+	}
 	animAssoc->blendDelta = -1000.0f;
 	CAnimManager::AddAnimation(ped->GetClump(), ASSOCGRP_STD, ANIM_STD_JUMP_GLIDE);
 
@@ -9511,6 +9511,11 @@ CPed::FinishLaunchCB(CAnimBlendAssociation *animAssoc, void *arg)
 	}
 }
 
+// The running landing's finish callback. The player's running landing is gone
+// with VICE-182 - the landing is the fall's own and the solver's - but the
+// replay serialises the callback table by index (Replay.cpp, CBArray), so the
+// function and its entry stay: a replay written by an older build still finds
+// the function its id names, and its body only clears the flags it always did.
 void
 CPed::FinishJumpCB(CAnimBlendAssociation *animAssoc, void *arg)
 {

@@ -864,7 +864,7 @@ public:
 	void Pause(void);
 	void ProcessBuoyancy(void);
 	void ServiceTalking(void);
-	void SetJump(void);
+	bool SetJump(void);
 	void WanderPath(void);
 	void ReactToPointGun(CEntity*);
 	void SeekCar(void);

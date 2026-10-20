@@ -110,7 +110,6 @@ public:
 	void RestoreSprintEnergy(float);
 	void DoStuffToGoOnFire(void);
 	bool DoesTargetHaveToBeBroken(CVector, CWeapon*);
-	void RunningLand(CPad*);
 	bool IsThisPedAnAimingPriority(CPed*);
 	void FireWeaponWhenHeld(CPad*);
 	void ProcessAirborneWeapon(CPad*);

@@ -213,6 +213,16 @@ scanned in their priority order over that one mask, so a move is a row and never
 a branch. A row may also carry a guard: a threshold of the step's speed the row
 reads beside its trigger bit.
 
+## Jump (on foot)
+
+The movement solver's ground action: the press leaves the ground state for the
+air in the frame the pad reads it, and the step reports the jump event. The
+vertical impulse is the adapter's write on that frame
+(`MOVE_PLAYER_JUMP_IMPULSE`, the launch animation's old 8.5), because the solver
+owns the horizontal velocity only. The AI peds keep the launch animation's
+impulse and its horizontal speed (`CPed::FinishLaunchCB`). A jump out of the
+slide is the slide jump, and it carries the slide's speed.
+
 ## Dive (on foot)
 
 The movement solver's airborne state for the prone action: the PED_PRONE edge
