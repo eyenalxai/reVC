@@ -1028,7 +1028,10 @@ planning are measured, not hidden. The service's telemetry is one static
 behind the service's ladder API (`CSpawnService::AllowsCreation`,
 `AllowsRemoval` and the counter notes), so no spawn decision outside
 `SpawnService.cpp` asks them directly. The ambient traffic is the first
-requester (`CCarCtrl::GenerateOneRandomCar`).
+requester (`CCarCtrl::GenerateOneRandomCar`); the emergency services and the
+police are the event requesters (VICE-156, `CCarCtrl::
+GenerateEmergencyServicesCar` and `GeneratePoliceCars`), counted by their own
+purposes.
 
 The service states its deltas from the old spawner, rather than hiding them:
 the plan's candidates are the sites whose **midpoint** is in the ring band,
@@ -1083,3 +1086,46 @@ occupants. The driver contract: `SetUpDriver` needs `RANDOM_VEHICLE`, so a
 kind that wants occupants creates with the random tag (the far promotion sets
 the tag before its own call). The return is an `ESpawnRefusal`, so the service
 counts the primitive's refusals by reason.
+
+## Responder policy
+
+The emergency services' and the police's dispatch policy (VICE-156,
+`src/control/ResponderPolicy.h`). The service owns the placement; the policy
+owns whether a request happens at all, and it is engine-free so the evidence
+program drives the same code the game runs. The emergency services keep the old
+triggers and caps: an ambulance asks with two active accidents and a fire truck
+with three active fires, the nearest incident within 30 m is the destination,
+the cooldowns are 30 s and 35 s, at most two cars of the model may exist and one
+of them may be on duty (the duty counter clears on arrival). The police keep the
+wanted system as the policy owner: more than one star, the law-enforcer and cop
+caps, no interior, and the old cadence (every frame at four stars or more, 5 s
+at three, 8 s at two); `CCarCtrl::ChoosePoliceCarModel` still chooses the tier.
+A refused policy costs no service request, no plan and no ledger row.
+
+## Responder destination mode
+
+The request field and placement field that make a responder drive to its
+incident instead of a cruise route (VICE-156). `SSpawnCarRequest::responder`
+carries the role (ambulance or fire truck) and the destination; the request's
+target is the destination (the ring and the reachability target), while its
+`centre` stays the player's, so the visibility ladder and the birth cull keep
+measuring from the player. The service copies the destination fields to
+`SSpawnPlacement` through `SpawnPlacementSetDestination`,
+and the primitive joins the car to the road at its **planned** position with
+`JoinCarWithRoadSystemGotoCoors` and sets `MISSION_GOTOCOORDS` (or
+`MISSION_GOTOCOORDS_STRAIGHT` when the join finds no path) for the incident at
+the old emergency cruise speed (25). The old emergency path built the same
+mission after a raw path collector placement; only the placement moved to the
+service. The destination mode also skips the ambient speed-away test and the
+mad-driver and dead-ped rolls, and sets the duty flag, the siren and the crew
+(the ambulance's seat 1, the fire truck's seat 0).
+
+## Event priority
+
+The request flag that lets a responder or a police request step over the
+ambient **car target** while the car budget and the ped pool reserve still hold
+(VICE-156, `SpawnFunctionGate`'s `priority`). The target is the ambient fill's
+own line; an event request is not ambient traffic and must not be refused
+because the street is full. The police request keeps its own caps (the wanted
+system's law-enforcer and cop tops) and the emergency services keep their duty
+and model caps, so the priority is about the ambient line only.

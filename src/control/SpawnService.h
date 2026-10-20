@@ -32,6 +32,16 @@
  * decision sites live in the parent commit (the per-frame dice are the thing
  * this ticket replaces, so no runtime switch keeps them alive here).
  *
+ * The responders and the police are the next requesters (VICE-156). Their
+ * triggers, cooldowns and duty caps stay the policy of their own modules
+ * (ResponderPolicy.h for the emergency services, CWanted for the stars and
+ * the caps) and the placement goes through this service. A responder carries
+ * a destination: the primitive joins it to the road at its placed position
+ * and sets the autopilot to drive to the incident instead of the cruise
+ * state (SSpawnPlacement::responder). The police request is the wanted
+ * system's own request, boats included: a water site of a COPS request takes
+ * the Predator. Both count in the ledger by their own purposes.
+ *
  * The planner (engine-free, this header)
  * --------------------------------------
  *
@@ -185,6 +195,18 @@ enum ESpawnTier
 	SPAWN_TIER_COUNT
 };
 
+/* The responder role of a placement (VICE-156): the incident a car is
+ * dispatched to and the duty state it carries. NONE is every other creation.
+ * The role is the service's vocabulary because it switches the primitive's
+ * destination mode and names the ledger's responder row. */
+enum ESpawnResponderRole
+{
+	SPAWN_RESPONDER_NONE = 0,
+	SPAWN_RESPONDER_AMBULANCE,
+	SPAWN_RESPONDER_FIRETRUCK,
+	SPAWN_RESPONDER_COUNT
+};
+
 /* The refusal reasons of the ticket, and nothing else: the primitives below
  * map every refusal onto one of them. NONE is the created state. */
 enum ESpawnRefusal
@@ -212,8 +234,13 @@ enum ESpawnSiteWater
 };
 
 /* The vehicle tag the driver contract needs (Vehicle.h: RANDOM_VEHICLE).
- * SpawnService.cpp pins it to the engine's own value. */
-#define SPAWN_VEHICLE_TAG_RANDOM 1
+ * SpawnService.cpp pins the values to the engine's own. The mission, parked
+ * and permanent tags name the creation classes the removal ledger maps; the
+ * responder and police rows are read from the live flags (VICE-156). */
+#define SPAWN_VEHICLE_TAG_RANDOM	1
+#define SPAWN_VEHICLE_TAG_MISSION	2
+#define SPAWN_VEHICLE_TAG_PARKED	3
+#define SPAWN_VEHICLE_TAG_PERMANENT	4
 
 /* --- The telemetry ------------------------------------------------------ */
 
@@ -302,6 +329,31 @@ SpawnNoteRemoval(SSpawnServiceTelemetry *tel, ESpawnPurpose purpose)
 {
 	if (purpose >= 0 && purpose < SPAWN_PURPOSE_COUNT)
 		tel->m_nRemovedByPurpose[purpose]++;
+}
+
+/*
+ * The purpose of a removed car (VICE-156): the live role flags answer before
+ * the creation class, so an ambulance or a police car that the service
+ * created under SPAWN_PURPOSE_RESPONDER or SPAWN_PURPOSE_POLICE leaves the
+ * ledger in its own row. The flags are only trusted on a RANDOM_VEHICLE: a
+ * script's mission car that happens to carry the law flag was created as a
+ * mission car and its removal belongs to that row.
+ */
+static inline ESpawnPurpose
+SpawnPurposeOfRemovedVehicle(uint8_t createdBy, bool lawEnforcer, bool responderOnDuty)
+{
+	if (createdBy == SPAWN_VEHICLE_TAG_RANDOM) {
+		if (responderOnDuty)
+			return SPAWN_PURPOSE_RESPONDER;
+		if (lawEnforcer)
+			return SPAWN_PURPOSE_POLICE;
+	}
+	switch (createdBy) {
+	case SPAWN_VEHICLE_TAG_MISSION:		return SPAWN_PURPOSE_MISSION;
+	case SPAWN_VEHICLE_TAG_PARKED:		return SPAWN_PURPOSE_PARKED;
+	case SPAWN_VEHICLE_TAG_PERMANENT:	return SPAWN_PURPOSE_SPECIAL;
+	default:				return SPAWN_PURPOSE_AMBIENT;
+	}
 }
 
 /* The plan cost of one call: the caller times it, the core accumulates. */
@@ -794,19 +846,22 @@ struct SSpawnBudgetFacts
  * The gate before the plan (and before an explicit creation): the force
  * bypass steps over everything, because a mission cannot fail on a scheduling
  * decision; otherwise the car target, the car budget and the pool reserve
- * refuse in that order. The gate counts its refusal itself; the request's own
- * readiness gate is separate (the model is not a budget).
+ * refuse in that order. `priority` (VICE-156: a responder or a police request)
+ * steps over the car target only: the target is the ambient fill's own line,
+ * not the event's budget, while the car budget and the ped reserve are the
+ * physical limits that still hold. The gate counts its refusal itself; the
+ * request's own readiness gate is separate (the model is not a budget).
  */
 static inline ESpawnRefusal
-SpawnFunctionGate(const SSpawnBudgetFacts &facts, bool force, SSpawnServiceTelemetry *tel)
+SpawnFunctionGate(const SSpawnBudgetFacts &facts, bool force, SSpawnServiceTelemetry *tel, bool priority = false)
 {
 	ESpawnRefusal refusal = SPAWN_REFUSAL_NONE;
 
 	if (force)
 		return SPAWN_REFUSAL_NONE;
-	if (facts.randomTarget <= 0.0f || facts.carBudget <= 0)
+	if (facts.carBudget <= 0)
 		refusal = SPAWN_REFUSAL_BUDGET;
-	else if ((float)facts.randomCars >= facts.randomTarget)
+	else if (!priority && (facts.randomTarget <= 0.0f || (float)facts.randomCars >= facts.randomTarget))
 		refusal = SPAWN_REFUSAL_BUDGET;
 	else if (facts.carsInUse >= facts.carBudget)
 		refusal = SPAWN_REFUSAL_BUDGET;
@@ -937,12 +992,21 @@ struct SSpawnPlacement
 	int16_t link;
 	float x, y, z;		/* the site midpoint (or the collector's point) */
 	float between;
+
+	/* The destination mode (VICE-156). `responder` is NONE for every
+	 * ordinary creation; an ambulance or a fire truck sets it, and the
+	 * primitive joins the car to the road at its placed position and drives
+	 * it to (destX, destY, destZ) instead of leaving it in the cruise state.
+	 * The crew and the duty flag follow the role. */
+	uint8_t responder;
+	float destX, destY, destZ;
 };
 
 /* The placement of one planned site, the one construction of the mapping: the
  * site's midpoint, its node pair and its link id, the fraction 0.5 (the
  * midpoint is the pair's own). The engine and the evidence program both build
- * placements through this, so the slot-versus-link mistake cannot come back. */
+ * placements through this, so the slot-versus-link mistake cannot come back.
+ * The destination fields stay empty until SpawnPlacementSetDestination. */
 static inline void
 SpawnPlacementFromSite(const SSpawnSite &site, int32_t siteId, SSpawnPlacement *pOut)
 {
@@ -954,6 +1018,10 @@ SpawnPlacementFromSite(const SSpawnSite &site, int32_t siteId, SSpawnPlacement *
 	pOut->y = site.y;
 	pOut->z = site.z;
 	pOut->between = 0.5f;
+	pOut->responder = SPAWN_RESPONDER_NONE;
+	pOut->destX = 0.0f;
+	pOut->destY = 0.0f;
+	pOut->destZ = 0.0f;
 }
 
 /* --- The request envelopes ----------------------------------------------- */
@@ -963,16 +1031,24 @@ SpawnPlacementFromSite(const SSpawnSite &site, int32_t siteId, SSpawnPlacement *
  * ring, the class and model policy) - the service chooses the site. The
  * target is the player centre for the traffic and the destination for the
  * responders; it is both the cone's origin and the reachability's target.
+ * The centre is the one point the visibility ladder and the primitive's birth
+ * cull measure from: the player centre for every request, including a
+ * responder whose target is the incident (VICE-156). The two coincide for the
+ * ambient traffic and the police; they differ for a responder by the
+ * incident's offset (at most the search range), and the visibility rule must
+ * stay the player's.
  */
 struct SSpawnCarRequest
 {
 	ESpawnPurpose purpose;
 	bool force;
+	bool priority;		/* responder/police: the ambient car target does not gate it */
 	bool allowBoats;	/* a water site falls back to a boat model */
 	bool requireReach;	/* the planner asks TestCoorsCloseness per site */
 	int32_t carClass;
 	int32_t carModel;
 	float targetX, targetY, targetZ;
+	float centreX, centreY, centreZ;
 	float playerSpeedX, playerSpeedY;
 	bool testForCollision;	/* the requester's own camera/speed policy */
 
@@ -982,7 +1058,31 @@ struct SSpawnCarRequest
 	float angleLimit;
 	bool forward;
 	bool allowDisabled;
+
+	/* The destination mode (VICE-156): a responder asks for a crew car that
+	 * drives to the incident, not a cruise route. `responder` selects the
+	 * duty role (NONE for every other request) and the destination is the
+	 * incident's position. The target above is the ring's origin and the
+	 * reachability's target; for a responder it is the destination too (the
+	 * car is placed on the ring around the incident it must reach). */
+	uint8_t responder;
+	float destinationX, destinationY, destinationZ;
 };
+
+/* The destination fields of a placement, from the request that asked for it:
+ * one copy of the mapping, so the engine and the evidence program cannot
+ * disagree about which fields travel. A request without a role leaves the
+ * placement's destination empty. */
+static inline void
+SpawnPlacementSetDestination(SSpawnPlacement *pPlacement, const SSpawnCarRequest &request)
+{
+	if (request.responder == SPAWN_RESPONDER_NONE)
+		return;
+	pPlacement->responder = request.responder;
+	pPlacement->destX = request.destinationX;
+	pPlacement->destY = request.destinationY;
+	pPlacement->destZ = request.destinationZ;
+}
 
 /* --- The engine side ----------------------------------------------------- */
 
@@ -1019,10 +1119,11 @@ public:
 	static void CountValveRemoval(void);
 
 	/* The removal note: the near cull's deletions, by the removed car's own
-	 * class (RANDOM_VEHICLE -> ambient, MISSION_VEHICLE -> mission,
-	 * PARKED_VEHICLE -> parked, PERMANENT_VEHICLE -> special; a class the
-	 * map does not name counts as the ambient traffic's, the cull's own
-	 * subject). */
+	 * role (VICE-156: an on-duty responder -> RESPONDER, a law enforcer ->
+	 * POLICE) and then its creation class (RANDOM_VEHICLE -> ambient,
+	 * MISSION_VEHICLE -> mission, PARKED_VEHICLE -> parked,
+	 * PERMANENT_VEHICLE -> special; a class the map does not name counts as
+	 * the ambient traffic's, the cull's own subject). */
 	static void NoteVehicleRemoval(CVehicle *pVehicle);
 
 	/* The primitive's defect notes (the ground casts and the water casts). */

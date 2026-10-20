@@ -93,6 +93,10 @@ public:
 	 * far layer's own until VICE-190) and the tier carries the far layer's
 	 * birth-cull skip. The return is the refusal (SPAWN_REFUSAL_*). */
 	static ESpawnRefusal CreateCarFromPlacement(const SSpawnPlacement& placement, int carClass, int carModel, const CVector& vecTargetPos, const CVector2D& vecPlayerSpeed, bool testForCollision, ESpawnTier tier = SPAWN_TIER_NEAR, CVehicle **ppCreated = nil, ENearBubbleArm *pArm = nil);
+	/* The police requester (VICE-156): the wanted system's stars, caps and
+	 * model tiers decide; the request carries SPAWN_PURPOSE_POLICE and goes
+	 * through the service. */
+	static void GeneratePoliceCars(void);
 	static void GenerateEmergencyServicesCar(void);
 	static int32 ChooseModel(CZoneInfo*, int*);
 	static int32 ChoosePoliceCarModel(void);
@@ -146,7 +150,6 @@ public:
 	static bool ThisRoadObjectCouldMove(int16);
 	static void ClearInterestingVehicleList();
 	static void FindLinksToGoWithTheseNodes(CVehicle*);
-	static bool GenerateOneEmergencyServicesCar(uint32, CVector);
 	static float FindSpeedMultiplierWithSpeedFromNodes(int8);
 	static int32 ChooseBoatModel(int32);
 	static int32 ChooseBoatRating(CZoneInfo* pZoneInfo);

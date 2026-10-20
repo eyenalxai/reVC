@@ -765,6 +765,10 @@ FarTrafficTrySite(const SFarTrafficBand &band, const CVector &playerPos, const C
 		placement.y = placements[i].position.y;
 		placement.z = placements[i].position.z;
 		placement.between = placements[i].positionBetweenNodes;
+		placement.responder = SPAWN_RESPONDER_NONE;
+		placement.destX = 0.0f;
+		placement.destY = 0.0f;
+		placement.destZ = 0.0f;
 		if (CCarCtrl::CreateCarFromPlacement(placement, carClass, carModel, playerPos,
 				playerSpeed, false, SPAWN_TIER_FAR, &pCar) == SPAWN_REFUSAL_NONE && pCar) {
 			FarTrafficAddEntry(pCar);

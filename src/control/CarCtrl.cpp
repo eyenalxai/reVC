@@ -2,6 +2,8 @@
 
 #include "CarCtrl.h"
 
+#include "ResponderPolicy.h"
+
 #include "Accident.h"
 #include "Automobile.h"
 #include "Bike.h"
@@ -39,7 +41,6 @@
 #include "WaterLevel.h"
 #include "World.h"
 #include "Zones.h"
-#include "Pickups.h"
 
 #define DISTANCE_TO_SPAWN_ROADBLOCK_PEDS (51.0f)
 #define DISTANCE_TO_SCAN_FOR_DANGER (14.0f)
@@ -161,6 +162,10 @@ CCarCtrl::GenerateRandomCars()
 	 * not one per call. */
 	if (CPools::GetPedPool()->GetNoOfFreeSpaces() < PED_POOL_RESERVE)
 		return;
+	/* The police are their own requester (VICE-156): the wanted system's
+	 * stars and caps decide, and the request goes to the service even when
+	 * the ambient car target is full. */
+	GeneratePoliceCars();
 	if (NumRandomCars < MAX_RANDOM_CARS){
 		if (CountDownToCarsAtStart != 0) {
 			// The countdown lets the world settle after boot and after a
@@ -288,6 +293,144 @@ CCarCtrl::SpendFillBurstFrame(void)
 		ms_nFillBurstEndedWindow++;
 }
 
+/* The spawn ring of one traffic call (VICE-150, shared with the police request
+ * in VICE-156): the camera and the player vehicle's speed choose the cone, the
+ * band and the collision test. The ambient traffic and the police request both
+ * read this, so a police car arrives by the ring rule of the traffic around
+ * it. */
+struct STrafficSpawnRing
+{
+	float frontX, frontY;
+	float preferredDistance;
+	float angleLimit;
+	bool invertAngleLimitTest;
+	bool testForCollision;
+};
+
+static void
+ChooseTrafficSpawnRing(const STrafficRings &rings, STrafficSpawnRing *pRing)
+{
+	CVehicle *pPlayerVehicle = FindPlayerVehicle();
+	CVector2D vecPlayerVehicleSpeed;
+	float fPlayerVehicleSpeed = 0.0f;
+
+	if (pPlayerVehicle) {
+		vecPlayerVehicleSpeed = FindPlayerVehicle()->GetMoveSpeed();
+		fPlayerVehicleSpeed = vecPlayerVehicleSpeed.Magnitude();
+	}
+	if (TheCamera.GetForward().z < -0.9f) {
+		/* Player uses topdown camera. */
+		/* Spawn essentially anywhere. */
+		pRing->frontX = pRing->frontY = 0.707f; /* 45 degrees */
+		pRing->angleLimit = -1.0f;
+		pRing->invertAngleLimitTest = true;
+		pRing->preferredDistance = rings.carSideSpawn + 15.0f;
+		/* BUG: testForCollision not initialized in original game. */
+		pRing->testForCollision = false;
+	} else if (!pPlayerVehicle) {
+		/* Player is not in vehicle. */
+		pRing->testForCollision = true;
+		pRing->frontX = TheCamera.CamFrontXNorm;
+		pRing->frontY = TheCamera.CamFrontYNorm;
+		switch (CTimer::GetFrameCounter() & 1) {
+		case 0:
+			/* Spawn a vehicle relatively far away from player. */
+			/* Forward to his current direction (camera direction). */
+			pRing->angleLimit = 0.707f; /* 45 degrees */
+			pRing->invertAngleLimitTest = true;
+			pRing->preferredDistance = rings.carOnScreenSpawnMax;
+			break;
+		case 1:
+			/* Spawn a vehicle close to player to his side. */
+			/* Kinda not within camera angle. */
+			pRing->angleLimit = 0.707f; /* 45 degrees */
+			pRing->invertAngleLimitTest = false;
+			pRing->preferredDistance = rings.carSideSpawn;
+			break;
+		}
+	} else if (fPlayerVehicleSpeed > 0.4f) { /* 72 km/h */
+		/* Player is moving fast in vehicle */
+		/* Prefer spawning vehicles very far away from him. */
+		pRing->frontX = vecPlayerVehicleSpeed.x / fPlayerVehicleSpeed;
+		pRing->frontY = vecPlayerVehicleSpeed.y / fPlayerVehicleSpeed;
+		pRing->testForCollision = false;
+		switch (CTimer::GetFrameCounter() & 3) {
+		case 0:
+		case 1:
+			/* Spawn a vehicle in a very narrow gap in front of a player */
+			pRing->angleLimit = 0.85f; /* approx 30 degrees */
+			pRing->invertAngleLimitTest = true;
+			pRing->preferredDistance = rings.carOnScreenSpawnMax;
+			break;
+		case 2:
+			/* Spawn a vehicle relatively far away from player. */
+			/* Forward to his current direction (camera direction). */
+			pRing->angleLimit = 0.707f; /* 45 degrees */
+			pRing->invertAngleLimitTest = true;
+			pRing->preferredDistance = rings.carOnScreenSpawnMax;
+			break;
+		case 3:
+			/* Spawn a vehicle close to player to his side. */
+			/* Kinda not within camera angle. */
+			pRing->angleLimit = 0.707f; /* 45 degrees */
+			pRing->invertAngleLimitTest = false;
+			pRing->preferredDistance = rings.carSideSpawn;
+			break;
+		}
+	} else if (fPlayerVehicleSpeed > 0.1f) { /* 18 km/h */
+		/* Player is moving moderately fast in vehicle */
+		/* Spawn more vehicles to player's side. */
+		pRing->frontX = vecPlayerVehicleSpeed.x / fPlayerVehicleSpeed;
+		pRing->frontY = vecPlayerVehicleSpeed.y / fPlayerVehicleSpeed;
+		pRing->testForCollision = false;
+		switch (CTimer::GetFrameCounter() & 3) {
+		case 0:
+			/* Spawn a vehicle in a very narrow gap in front of a player */
+			pRing->angleLimit = 0.85f; /* approx 30 degrees */
+			pRing->invertAngleLimitTest = true;
+			pRing->preferredDistance = rings.carOnScreenSpawnMax;
+			break;
+		case 1:
+			/* Spawn a vehicle relatively far away from player. */
+			/* Forward to his current direction (camera direction). */
+			pRing->angleLimit = 0.707f; /* 45 degrees */
+			pRing->invertAngleLimitTest = true;
+			pRing->preferredDistance = rings.carOnScreenSpawnMax;
+			break;
+		case 2:
+		case 3:
+			/* Spawn a vehicle close to player to his side. */
+			/* Kinda not within camera angle. */
+			pRing->angleLimit = 0.707f; /* 45 degrees */
+			pRing->invertAngleLimitTest = false;
+			pRing->preferredDistance = rings.carSideSpawn;
+			break;
+		}
+	} else {
+		/* Player is in vehicle but moving very slow. */
+		/* Then use camera direction instead of vehicle direction. */
+		pRing->testForCollision = true;
+		pRing->frontX = TheCamera.CamFrontXNorm;
+		pRing->frontY = TheCamera.CamFrontYNorm;
+		switch (CTimer::GetFrameCounter() & 1) {
+		case 0:
+			/* Spawn a vehicle relatively far away from player. */
+			/* Forward to his current direction (camera direction). */
+			pRing->angleLimit = 0.707f; /* 45 degrees */
+			pRing->invertAngleLimitTest = true;
+			pRing->preferredDistance = rings.carOnScreenSpawnMax;
+			break;
+		case 1:
+			/* Spawn a vehicle close to player to his side. */
+			/* Kinda not within camera angle. */
+			pRing->angleLimit = 0.707f; /* 45 degrees */
+			pRing->invertAngleLimitTest = false;
+			pRing->preferredDistance = rings.carSideSpawn;
+			break;
+		}
+	}
+}
+
 void
 CCarCtrl::GenerateOneRandomCar()
 {
@@ -303,149 +446,22 @@ CCarCtrl::GenerateOneRandomCar()
 	const STrafficRings rings = CurrentTrafficRings();
 	/* The budget gates of this call moved into the service (VICE-150): one
 	 * request, one gate (the car target, the car budget, the ped pool's
-	 * reserve). What stays here is the requester's policy: the cops, the
-	 * zone's model dice and the ring the call aims at. */
+	 * reserve). What stays here is the requester's policy: the zone's model
+	 * dice and the ring the call aims at. The police are their own requester
+	 * (VICE-156, GeneratePoliceCars): an ambient zone may still choose a cop
+	 * class below one star, and with any wanted level the ambient traffic
+	 * leaves the police to the wanted system. */
 	CWanted* pWanted = pPlayer->m_pPed->m_pWanted;
 	int carClass;
 	int carModel;
-	if (pWanted->GetWantedLevel() > 1 && NumLawEnforcerCars < pWanted->m_MaximumLawEnforcerVehicles &&
-		pWanted->m_CurrentCops < pWanted->m_MaxCops && !CGame::IsInInterior() && (
-			pWanted->GetWantedLevel() > 3 ||
-			pWanted->GetWantedLevel() > 2 && CTimer::GetTimeInMilliseconds() > LastTimeLawEnforcerCreated + 5000 ||
-			pWanted->GetWantedLevel() > 1 && CTimer::GetTimeInMilliseconds() > LastTimeLawEnforcerCreated + 8000)) {
-		/* Last pWanted->GetWantedLevel() > 1 is unnecessary but I added it for better readability. */
-		/* Wouldn't be surprised it was there originally but was optimized out. */
-		carClass = COPS;
-		carModel = ChoosePoliceCarModel();
-	}else{
-		carModel = ChooseModel(&zone, &carClass);
-		if (carModel == -1 || (carClass == COPS && pWanted->GetWantedLevel() >= 1))
-			/* All cop spawns with wanted level are handled by condition above. */
-			/* In particular it means that cop cars never spawn if player has wanted level of 1. */
-			return;
-	}
-	float frontX, frontY;
-	float preferredDistance, angleLimit;
-	bool invertAngleLimitTest;
-	bool testForCollision;
-	CVehicle* pPlayerVehicle = FindPlayerVehicle();
-	CVector2D vecPlayerVehicleSpeed;
-	float fPlayerVehicleSpeed;
-	if (pPlayerVehicle) {
-		vecPlayerVehicleSpeed = FindPlayerVehicle()->GetMoveSpeed();
-		fPlayerVehicleSpeed = vecPlayerVehicleSpeed.Magnitude();
-	}
-	if (TheCamera.GetForward().z < -0.9f){
-		/* Player uses topdown camera. */
-		/* Spawn essentially anywhere. */
-		frontX = frontY = 0.707f; /* 45 degrees */
-		angleLimit = -1.0f;
-		invertAngleLimitTest = true;
-		preferredDistance = rings.carSideSpawn + 15.0f;
-		/* BUG: testForCollision not initialized in original game. */
-		testForCollision = false;
-	}else if (!pPlayerVehicle){
-		/* Player is not in vehicle. */
-		testForCollision = true;
-		frontX = TheCamera.CamFrontXNorm;
-		frontY = TheCamera.CamFrontYNorm;
-		switch (CTimer::GetFrameCounter() & 1) {
-		case 0:
-			/* Spawn a vehicle relatively far away from player. */
-			/* Forward to his current direction (camera direction). */
-			angleLimit = 0.707f; /* 45 degrees */
-			invertAngleLimitTest = true;
-			preferredDistance = rings.carOnScreenSpawnMax;
-			break;
-		case 1:
-			/* Spawn a vehicle close to player to his side. */
-			/* Kinda not within camera angle. */
-			angleLimit = 0.707f; /* 45 degrees */
-			invertAngleLimitTest = false;
-			preferredDistance = rings.carSideSpawn;
-			break;
-		}
-	}else if (fPlayerVehicleSpeed > 0.4f){ /* 72 km/h */
-		/* Player is moving fast in vehicle */
-		/* Prefer spawning vehicles very far away from him. */
-		frontX = vecPlayerVehicleSpeed.x / fPlayerVehicleSpeed;
-		frontY = vecPlayerVehicleSpeed.y / fPlayerVehicleSpeed;
-		testForCollision = false;
-		switch (CTimer::GetFrameCounter() & 3) {
-		case 0:
-		case 1:
-			/* Spawn a vehicle in a very narrow gap in front of a player */
-			angleLimit = 0.85f; /* approx 30 degrees */
-			invertAngleLimitTest = true;
-			preferredDistance = rings.carOnScreenSpawnMax;
-			break;
-		case 2:
-			/* Spawn a vehicle relatively far away from player. */
-			/* Forward to his current direction (camera direction). */
-			angleLimit = 0.707f; /* 45 degrees */
-			invertAngleLimitTest = true;
-			preferredDistance = rings.carOnScreenSpawnMax;
-			break;
-		case 3:
-			/* Spawn a vehicle close to player to his side. */
-			/* Kinda not within camera angle. */
-			angleLimit = 0.707f; /* 45 degrees */
-			invertAngleLimitTest = false;
-			preferredDistance = rings.carSideSpawn;
-			break;
-		}
-	}else if (fPlayerVehicleSpeed > 0.1f){ /* 18 km/h */
-		/* Player is moving moderately fast in vehicle */
-		/* Spawn more vehicles to player's side. */
-		frontX = vecPlayerVehicleSpeed.x / fPlayerVehicleSpeed;
-		frontY = vecPlayerVehicleSpeed.y / fPlayerVehicleSpeed;
-		testForCollision = false;
-		switch (CTimer::GetFrameCounter() & 3) {
-		case 0:
-			/* Spawn a vehicle in a very narrow gap in front of a player */
-			angleLimit = 0.85f; /* approx 30 degrees */
-			invertAngleLimitTest = true;
-			preferredDistance = rings.carOnScreenSpawnMax;
-			break;
-		case 1:
-			/* Spawn a vehicle relatively far away from player. */
-			/* Forward to his current direction (camera direction). */
-			angleLimit = 0.707f; /* 45 degrees */
-			invertAngleLimitTest = true;
-			preferredDistance = rings.carOnScreenSpawnMax;
-			break;
-		case 2:
-		case 3:
-			/* Spawn a vehicle close to player to his side. */
-			/* Kinda not within camera angle. */
-			angleLimit = 0.707f; /* 45 degrees */
-			invertAngleLimitTest = false;
-			preferredDistance = rings.carSideSpawn;
-			break;
-		}
-	}else{
-		/* Player is in vehicle but moving very slow. */
-		/* Then use camera direction instead of vehicle direction. */
-		testForCollision = true;
-		frontX = TheCamera.CamFrontXNorm;
-		frontY = TheCamera.CamFrontYNorm;
-		switch (CTimer::GetFrameCounter() & 1) {
-		case 0:
-			/* Spawn a vehicle relatively far away from player. */
-			/* Forward to his current direction (camera direction). */
-			angleLimit = 0.707f; /* 45 degrees */
-			invertAngleLimitTest = true;
-			preferredDistance = rings.carOnScreenSpawnMax;
-			break;
-		case 1:
-			/* Spawn a vehicle close to player to his side. */
-			/* Kinda not within camera angle. */
-			angleLimit = 0.707f; /* 45 degrees */
-			invertAngleLimitTest = false;
-			preferredDistance = rings.carSideSpawn;
-			break;
-		}
-	}
+	carModel = ChooseModel(&zone, &carClass);
+	if (carModel == -1 || (carClass == COPS && pWanted->GetWantedLevel() >= 1))
+		/* In particular it means that cop cars never spawn if player has wanted level of 1. */
+		return;
+
+	STrafficSpawnRing ring;
+	ChooseTrafficSpawnRing(rings, &ring);
+
 	/* The request (VICE-150): the service plans the site - the index's
 	 * candidates, the live zone, the occupancy, the visibility ladder and
 	 * the reachability - and the primitive creates the car there. The
@@ -458,6 +474,7 @@ CCarCtrl::GenerateOneRandomCar()
 	SSpawnCarRequest request;
 	request.purpose = SPAWN_PURPOSE_AMBIENT;
 	request.force = false;
+	request.priority = false;
 	request.allowBoats = true;
 	request.requireReach = true;
 	request.carClass = carClass;
@@ -465,15 +482,74 @@ CCarCtrl::GenerateOneRandomCar()
 	request.targetX = vecTargetPos.x;
 	request.targetY = vecTargetPos.y;
 	request.targetZ = vecTargetPos.z;
+	request.centreX = vecTargetPos.x;
+	request.centreY = vecTargetPos.y;
+	request.centreZ = vecTargetPos.z;
 	request.playerSpeedX = vecPlayerSpeed.x;
 	request.playerSpeedY = vecPlayerSpeed.y;
-	request.testForCollision = testForCollision;
-	request.spawnDist = preferredDistance;
-	request.dirX = frontX;
-	request.dirY = frontY;
-	request.angleLimit = angleLimit;
-	request.forward = invertAngleLimitTest;
+	request.testForCollision = ring.testForCollision;
+	request.spawnDist = ring.preferredDistance;
+	request.dirX = ring.frontX;
+	request.dirY = ring.frontY;
+	request.angleLimit = ring.angleLimit;
+	request.forward = ring.invertAngleLimitTest;
 	request.allowDisabled = carClass == COPS && pWanted->GetWantedLevel() >= 1;
+	request.responder = SPAWN_RESPONDER_NONE;
+	request.destinationX = 0.0f;
+	request.destinationY = 0.0f;
+	request.destinationZ = 0.0f;
+	CSpawnService::RequestCar(request, nil);
+}
+
+/*
+ * The police requester (VICE-156). The wanted system stays the policy owner:
+ * its stars, its law-enforcer and cop caps and its model tiers
+ * (ChoosePoliceCarModel) decide whether and what, and PoliceRequestGate holds
+ * the old branch's cadence. The service plans the site on the traffic ring
+ * around the player and creates the car; the primitive keeps the pursuit
+ * state (the wanted-level mission and speed) and the occupants. Boats are
+ * allowed, so a water site of the request takes the Predator.
+ *
+ * The old code took this branch inside GenerateOneRandomCar, so a full ambient
+ * car target stopped the police as well. The request is now its own call with
+ * the priority flag: the ambient fill target is not a police cap, while the
+ * car budget, the pool and the wanted caps still hold.
+ */
+void
+CCarCtrl::GeneratePoliceCars(void)
+{
+	CPlayerInfo* pPlayer = &CWorld::Players[CWorld::PlayerInFocus];
+	CVector vecTargetPos;
+	CVector2D vecPlayerSpeed;
+	CWanted* pWanted;
+	const STrafficRings rings = CurrentTrafficRings();
+	SPoliceFacts facts;
+	STrafficSpawnRing ring;
+	SSpawnCarRequest request;
+
+	/* The frame may run before the player exists (the boot countdown); no
+	 * player, no wanted system, no request. */
+	if (pPlayer->m_pPed == nil || pPlayer->m_pPed->m_pWanted == nil)
+		return;
+	pWanted = pPlayer->m_pPed->m_pWanted;
+
+	facts.wantedLevel = pWanted->GetWantedLevel();
+	facts.lawEnforcers = NumLawEnforcerCars;
+	facts.maxVehicles = pWanted->m_MaximumLawEnforcerVehicles;
+	facts.currentCops = pWanted->m_CurrentCops;
+	facts.maxCops = pWanted->m_MaxCops;
+	facts.interior = CGame::IsInInterior();
+	facts.nowMs = CTimer::GetTimeInMilliseconds();
+	facts.lastCreatedMs = LastTimeLawEnforcerCreated;
+	if (PoliceRequestGate(facts) != POLICE_GATE_ALLOWED)
+		return;
+
+	vecTargetPos = FindPlayerCentreOfWorld(CWorld::PlayerInFocus);
+	vecPlayerSpeed = FindPlayerSpeed();
+	ChooseTrafficSpawnRing(rings, &ring);
+	PoliceFillRequest(ChoosePoliceCarModel(), COPS, vecTargetPos.x, vecTargetPos.y, vecTargetPos.z,
+		vecPlayerSpeed.x, vecPlayerSpeed.y, ring.preferredDistance, ring.frontX, ring.frontY,
+		ring.angleLimit, ring.invertAngleLimitTest, ring.testForCollision, &request);
 	CSpawnService::RequestCar(request, nil);
 }
 
@@ -795,6 +871,28 @@ CCarCtrl::CreateCarFromPlacement(const SSpawnPlacement& placement, int carClass,
 		bBoatGenerated ? pVehicle->SetStatus(STATUS_PHYSICS) : pVehicle->SetStatus(STATUS_SIMPLE);
 		break;
 	}
+	/* The destination mode (VICE-156): a responder's route is its incident,
+	 * not a cruise. The car is already on the road at its placed position
+	 * (the route and lane state above), so the old emergency route builder
+	 * runs here: join the road system at the placed position and point the
+	 * autopilot at the incident, or drive straight when the join found no
+	 * path. The old emergency path set the same mission, speed and style
+	 * after a raw collector placement; only the placement moved. */
+	if (placement.responder != SPAWN_RESPONDER_NONE) {
+		CVector destination(placement.destX, placement.destY, placement.destZ);
+
+		pVehicle->AutoPilot.m_vecDestinationCoors = destination;
+		pVehicle->AutoPilot.m_nCarMission = JoinCarWithRoadSystemGotoCoors(pVehicle, destination, false) ?
+			MISSION_GOTOCOORDS_STRAIGHT : MISSION_GOTOCOORDS;
+		pVehicle->AutoPilot.m_fMaxTrafficSpeed = pVehicle->AutoPilot.m_nCruiseSpeed = RESPONDER_CRUISE_SPEED;
+		pVehicle->AutoPilot.m_nTempAction = TEMPACT_NONE;
+		pVehicle->AutoPilot.m_nDrivingStyle = DRIVINGSTYLE_AVOID_CARS;
+		/* The old emergency car stood still at the placement and left under
+		 * physics; the curve's birth speed is the traffic's, not a
+		 * responder's. */
+		pVehicle->SetMoveSpeed(CVector(0.0f, 0.0f, 0.0f));
+		pVehicle->SetStatus(STATUS_PHYSICS);
+	}
 	CVisibilityPlugins::SetClumpAlpha(pVehicle->GetClump(), 0);
 	/* The birth cull. A fresh spawn must never be culled here, whatever the
 	 * view state, the slider or the weather: the spawn ring plus the reserve of
@@ -869,12 +967,31 @@ CCarCtrl::CreateCarFromPlacement(const SSpawnPlacement& placement, int carClass,
 	/* The speed test refuses a spawn that drives away from the player: a near
 	 * car would leave the ring without ever being seen. The far layer's cars
 	 * drive away from the player by design (they are the traffic that
-	 * recedes), so the test is the near cars' own (VICE-128). */
-	if (!bFarTraffic &&
+	 * recedes), so the test is the near cars' own (VICE-128). A responder
+	 * drives to its incident, not away from the ring, so the test is not its
+	 * own either: the old emergency path never asked it. */
+	if (placement.responder == SPAWN_RESPONDER_NONE && !bFarTraffic &&
 		speedDifferenceWithTarget.x * distanceToTarget.x +
 		speedDifferenceWithTarget.y * distanceToTarget.y >= 0.0f){
 		delete pVehicle;
 		return SPAWN_REFUSAL_VISIBILITY;
+	}
+	/* The duty state of a responder (VICE-156): the flags the old emergency
+	 * path set before the world add, and the siren. CVehicle's destructor and
+	 * the emergency AI clear them (and their counters) on arrival or
+	 * deletion. */
+	if (placement.responder != SPAWN_RESPONDER_NONE) {
+		pVehicle->m_bSirenOrAlarm = true;
+		switch (placement.responder) {
+		case SPAWN_RESPONDER_FIRETRUCK:
+			pVehicle->bIsFireTruckOnDuty = true;
+			++NumFiretrucksOnDuty;
+			break;
+		case SPAWN_RESPONDER_AMBULANCE:
+			pVehicle->bIsAmbulanceOnDuty = true;
+			++NumAmbulancesOnDuty;
+			break;
+		}
 	}
 	pVehicleModel->AvoidSameVehicleColour(&pVehicle->m_currentColour1, &pVehicle->m_currentColour2);
 	CWorld::Add(pVehicle);
@@ -904,7 +1021,11 @@ CCarCtrl::CreateCarFromPlacement(const SSpawnPlacement& placement, int carClass,
 	 * (CFarTraffic) gives it its driver when the player is near. */
 	if (bFarTraffic)
 		return SPAWN_REFUSAL_NONE;
-	if (carClass == COPS || carClass == COPS_BOAT)
+	if (placement.responder == SPAWN_RESPONDER_FIRETRUCK)
+		CCarAI::AddFiretruckOccupants(pVehicle);
+	else if (placement.responder == SPAWN_RESPONDER_AMBULANCE)
+		CCarAI::AddAmbulanceOccupants(pVehicle);
+	else if (carClass == COPS || carClass == COPS_BOAT)
 		CCarAI::AddPoliceCarOccupants(pVehicle);
 	else {
 		/* The driver contract (VICE-150): SetUpDriver needs RANDOM_VEHICLE;
@@ -947,7 +1068,8 @@ CCarCtrl::CreateCarFromPlacement(const SSpawnPlacement& placement, int carClass,
 		nMadDrivers = 6;
 		break;
 	}
-	if ((CGeneral::GetRandomNumber() & 0x7F) < nMadDrivers || bMadDriversCheat) {
+	if (placement.responder == SPAWN_RESPONDER_NONE &&
+		((CGeneral::GetRandomNumber() & 0x7F) < nMadDrivers || bMadDriversCheat)) {
 		pVehicle->SetStatus(STATUS_PHYSICS);
 		pVehicle->AutoPilot.m_nDrivingStyle = DRIVINGSTYLE_AVOID_CARS;
 		pVehicle->AutoPilot.m_nCruiseSpeed += 10;
@@ -977,7 +1099,8 @@ CCarCtrl::CreateCarFromPlacement(const SSpawnPlacement& placement, int carClass,
 			break;
 		}
 	}
-	if (CGeneral::GetRandomNumberInRange(0.0f, 1.0f) >= (1 - PROBABILITY_OF_DEAD_PED_ACCIDENT)) {
+	if (placement.responder == SPAWN_RESPONDER_NONE &&
+		CGeneral::GetRandomNumberInRange(0.0f, 1.0f) >= (1 - PROBABILITY_OF_DEAD_PED_ACCIDENT)) {
 		if (CModelInfo::IsCarModel(pVehicle->GetModelIndex()) && !pVehicle->bIsLawEnforcer) {
 			if (CPopulation::AddDeadPedInFrontOfCar(pVehicle->GetPosition() + pVehicle->GetForward() * DISTANCE_BETWEEN_CAR_AND_DEAD_PED, pVehicle)) {
 				pVehicle->AutoPilot.m_nCruiseSpeed = 0;
@@ -3438,154 +3561,110 @@ void CCarCtrl::FindLinksToGoWithTheseNodes(CVehicle* pVehicle)
 	pVehicle->AutoPilot.m_nCurrentDirection = (ThePaths.ConnectedNode(curLink + pCurNode->firstLink) >= pVehicle->AutoPilot.m_nCurrentRouteNode) ? 1 : -1;
 }
 
-void CCarCtrl::GenerateEmergencyServicesCar(void)
+/*
+ * One responder call (VICE-156): the policy decides (the accident/fire
+ * triggers, the cooldowns, the duty and model caps), the streaming asks for
+ * the models, and the service places the car on the ring around the incident
+ * with the destination mode. The cooldown is stamped only on a created car,
+ * the old path's LastTime* update: a refusal or a streaming wait retries on
+ * the next trigger. The crew model is released below the trigger, the old
+ * rule that let the emergency peds go when no dispatch was wanted.
+ */
+static bool
+GenerateResponder(ESpawnResponderRole role, uint32 model, uint32 crewModel, uint32 *pLastCreated,
+	int32 activeIncidents, bool nearestFound, CVector nearestPos, float nearestDistance)
 {
-	if (FindPlayerPed()->m_pWanted->GetWantedLevel() > 3)
-		return;
-	if (CGame::IsInInterior())
-		return;
-	/* The same car budget as the random traffic and the generator
-	 * (CCarCtrl::NumCarsInUse): the emergency services take their slots from
-	 * the same pool, so the check is the same count and the same top. */
-	if (NumCarsInUse() >= MaxNumberOfCarsInUse)
-		return;
-	if (NumAmbulancesOnDuty == 0){
-		if (gAccidentManager.CountActiveAccidents() < 2){
-			if (CStreaming::HasModelLoaded(MI_AMBULAN))
-				CStreaming::SetModelIsDeletable(MI_MEDIC);
-		}else{
-			float distance = 30.0f;
-			CAccident* pNearestAccident = gAccidentManager.FindNearestAccident(FindPlayerCoors(), &distance);
-			if (pNearestAccident){
-				if (CountCarsOfType(MI_AMBULAN) < 2 && CTimer::GetTimeInMilliseconds() > LastTimeAmbulanceCreated + 30000){
-					CStreaming::RequestModel(MI_AMBULAN, STREAMFLAGS_DEPENDENCY);
-					CStreaming::RequestModel(MI_MEDIC, STREAMFLAGS_DONT_REMOVE);
-					if (CStreaming::HasModelLoaded(MI_AMBULAN) && CStreaming::HasModelLoaded(MI_MEDIC)){
-						if (GenerateOneEmergencyServicesCar(MI_AMBULAN, pNearestAccident->m_pVictim->GetPosition())){
-							LastTimeAmbulanceCreated = CTimer::GetTimeInMilliseconds();
-						}
-					}
-				}
-			}
-		}
+	CPlayerInfo *pPlayer = &CWorld::Players[CWorld::PlayerInFocus];
+	const STrafficRings rings = CurrentTrafficRings();
+	SResponderFacts facts;
+	SResponderDecision decision;
+	SSpawnCarRequest request;
+	CVector playerCentre;
+	CVehicle *pCreated = nil;
+
+	if (pPlayer->m_pPed == nil || pPlayer->m_pPed->m_pWanted == nil)
+		return false;
+	playerCentre = FindPlayerCentreOfWorld(CWorld::PlayerInFocus);
+	facts.wantedLevel = pPlayer->m_pPed->m_pWanted->GetWantedLevel();
+	facts.interior = CGame::IsInInterior();
+	facts.carsInUse = CCarCtrl::NumCarsInUse();
+	facts.carBudget = CCarCtrl::MaxNumberOfCarsInUse;
+	facts.activeIncidents = activeIncidents;
+	facts.nearestFound = nearestFound;
+	facts.nearestDistance = nearestDistance;
+	facts.nearestX = nearestPos.x;
+	facts.nearestY = nearestPos.y;
+	facts.nearestZ = nearestPos.z;
+	facts.onDuty = role == SPAWN_RESPONDER_AMBULANCE ?
+		CCarCtrl::NumAmbulancesOnDuty : CCarCtrl::NumFiretrucksOnDuty;
+	facts.carsOfType = CCarCtrl::CountCarsOfType(model);
+	facts.nowMs = CTimer::GetTimeInMilliseconds();
+	facts.lastCreatedMs = *pLastCreated;
+
+	ResponderEvaluate(role, facts, &decision);
+	if (decision.gate == RESPONDER_GATE_BELOW_TRIGGER) {
+		/* The old rule: while the incident count is below the trigger, the
+		 * crew model is not pinned (the emergency peds may go). The old
+		 * guard read the vehicle model's residency. */
+		if (CStreaming::HasModelLoaded(model))
+			CStreaming::SetModelIsDeletable(crewModel);
+		return false;
 	}
-	if (NumFiretrucksOnDuty == 0){
-		if (gFireManager.GetTotalActiveFires() < 3){
-			if (CStreaming::HasModelLoaded(MI_FIRETRUCK))
-				CStreaming::SetModelIsDeletable(MI_FIREMAN);
-		}else{
-			float distance = 30.0f;
-			CFire* pNearestFire = gFireManager.FindNearestFire(FindPlayerCoors(), &distance);
-			if (pNearestFire) {
-				if (CountCarsOfType(MI_FIRETRUCK) < 2 && CTimer::GetTimeInMilliseconds() > LastTimeFireTruckCreated + 35000){
-					CStreaming::RequestModel(MI_FIRETRUCK, STREAMFLAGS_DEPENDENCY);
-					CStreaming::RequestModel(MI_FIREMAN, STREAMFLAGS_DONT_REMOVE);
-					if (CStreaming::HasModelLoaded(MI_FIRETRUCK) && CStreaming::HasModelLoaded(MI_FIREMAN)){
-						if (GenerateOneEmergencyServicesCar(MI_FIRETRUCK, pNearestFire->m_vecPos)){
-							LastTimeFireTruckCreated = CTimer::GetTimeInMilliseconds();
-#ifdef SECUROM
-							if ((myrand() & 7) == 5){
-								// if pirated game
-								CPickups::Init();
-							}
-#endif
-						}
-					}
-				}
-			}
-		}
-	}
+	if (!decision.dispatch)
+		return false;
+
+	CStreaming::RequestModel(model, STREAMFLAGS_DEPENDENCY);
+	CStreaming::RequestModel(crewModel, STREAMFLAGS_DONT_REMOVE);
+	if (!CStreaming::HasModelLoaded(model) || !CStreaming::HasModelLoaded(crewModel))
+		return false;
+
+	ResponderFillRequest(decision, model, CCarCtrl::NORMAL,
+		playerCentre.x, playerCentre.y, playerCentre.z, rings.carOnScreenSpawnMax, &request);
+	if (!CSpawnService::RequestCar(request, &pCreated))
+		return false;
+	*pLastCreated = facts.nowMs;
+	return true;
 }
 
-bool CCarCtrl::GenerateOneEmergencyServicesCar(uint32 mi, CVector vecPos)
+void CCarCtrl::GenerateEmergencyServicesCar(void)
 {
-	CVector pPlayerPos = FindPlayerCentreOfWorld(CWorld::PlayerInFocus);
-	bool created = false;
-	int attempts = 0;
-	CVector spawnPos;
-	int curNode, nextNode;
-	float posBetweenNodes;
-	/* An emergency spawn is neither random nor scripted; it aims at the
-	 * on-screen ring, from the one table. */
-	const STrafficRings rings = CurrentTrafficRings();
-	while (!created && attempts < 5){
-		if (ThePaths.GenerateCarCreationCoors(pPlayerPos.x, pPlayerPos.y, 0.707f, 0.707f,
-			rings.carOnScreenSpawnMax, -1.0f, true, &spawnPos, &curNode, &nextNode, &posBetweenNodes, false)){
-			int16 colliding[2];
-			if (!ThePaths.GetNode(curNode)->bWaterPath) {
-				CWorld::FindObjectsKindaColliding(spawnPos, 10.0f, true, colliding, 2, nil, false, true, true, false, false);
-				if (colliding[0] == 0)
-					created = true;
+	/* The ambulance: the old trigger is two active accidents, the nearest
+	 * within 30 m is the destination. The policy's own order keeps the
+	 * wanted/interior/budget gates. */
+	{
+		int32 active = gAccidentManager.CountActiveAccidents();
+		bool found = false;
+		CVector nearestPos(0.0f, 0.0f, 0.0f);
+		float distance = RESPONDER_NEAREST_RANGE;
+
+		if (NumAmbulancesOnDuty == 0 && active >= RESPONDER_ACCIDENT_TRIGGER) {
+			CAccident *pAccident = gAccidentManager.FindNearestAccident(FindPlayerCoors(), &distance);
+			if (pAccident) {
+				found = true;
+				nearestPos = pAccident->m_pVictim->GetPosition();
 			}
 		}
-		attempts += 1;
+		GenerateResponder(SPAWN_RESPONDER_AMBULANCE, MI_AMBULAN, MI_MEDIC,
+			&LastTimeAmbulanceCreated, active, found, nearestPos, distance);
 	}
-	if (attempts >= 5)
-		return false;
-	CAutomobile* pVehicle = new CAutomobile(mi, RANDOM_VEHICLE);
-	pVehicle->AutoPilot.m_vecDestinationCoors = vecPos;
-	pVehicle->SetPosition(spawnPos);
-	pVehicle->AutoPilot.m_nCarMission = (JoinCarWithRoadSystemGotoCoors(pVehicle, vecPos, false)) ? MISSION_GOTOCOORDS_STRAIGHT : MISSION_GOTOCOORDS;
-	pVehicle->AutoPilot.m_fMaxTrafficSpeed = pVehicle->AutoPilot.m_nCruiseSpeed = 25;
-	pVehicle->AutoPilot.m_nTempAction = TEMPACT_NONE;
-	pVehicle->AutoPilot.m_nDrivingStyle = DRIVINGSTYLE_AVOID_CARS;
-	CVector2D direction = vecPos - spawnPos;
-	direction.Normalise();
-	pVehicle->GetForward() = CVector(direction.x, direction.y, 0.0f);
-	pVehicle->GetRight() = CVector(direction.y, -direction.x, 0.0f);
-	pVehicle->GetUp() = CVector(0.0f, 0.0f, 1.0f);
-	spawnPos.z = posBetweenNodes * ThePaths.m_pathNodes[curNode].GetZ() + (1.0f - posBetweenNodes) * ThePaths.m_pathNodes[nextNode].GetZ();
-	float groundZ = INFINITE_Z;
-	CColPoint colPoint;
-	CEntity* pEntity;
-	if (CWorld::ProcessVerticalLine(spawnPos, 1000.0f, colPoint, pEntity, true, false, false, false, true, false, nil))
-		groundZ = colPoint.point.z;
-	if (CWorld::ProcessVerticalLine(spawnPos, -1000.0f, colPoint, pEntity, true, false, false, false, true, false, nil)) {
-		if (ABS(colPoint.point.z - spawnPos.z) < ABS(groundZ - spawnPos.z))
-			groundZ = colPoint.point.z;
+	/* The fire truck: the old trigger is three active fires, the nearest
+	 * within 30 m is the destination. */
+	{
+		int32 active = (int32)gFireManager.GetTotalActiveFires();
+		bool found = false;
+		CVector nearestPos(0.0f, 0.0f, 0.0f);
+		float distance = RESPONDER_NEAREST_RANGE;
+
+		if (NumFiretrucksOnDuty == 0 && active >= RESPONDER_FIRE_TRIGGER) {
+			CFire *pFire = gFireManager.FindNearestFire(FindPlayerCoors(), &distance);
+			if (pFire) {
+				found = true;
+				nearestPos = pFire->m_vecPos;
+			}
+		}
+		GenerateResponder(SPAWN_RESPONDER_FIRETRUCK, MI_FIRETRUCK, MI_FIREMAN,
+			&LastTimeFireTruckCreated, active, found, nearestPos, distance);
 	}
-	if (groundZ == INFINITE_Z) {
-		delete pVehicle;
-		return false;
-	}
-	spawnPos.z = groundZ + pVehicle->GetDistanceFromCentreOfMassToBaseOfModel();
-	pVehicle->SetPosition(spawnPos);
-	pVehicle->SetMoveSpeed(CVector(0.0f, 0.0f, 0.0f));
-	pVehicle->SetStatus(STATUS_PHYSICS);
-	/* The near bubble (VICE-127): the ambulance or the fire truck appears only
-	 * where the player cannot see it. The rule's soft arm (a position behind
-	 * the camera) is what keeps the service alive on an open road: the
-	 * placement search above picks any crossing of the on-screen ring, and
-	 * the ones behind the camera pass. A refusal costs the call (the timer of
-	 * the emergency service asks again in 30 s), which is the same price the
-	 * other rejections of this path pay. */
-	if (!CSpawnService::AllowsCreation(pVehicle->GetPosition(), pPlayerPos, NEAR_BUBBLE_ENTITY_RADIUS, true)) {
-		delete pVehicle;
-		return false;
-	}
-	pVehicle->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + NEAR_BUBBLE_GRACE_MS;
-	/* The service car starts invisible and fades in like every fresh car the
-	 * traffic creates (the same treatment as the road blocks and the set
-	 * pieces): the soft arm's appearance is a fade, not a hard cut. */
-	CVisibilityPlugins::SetClumpAlpha(pVehicle->GetClump(), 0);
-	pVehicle->bIsTrafficCar = true;
-	switch (mi){
-	case MI_FIRETRUCK:
-		pVehicle->bIsFireTruckOnDuty = true;
-		++NumFiretrucksOnDuty;
-		CCarAI::AddFiretruckOccupants(pVehicle);
-		break;
-	case MI_AMBULAN:
-		pVehicle->bIsAmbulanceOnDuty = true;
-		++NumAmbulancesOnDuty;
-		CCarAI::AddAmbulanceOccupants(pVehicle);
-		break;
-	}
-	pVehicle->m_bSirenOrAlarm = true;
-	CWorld::Add(pVehicle);
-	CSpawnService::CountCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
-	printf("CREATED EMERGENCY VEHICLE\n");
-	return true;
 }
 
 void CCarCtrl::UpdateCarCount(CVehicle* pVehicle, bool remove)

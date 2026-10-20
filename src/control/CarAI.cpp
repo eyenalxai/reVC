@@ -2,6 +2,8 @@
 
 #include "CarAI.h"
 
+#include "ResponderPolicy.h"
+
 #include "Accident.h"
 #include "AutoPilot.h"
 #include "CarCtrl.h"
@@ -532,52 +534,63 @@ float CCarAI::GetCarToParkAtCoors(CVehicle* pVehicle, CVector* pTarget)
 	return (pVehicle->GetPosition() - *pTarget).Magnitude2D();
 }
 
+/* The seats of one dispatch (VICE-156): the crew table of ResponderPolicy.h
+ * is the one truth, so the evidence program checks the seats the game fills. */
+static void
+AddCrew(CVehicle *pVehicle, const SSpawnCrew &crew)
+{
+	if (crew.driver)
+		pVehicle->SetUpDriver();
+	for (int i = 0; i < 8; i++)
+		if (crew.passengerSeats & (1 << i))
+			pVehicle->SetupPassenger(i);
+}
+
 void CCarAI::AddPoliceCarOccupants(CVehicle* pVehicle)
 {
 	if (pVehicle->bOccupantsHaveBeenGenerated)
 		return;
 	pVehicle->bOccupantsHaveBeenGenerated = true;
+	ESpawnCrewKind kind;
 	switch (pVehicle->GetModelIndex()){
 	case MI_FBIRANCH:
 	case MI_ENFORCER:
-		pVehicle->SetUpDriver();
-		for (int i = 0; i < 3; i++)
-			pVehicle->SetupPassenger(i);
-		return;
+		kind = SPAWN_CREW_POLICE_VAN;
+		break;
 	case MI_POLICE:
 	case MI_RHINO:
 	case MI_BARRACKS:
-		pVehicle->SetUpDriver();
-		if (FindPlayerPed()->m_pWanted->GetWantedLevel() > 1)
-			pVehicle->SetupPassenger(0);
-		return;
+		kind = SPAWN_CREW_POLICE_SEDAN;
+		break;
 	case MI_PREDATOR:
-		pVehicle->SetUpDriver();
-		return;
+		kind = SPAWN_CREW_POLICE_BOAT;
+		break;
 	case MI_VICECHEE:
-	{
-		pVehicle->SetUpDriver()->bMiamiViceCop = true;
-		pVehicle->SetupPassenger(0)->bMiamiViceCop = true;
+		kind = SPAWN_CREW_VICE;
+		break;
+	default:
+		return;
+	}
+	AddCrew(pVehicle, SpawnCrewOf(kind, FindPlayerPed()->m_pWanted->GetWantedLevel()));
+	if (kind == SPAWN_CREW_VICE) {
+		if (pVehicle->pDriver)
+			pVehicle->pDriver->bMiamiViceCop = true;
+		if (pVehicle->pPassengers[0])
+			pVehicle->pPassengers[0]->bMiamiViceCop = true;
 		CPopulation::NumMiamiViceCops += 2;
 		CCarCtrl::MiamiViceCycle = (CCarCtrl::MiamiViceCycle + 1) % 4;
 		CCarCtrl::LastTimeMiamiViceGenerated = CTimer::GetTimeInMilliseconds();
-		return;
-	}
-	default:
-		return;
 	}
 }
 
 void CCarAI::AddAmbulanceOccupants(CVehicle* pVehicle)
 {
-	pVehicle->SetUpDriver();
-	pVehicle->SetupPassenger(1);
+	AddCrew(pVehicle, SpawnCrewOf(ResponderCrewKind(SPAWN_RESPONDER_AMBULANCE), 0));
 }
 
 void CCarAI::AddFiretruckOccupants(CVehicle* pVehicle)
 {
-	pVehicle->SetUpDriver();
-	pVehicle->SetupPassenger(0);
+	AddCrew(pVehicle, SpawnCrewOf(ResponderCrewKind(SPAWN_RESPONDER_FIRETRUCK), 0));
 }
 
 void CCarAI::TellOccupantsToLeaveCar(CVehicle* pVehicle)

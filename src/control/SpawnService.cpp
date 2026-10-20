@@ -62,8 +62,12 @@ static_assert(offsetof(SSpawnServiceTelemetry, m_nGroundRejections) == 220, "the
 static_assert(sizeof(SSpawnServiceTelemetry) == 232, "the telemetry's size is the live reader's contract");
 
 /* The vehicle tag the core names (SPAWN_VEHICLE_TAG_RANDOM) is the engine's
- * own RANDOM_VEHICLE: the driver contract of SetUpDriver reads the tag. */
+ * own RANDOM_VEHICLE: the driver contract of SetUpDriver reads the tag. The
+ * removal ledger's creation classes are pinned the same way. */
 static_assert(SPAWN_VEHICLE_TAG_RANDOM == RANDOM_VEHICLE, "the random tag must be the engine's own");
+static_assert(SPAWN_VEHICLE_TAG_MISSION == MISSION_VEHICLE, "the mission tag must be the engine's own");
+static_assert(SPAWN_VEHICLE_TAG_PARKED == PARKED_VEHICLE, "the parked tag must be the engine's own");
+static_assert(SPAWN_VEHICLE_TAG_PERMANENT == PERMANENT_VEHICLE, "the permanent tag must be the engine's own");
 
 /*
  * The zone compatibility of one class: the live info zone of the position
@@ -102,6 +106,7 @@ struct SSpawnCarAttempt
 	const SSpawnCarRequest *pRequest;
 	CZoneInfo zone;
 	CVector target;
+	CVector centre;
 	SSpawnOffer offers[SPAWN_SERVICE_MAX_CANDIDATES];
 	SNearBubbleCandidate bubbles[SPAWN_SERVICE_MAX_CANDIDATES];
 	int32 boatModel;
@@ -257,10 +262,13 @@ SpawnTrySite(void *user, const SSpawnPlanSite &planSite, uint8_t *pArm)
 	SSpawnPlacement placement;
 
 	/* The site's own mapping (B1): the primitive indexes m_carPathLinks with
-	 * the site's LINK id, never with the directed connection slot. */
+	 * the site's LINK id, never with the directed connection slot. The
+	 * destination (VICE-156) travels with the placement: a responder drives
+	 * to its incident, every other request leaves the mode empty. */
 	SpawnPlacementFromSite(site, planSite.site, &placement);
+	SpawnPlacementSetDestination(&placement, request);
 	refusal = CCarCtrl::CreateCarFromPlacement(placement, carClass, carModel,
-		pAttempt->target, CVector2D(request.playerSpeedX, request.playerSpeedY),
+		pAttempt->centre, CVector2D(request.playerSpeedX, request.playerSpeedY),
 		request.testForCollision, SPAWN_TIER_NEAR, pAttempt->ppCreated, &arm);
 	if (refusal == SPAWN_REFUSAL_NONE && pArm)
 		*pArm = (uint8_t)arm;
@@ -287,7 +295,7 @@ CSpawnService::RequestCar(const SSpawnCarRequest &request, CVehicle **ppCreated)
 	budget.carsInUse = CCarCtrl::NumCarsInUse();
 	budget.carBudget = CCarCtrl::MaxNumberOfCarsInUse;
 	budget.pedFreeSpaces = CPools::GetPedPool()->GetNoOfFreeSpaces();
-	if (SpawnFunctionGate(budget, request.force, &ms_Telemetry) != SPAWN_REFUSAL_NONE)
+	if (SpawnFunctionGate(budget, request.force, &ms_Telemetry, request.priority) != SPAWN_REFUSAL_NONE)
 		return false;
 
 	/* The request's own readiness (VICE-151): the model the requester chose
@@ -308,6 +316,7 @@ CSpawnService::RequestCar(const SSpawnCarRequest &request, CVehicle **ppCreated)
 
 	attempt.pRequest = &request;
 	attempt.target = CVector(request.targetX, request.targetY, request.targetZ);
+	attempt.centre = CVector(request.centreX, request.centreY, request.centreZ);
 	attempt.boatModel = -1;
 	attempt.boatModelChosen = false;
 	attempt.ppCreated = ppCreated;
@@ -330,7 +339,7 @@ CSpawnService::RequestCar(const SSpawnCarRequest &request, CVehicle **ppCreated)
 	numOffers = SpawnOfferSites(CSpawnSites::Index(), query, attempt.offers, SPAWN_SERVICE_MAX_CANDIDATES);
 	for (i = 0; i < numOffers; i++) {
 		const SSpawnSite &site = CSpawnSites::Index().GetSites()[attempt.offers[i].site];
-		CCarCtrl::NearBubbleCandidateFor(CVector(site.x, site.y, site.z), attempt.target,
+		CCarCtrl::NearBubbleCandidateFor(CVector(site.x, site.y, site.z), attempt.centre,
 			NEAR_BUBBLE_ENTITY_RADIUS, &attempt.bubbles[i]);
 	}
 	SpawnPlanSites(CSpawnSites::Index(), attempt.offers, attempt.bubbles, numOffers,
@@ -468,27 +477,18 @@ CSpawnService::CountValveRemoval(void)
 
 /* --- The notes ----------------------------------------------------------- */
 
-/* The purpose of a removed car's class: the ledger names the class the
- * vehicle was created as (VICE-150), so a scripted or parked deletion is not
- * hidden inside the ambient traffic's row. */
-static ESpawnPurpose
-SpawnPurposeOfVehicle(const CVehicle *pVehicle)
-{
-	switch (pVehicle->VehicleCreatedBy) {
-	case RANDOM_VEHICLE:	return SPAWN_PURPOSE_AMBIENT;
-	case MISSION_VEHICLE:	return SPAWN_PURPOSE_MISSION;
-	case PARKED_VEHICLE:	return SPAWN_PURPOSE_PARKED;
-	case PERMANENT_VEHICLE:	return SPAWN_PURPOSE_SPECIAL;
-	default:		return SPAWN_PURPOSE_AMBIENT;	/* a class outside the map: the cull's own subject */
-	}
-}
-
 void
 CSpawnService::NoteVehicleRemoval(CVehicle *pVehicle)
 {
 	if (pVehicle == nil)
 		return;
-	SpawnNoteRemoval(&ms_Telemetry, SpawnPurposeOfVehicle(pVehicle));
+	/* The live role flags answer first (VICE-156): an ambulance or a fire
+	 * truck on duty leaves in the responder row, a law enforcer in the
+	 * police row, and only then the creation class names the row. */
+	SpawnNoteRemoval(&ms_Telemetry, SpawnPurposeOfRemovedVehicle(
+		pVehicle->VehicleCreatedBy,
+		pVehicle->bIsLawEnforcer != 0,
+		pVehicle->bIsAmbulanceOnDuty != 0 || pVehicle->bIsFireTruckOnDuty != 0));
 }
 
 void
