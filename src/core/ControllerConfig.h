@@ -68,8 +68,6 @@ enum e_ControllerAction
 	TAKE_SCREEN_SHOT,
 	SHOW_MOUSE_POINTER_TOGGLE,
 	PED_RELOAD,
-	VEHICLE_CYCLE_WEAPON_RIGHT,
-	VEHICLE_CYCLE_WEAPON_LEFT,
 	UNKNOWN_ACTION,
 	MAX_CONTROLLERACTIONS,
 };
@@ -84,14 +82,12 @@ enum e_ControllerAction
 // VEHICLE_FIREWEAPON entered the block at 4 and PED_RELOAD one version later.
 #define CONTROLS_VERSION_VEHICLE_FIREWEAPON   4
 #define CONTROLS_VERSION_PED_RELOAD           5
-#define CONTROLS_VERSION_VEHICLE_CYCLE_WEAPON 6
-#define CONTROLS_VERSION                      6
+#define CONTROLS_VERSION                      5
 #else
 // Without BIND_VEHICLE_FIREWEAPON the vehicle fire key shares the ped's, so
 // PED_RELOAD is the first field after version 3.
 #define CONTROLS_VERSION_PED_RELOAD           4
-#define CONTROLS_VERSION_VEHICLE_CYCLE_WEAPON 5
-#define CONTROLS_VERSION                      5
+#define CONTROLS_VERSION                      4
 #endif
 
 enum e_ControllerActionType
@@ -187,7 +183,6 @@ public:
 	void  LoadSettings(int32 file);
 	
 	void  InitDefaultControlConfiguration();
-	void  SetDefaultVehicleCycleWeaponKeys();
 	void  InitDefaultControlConfigMouse(CMouseControllerState const &availableButtons);
 	void  InitDefaultControlConfigJoyPad(uint32 buttons);
 	void  InitialiseControllerActionNameArray();

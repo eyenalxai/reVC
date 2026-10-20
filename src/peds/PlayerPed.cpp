@@ -773,7 +773,7 @@ CPlayerPed::CycleWeaponInput(CPad *padUsed, bool inCar)
 	if (m_pPointGunAt || bDontAllowWeaponChange || GetWeapon()->m_eWeaponType == WEAPONTYPE_DETONATOR)
 		return false;
 
-	if (padUsed->CycleWeaponRightJustDown(inCar)) {
+	if (padUsed->CycleWeaponRightJustDown()) {
 		if (TheCamera.PlayerWeaponMode.Mode == CCam::MODE_M16_1STPERSON
 			|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_M16_1STPERSON_RUNABOUT
 			|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_SNIPER
@@ -787,7 +787,7 @@ CPlayerPed::CycleWeaponInput(CPad *padUsed, bool inCar)
 		return true;
 	}
 
-	if (padUsed->CycleWeaponLeftJustDown(inCar)) {
+	if (padUsed->CycleWeaponLeftJustDown()) {
 		if (TheCamera.PlayerWeaponMode.Mode == CCam::MODE_M16_1STPERSON
 			|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_SNIPER
 			|| TheCamera.PlayerWeaponMode.Mode == CCam::MODE_ROCKETLAUNCHER
