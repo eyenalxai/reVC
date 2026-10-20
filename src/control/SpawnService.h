@@ -69,6 +69,58 @@
  * order through the caller's attempt (the primitive) and counts every
  * post-plan refusal by reason.
  *
+ * The planner worker (VICE-160): the rank leaves the frame thread
+ * ---------------------------------------------------------------
+ *
+ * The rank - the cheap gates and the bounded top-K - is arithmetic on the
+ * site records, the ladder's candidates and the occupancy store's answers.
+ * It runs on a worker thread (SpawnPlannerWorker.h) so the frame thread's
+ * plan cost stops growing with the candidate count; the deep facts and every
+ * creation stay where they were, on the main thread.
+ *
+ * The pipeline, in the far worker's shape:
+ *
+ *	frame N-1, end of Idle	the main thread publishes the occupancy copy
+ *				(the store at the top of frame N) and hands the
+ *				frame's rank commands over;
+ *	frame N, top of Process	the join: the rank of frame N-1 is complete;
+ *	frame N, the request	the main thread reserves the ranked candidates
+ *				in order (the tail re-checks the live store), runs
+ *				the deep facts of the prefix, then the attempts -
+ *				and queues this frame's rank command.
+ *
+ * The one-frame lag is the price and it is stated: a plan ranked on frame
+ * N-1 is applied on frame N, so a car appears a frame after its request. A
+ * caller that needs the car in the same call (`ppCreated`, the same-frame
+ * handle) keeps the inline planner, exactly as the explicit kind does; the
+ * parked kind, when its requester lands, is synchronous and keeps it too.
+ * The request gates (the budget and the primary model's readiness) run on
+ * the queue frame, so the apply admits at most one creation on a budget that
+ * filled in between (the primitive's own checks and the pool reserve stand).
+ *
+ * The contention: the worker ranks against the frame-start copy of the store,
+ * not the store. The tail resolves a conflict - a site another request
+ * reserved, or a cell that filled, between the publish and the apply - by
+ * re-checking the live store and, when the reserve fails, moving to the next
+ * ranked candidate. The rank and the tail share their code with the inline
+ * path (SpawnRankSites and SpawnPlanFromRank), so the two cannot drift. The
+ * plans are exact while the tail's conflict and deep refusals stay inside the
+ * published prefix (SPAWN_SERVICE_DEEP_CANDIDATES, eight); past it the
+ * worker's plan is empty (the stated prefix bound) where the inline planner
+ * could reach a ninth candidate. A reservation conflict does not move the
+ * rank's other keys, so the examined prefix and the refusal rows match too; a
+ * cell that fills does move the rank's occupancy key for the candidates in
+ * that cell, so the inline rank over the filled store can order (and count)
+ * the rest differently while the plans still agree. The pipeline's own bound
+ * is SPAWN_PLANNER_RING; a full ring falls back to the inline planner and
+ * counts the fallback.
+ *
+ * The worker is arithmetic only: it reads the site snapshot and the
+ * occupancy copy, writes the published ranked plans, and touches no store,
+ * counter or world. The contract, the frame's order and the write boundary
+ * are SpawnPlannerWorker.h's; the evidence program is utils/spawn-service/
+ * worker.cpp.
+ *
  * The primitive (CarCtrl.cpp, CreateCarFromPlacement)
  * ---------------------------------------------------
  *
@@ -139,6 +191,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <math.h>
+#include <string.h>
 
 #include "config.h"
 #include "PopulationBudget.h"	/* CAR_SPAWN_ATTEMPTS, PED_POOL_RESERVE */
@@ -234,7 +287,9 @@ enum ESpawnSiteWater
  * rows are set by the check (the director calls it later); a breach is a
  * defect row. The defect rows are the primitive's own: the ground casts that
  * found nothing, the offsets over the air guard, and the water casts that
- * failed.
+ * failed. The planner worker's rows (VICE-160) are appended at the end: the
+ * cycles it ran, the commands that did not fit (a fallback to the inline
+ * planner, never silent) and the pending queue's depth at the join.
  */
 struct SSpawnServiceTelemetry
 {
@@ -257,6 +312,16 @@ struct SSpawnServiceTelemetry
 	uint32_t m_nGroundRejections;
 	uint32_t m_nAirOffsetRejections;
 	uint32_t m_nWaterRejections;
+
+	/* The planner worker's own rows (VICE-160), appended: the cycles it ran
+	 * (one per hand-over that had commands), the commands the ring or the
+	 * published queue could not hold (they fall back to the inline planner and
+	 * must stay 0 in normal play), and the depth of the pending plan queue at
+	 * the last join (a gauge: 0 is an empty pipeline, the steady state is the
+	 * frame's own request count). */
+	uint32_t m_nPlannerWorkerCycles;
+	uint32_t m_nPlannerWorkerLost;
+	uint32_t m_nPlannerWorkerQueueDepth;
 };
 
 static inline void
@@ -310,6 +375,40 @@ SpawnNotePlanCost(SSpawnServiceTelemetry *tel, uint64_t micros)
 {
 	tel->m_nPlanCalls++;
 	tel->m_nPlanMicros += micros;
+}
+
+/* The main thread's share of a worker-ranked plan: the rank's cost is the
+ * worker's, so the apply's plan work (the reserve and the deep facts) adds its
+ * microseconds to the same row without a second call. The row's average is
+ * therefore the main thread's whole plan work per request, the number the
+ * ticket's before/after reads (the harness reports the worker's own rank
+ * time beside it). */
+static inline void
+SpawnNotePlanApplyCost(SSpawnServiceTelemetry *tel, uint64_t micros)
+{
+	tel->m_nPlanMicros += micros;
+}
+
+/* The planner worker's own rows (VICE-160). A cycle is one hand-over that
+ * carried commands; a lost command is one the ring (or the published queue)
+ * could not hold, so the request fell back to the inline planner; the depth
+ * is the pending plan queue at the join, a gauge. */
+static inline void
+SpawnNotePlannerWorkerCycle(SSpawnServiceTelemetry *tel)
+{
+	tel->m_nPlannerWorkerCycles++;
+}
+
+static inline void
+SpawnNotePlannerWorkerLost(SSpawnServiceTelemetry *tel, uint32_t count)
+{
+	tel->m_nPlannerWorkerLost += count;
+}
+
+static inline void
+SpawnNotePlannerWorkerQueueDepth(SSpawnServiceTelemetry *tel, uint32_t depth)
+{
+	tel->m_nPlannerWorkerQueueDepth = depth;
 }
 
 /* The conservation check (the director's later call): the cell target sum
@@ -384,6 +483,20 @@ SpawnRingDistSlack(float spawnDist)
  * (the 16 m grid's lanes at the ring held 2..3 cars in the stock traffic; the
  * final collision query at creation stays the true guard). */
 #define SPAWN_SERVICE_CELL_CAPACITY	3
+
+/*
+ * The planner worker (VICE-160). `SPAWN_PLANNER_WORKER` selects the worker or
+ * the inline planner for a road-site request that does not need the car in
+ * the same call; a request with `ppCreated` (the same-frame handle) and the
+ * explicit kind always take the inline planner. `SPAWN_PLANNER_RING` is the
+ * pipeline's bound: the rank commands one hand-over carries and the published
+ * plans the main thread holds. The steady state is one frame's requests (the
+ * ambient spawner's three calls a frame at the stock scale); a full ring
+ * falls back to the inline planner and counts the fallback, never drops the
+ * request.
+ */
+#define SPAWN_PLANNER_RING	16
+#define SPAWN_PLANNER_WORKER	1
 
 /* One request's site query: the target, the ring it aims at, the cone it
  * looks through and the site policy of its purpose. */
@@ -499,9 +612,43 @@ struct SSpawnSiteDeepFacts
 	bool reachOk;
 };
 
-/* The engine's (or the evidence program's) resolution of one candidate's deep
- * facts, by the offer index. */
-typedef void (*SpawnDeepFactsFn)(void *user, int32_t offerIndex, SSpawnSiteDeepFacts *facts);
+/* The main thread's (or the evidence program's) resolution of one candidate's
+ * deep facts. The offer is passed whole, so the inline planner and the
+ * worker's tail (which holds the published offer copies) resolve it the same
+ * way. */
+typedef void (*SpawnDeepFactsFn)(void *user, const SSpawnOffer &offer, SSpawnSiteDeepFacts *facts);
+
+/* --- The road-site request envelope ------------------------------------- */
+
+/*
+ * The road-site request envelope: what a producer chooses (the purpose, the
+ * ring, the class and model policy) - the service chooses the site. The
+ * target is the player centre for the traffic and the destination for the
+ * responders; it is both the cone's origin and the reachability's target.
+ *
+ * The envelope is plain data, so the planner worker's command and its
+ * published plan carry a copy: the apply of a plan ranked on the previous
+ * frame runs the same deep facts and attempts from the same request facts.
+ */
+struct SSpawnCarRequest
+{
+	ESpawnPurpose purpose;
+	bool force;
+	bool allowBoats;	/* a water site falls back to a boat model */
+	bool requireReach;	/* the planner asks TestCoorsCloseness per site */
+	int32_t carClass;
+	int32_t carModel;
+	float targetX, targetY, targetZ;
+	float playerSpeedX, playerSpeedY;
+	bool testForCollision;	/* the requester's own camera/speed policy */
+
+	/* The ring query (the requester's own branch, verbatim). */
+	float spawnDist;
+	float dirX, dirY;
+	float angleLimit;
+	bool forward;
+	bool allowDisabled;
+};
 
 /* --- The plan and its rank ---------------------------------------------- */
 
@@ -573,15 +720,252 @@ SpawnPlanSiteSortsBefore(int32_t rankA, int32_t occupancyA, float ringErrorA, ui
 }
 
 /*
- * The planner's decision: filter the offered sites by the cheap facts, rank
- * the valid ones, resolve the deep facts of the ranked prefix, and reserve
- * the returned placements in the store.
+ * Stage one of the planner, shared by the inline path and the planner worker
+ * (VICE-160): the cheap gates (the site's reservation, the presence cell's
+ * capacity, the ladder's arm) and the bounded top-K rank. It reads only the
+ * site records, the offers, the ladder's candidates and the occupancy view:
+ * no world, no engine, no reservation. The cheap refusals are counted into
+ * the answer, so the caller that owns the telemetry adds them (the worker
+ * cannot write the engine's counters: its output carries them instead).
  *
- * The cheap filter drops a candidate at its first failing gate, counted by
- * reason: a reserved site or a cell at its capacity (OCCUPANCY) and an arm
- * the ladder refuses (VISIBILITY). The deep gates then run in the ticket's
- * order for the ranked prefix: a zone the requested class is not carried in
- * (ZONE) and an unreachable site (REACHABILITY).
+ * The answer is the ordered prefix (K = SPAWN_SERVICE_DEEP_CANDIDATES), the
+ * first cheap refusal and the candidate count. This is the one copy of the
+ * rank's rules: the inline planner (SpawnPlanSites) and the worker's cycle
+ * (SpawnPlannerWorker.cpp) both call it, so the two cannot drift.
+ */
+struct SSpawnRankEntry
+{
+	int32_t offer;
+	int32_t occupancy;
+	float ringError;
+	uint8_t arm;
+	uint8_t rate;
+};
+
+struct SSpawnRank
+{
+	int32_t count;		/* the ranked prefix's length (<= K) */
+	int32_t candidates;	/* the offers examined (the plan cost row) */
+	ESpawnRefusal refusal;	/* the first cheap drop, NONE when all passed */
+	uint32_t refusals[SPAWN_REFUSAL_COUNT];	/* the cheap drops by reason */
+	SSpawnRankEntry entries[SPAWN_SERVICE_DEEP_CANDIDATES];
+};
+
+static inline int32_t
+SpawnRankSites(const SSpawnSite *sites, const SSpawnOffer *offers,
+	const SNearBubbleCandidate *bubbles, int32_t numOffers,
+	const SSpawnOccupancyView &occupancy, uint32_t nowMs, SSpawnRank *rank)
+{
+	int32_t i, nb, r;
+
+	rank->count = 0;
+	rank->candidates = numOffers;
+	rank->refusal = SPAWN_REFUSAL_NONE;
+	for (r = 0; r < SPAWN_REFUSAL_COUNT; r++)
+		rank->refusals[r] = 0;
+
+	if (numOffers <= 0 || sites == 0) {
+		rank->refusal = SPAWN_REFUSAL_NO_SITE;
+		rank->refusals[SPAWN_REFUSAL_NO_SITE]++;
+		return 0;
+	}
+
+	nb = 0;
+	for (i = 0; i < numOffers; i++) {
+		const SSpawnSite *pSite = &sites[offers[i].site];
+		ESpawnRefusal refusal = SPAWN_REFUSAL_NONE;
+		uint8_t arm = (uint8_t)NearBubbleArmFor(bubbles[i]);
+		int32_t cellOccupancy = 0;
+		int32_t visibilityRank;
+
+		if (occupancy.SiteReserved(offers[i].site, nowMs))
+			refusal = SPAWN_REFUSAL_OCCUPANCY;
+		else {
+			cellOccupancy = occupancy.CountAtPosition(pSite->x, pSite->y);
+			if (cellOccupancy >= SPAWN_SERVICE_CELL_CAPACITY)
+				refusal = SPAWN_REFUSAL_OCCUPANCY;
+			else if (arm == NEAR_BUBBLE_ARM_NONE)
+				refusal = SPAWN_REFUSAL_VISIBILITY;
+		}
+		if (refusal != SPAWN_REFUSAL_NONE) {
+			if (rank->refusal == SPAWN_REFUSAL_NONE)
+				rank->refusal = refusal;
+			rank->refusals[refusal]++;
+			continue;
+		}
+		visibilityRank = SpawnVisibilityRank(arm);
+
+		/* The bounded top-K insert (K = SPAWN_SERVICE_DEEP_CANDIDATES): a
+		 * full buffer takes the candidate only when it sorts before the
+		 * buffer's worst entry; then the candidate walks up while it sorts
+		 * before the entry above it. */
+		{
+			bool insert = nb < SPAWN_SERVICE_DEEP_CANDIDATES;
+
+			if (!insert) {
+				const SSpawnRankEntry &worst = rank->entries[SPAWN_SERVICE_DEEP_CANDIDATES-1];
+				insert = SpawnPlanSiteSortsBefore(visibilityRank, cellOccupancy, offers[i].ringError, offers[i].spawnRate, offers[i].site,
+					SpawnVisibilityRank(worst.arm), worst.occupancy, worst.ringError, worst.rate,
+					offers[worst.offer].site);
+			}
+			if (insert) {
+				int32_t at = nb < SPAWN_SERVICE_DEEP_CANDIDATES ? nb : SPAWN_SERVICE_DEEP_CANDIDATES - 1;
+
+				while (at > 0) {
+					const SSpawnRankEntry &above = rank->entries[at-1];
+					if (!SpawnPlanSiteSortsBefore(visibilityRank, cellOccupancy,
+						offers[i].ringError, offers[i].spawnRate, offers[i].site,
+						SpawnVisibilityRank(above.arm), above.occupancy, above.ringError,
+						above.rate, offers[above.offer].site))
+						break;
+					rank->entries[at] = above;
+					at--;
+				}
+				rank->entries[at].offer = i;
+				rank->entries[at].occupancy = cellOccupancy;
+				rank->entries[at].arm = arm;
+				rank->entries[at].ringError = offers[i].ringError;
+				rank->entries[at].rate = offers[i].spawnRate;
+				if (nb < SPAWN_SERVICE_DEEP_CANDIDATES)
+					nb++;
+			}
+		}
+	}
+	rank->count = nb;
+	return nb;
+}
+
+/*
+ * The published form of one ranked plan (VICE-160): the rank's ordered
+ * offers and arms, its cheap counts, and the request the plan belongs to.
+ * The worker publishes it (SpawnPlannerWorker.h); the main thread's tail
+ * (SpawnPlanFromRank) applies it. The inline planner builds the same form
+ * from its own rank, so the deep facts, the reservations and the attempts
+ * have one implementation for both paths.
+ */
+struct SSpawnRankedSite
+{
+	SSpawnOffer offer;
+	uint8_t arm;
+};
+
+struct SSpawnRankedPlan
+{
+	SSpawnCarRequest request;	/* the request the rank belongs to */
+	ESpawnRefusal refusal;		/* the rank's first cheap drop */
+	int32_t numCandidates;		/* the offers the rank examined */
+	uint32_t refusals[SPAWN_REFUSAL_COUNT];	/* the rank's cheap drops by reason */
+	int32_t count;			/* the ranked prefix's length */
+	SSpawnRankedSite sites[SPAWN_SERVICE_DEEP_CANDIDATES];
+};
+
+/* The rank, in the published form. The request is the caller's to set (the
+ * worker echoes the command's; the inline path has none). */
+static inline void
+SpawnRankedPlanFromRank(const SSpawnRank &rank, const SSpawnOffer *offers, SSpawnRankedPlan *out)
+{
+	int32_t i, r;
+
+	out->refusal = rank.refusal;
+	out->numCandidates = rank.candidates;
+	for (r = 0; r < SPAWN_REFUSAL_COUNT; r++)
+		out->refusals[r] = rank.refusals[r];
+	out->count = rank.count;
+	for (i = 0; i < rank.count; i++) {
+		out->sites[i].offer = offers[rank.entries[i].offer];
+		out->sites[i].arm = rank.entries[i].arm;
+	}
+}
+
+/*
+ * The main thread's tail over a ranked plan: the contention re-check, the
+ * deep facts of the prefix, the reservations and the plan. It is the one
+ * stage-two implementation, called by the inline planner (SpawnPlanSites)
+ * and by the service's apply of a published plan; the store is live here,
+ * so a plan ranked on the previous frame resolves its conflicts against the
+ * state it lands on.
+ *
+ * The order is the ticket's: for each ranked candidate, reserve it in order
+ * (a site reserved or a cell filled since the rank, or a failed reserve,
+ * refuses with OCCUPANCY and the tail moves to the next ranked candidate),
+ * then resolve the deep facts (ZONE, then REACHABILITY), release the
+ * reservation when they refuse, and keep the first SPAWN_PLAN_MAX_PLACEMENTS
+ * placements. The examined prefix is bounded by SPAWN_SERVICE_DEEP_CANDIDATES
+ * (eight), exactly as the rank's; beyond it the plan is empty even if the
+ * store would allow a later candidate - the stated prefix bound.
+ */
+static inline int32_t
+SpawnPlanFromRank(const SSpawnRankedPlan &ranked, const SSpawnSite *sites,
+	SSpawnOccupancyStore *store, uint32_t nowMs,
+	SpawnDeepFactsFn deepFacts, void *deepUser,
+	SSpawnPlan *plan, SSpawnServiceTelemetry *tel)
+{
+	int32_t i, r;
+
+	plan->count = 0;
+	plan->refusal = ranked.refusal;
+	if (tel) {
+		tel->m_nPlanCandidates += ranked.numCandidates;
+		for (r = 0; r < SPAWN_REFUSAL_COUNT; r++)
+			tel->m_nRefusalsByReason[r] += ranked.refusals[r];
+	}
+
+	for (i = 0; i < ranked.count &&
+		i < SPAWN_SERVICE_DEEP_CANDIDATES && plan->count < SPAWN_PLAN_MAX_PLACEMENTS; i++) {
+		const SSpawnRankedSite &rankedSite = ranked.sites[i];
+		const SSpawnSite &site = sites[rankedSite.offer.site];
+		ESpawnRefusal refusal = SPAWN_REFUSAL_NONE;
+
+		/* The contention re-check: the copy the rank read may be a frame
+		 * old, so the live store answers first. */
+		if (store && store->SiteReserved(rankedSite.offer.site, nowMs))
+			refusal = SPAWN_REFUSAL_OCCUPANCY;
+		else if (store && store->CountAtPosition(SPAWN_OCCUPANCY_VEHICLE, site.x, site.y) >= SPAWN_SERVICE_CELL_CAPACITY)
+			refusal = SPAWN_REFUSAL_OCCUPANCY;
+		else if (store && !store->ReserveSite(rankedSite.offer.site, nowMs))
+			refusal = SPAWN_REFUSAL_OCCUPANCY;
+
+		if (refusal == SPAWN_REFUSAL_NONE) {
+			SSpawnSiteDeepFacts deep;
+
+			deep.zoneOk = true;
+			deep.reachOk = true;
+			if (deepFacts)
+				deepFacts(deepUser, rankedSite.offer, &deep);
+			if (!deep.zoneOk)
+				refusal = SPAWN_REFUSAL_ZONE;
+			else if (!deep.reachOk)
+				refusal = SPAWN_REFUSAL_REACHABILITY;
+			/* The reservation is released when the deep facts refuse: the
+			 * street is free for the next request at once. */
+			if (refusal != SPAWN_REFUSAL_NONE && store)
+				store->ReleaseSite(rankedSite.offer.site);
+		}
+		if (refusal != SPAWN_REFUSAL_NONE) {
+			if (plan->refusal == SPAWN_REFUSAL_NONE)
+				plan->refusal = refusal;
+			if (tel)
+				SpawnNoteRefusal(tel, refusal);
+			continue;
+		}
+		plan->sites[plan->count].offer = i;
+		plan->sites[plan->count].site = rankedSite.offer.site;
+		plan->sites[plan->count].ringError = rankedSite.offer.ringError;
+		plan->sites[plan->count].arm = rankedSite.arm;
+		plan->count++;
+	}
+	if (plan->count == 0 && plan->refusal == SPAWN_REFUSAL_NONE)
+		plan->refusal = SPAWN_REFUSAL_OCCUPANCY;
+	if (tel)
+		tel->m_nPlanPlacements += plan->count;
+	return plan->count;
+}
+
+/*
+ * The planner's decision, inline: the shared rank (SpawnRankSites) over the
+ * live store, then the shared tail (SpawnPlanFromRank). The worker path is
+ * the same two calls with the published rank instead of the live one; the
+ * tail is the one truth of the deep facts, the reservations and the plan.
  *
  * The returned placements are reserved for SPAWN_OCCUPANCY_RESERVE_MS while
  * the plan is outstanding, so two requests cannot plan the same connection at
@@ -598,128 +982,19 @@ SpawnPlanSites(const CSpawnSiteIndex &index, const SSpawnOffer *offers,
 	SpawnDeepFactsFn deepFacts, void *deepUser,
 	SSpawnPlan *plan, SSpawnServiceTelemetry *tel)
 {
-	int32_t i, nb, examined;
-	/* The cheap rank's top-K: the deep-facts prefix (the plan's four plus
-	 * the backfill's four), so four deep refusals cannot empty the plan. */
-	int32_t bestOffer[SPAWN_SERVICE_DEEP_CANDIDATES];
-	int32_t bestOcc[SPAWN_SERVICE_DEEP_CANDIDATES];
-	uint8_t bestArm[SPAWN_SERVICE_DEEP_CANDIDATES];
-	float bestErr[SPAWN_SERVICE_DEEP_CANDIDATES];
-	uint8_t bestRate[SPAWN_SERVICE_DEEP_CANDIDATES];
+	SSpawnOccupancyView occupancy;
+	SSpawnRank rank;
+	SSpawnRankedPlan ranked;
 
-	plan->count = 0;
-	plan->refusal = SPAWN_REFUSAL_NONE;
-	if (tel)
-		tel->m_nPlanCandidates += numOffers;
-
-	if (numOffers <= 0) {
-		plan->refusal = SPAWN_REFUSAL_NO_SITE;
-		if (tel)
-			SpawnNoteRefusal(tel, SPAWN_REFUSAL_NO_SITE);
-		return 0;
-	}
-
-	/* Stage one: the cheap gates and the rank. */
-	nb = 0;
-	for (i = 0; i < numOffers; i++) {
-		const SSpawnSite *pSite = &index.GetSites()[offers[i].site];
-		ESpawnRefusal refusal = SPAWN_REFUSAL_NONE;
-		uint8_t arm = (uint8_t)NearBubbleArmFor(bubbles[i]);
-		int32_t occupancy = 0;
-		int32_t rank;
-
-		if (store && store->SiteReserved(offers[i].site, nowMs))
-			refusal = SPAWN_REFUSAL_OCCUPANCY;
-		else {
-			occupancy = store ? store->CountAtPosition(SPAWN_OCCUPANCY_VEHICLE, pSite->x, pSite->y) : 0;
-			if (occupancy >= SPAWN_SERVICE_CELL_CAPACITY)
-				refusal = SPAWN_REFUSAL_OCCUPANCY;
-			else if (arm == NEAR_BUBBLE_ARM_NONE)
-				refusal = SPAWN_REFUSAL_VISIBILITY;
-		}
-		if (refusal != SPAWN_REFUSAL_NONE) {
-			if (plan->refusal == SPAWN_REFUSAL_NONE)
-				plan->refusal = refusal;
-			if (tel)
-				SpawnNoteRefusal(tel, refusal);
-			continue;
-		}
-		rank = SpawnVisibilityRank(arm);
-
-		/* The bounded top-K insert (K = SPAWN_SERVICE_DEEP_CANDIDATES): a
-		 * full buffer takes the candidate only when it sorts before the
-		 * buffer's worst entry; then the candidate walks up while it sorts
-		 * before the entry above it. */
-		{
-			bool insert = nb < SPAWN_SERVICE_DEEP_CANDIDATES;
-
-			if (!insert)
-				insert = SpawnPlanSiteSortsBefore(rank, occupancy, offers[i].ringError, offers[i].spawnRate, offers[i].site,
-					SpawnVisibilityRank(bestArm[SPAWN_SERVICE_DEEP_CANDIDATES-1]),
-					bestOcc[SPAWN_SERVICE_DEEP_CANDIDATES-1],
-					bestErr[SPAWN_SERVICE_DEEP_CANDIDATES-1],
-					bestRate[SPAWN_SERVICE_DEEP_CANDIDATES-1],
-					offers[bestOffer[SPAWN_SERVICE_DEEP_CANDIDATES-1]].site);
-			if (insert) {
-				int32_t at = nb < SPAWN_SERVICE_DEEP_CANDIDATES ? nb : SPAWN_SERVICE_DEEP_CANDIDATES - 1;
-				while (at > 0 &&
-					SpawnPlanSiteSortsBefore(rank, occupancy, offers[i].ringError, offers[i].spawnRate, offers[i].site,
-						SpawnVisibilityRank(bestArm[at-1]), bestOcc[at-1], bestErr[at-1], bestRate[at-1], offers[bestOffer[at-1]].site)) {
-					bestOffer[at] = bestOffer[at-1];
-					bestOcc[at] = bestOcc[at-1];
-					bestArm[at] = bestArm[at-1];
-					bestErr[at] = bestErr[at-1];
-					bestRate[at] = bestRate[at-1];
-					at--;
-				}
-				bestOffer[at] = i;
-				bestOcc[at] = occupancy;
-				bestArm[at] = arm;
-				bestErr[at] = offers[i].ringError;
-				bestRate[at] = offers[i].spawnRate;
-				if (nb < SPAWN_SERVICE_DEEP_CANDIDATES)
-					nb++;
-			}
-		}
-	}
-
-	/* Stage two: the deep facts of the ranked prefix, and the reservations.
-	 * The prefix bound keeps the path search out of the per-creation loop
-	 * and out of the whole offer list. */
-	for (i = 0, examined = 0; i < nb &&
-		examined < SPAWN_SERVICE_DEEP_CANDIDATES && plan->count < SPAWN_PLAN_MAX_PLACEMENTS; i++, examined++) {
-		int32_t offerIndex = bestOffer[i];
-		SSpawnSiteDeepFacts deep;
-		ESpawnRefusal refusal = SPAWN_REFUSAL_NONE;
-
-		deep.zoneOk = true;
-		deep.reachOk = true;
-		if (deepFacts)
-			deepFacts(deepUser, offerIndex, &deep);
-		if (!deep.zoneOk)
-			refusal = SPAWN_REFUSAL_ZONE;
-		else if (!deep.reachOk)
-			refusal = SPAWN_REFUSAL_REACHABILITY;
-		else if (store && !store->ReserveSite(offers[offerIndex].site, nowMs))
-			refusal = SPAWN_REFUSAL_OCCUPANCY;
-		if (refusal != SPAWN_REFUSAL_NONE) {
-			if (plan->refusal == SPAWN_REFUSAL_NONE)
-				plan->refusal = refusal;
-			if (tel)
-				SpawnNoteRefusal(tel, refusal);
-			continue;
-		}
-		plan->sites[plan->count].offer = offerIndex;
-		plan->sites[plan->count].site = offers[offerIndex].site;
-		plan->sites[plan->count].ringError = offers[offerIndex].ringError;
-		plan->sites[plan->count].arm = bestArm[i];
-		plan->count++;
-	}
-	if (plan->count == 0 && plan->refusal == SPAWN_REFUSAL_NONE)
-		plan->refusal = SPAWN_REFUSAL_OCCUPANCY;
-	if (tel)
-		tel->m_nPlanPlacements += plan->count;
-	return plan->count;
+	if (store)
+		occupancy = store->View();
+	else
+		memset(&occupancy, 0, sizeof(occupancy));
+	SpawnRankSites(index.GetSites(), offers, bubbles, numOffers, occupancy, nowMs, &rank);
+	memset(&ranked, 0, sizeof(ranked));
+	SpawnRankedPlanFromRank(rank, offers, &ranked);
+	return SpawnPlanFromRank(ranked, index.GetSites(), store, nowMs,
+		deepFacts, deepUser, plan, tel);
 }
 
 /* --- The run: the plan through the primitive ----------------------------- */
@@ -958,32 +1233,6 @@ SpawnPlacementFromSite(const SSpawnSite &site, int32_t siteId, SSpawnPlacement *
 
 /* --- The request envelopes ----------------------------------------------- */
 
-/*
- * The road-site request envelope: what a producer chooses (the purpose, the
- * ring, the class and model policy) - the service chooses the site. The
- * target is the player centre for the traffic and the destination for the
- * responders; it is both the cone's origin and the reachability's target.
- */
-struct SSpawnCarRequest
-{
-	ESpawnPurpose purpose;
-	bool force;
-	bool allowBoats;	/* a water site falls back to a boat model */
-	bool requireReach;	/* the planner asks TestCoorsCloseness per site */
-	int32_t carClass;
-	int32_t carModel;
-	float targetX, targetY, targetZ;
-	float playerSpeedX, playerSpeedY;
-	bool testForCollision;	/* the requester's own camera/speed policy */
-
-	/* The ring query (the requester's own branch, verbatim). */
-	float spawnDist;
-	float dirX, dirY;
-	float angleLimit;
-	bool forward;
-	bool allowDisabled;
-};
-
 /* --- The engine side ----------------------------------------------------- */
 
 /*
@@ -996,8 +1245,14 @@ class CSpawnService
 {
 public:
 	/* One road-site request: the gates, the plan (offer, facts, rank,
-	 * reserve) and the run through CCarCtrl::CreateCarFromPlacement. The
-	 * created car is handed back (ppCreated when the caller asks). */
+	 * reserve) and the run through CCarCtrl::CreateCarFromPlacement.
+	 *
+	 * The async kind (VICE-160): without `ppCreated`, the request applies one
+	 * plan ranked on the previous frame (reserve, deep facts, attempts) and
+	 * queues this request's rank for the worker; the created car is the
+	 * previous request's, and the return is that plan's answer. A caller that
+	 * needs the car in the same call passes `ppCreated`, which selects the
+	 * inline planner. The explicit kind is always inline. */
 	static bool RequestCar(const SSpawnCarRequest &request, CVehicle **ppCreated);
 
 	/* One explicit creation: synchronous, exact, no visibility and no ring;
@@ -1037,6 +1292,22 @@ public:
 
 	/* The boot, the restart and the load: the counters go. */
 	static void ReInit(void);
+
+	/* The planner worker's frame (VICE-160). `BuildPlannerWorker` copies the
+	 * site index into the worker's read-only snapshot and starts the thread;
+	 * it runs once, right after CSpawnSites::Build in CGame::Initialise.
+	 * `JoinPlannerWorker` is the top of CGame::Process: the cycle of the
+	 * previous frame is complete, and its plans move to the main thread's
+	 * pending queue. `RunPlannerWorker` is the end of Idle: the occupancy
+	 * copy and the site flags are published and the frame's commands are
+	 * handed over. `ShutDownPlannerWorker` joins the thread (CGame::ShutDown).
+	 * `AssertPlannerWorkerIdle` is the debug build's audit of the window, for
+	 * CWorld::Process and RenderScene. */
+	static void BuildPlannerWorker(void);
+	static void JoinPlannerWorker(void);
+	static void RunPlannerWorker(void);
+	static void ShutDownPlannerWorker(void);
+	static void AssertPlannerWorkerIdle(void);
 
 private:
 	/* The engine's one counter home (the live reader's symbol). */

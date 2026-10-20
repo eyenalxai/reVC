@@ -101,23 +101,20 @@
  * cannot read held. A rebuild (Resync) drops the reservations with the
  * records: a load or a replay plans afresh.
  *
- * The worker copy (a later ticket)
- * --------------------------------
+ * The worker copy (VICE-160)
+ * --------------------------
  *
- * The design's section 2 wants the planner worker to read a copy, merged at a
- * stated cadence; the worker itself is the design's section 11. It does not
- * read this store: it reads a copy of the counts only, double-buffered and
- * merged on the main thread. The merge runs with the worker joined (the far
- * worker's own window) and at most once per planning batch and at most every
- * 250 ms (fifteen frames at 60 Hz). The copy is exact at the merge - it is
- * these arrays, and the worker touches no store - and between merges it lags
- * by the updates of the window. The accuracy target is per entity, not per
- * cell: a tracked entity's cell is stale by at most its own unwatched
- * movement, one cell crossing per window (30 m/s is 7.5 m in 250 ms, inside a
- * 16 m cell), and the store's own sums never drift. The planner treats the
- * copy as a filter: the final collision query at creation stays the true
- * guard, so a stale count can refuse or admit a candidate, never create an
- * overlap. No worker is added here.
+ * The planner worker (SpawnPlannerWorker.h) does not read this store: it
+ * reads a copy of the vehicle counts and the reservations, double-buffered
+ * and published by the main thread with the worker joined, immediately
+ * before the hand-over (the far worker's own window). The copy is exact at
+ * the publish - it is these arrays, and the worker touches no store - and it
+ * is the state the applying frame starts from; the tail re-checks the live
+ * store for a reservation or a cell that moved in between, so a stale count
+ * can refuse or admit a candidate, never create an overlap (the primitive's
+ * final collision query stays the true guard). The store's own sums never
+ * drift. The view below (SSpawnOccupancyView) is the one read surface of the
+ * store and the copy.
  *
  * No engine header beyond config.h is included; the evidence program in
  * utils/spawn-service drives the store on its own.
@@ -165,11 +162,34 @@ enum ESpawnOccupancyClass
 };
 
 /*
+ * The held test of one site reservation, one truth for the store and the
+ * planner worker's read-only copy (VICE-160): an entry is held while its
+ * remaining lifetime is inside (0, SPAWN_OCCUPANCY_RESERVE_MS]. The signed
+ * difference survives the timer's wrap, a clock that moved backwards (a load)
+ * reads the reservation free, and an entry older than the wrap half cannot
+ * read held.
+ */
+static inline bool
+SpawnOccupancySiteHeld(bool inUse, uint32_t expiry, uint32_t now)
+{
+	int32_t remaining = (int32_t)(expiry - now);
+
+	return inUse && remaining > 0 && remaining <= SPAWN_OCCUPANCY_RESERVE_MS;
+}
+
+struct SSpawnOccupancyView;
+
+/*
  * The store: the grid, the handle records and the reservations. It is
  * engine-free (plain arithmetic over its own arrays; no allocation anywhere),
  * so the evidence program instantiates it directly and drives the same code
  * the game runs. The engine's one instance lives in SpawnOccupancy.cpp behind
  * CSpawnOccupancy.
+ *
+ * The planner worker (VICE-160) never reads the store: it reads a copy of the
+ * vehicle counts and the reservations that the main thread publishes before a
+ * hand-over (SpawnPlannerWorker.h). The view below is the one read surface of
+ * both, so the rank's cheap gates are one truth.
  */
 struct SSpawnOccupancyStore
 {
@@ -326,10 +346,9 @@ struct SSpawnOccupancyStore
 	bool
 	SiteReserved(int32_t site, uint32_t now) const
 	{
-		if (site < 0 || site >= SPAWN_OCCUPANCY_SITES || !m_aSiteInUse[site])
+		if (site < 0 || site >= SPAWN_OCCUPANCY_SITES)
 			return false;
-		int32_t remaining = (int32_t)(m_aSiteExpiry[site] - now);
-		return remaining > 0 && remaining <= SPAWN_OCCUPANCY_RESERVE_MS;
+		return SpawnOccupancySiteHeld(m_aSiteInUse[site], m_aSiteExpiry[site], now);
 	}
 
 	void
@@ -338,6 +357,10 @@ struct SSpawnOccupancyStore
 		if (site >= 0 && site < SPAWN_OCCUPANCY_SITES)
 			m_aSiteInUse[site] = false;
 	}
+
+	/* The rank's read-only view of this store (the planner worker's copy
+	 * exposes the same view over its published arrays). */
+	SSpawnOccupancyView View(void) const;
 
 private:
 	/* The presence update behind Create and Move: the handle is counted in
@@ -412,6 +435,58 @@ private:
 		*pRecord = SPAWN_OCCUPANCY_CELL_NONE;
 	}
 };
+
+/*
+ * The rank's read-only view of an occupancy store (VICE-160): the vehicle
+ * counts and the reservation table, nothing else. The store answers through
+ * it, and the planner worker's double-buffered copy exposes the same view
+ * over its published arrays, so the cheap gates (the cell capacity and the
+ * held reservation) are one implementation for the inline planner and the
+ * worker. The ped counts, the handle records and the totals are the store's
+ * own and are never read by the rank: `m_pVehicleCount` is nil on an invalid
+ * view, and every read answers the zero answer.
+ */
+struct SSpawnOccupancyView
+{
+	const uint16_t *m_pVehicleCount;
+	const uint32_t *m_pSiteExpiry;
+	const bool *m_pSiteInUse;
+
+	bool IsValid(void) const { return m_pVehicleCount != 0; }
+	int32_t CountAtPosition(float x, float y) const;
+	bool SiteReserved(int32_t site, uint32_t now) const;
+};
+
+inline int32_t
+SSpawnOccupancyView::CountAtPosition(float x, float y) const
+{
+	int32_t cell;
+
+	if (m_pVehicleCount == 0 || !SSpawnOccupancyStore::CellAt(x, y, cell))
+		return 0;
+	return m_pVehicleCount[cell];
+}
+
+inline bool
+SSpawnOccupancyView::SiteReserved(int32_t site, uint32_t now) const
+{
+	if (m_pSiteInUse == 0 || m_pSiteExpiry == 0)
+		return false;
+	if (site < 0 || site >= SPAWN_OCCUPANCY_SITES)
+		return false;
+	return SpawnOccupancySiteHeld(m_pSiteInUse[site], m_pSiteExpiry[site], now);
+}
+
+inline SSpawnOccupancyView
+SSpawnOccupancyStore::View(void) const
+{
+	SSpawnOccupancyView view;
+
+	view.m_pVehicleCount = m_aVehicleCount;
+	view.m_pSiteExpiry = m_aSiteExpiry;
+	view.m_pSiteInUse = m_aSiteInUse;
+	return view;
+}
 
 /*
  * The engine's one store and the hooks the lifecycle calls; every method

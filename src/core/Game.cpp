@@ -69,6 +69,7 @@
 #include "SetPieces.h"
 #include "SpawnOccupancy.h"
 #include "SpawnReadiness.h"
+#include "SpawnService.h"
 #include "SpecialFX.h"
 #include "SpawnSites.h"
 #include "Stats.h"
@@ -465,6 +466,10 @@ bool CGame::Initialise(const char* datFile)
 	 * site starts unvalidated and the ground is validated lazily per site.
 	 * The spawn service's planner reads it since VICE-150. */
 	CSpawnSites::Build();
+	/* The spawn planner's worker (VICE-160): its read-only copy of the site
+	 * index, made once, and its thread. The rank runs behind the boundary
+	 * from here; the deep facts and every creation stay on the main thread. */
+	CSpawnService::BuildPlannerWorker();
 	for (int i = 0; i < NUMPLAYERS; i++)
 		CWorld::Players[i].Clear();
 	CWorld::Players[0].LoadPlayerSkin();
@@ -597,6 +602,8 @@ bool CGame::ShutDown(void)
 	/* The far traffic layer's worker (VICE-133): its thread is joined here, so
 	 * nothing of the layer survives the world it simulated. */
 	CFarTraffic::ShutDown();
+	/* The spawn planner's worker (VICE-160): the same, with its snapshot. */
+	CSpawnService::ShutDownPlannerWorker();
 
 	CReplay::FinishPlayback();
 	CReplay::EmptyReplayBuffer();
@@ -861,6 +868,10 @@ void CGame::Process(void)
 	 * build asserts it). The cycle of this frame is handed back at the end of
 	 * Idle, after the render. */
 	CFarTraffic::JoinWorker();
+	/* The spawn planner's worker (VICE-160): the same window. Its rank of the
+	 * previous frame is complete; the plans move to the main thread's pending
+	 * queue, and the requests of CWorld::Process below apply them. */
+	CSpawnService::JoinPlannerWorker();
 
 	CPad::UpdatePads();
 #ifdef USE_CUSTOM_ALLOCATOR

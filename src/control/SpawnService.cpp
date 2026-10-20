@@ -1,6 +1,7 @@
 #include "common.h"
 
 #include "SpawnService.h"
+#include "SpawnPlannerWorker.h"
 
 #include "CarCtrl.h"
 
@@ -46,6 +47,19 @@
 
 SSpawnServiceTelemetry CSpawnService::ms_Telemetry;
 
+/*
+ * The main thread's pending plans (VICE-160): the plans the worker ranked, in
+ * the order the requests queued them. The join moves a published batch into
+ * this ring; each road-site request that takes the worker applies one at its
+ * head. The ring is the same bound as the worker's command ring, so the
+ * pipeline cannot outgrow it (a full ring falls back to the inline planner).
+ */
+static SSpawnRankedPlan ms_aPlannerPlans[SPAWN_PLANNER_RING];
+static int32_t ms_nPlannerHead;
+static int32_t ms_nPlannerCount;
+static uint32_t ms_nPlannerOutputCycle;		/* the last published cycle copied */
+static uint32_t ms_nPlannerSiteRefreshes;	/* CSpawnSites' refresh count the snapshot holds */
+
 /* The live reader's offsets (utils/caps-audit/live-counters.py). The layout
  * is the header's field order; a field move breaks the build here before it
  * can misread the live rows. */
@@ -59,7 +73,10 @@ static_assert(offsetof(SSpawnServiceTelemetry, m_nReadinessWaits) == 144, "the l
 static_assert(offsetof(SSpawnServiceTelemetry, m_nPlanMicros) == 200, "the live reader reads the plan rows at offset 184 and the micros at 200");
 static_assert(offsetof(SSpawnServiceTelemetry, m_nConservationCellSum) == 208, "the live reader reads the conservation rows at offset 208");
 static_assert(offsetof(SSpawnServiceTelemetry, m_nGroundRejections) == 220, "the live reader reads the defect rows at offset 220");
-static_assert(sizeof(SSpawnServiceTelemetry) == 232, "the telemetry's size is the live reader's contract");
+static_assert(offsetof(SSpawnServiceTelemetry, m_nPlannerWorkerCycles) == 232, "the live reader reads the worker's cycle row at offset 232");
+static_assert(offsetof(SSpawnServiceTelemetry, m_nPlannerWorkerLost) == 236, "the live reader reads the worker's lost row at offset 236");
+static_assert(offsetof(SSpawnServiceTelemetry, m_nPlannerWorkerQueueDepth) == 240, "the live reader reads the worker's queue row at offset 240");
+static_assert(sizeof(SSpawnServiceTelemetry) == 248, "the telemetry's size is the live reader's contract");
 
 /* The vehicle tag the core names (SPAWN_VEHICLE_TAG_RANDOM) is the engine's
  * own RANDOM_VEHICLE: the driver contract of SetUpDriver reads the tag. */
@@ -198,12 +215,13 @@ SpawnReachOf(int32 site, const CVector &target)
 /* The deep facts of one ranked candidate: the site's live zone (never cached:
  * the script fills the zones after boot and a save load replaces the array)
  * and the reachability of the target. The boat sites keep the old
- * primitive's own exemption from the reach test. */
+ * primitive's own exemption from the reach test. The offer comes whole from
+ * the planner's tail, so the inline planner and the worker's published plan
+ * resolve it the same way. */
 static void
-SpawnResolveDeepFacts(void *user, int32 offerIndex, SSpawnSiteDeepFacts *facts)
+SpawnResolveDeepFacts(void *user, const SSpawnOffer &offer, SSpawnSiteDeepFacts *facts)
 {
 	SSpawnCarAttempt *pAttempt = (SSpawnCarAttempt *)user;
-	const SSpawnOffer &offer = pAttempt->offers[offerIndex];
 	const SSpawnSite &site = CSpawnSites::Index().GetSites()[offer.site];
 	CVector sitePos(site.x, site.y, site.z);
 
@@ -267,51 +285,22 @@ SpawnTrySite(void *user, const SSpawnPlanSite &planSite, uint8_t *pArm)
 	return refusal;
 }
 
-bool
-CSpawnService::RequestCar(const SSpawnCarRequest &request, CVehicle **ppCreated)
+/* The offer walk and the ladder's candidates of one request: the main
+ * thread's share of both planner paths. The query's water policy is the
+ * ambient's (boats fall back to a boat model); the offer bound is the
+ * service's. */
+static int32
+SpawnBuildAttempt(const SSpawnCarRequest &request, SSpawnCarAttempt *pAttempt)
 {
-	SSpawnCarAttempt attempt;
 	SSpawnRingQuery query;
-	SSpawnPlan plan;
-	SSpawnBudgetFacts budget;
 	int32 numOffers, i;
-	uint32 startCycles, endCycles, cyclesPerMs;
-	uint64 micros;
 
-	SpawnRequestBegin(&ms_Telemetry, request.purpose, SPAWN_KIND_ROAD_SITE);
-
-	/* The function gate: the car target, the car budget and the ped pool's
-	 * reserve, the same counts the spawner's call checked one by one. */
-	budget.randomCars = CCarCtrl::NumRandomCars;
-	budget.randomTarget = CCarCtrl::GetRandomCarTarget();
-	budget.carsInUse = CCarCtrl::NumCarsInUse();
-	budget.carBudget = CCarCtrl::MaxNumberOfCarsInUse;
-	budget.pedFreeSpaces = CPools::GetPedPool()->GetNoOfFreeSpaces();
-	if (SpawnFunctionGate(budget, request.force, &ms_Telemetry) != SPAWN_REFUSAL_NONE)
-		return false;
-
-	/* The request's own readiness (VICE-151): the model the requester chose
-	 * must be resident with its txd and its animation block (IsModelReady:
-	 * a "loaded" model can have an evicted anim block, so HasModelLoaded
-	 * alone can lie). The wait clock of the purpose runs until a request
-	 * passes. The prewarm's pins hold the class catalogue's own models,
-	 * txds and anim blocks, so the ambient traffic's models (the class
-	 * arrays and the police sets, whose anims are the pinned van block or
-	 * none) never defer on the strict rule; a model outside the prewarm
-	 * whose anim block was evicted has no healer yet - a follow-up
-	 * decision, stated in SpawnReadiness.h. */
-	if (request.carModel < 0 || !CSpawnReadiness::IsModelReady(request.carModel)) {
-		SpawnReadinessDefer(&ms_Telemetry, request.purpose, CTimer::GetTimeInMilliseconds());
-		return false;
-	}
-	SpawnReadinessReady(&ms_Telemetry, request.purpose, CTimer::GetTimeInMilliseconds());
-
-	attempt.pRequest = &request;
-	attempt.target = CVector(request.targetX, request.targetY, request.targetZ);
-	attempt.boatModel = -1;
-	attempt.boatModelChosen = false;
-	attempt.ppCreated = ppCreated;
-	CTheZones::GetZoneInfoForTimeOfDay(&attempt.target, &attempt.zone);
+	pAttempt->pRequest = &request;
+	pAttempt->target = CVector(request.targetX, request.targetY, request.targetZ);
+	pAttempt->boatModel = -1;
+	pAttempt->boatModelChosen = false;
+	pAttempt->ppCreated = 0;
+	CTheZones::GetZoneInfoForTimeOfDay(&pAttempt->target, &pAttempt->zone);
 
 	query.targetX = request.targetX;
 	query.targetY = request.targetY;
@@ -323,26 +312,160 @@ CSpawnService::RequestCar(const SSpawnCarRequest &request, CVehicle **ppCreated)
 	query.water = request.allowBoats ? SPAWN_SITES_ANY : SPAWN_SITES_LAND;
 	query.allowDisabled = request.allowDisabled;
 
-	/* The plan's own price: the offer walk and the fact resolution (the
-	 * ranked prefix's path searches included). The primitive's work is the
-	 * run's, not the plan's. */
-	startCycles = CTimer::GetCurrentTimeInCycles();
-	numOffers = SpawnOfferSites(CSpawnSites::Index(), query, attempt.offers, SPAWN_SERVICE_MAX_CANDIDATES);
+	numOffers = SpawnOfferSites(CSpawnSites::Index(), query, pAttempt->offers, SPAWN_SERVICE_MAX_CANDIDATES);
 	for (i = 0; i < numOffers; i++) {
-		const SSpawnSite &site = CSpawnSites::Index().GetSites()[attempt.offers[i].site];
-		CCarCtrl::NearBubbleCandidateFor(CVector(site.x, site.y, site.z), attempt.target,
-			NEAR_BUBBLE_ENTITY_RADIUS, &attempt.bubbles[i]);
+		const SSpawnSite &site = CSpawnSites::Index().GetSites()[pAttempt->offers[i].site];
+		CCarCtrl::NearBubbleCandidateFor(CVector(site.x, site.y, site.z), pAttempt->target,
+			NEAR_BUBBLE_ENTITY_RADIUS, &pAttempt->bubbles[i]);
 	}
+	return numOffers;
+}
+
+static uint64
+SpawnPlanMicros(uint32 startCycles, uint32 endCycles)
+{
+	uint32 cyclesPerMs = CTimer::GetCyclesPerMillisecond();
+
+	return cyclesPerMs ? (uint64)(endCycles - startCycles) * 1000 / cyclesPerMs : 0;
+}
+
+/* The inline planner: the offer walk, the shared rank and the shared tail,
+ * then the run. The same-frame handle (and the explicit kind) takes this
+ * path; the worker path is the same tail over a published rank. */
+static bool
+SpawnRunInlinePlan(const SSpawnCarRequest &request, CVehicle **ppCreated, SSpawnServiceTelemetry *tel)
+{
+	SSpawnCarAttempt attempt;
+	SSpawnPlan plan;
+	uint32 startCycles, endCycles;
+	int32 numOffers;
+
+	startCycles = CTimer::GetCurrentTimeInCycles();
+	numOffers = SpawnBuildAttempt(request, &attempt);
+	attempt.ppCreated = ppCreated;
 	SpawnPlanSites(CSpawnSites::Index(), attempt.offers, attempt.bubbles, numOffers,
 		&CSpawnOccupancy::Store(), CTimer::GetTimeInMilliseconds(),
-		SpawnResolveDeepFacts, &attempt, &plan, &ms_Telemetry);
+		SpawnResolveDeepFacts, &attempt, &plan, tel);
 	endCycles = CTimer::GetCurrentTimeInCycles();
-	cyclesPerMs = CTimer::GetCyclesPerMillisecond();
-	micros = cyclesPerMs ? (uint64)(endCycles - startCycles) * 1000 / cyclesPerMs : 0;
-	NotePlanCost(micros);
+	SpawnNotePlanCost(tel, SpawnPlanMicros(startCycles, endCycles));
 
 	return SpawnRunPlan(plan, &CSpawnOccupancy::Store(), SpawnTrySite, &attempt,
-		&ms_Telemetry, request.purpose) == SPAWN_REFUSAL_NONE;
+		tel, request.purpose) == SPAWN_REFUSAL_NONE;
+}
+
+/*
+ * Apply the oldest published plan (VICE-160): the shared tail (the live
+ * store's re-check, the reserve in ranked order, the deep facts of the
+ * prefix) and the run. The plan's request is the one that queued it, so the
+ * attempts resolve the same class, model and target. The main thread's plan
+ * cost adds to the plan row without a second call: the rank's cost is the
+ * worker's and the harness reports it beside the row.
+ */
+static ESpawnRefusal
+SpawnApplyNextRankedPlan(bool *pApplied, SSpawnServiceTelemetry *tel)
+{
+	const SSpawnRankedPlan *pRanked;
+	SSpawnCarAttempt attempt;
+	SSpawnPlan plan;
+	uint32 startCycles, endCycles;
+
+	*pApplied = false;
+	if (ms_nPlannerCount <= 0)
+		return SPAWN_REFUSAL_NONE;
+	pRanked = &ms_aPlannerPlans[ms_nPlannerHead];
+
+	attempt.pRequest = &pRanked->request;
+	attempt.target = CVector(pRanked->request.targetX, pRanked->request.targetY, pRanked->request.targetZ);
+	attempt.boatModel = -1;
+	attempt.boatModelChosen = false;
+	attempt.ppCreated = 0;
+	CTheZones::GetZoneInfoForTimeOfDay(&attempt.target, &attempt.zone);
+
+	startCycles = CTimer::GetCurrentTimeInCycles();
+	SpawnPlanFromRank(*pRanked, CSpawnSites::Index().GetSites(), &CSpawnOccupancy::Store(),
+		CTimer::GetTimeInMilliseconds(), SpawnResolveDeepFacts, &attempt, &plan, tel);
+	endCycles = CTimer::GetCurrentTimeInCycles();
+	SpawnNotePlanApplyCost(tel, SpawnPlanMicros(startCycles, endCycles));
+
+	*pApplied = true;
+	ms_nPlannerHead = (ms_nPlannerHead + 1) % SPAWN_PLANNER_RING;
+	ms_nPlannerCount--;
+
+	return SpawnRunPlan(plan, &CSpawnOccupancy::Store(), SpawnTrySite, &attempt,
+		tel, pRanked->request.purpose);
+}
+
+bool
+CSpawnService::RequestCar(const SSpawnCarRequest &request, CVehicle **ppCreated)
+{
+	SSpawnBudgetFacts budget;
+	ESpawnRefusal appliedRefusal = SPAWN_REFUSAL_NONE;
+	bool bAsync, bApplied = false;
+
+	SpawnRequestBegin(&ms_Telemetry, request.purpose, SPAWN_KIND_ROAD_SITE);
+
+	/* The split (SpawnService.h, SpawnPlannerWorker.h): the same-frame handle
+	 * keeps the inline planner, so the explicit and parked kinds do too. */
+	bAsync = SPAWN_PLANNER_WORKER != 0 && ppCreated == 0 && CSpawnPlannerWorker::IsEnabled();
+
+	/* The previous frame's plan lands first, before this request's gates:
+	 * its own gates ran on the queue frame, and a budget that filled since
+	 * must not strand a plan the worker already ranked. */
+	if (bAsync)
+		appliedRefusal = SpawnApplyNextRankedPlan(&bApplied, &ms_Telemetry);
+
+	/* The function gate: the car target, the car budget and the ped pool's
+	 * reserve, the same counts the spawner's call checked one by one. */
+	budget.randomCars = CCarCtrl::NumRandomCars;
+	budget.randomTarget = CCarCtrl::GetRandomCarTarget();
+	budget.carsInUse = CCarCtrl::NumCarsInUse();
+	budget.carBudget = CCarCtrl::MaxNumberOfCarsInUse;
+	budget.pedFreeSpaces = CPools::GetPedPool()->GetNoOfFreeSpaces();
+	if (SpawnFunctionGate(budget, request.force, &ms_Telemetry) != SPAWN_REFUSAL_NONE)
+		return bApplied && appliedRefusal == SPAWN_REFUSAL_NONE;
+
+	/* The request's own readiness (VICE-151): the model the requester chose
+	 * must be resident with its txd and its animation block (IsModelReady:
+	 * a "loaded" model can have an evicted anim block, so HasModelLoaded
+	 * alone can lie). The wait clock of the purpose runs until a request
+	 * passes. The prewarm's pins hold the class catalogue's own models,
+	 * txds and anim blocks, so the ambient traffic's models (the class
+	 * arrays and the police sets, whose anims are the pinned van block or
+	 * none) never defer on the strict rule; a model outside the prewarm
+	 * whose anim block was evicted has no healer yet - a follow-up
+	 * decision, stated in SpawnReadiness.h. The async plan's apply runs one
+	 * frame after this gate; the pins hold the class models across it. */
+	if (request.carModel < 0 || !CSpawnReadiness::IsModelReady(request.carModel)) {
+		SpawnReadinessDefer(&ms_Telemetry, request.purpose, CTimer::GetTimeInMilliseconds());
+		return bApplied && appliedRefusal == SPAWN_REFUSAL_NONE;
+	}
+	SpawnReadinessReady(&ms_Telemetry, request.purpose, CTimer::GetTimeInMilliseconds());
+
+	if (bAsync) {
+		SSpawnCarAttempt attempt;
+		uint32 startCycles, endCycles;
+		int32 numOffers;
+		bool bQueued;
+
+		/* The plan's own price on this thread: the offer walk and the
+		 * ladder's candidates, then the command's copy. The rank and the
+		 * deep facts are the worker's and the tail's. */
+		startCycles = CTimer::GetCurrentTimeInCycles();
+		numOffers = SpawnBuildAttempt(request, &attempt);
+		bQueued = CSpawnPlannerWorker::QueueRank(request, attempt.offers, attempt.bubbles, numOffers);
+		endCycles = CTimer::GetCurrentTimeInCycles();
+		SpawnNotePlanCost(&ms_Telemetry, SpawnPlanMicros(startCycles, endCycles));
+
+		if (!bQueued) {
+			/* The ring is full (a missed hand-over): the request keeps its
+			 * same-frame answer through the inline planner, counted. */
+			SpawnNotePlannerWorkerLost(&ms_Telemetry, 1);
+			return SpawnRunInlinePlan(request, ppCreated, &ms_Telemetry);
+		}
+		return bApplied && appliedRefusal == SPAWN_REFUSAL_NONE;
+	}
+
+	return SpawnRunInlinePlan(request, ppCreated, &ms_Telemetry);
 }
 
 bool
@@ -526,4 +649,102 @@ CSpawnService::ReInit(void)
 {
 	SpawnTelemetryReset(&ms_Telemetry);
 	SpawnReachCacheClear();
+	/* The restart drops the previous world's plans: the ring, the pending
+	 * queue and the published block (a load or a new game plans afresh). The
+	 * worker is idle here (the menu runs after the join), and Reset asserts
+	 * it. */
+	ms_nPlannerHead = 0;
+	ms_nPlannerCount = 0;
+	ms_nPlannerOutputCycle = 0;
+	CSpawnPlannerWorker::Reset();
+}
+
+/* --- The planner worker's frame ------------------------------------------ */
+
+/*
+ * The build (VICE-160): right after CSpawnSites::Build, with the index made
+ * and the worker stopped. The snapshot is a copy of the index's sites; the
+ * geometry never moves and the flags are refreshed by RefreshSiteFlags when
+ * the index's own refresh count changes.
+ */
+void
+CSpawnService::BuildPlannerWorker(void)
+{
+	CSpawnPlannerWorker::Stop();
+	CSpawnPlannerWorker::Reset();
+	CSpawnPlannerWorker::SetSites(CSpawnSites::Index().GetSites(), CSpawnSites::Index().GetNumSites());
+	ms_nPlannerHead = 0;
+	ms_nPlannerCount = 0;
+	ms_nPlannerOutputCycle = 0;
+	ms_nPlannerSiteRefreshes = CSpawnSites::Index().GetNumFlagRefreshes();
+	CSpawnPlannerWorker::Start();
+}
+
+/*
+ * The join (VICE-160): the top of CGame::Process, before CWorld::Process. The
+ * cycle of the previous frame is complete; its plans move to the main
+ * thread's pending queue, in the order the requests queued them. The cycle
+ * number marks the block applied, so a frame with no hand-over re-reads
+ * nothing.
+ */
+void
+CSpawnService::JoinPlannerWorker(void)
+{
+	const SSpawnPlannerOutput *pOutput;
+	int32 i;
+
+	CSpawnPlannerWorker::Join();
+	pOutput = CSpawnPlannerWorker::Published();
+	if (pOutput->cycle != ms_nPlannerOutputCycle) {
+		ms_nPlannerOutputCycle = pOutput->cycle;
+		if (pOutput->numLost > 0)
+			SpawnNotePlannerWorkerLost(&ms_Telemetry, pOutput->numLost);
+		for (i = 0; i < pOutput->numPlans; i++) {
+			if (ms_nPlannerCount >= SPAWN_PLANNER_RING) {
+				/* Unreachable with the ring's bound (the outstanding count
+				 * gates the queue); counted, never silent. */
+				SpawnNotePlannerWorkerLost(&ms_Telemetry, 1);
+				continue;
+			}
+			ms_aPlannerPlans[(ms_nPlannerHead + ms_nPlannerCount) % SPAWN_PLANNER_RING] = pOutput->plans[i];
+			ms_nPlannerCount++;
+		}
+	}
+	SpawnNotePlannerWorkerQueueDepth(&ms_Telemetry, (uint32)ms_nPlannerCount);
+}
+
+/*
+ * The hand-over (VICE-160): the end of Idle, after the render. The site flags
+ * are refreshed first if the index moved them (the script's road toggles, a
+ * save load), then the occupancy copy is published (the store as the
+ * applying frame starts from it) and the frame's commands are handed over.
+ * A frame with no commands publishes and wakes nothing.
+ */
+void
+CSpawnService::RunPlannerWorker(void)
+{
+	uint32 refreshes = CSpawnSites::Index().GetNumFlagRefreshes();
+
+	if (ms_nPlannerSiteRefreshes != refreshes) {
+		ms_nPlannerSiteRefreshes = refreshes;
+		CSpawnPlannerWorker::RefreshSiteFlags(CSpawnSites::Index().GetSites(),
+			CSpawnSites::Index().GetNumSites());
+	}
+	if (CSpawnPlannerWorker::CommandsPending() == 0)
+		return;
+	CSpawnPlannerWorker::PublishOccupancy(CSpawnOccupancy::Store());
+	if (CSpawnPlannerWorker::Run(CTimer::GetTimeInMilliseconds()))
+		SpawnNotePlannerWorkerCycle(&ms_Telemetry);
+}
+
+void
+CSpawnService::ShutDownPlannerWorker(void)
+{
+	CSpawnPlannerWorker::Stop();
+}
+
+void
+CSpawnService::AssertPlannerWorkerIdle(void)
+{
+	CSpawnPlannerWorker::AssertIdle();
 }

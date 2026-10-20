@@ -406,11 +406,11 @@ BubbleForArm(SNearBubbleCandidate *c, uint8_t arm)
 }
 
 static void
-HarnessDeep(void *user, int32_t offerIndex, SSpawnSiteDeepFacts *facts)
+HarnessDeep(void *user, const SSpawnOffer &offer, SSpawnSiteDeepFacts *facts)
 {
-	const SSpawnOffer *offers = (const SSpawnOffer *)user;
-	int32_t site = offers[offerIndex].site;
+	int32_t site = offer.site;
 
+	(void)user;
 	if (g_deepCalls < (int32_t)(sizeof(g_deepSiteList) / sizeof(g_deepSiteList[0])))
 		g_deepSiteList[g_deepCalls] = site;
 	g_deepCalls++;

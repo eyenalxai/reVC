@@ -1065,7 +1065,37 @@ final-position occluded hint could allow it by ray. `SpawnRunPlan` tries the
 plan's sites in order through the primitive and counts every post-plan
 refusal. The rank keeps the first `SPAWN_SERVICE_DEEP_CANDIDATES` (8)
 candidates for the deep facts, and the plan returns at most
-`SPAWN_PLAN_MAX_PLACEMENTS` (4).
+`SPAWN_PLAN_MAX_PLACEMENTS` (4). Since VICE-160 the rank may run on the
+planner worker (see below); the deep facts, the reservations and the attempts
+stay on the main thread.
+
+## Spawn planner worker
+
+The thread the spawn planner's rank runs on (VICE-160,
+`src/control/SpawnPlannerWorker.{h,cpp}`), in the far traffic worker's shape.
+It owns the cheap gates (the site's reservation, the presence cell's capacity
+and the ladder's arm) and the bounded top-K rank, over a read-only copy of the
+site index (the geometry, and the flags refreshed when
+`CSpawnSites::RefreshFlags` moves them) and a double-buffered copy of the
+occupancy store's vehicle counts and reservations, published by the main
+thread immediately before the hand-over. The requests queue rank commands
+(the offers and the ladder's candidates); the worker publishes one ranked
+plan per command in a double-buffered output, and the main thread's tail
+(`SpawnPlanFromRank`) re-checks the live store, reserves the ranked
+candidates in order, resolves the deep facts of the prefix and runs the
+attempts. The window is the far worker's: the cycle is handed over at the end
+of `Idle` (after the render) and joined at the top of `CGame::Process`
+(before `CWorld::Process`); a debug build asserts the window and hashes the
+worker's inputs around every cycle, and a cycle allocates nothing. A plan
+ranked on frame N-1 is applied on frame N - the one-frame lag, stated - so a
+request that needs the car in the same call (`ppCreated`) and the explicit
+kind keep the inline planner. The rank is the planner's own `SpawnRankSites`
+and the tail its `SpawnPlanFromRank`, so the inline and worker paths share one
+truth. The worker's counters are `m_nPlannerWorkerCycles`, `m_nPlannerWorkerLost`
+(a command the ring could not hold; the request falls back to the inline
+planner and the row must stay 0) and `m_nPlannerWorkerQueueDepth` (the pending
+plan queue at the join). `utils/spawn-service/worker.cpp` is the evidence
+program; ADR 0030 holds the decisions and the measured cost.
 
 ## Creation primitive (spawn)
 

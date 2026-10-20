@@ -347,8 +347,11 @@ PED_SITES = [
 # The conservation rows are the director's check (the cell target sum against
 # the global target) and its breach row; the defect rows are the primitive's
 # ground casts that found nothing, the air offsets over its 7 m guard and the
-# water casts that failed. The rows are cumulative since CCarCtrl's Init or
-# ReInit (the service restarts its counters with the world).
+# water casts that failed. The worker rows (VICE-160) are the planner worker's
+# own: the cycles it ran, the commands that did not fit its ring (a fallback to
+# the inline planner; must stay 0) and the pending plan queue's depth at the
+# join (a gauge). The rows are cumulative since CCarCtrl's Init or ReInit (the
+# service restarts its counters with the world).
 SPAWN_SERVICE_STRUCT = "_ZN13CSpawnService12ms_TelemetryE"
 SPAWN_SERVICE = [
     ("spawn: requests ambient",         0,                          "I"),
@@ -385,6 +388,9 @@ SPAWN_SERVICE = [
     ("spawn: ground rejections",        220,                        "I"),
     ("spawn: air offset rejections",    224,                        "I"),
     ("spawn: water rejections",         228,                        "I"),
+    ("spawn worker: cycles",            232,                        "I"),
+    ("spawn worker: lost commands",     236,                        "I"),
+    ("spawn worker: queue depth",       240,                        "I"),
 ]
 
 CONFIG = "src/core/config.h"

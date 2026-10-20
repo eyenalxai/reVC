@@ -21,6 +21,7 @@
 #include "RpAnimBlend.h"
 #include "Shadows.h"
 #include "SpawnOccupancy.h"
+#include "SpawnService.h"
 #include "TempColModels.h"
 #include "WaterLevel.h"
 #include "World.h"
@@ -1954,6 +1955,9 @@ CWorld::Process(void)
 	 * at CFarTraffic::JoinWorker in CGame::Process, which runs before this.
 	 * Debug builds only. */
 	CFarTraffic::AssertWorkerIdle();
+	/* The spawn planner's worker (VICE-160): the same window, joined at the top
+	 * of CGame::Process before this. */
+	CSpawnService::AssertPlannerWorkerIdle();
 
 	if(!(CTimer::GetFrameCounter() & 63)) CReferences::PruneAllReferencesInWorld();
 
