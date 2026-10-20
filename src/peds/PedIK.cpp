@@ -9,8 +9,10 @@
 #include "RwHelper.h"
 
 LimbMovementInfo CPedIK::ms_torsoInfo = { DEGTORAD(50.0f), DEGTORAD(-50.0f), DEGTORAD(8.0f), DEGTORAD(45.0f), DEGTORAD(-45.0f), DEGTORAD(5.0f) };
-// The seated player turns the torso further: the body heading is pinned to the seat
-LimbMovementInfo CPedIK::ms_seatTorsoInfo = { DEGTORAD(90.0f), DEGTORAD(-90.0f), DEGTORAD(8.0f), DEGTORAD(45.0f), DEGTORAD(-45.0f), DEGTORAD(5.0f) };
+// The seated player turns the torso further: the body heading is pinned to the seat.
+// The arm adds at most 65 degrees, and its target wraps at 180 minus the 15 degree offset,
+// so 130 degrees of torso lets the gun reach every aim direction.
+LimbMovementInfo CPedIK::ms_seatTorsoInfo = { DEGTORAD(130.0f), DEGTORAD(-130.0f), DEGTORAD(8.0f), DEGTORAD(45.0f), DEGTORAD(-45.0f), DEGTORAD(5.0f) };
 LimbMovementInfo CPedIK::ms_leanInfo = { DEGTORAD(20.0f), DEGTORAD(-20.0f), DEGTORAD(3.0f), 0.0f, 0.0f, DEGTORAD(1.0f) };
 LimbMovementInfo CPedIK::ms_headInfo = { DEGTORAD(90.0f), DEGTORAD(-90.0f), DEGTORAD(15.0f), DEGTORAD(45.0f), DEGTORAD(-45.0f), DEGTORAD(8.0f) };
 LimbMovementInfo CPedIK::ms_headRestoreInfo = { DEGTORAD(90.0f), DEGTORAD(-90.0f), DEGTORAD(10.0f), DEGTORAD(45.0f), DEGTORAD(-45.0f), DEGTORAD(5.0f) };
