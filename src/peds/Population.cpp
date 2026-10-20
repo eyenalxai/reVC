@@ -190,6 +190,19 @@ AreaPedCountTarget(const CVector &playerCentreOfWorld, const CZoneInfo &zoneInfo
 	return AreaPedBudget(playerCentreOfWorld, zoneInfo, rings) + CCarCtrl::NumRandomCars + CCarCtrl::NumLawEnforcerCars;
 }
 
+/* The director's read of the same line (VICE-152): the budget plus the crews,
+ * resolved live. One owner: the director spreads this number, it never
+ * recomputes the budget. */
+float
+CPopulation::GetAreaPedCountTarget(void)
+{
+	CVector playerCentreOfWorld = FindPlayerCentreOfWorld(CWorld::PlayerInFocus);
+	CZoneInfo zoneInfo;
+
+	CTheZones::GetZoneInfoForTimeOfDay(&playerCentreOfWorld, &zoneInfo);
+	return AreaPedCountTarget(playerCentreOfWorld, zoneInfo, CurrentTrafficRings());
+}
+
 /* The strays: the off-network pedestrians that have not reached the network yet
  * (VICE-122). The table is bounded and the frame checks a fixed number of
  * entries, so the cost of the cull does not follow the crowd. The references

@@ -464,6 +464,10 @@ bool CGame::Initialise(const char* datFile)
 	 * site starts unvalidated and the ground is validated lazily per site.
 	 * The spawn service's planner reads it since VICE-150. */
 	CSpawnSites::Build();
+	/* The population director's presence facts (VICE-152), from the sites
+	 * just built: a street, a water lane and the lanes of every cell. The
+	 * live facts (the zone densities, the view) resolve per refresh. */
+	CSpawnDirector::Build();
 	for (int i = 0; i < NUMPLAYERS; i++)
 		CWorld::Players[i].Clear();
 	CWorld::Players[0].LoadPlayerSkin();
@@ -910,6 +914,11 @@ void CGame::Process(void)
 		gFireManager.Update();
 
 		// Otherwise even on 30 fps most probably you won't see any peds around Ocean View Hospital
+		// The frame-time watchdog of the population (VICE-152 keeps it): a frame whose
+		// streaming update overran its budget skips the pedestrian trickle, so the crowd
+		// cannot pile on a frame that is already late. The population director's own
+		// tick (CCarCtrl::GenerateRandomCars) reads the same frame and is arithmetic
+		// over the active cells only, so it never needs the skip.
 #if defined FIX_BUGS && !defined SQUEEZE_PERFORMANCE
 		if (processTime > 2) {
 #else

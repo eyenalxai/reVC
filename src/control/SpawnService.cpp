@@ -47,18 +47,19 @@ SSpawnServiceTelemetry CSpawnService::ms_Telemetry;
 
 /* The live reader's offsets (utils/caps-audit/live-counters.py). The layout
  * is the header's field order; a field move breaks the build here before it
- * can misread the live rows. */
+ * can misread the live rows. The arrays grew with SPAWN_PURPOSE_FAR
+ * (VICE-152): nine purposes. */
 static_assert(offsetof(SSpawnServiceTelemetry, m_nRequestsByPurpose) == 0, "the live reader reads the request rows at offset 0");
-static_assert(offsetof(SSpawnServiceTelemetry, m_nRequestsByKind) == 32, "the live reader reads the kind rows at offset 32");
-static_assert(offsetof(SSpawnServiceTelemetry, m_nRefusalsByReason) == 40, "the live reader reads the refusal rows at offset 40");
-static_assert(offsetof(SSpawnServiceTelemetry, m_nCreatedByPurpose) == 76, "the live reader reads the created rows at offset 76");
-static_assert(offsetof(SSpawnServiceTelemetry, m_nRemovedByPurpose) == 108, "the live reader reads the removed rows at offset 108");
-static_assert(offsetof(SSpawnServiceTelemetry, m_nCoveredFillCreations) == 140, "the live reader reads the covered-fill row at offset 140");
-static_assert(offsetof(SSpawnServiceTelemetry, m_nReadinessWaits) == 144, "the live reader reads the wait rows at offset 144");
-static_assert(offsetof(SSpawnServiceTelemetry, m_nPlanMicros) == 200, "the live reader reads the plan rows at offset 184 and the micros at 200");
-static_assert(offsetof(SSpawnServiceTelemetry, m_nConservationCellSum) == 208, "the live reader reads the conservation rows at offset 208");
-static_assert(offsetof(SSpawnServiceTelemetry, m_nGroundRejections) == 220, "the live reader reads the defect rows at offset 220");
-static_assert(sizeof(SSpawnServiceTelemetry) == 232, "the telemetry's size is the live reader's contract");
+static_assert(offsetof(SSpawnServiceTelemetry, m_nRequestsByKind) == 36, "the live reader reads the kind rows at offset 36");
+static_assert(offsetof(SSpawnServiceTelemetry, m_nRefusalsByReason) == 44, "the live reader reads the refusal rows at offset 44");
+static_assert(offsetof(SSpawnServiceTelemetry, m_nCreatedByPurpose) == 80, "the live reader reads the created rows at offset 80");
+static_assert(offsetof(SSpawnServiceTelemetry, m_nRemovedByPurpose) == 116, "the live reader reads the removed rows at offset 116");
+static_assert(offsetof(SSpawnServiceTelemetry, m_nCoveredFillCreations) == 152, "the live reader reads the covered-fill row at offset 152");
+static_assert(offsetof(SSpawnServiceTelemetry, m_nReadinessWaits) == 156, "the live reader reads the wait rows at offset 156");
+static_assert(offsetof(SSpawnServiceTelemetry, m_nPlanMicros) == 216, "the live reader reads the plan rows at offset 200 and the micros at 216");
+static_assert(offsetof(SSpawnServiceTelemetry, m_nConservationCellSum) == 224, "the live reader reads the conservation rows at offset 224");
+static_assert(offsetof(SSpawnServiceTelemetry, m_nGroundRejections) == 236, "the live reader reads the defect rows at offset 236");
+static_assert(sizeof(SSpawnServiceTelemetry) == 248, "the telemetry's size is the live reader's contract");
 
 /* The vehicle tag the core names (SPAWN_VEHICLE_TAG_RANDOM) is the engine's
  * own RANDOM_VEHICLE: the driver contract of SetUpDriver reads the tag. */
@@ -461,7 +462,8 @@ CSpawnService::CountValveRemoval(void)
 
 /* The purpose of a removed car's class: the ledger names the class the
  * vehicle was created as (VICE-150), so a scripted or parked deletion is not
- * hidden inside the ambient traffic's row. */
+ * hidden inside the ambient traffic's row. The far layer has its own class
+ * (VICE-152). */
 static ESpawnPurpose
 SpawnPurposeOfVehicle(const CVehicle *pVehicle)
 {
@@ -470,8 +472,20 @@ SpawnPurposeOfVehicle(const CVehicle *pVehicle)
 	case MISSION_VEHICLE:	return SPAWN_PURPOSE_MISSION;
 	case PARKED_VEHICLE:	return SPAWN_PURPOSE_PARKED;
 	case PERMANENT_VEHICLE:	return SPAWN_PURPOSE_SPECIAL;
+	case FAR_TRAFFIC_VEHICLE: return SPAWN_PURPOSE_FAR;
 	default:		return SPAWN_PURPOSE_AMBIENT;	/* a class outside the map: the cull's own subject */
 	}
+}
+
+/* The creation note (VICE-152): the far layer's cars are built outside the
+ * service's runs (FarTraffic.cpp calls the primitive directly until its own
+ * migration, VICE-190), so the ledger learns of them here, by their class. */
+void
+CSpawnService::NoteVehicleCreation(CVehicle *pVehicle)
+{
+	if (pVehicle == nil)
+		return;
+	SpawnNoteCreated(&ms_Telemetry, SpawnPurposeOfVehicle(pVehicle));
 }
 
 void

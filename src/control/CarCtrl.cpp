@@ -125,7 +125,8 @@ float
 CCarCtrl::GetRandomCarTarget()
 {
 	// The ring area grows with the square of the ring scale, so the target scales with it too.
-	return Min(RANDOM_CARS_PER_INI_UNIT * CarDensityMultiplier * CIniFile::CarNumberMultiplier * SQR(CurrentTrafficRings().scale), (float)MAX_RANDOM_CARS);
+	// The formula itself lives in the cap table (PopulationBudget.h), the one owner the director (VICE-152) reads too.
+	return RandomCarTarget(CarDensityMultiplier, CIniFile::CarNumberMultiplier, CurrentTrafficRings().scale);
 }
 
 int32
@@ -146,6 +147,13 @@ CCarCtrl::GenerateRandomCars()
 	 * (VICE-127), through the service's API (VICE-150). The cutscene gate
 	 * below must not leave a stale frame. */
 	CSpawnService::BeginFrame();
+	/* The population director's frame (VICE-152), right after the bubble and
+	 * before the calls below: the refresh when the player's cell, the mode or
+	 * the cadence moved it, then the live arms and the counts of the active
+	 * cells. The trickle and the burst both ask it for the cell to serve
+	 * (GenerateOneRandomCar), so the frame's requests go where the traffic is
+	 * missing instead of into the old ring dice. */
+	CSpawnDirector::BeginFrame();
 	/* One table read per frame: the rate that fills the ring follows the ring
 	 * scale, exactly as the count target does. */
 	const STrafficRings rings = CurrentTrafficRings();
@@ -298,13 +306,12 @@ CCarCtrl::GenerateOneRandomCar()
 	CTheZones::GetZoneInfoForTimeOfDay(&vecTargetPos, &zone);
 	float trafficDensity = pPlayer->m_fRoadDensity * zone.carDensity;
 	pPlayer->m_nTrafficMultiplier = trafficDensity;
-	/* One table read per call: the spawn rings, the birth culls and the
-	 * camera rule of this call all come from it. */
-	const STrafficRings rings = CurrentTrafficRings();
 	/* The budget gates of this call moved into the service (VICE-150): one
 	 * request, one gate (the car target, the car budget, the ped pool's
-	 * reserve). What stays here is the requester's policy: the cops, the
-	 * zone's model dice and the ring the call aims at. */
+	 * reserve). What stays here is the requester's policy: the cops and the
+	 * zone's model dice. The cell the call serves comes from the director
+	 * (VICE-152, below): the ring, the camera rule and the angle limits of
+	 * the old call are gone. */
 	CWanted* pWanted = pPlayer->m_pPed->m_pWanted;
 	int carClass;
 	int carModel;
@@ -324,128 +331,40 @@ CCarCtrl::GenerateOneRandomCar()
 			/* In particular it means that cop cars never spawn if player has wanted level of 1. */
 			return;
 	}
-	float frontX, frontY;
-	float preferredDistance, angleLimit;
-	bool invertAngleLimitTest;
-	bool testForCollision;
-	CVehicle* pPlayerVehicle = FindPlayerVehicle();
-	CVector2D vecPlayerVehicleSpeed;
-	float fPlayerVehicleSpeed;
-	if (pPlayerVehicle) {
-		vecPlayerVehicleSpeed = FindPlayerVehicle()->GetMoveSpeed();
-		fPlayerVehicleSpeed = vecPlayerVehicleSpeed.Magnitude();
+	/* The director's cell (VICE-152): the maintenance tick (CSpawnDirector::
+	 * BeginFrame, one call in GenerateRandomCars before this loop) has
+	 * counted every active cell's deficit, so this call serves the neediest
+	 * cell the ladder can create under - the largest deficit fraction first
+	 * (the fair share, so the far cells are not starved by the near ones),
+	 * the nearest then; the cells whose centre the ladder refuses are never
+	 * served. No cell: the area is at its targets and the call makes no
+	 * request. The old camera and ring policy (the front and side bands, the
+	 * angle limits, the top-down branch) is gone with the ticket: the
+	 * director owns where the traffic is needed, and the service's own gates
+	 * (the plan, the occupancy, the visibility ladder, the reachability)
+	 * decide whether a car may appear at the cell's sites. */
+	float cellX, cellY;
+	uint8 water;
+	if (!CSpawnDirector::NextCellTarget(&cellX, &cellY, &water))
+		return;
+
+	/* The cone of the request: the half-plane ahead of the target along the
+	 * player's travel, or no cone at all for a standing player. The primitive
+	 * refuses a car that drives away from the target relative to the player's
+	 * own speed (CarCtrl.cpp), so with the player moving the sites the test
+	 * can accept are the ones ahead of the target along the travel; offering
+	 * the others would only spend the plan on refusals. */
+	float travelX, travelY, travelLen;
+	CVector2D playerSpeedForCone = vecPlayerSpeed;
+	travelLen = playerSpeedForCone.Magnitude();
+	if (travelLen > 0.001f) {
+		travelX = playerSpeedForCone.x / travelLen;
+		travelY = playerSpeedForCone.y / travelLen;
+	} else {
+		travelX = 1.0f;
+		travelY = 0.0f;
 	}
-	if (TheCamera.GetForward().z < -0.9f){
-		/* Player uses topdown camera. */
-		/* Spawn essentially anywhere. */
-		frontX = frontY = 0.707f; /* 45 degrees */
-		angleLimit = -1.0f;
-		invertAngleLimitTest = true;
-		preferredDistance = rings.carSideSpawn + 15.0f;
-		/* BUG: testForCollision not initialized in original game. */
-		testForCollision = false;
-	}else if (!pPlayerVehicle){
-		/* Player is not in vehicle. */
-		testForCollision = true;
-		frontX = TheCamera.CamFrontXNorm;
-		frontY = TheCamera.CamFrontYNorm;
-		switch (CTimer::GetFrameCounter() & 1) {
-		case 0:
-			/* Spawn a vehicle relatively far away from player. */
-			/* Forward to his current direction (camera direction). */
-			angleLimit = 0.707f; /* 45 degrees */
-			invertAngleLimitTest = true;
-			preferredDistance = rings.carOnScreenSpawnMax;
-			break;
-		case 1:
-			/* Spawn a vehicle close to player to his side. */
-			/* Kinda not within camera angle. */
-			angleLimit = 0.707f; /* 45 degrees */
-			invertAngleLimitTest = false;
-			preferredDistance = rings.carSideSpawn;
-			break;
-		}
-	}else if (fPlayerVehicleSpeed > 0.4f){ /* 72 km/h */
-		/* Player is moving fast in vehicle */
-		/* Prefer spawning vehicles very far away from him. */
-		frontX = vecPlayerVehicleSpeed.x / fPlayerVehicleSpeed;
-		frontY = vecPlayerVehicleSpeed.y / fPlayerVehicleSpeed;
-		testForCollision = false;
-		switch (CTimer::GetFrameCounter() & 3) {
-		case 0:
-		case 1:
-			/* Spawn a vehicle in a very narrow gap in front of a player */
-			angleLimit = 0.85f; /* approx 30 degrees */
-			invertAngleLimitTest = true;
-			preferredDistance = rings.carOnScreenSpawnMax;
-			break;
-		case 2:
-			/* Spawn a vehicle relatively far away from player. */
-			/* Forward to his current direction (camera direction). */
-			angleLimit = 0.707f; /* 45 degrees */
-			invertAngleLimitTest = true;
-			preferredDistance = rings.carOnScreenSpawnMax;
-			break;
-		case 3:
-			/* Spawn a vehicle close to player to his side. */
-			/* Kinda not within camera angle. */
-			angleLimit = 0.707f; /* 45 degrees */
-			invertAngleLimitTest = false;
-			preferredDistance = rings.carSideSpawn;
-			break;
-		}
-	}else if (fPlayerVehicleSpeed > 0.1f){ /* 18 km/h */
-		/* Player is moving moderately fast in vehicle */
-		/* Spawn more vehicles to player's side. */
-		frontX = vecPlayerVehicleSpeed.x / fPlayerVehicleSpeed;
-		frontY = vecPlayerVehicleSpeed.y / fPlayerVehicleSpeed;
-		testForCollision = false;
-		switch (CTimer::GetFrameCounter() & 3) {
-		case 0:
-			/* Spawn a vehicle in a very narrow gap in front of a player */
-			angleLimit = 0.85f; /* approx 30 degrees */
-			invertAngleLimitTest = true;
-			preferredDistance = rings.carOnScreenSpawnMax;
-			break;
-		case 1:
-			/* Spawn a vehicle relatively far away from player. */
-			/* Forward to his current direction (camera direction). */
-			angleLimit = 0.707f; /* 45 degrees */
-			invertAngleLimitTest = true;
-			preferredDistance = rings.carOnScreenSpawnMax;
-			break;
-		case 2:
-		case 3:
-			/* Spawn a vehicle close to player to his side. */
-			/* Kinda not within camera angle. */
-			angleLimit = 0.707f; /* 45 degrees */
-			invertAngleLimitTest = false;
-			preferredDistance = rings.carSideSpawn;
-			break;
-		}
-	}else{
-		/* Player is in vehicle but moving very slow. */
-		/* Then use camera direction instead of vehicle direction. */
-		testForCollision = true;
-		frontX = TheCamera.CamFrontXNorm;
-		frontY = TheCamera.CamFrontYNorm;
-		switch (CTimer::GetFrameCounter() & 1) {
-		case 0:
-			/* Spawn a vehicle relatively far away from player. */
-			/* Forward to his current direction (camera direction). */
-			angleLimit = 0.707f; /* 45 degrees */
-			invertAngleLimitTest = true;
-			preferredDistance = rings.carOnScreenSpawnMax;
-			break;
-		case 1:
-			/* Spawn a vehicle close to player to his side. */
-			/* Kinda not within camera angle. */
-			angleLimit = 0.707f; /* 45 degrees */
-			invertAngleLimitTest = false;
-			preferredDistance = rings.carSideSpawn;
-			break;
-		}
-	}
+
 	/* The request (VICE-150): the service plans the site - the index's
 	 * candidates, the live zone, the occupancy, the visibility ladder and
 	 * the reachability - and the primitive creates the car there. The
@@ -458,21 +377,21 @@ CCarCtrl::GenerateOneRandomCar()
 	SSpawnCarRequest request;
 	request.purpose = SPAWN_PURPOSE_AMBIENT;
 	request.force = false;
-	request.allowBoats = true;
+	request.allowBoats = water != 0;
 	request.requireReach = true;
 	request.carClass = carClass;
 	request.carModel = carModel;
-	request.targetX = vecTargetPos.x;
-	request.targetY = vecTargetPos.y;
+	request.targetX = cellX;
+	request.targetY = cellY;
 	request.targetZ = vecTargetPos.z;
 	request.playerSpeedX = vecPlayerSpeed.x;
 	request.playerSpeedY = vecPlayerSpeed.y;
-	request.testForCollision = testForCollision;
-	request.spawnDist = preferredDistance;
-	request.dirX = frontX;
-	request.dirY = frontY;
-	request.angleLimit = angleLimit;
-	request.forward = invertAngleLimitTest;
+	request.testForCollision = true;
+	request.spawnDist = SPAWN_DIRECTOR_REQUEST_RING;
+	request.dirX = travelX;
+	request.dirY = travelY;
+	request.angleLimit = travelLen > 0.001f ? 0.0f : -1.0f;
+	request.forward = true;
 	request.allowDisabled = carClass == COPS && pWanted->GetWantedLevel() >= 1;
 	CSpawnService::RequestCar(request, nil);
 }
@@ -1338,7 +1257,14 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 		float threshold = rings.carDespawn;
 		if (pVehicle->bExtendedRange)
 			threshold *= rings.extendedRangeFactor;
-		if (distanceToPlayer > threshold && !bInsideHideOutGarageAtEntry){
+		/* The director's over-target release (VICE-152): a cell that holds
+		 * more than its target may hand this car to the cull at its far edge,
+		 * before the despawn. The gate below still decides - the car must be
+		 * hidden and past its fresh-spawn grace - so nothing the player can
+		 * see vanishes; the release is only offered here, and the note (the
+		 * cell's clock and the ledger) is taken once the gate passed. */
+		bool releaseOverTarget = CSpawnDirector::AllowsOverTargetRelease(pVehicle, vecPlayerPos);
+		if ((distanceToPlayer > threshold || releaseOverTarget) && !bInsideHideOutGarageAtEntry){
 			/* The near bubble (VICE-127), behind the service's API
 			 * (VICE-150): the threshold is the ring's own (already the
 			 * spawn band plus the reserve), raised by the bubble and its
@@ -1348,6 +1274,10 @@ CCarCtrl::PossiblyRemoveVehicle(CVehicle* pVehicle, CVector vecPlayerPos)
 			 * turn cannot reveal the change. */
 			if (!CSpawnService::AllowsRemoval(pVehicle, vecPlayerPos, threshold))
 				return;
+			/* The release's note (VICE-152): the car passed the hidden gate,
+			 * so the cell's release clock starts and the ledger counts it. */
+			if (releaseOverTarget)
+				CSpawnDirector::NoteOverTargetRelease(pVehicle);
 			if (bOnScreenAtEntry){
 				pVehicle->bFadeOut = true;
 			}else{
@@ -2456,8 +2386,11 @@ void CCarCtrl::Init(void)
 	ms_nFillBurstEndedBudget = 0;
 	ms_nFillBurstEndedStalls = 0;
 	ms_nFillBurstEndedWindow = 0;
-	/* The service's counters restart with the world (VICE-150). */
+	/* The service's counters restart with the world (VICE-150), and the
+	 * director's state with them (VICE-152): the metric's clocks and the
+	 * per-cell minima are a drive's own. */
 	CSpawnService::ReInit();
+	CSpawnDirector::ReInit();
 	for (int i = 0; i < MAX_CARS_TO_KEEP; i++)
 		apCarsToKeep[i] = nil;
 	for (int i = 0; i < TOTAL_CUSTOM_CLASSES; i++){
@@ -2494,8 +2427,11 @@ void CCarCtrl::ReInit(void)
 	ms_nFillBurstEndedBudget = 0;
 	ms_nFillBurstEndedStalls = 0;
 	ms_nFillBurstEndedWindow = 0;
-	/* The service's counters restart with the world (VICE-150). */
+	/* The service's counters restart with the world (VICE-150), and the
+	 * director's state with them (VICE-152): the metric's clocks and the
+	 * per-cell minima are a drive's own. */
 	CSpawnService::ReInit();
+	CSpawnDirector::ReInit();
 	for (int i = 0; i < MAX_CARS_TO_KEEP; i++)
 		apCarsToKeep[i] = nil;
 	for (int i = 0; i < TOTAL_CUSTOM_CLASSES; i++)

@@ -89,6 +89,11 @@ public:
 	static int32 ChooseGangOccupation(int);
 	static void ArmFillBurst(void);
 	static float PedCreationDistMultiplier();
+	/* The pedestrian count target of the area: the on-foot budget plus the car
+	 * crews the totals are compared against (the AreaPedCountTarget line this
+	 * file's Update stops at). The population director spreads it over the ped
+	 * cells (VICE-152). */
+	static float GetAreaPedCountTarget(void);
 	static CPed *AddPed(ePedType pedType, uint32 mi, CVector const &coors, int32 modifier = 0);
 	static void AddToPopulation(float, float, float, float);
 	static void ManagePopulation(void);

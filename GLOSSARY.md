@@ -1023,3 +1023,74 @@ occupants. The driver contract: `SetUpDriver` needs `RANDOM_VEHICLE`, so a
 kind that wants occupants creates with the random tag (the far promotion sets
 the tag before its own call). The return is an `ESpawnRefusal`, so the service
 counts the primitive's refusals by reason.
+
+## Population director
+
+The traffic's and the crowd's per-area keeper (`src/control/SpawnDirector.h`
+and `SpawnDirector.cpp`, VICE-152). The service's global budgets are totals;
+the director makes them a distribution: the map is covered by **density
+cells**, every cell carries a target spread from the same global number
+(`CCarCtrl::GetRandomCarTarget` for the cars, the population's own count
+target for the crowd), and a maintenance tick serves the cells whose count is
+below the target. The ambient traffic still asks through the service - the
+director only chooses the cell, and the request's target sits one ring behind
+the cell along the player's travel so the primitive's speed test can accept
+the cell's sites. The cells are ordered by the largest deficit fraction first
+(the fair share: the far cells are not starved by the near ones the flow keeps
+re-opening), then by proximity; the visibility is the gate - a cell whose
+centre the ladder refuses is never served, and inside a served cell the
+service's plan ranks the sites by the same arms. The crowd's targets are the
+director's now; its *requests* stay the population's own trickle until the
+pedestrian requester migrates. The engine's half resolves the live facts (the
+info zone's densities, the view) and the frame's arms; the evidence program is
+`utils/spawn-service/director.cpp`. The slow-frame pedestrian watchdog of
+`CGame::Process` (a frame whose streaming update overran its budget skips the
+ped trickle) stays with the director's area and is untouched.
+
+## Density cell
+
+One cell of the population director's grid: 128 m a side, 32 x 32 over
+World.h's 4000 x 4000 m, so the map is 1024 cells. Its presence is the
+occupancy store's own 16 m counts summed over the 8 x 8 block; its facts are
+the site index's (a street, a water lane, the lanes) and the live ones (the
+info zone's car and ped density at the centre, the view). A cell is *active*
+for a track while its centre is inside that track's radius: the car track the
+ring's despawn (280 m stock, 560 m at the cap), the ped track the pedestrian
+removal ring (131 m stock, 262 m at the cap). The shipped worst case of an
+active set is 61 cells.
+
+## Weight (density)
+
+The share a density cell receives of its track's global target: the live info
+zone's density, the player's `m_fRoadDensity` and the view (`SPAWN_
+DIRECTOR_VISIBLE_WEIGHT`: an in-view cell weighs half again a hidden one),
+times the presence (a cell with no street or water lane weighs nothing). The
+weights are apportioned by the largest-remainder method over integer targets,
+with the cell's **lane capacity** as the hard ceiling (`SPAWN_DIRECTOR_CARS_
+PER_LANE` cars a travelled lane, `SPAWN_DIRECTOR_PEDS_PER_LANE` peds a lane),
+so the cell targets always sum to the global target and never exceed the
+caps. The floor (`SPAWN_DIRECTOR_CELL_FLOOR`, one) is the "no street goes dry"
+line the consistency metric measures against, not a second budget.
+
+## Fill bound
+
+The time a density cell may stay below its floor before the stay is a
+**defect**: `SPAWN_DIRECTOR_FILL_BOUND_MS` (10 s). The number is derived from
+the frame's own rate, not guessed: the ring cap asks six random car calls a
+frame at 30 fps (180 a second), so the owner's 408-car budget refills in about
+2.3 s; the bound is four times that, and a cell starved longer is not waiting
+for the rate. The bound is the acceptance of VICE-152's drive trace.
+
+## Consistency metric (director)
+
+The population director's own reading of the distribution: every active cell
+keeps the minimum of its count over the drive (the per-cell minimum, the
+before/after number: a cell the old dice missed shows 0) and the clock of its
+stay below the floor. A stay past the **fill bound** is a defect, counted once
+per stay in the cell's own row and the track's total; the live rows are the
+cells below their floor now, the defects since the reset and the worst
+per-cell minimum (`SSpawnDirectorTelemetry`, read by
+`utils/caps-audit/live-counters.py`). The metric is engine-free and the
+evidence program drives the same clocks (`utils/spawn-service/director.cpp`):
+the after drive ends with no defect and no starved cell, the ring dice's before
+drive with 112 defects and 17 starved cells.

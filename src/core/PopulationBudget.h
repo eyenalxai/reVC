@@ -179,6 +179,24 @@
  * data and checks it). */
 #define MAX_CAR_MODELS_IN_ARRAY 25
 
+/*
+ * The random car target of the ring: the one formula the engine's
+ * CCarCtrl::GetRandomCarTarget has always used (RANDOM_CARS_PER_INI_UNIT x
+ * the Car Density slider x the ini car multiplier x the ring scale squared,
+ * topped by MAX_RANDOM_CARS). It lives here so the traffic target has one
+ * owner for the engine, the population director (VICE-152) and the evidence
+ * programs: the director apportions this number, it never recomputes it from
+ * other factors, so the cell targets cannot drift from the caps (ADR 0009,
+ * ADR 0013, ADR 0017).
+ */
+static inline float
+RandomCarTarget(float carDensityMultiplier, float carNumberMultiplier, float ringScale)
+{
+	float target = RANDOM_CARS_PER_INI_UNIT * carDensityMultiplier * carNumberMultiplier * ringScale * ringScale;
+
+	return target >= (float)MAX_RANDOM_CARS ? (float)MAX_RANDOM_CARS : target;
+}
+
 /* --- The fill rate ------------------------------------------------------ */
 
 /* The placements a random car call tries before it gives up. */

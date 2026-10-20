@@ -318,22 +318,25 @@ PED_SITES = [
 # purpose / kind / reason enumeration order.
 #
 # The requests are the service's intake, by purpose (ambient, parked,
-# responder, police, mission, scenario, special, debug) and by kind (road-site,
-# explicit). The refusals are every refusal event by reason (no site,
-# occupancy, visibility, zone, readiness, budget, pool, reachability): a
-# request's own gate, a candidate the plan dropped, or an attempt the
-# primitive refused - refusals after planning are counted, not hidden. The
-# created and removed rows are the placements by purpose; the covered-fill row
-# is the fade's own creations. The readiness rows are the requests deferred
-# for models and the milliseconds they spent waiting. The plan rows are the
-# planner's cost: the calls, the candidates examined, the placements returned
-# and the total microseconds (us/call is the column to read against a frame's
-# budget; the measured harness rate is about 5 us a call over 197 candidates).
-# The conservation rows are the director's check (the cell target sum against
-# the global target) and its breach row; the defect rows are the primitive's
-# ground casts that found nothing, the air offsets over its 7 m guard and the
-# water casts that failed. The rows are cumulative since CCarCtrl's Init or
-# ReInit (the service restarts its counters with the world).
+# responder, police, mission, scenario, special, debug, far) and by kind
+# (road-site, explicit). The far row is the far layer's own ledger class
+# (VICE-152): its creations and removals are counted under it until the layer
+# migrates to a requester (VICE-190). The refusals are every refusal event by
+# reason (no site, occupancy, visibility, zone, readiness, budget, pool,
+# reachability): a request's own gate, a candidate the plan dropped, or an
+# attempt the primitive refused - refusals after planning are counted, not
+# hidden. The created and removed rows are the placements by purpose; the
+# covered-fill row is the fade's own creations. The readiness rows are the
+# requests deferred for models and the milliseconds they spent waiting. The
+# plan rows are the planner's cost: the calls, the candidates examined, the
+# placements returned and the total microseconds (us/call is the column to
+# read against a frame's budget; the measured harness rate is about 5 us a
+# call over 197 candidates). The conservation rows are the director's check
+# (the car track's cell target sum against GetRandomCarTarget) and its breach
+# row; the defect rows are the primitive's ground casts that found nothing,
+# the air offsets over its 7 m guard and the water casts that failed. The rows
+# are cumulative since CCarCtrl's Init or ReInit (the service restarts its
+# counters with the world).
 SPAWN_SERVICE_STRUCT = "_ZN13CSpawnService12ms_TelemetryE"
 SPAWN_SERVICE = [
     ("spawn: requests ambient",         0,                          "I"),
@@ -344,32 +347,66 @@ SPAWN_SERVICE = [
     ("spawn: requests scenario",        20,                         "I"),
     ("spawn: requests special",         24,                         "I"),
     ("spawn: requests debug",           28,                         "I"),
-    ("spawn: requests road-site",       32,                         "I"),
-    ("spawn: requests explicit",        36,                         "I"),
-    ("spawn: refused no site",          40 + 1 * 4,                 "I"),
-    ("spawn: refused occupancy",        40 + 2 * 4,                 "I"),
-    ("spawn: refused visibility",       40 + 3 * 4,                 "I"),
-    ("spawn: refused zone",             40 + 4 * 4,                 "I"),
-    ("spawn: refused readiness",        40 + 5 * 4,                 "I"),
-    ("spawn: refused budget",           40 + 6 * 4,                 "I"),
-    ("spawn: refused pool",             40 + 7 * 4,                 "I"),
-    ("spawn: refused reachability",     40 + 8 * 4,                 "I"),
-    ("spawn: created ambient",          76,                         "I"),
-    ("spawn: created mission",          76 + 4 * 4,                 "I"),
-    ("spawn: removed ambient",          108,                        "I"),
-    ("spawn: covered-fill creations",   140,                        "I"),
-    ("spawn: readiness waits",          144,                        "I"),
-    ("spawn: readiness wait ms",        148,                        "I"),
-    ("spawn: plan calls",               184,                        "I"),
-    ("spawn: plan candidates",          188,                        "I"),
-    ("spawn: plan placements",          192,                        "I"),
-    ("spawn: plan micros total",        200,                        "Q"),
-    ("spawn: conservation cell sum",    208,                        "I"),
-    ("spawn: conservation global",      212,                        "I"),
-    ("spawn: conservation breaches",    216,                        "I"),
-    ("spawn: ground rejections",        220,                        "I"),
-    ("spawn: air offset rejections",    224,                        "I"),
-    ("spawn: water rejections",         228,                        "I"),
+    ("spawn: requests far",             32,                         "I"),
+    ("spawn: requests road-site",       36,                         "I"),
+    ("spawn: requests explicit",        40,                         "I"),
+    ("spawn: refused no site",          44 + 1 * 4,                 "I"),
+    ("spawn: refused occupancy",        44 + 2 * 4,                 "I"),
+    ("spawn: refused visibility",       44 + 3 * 4,                 "I"),
+    ("spawn: refused zone",             44 + 4 * 4,                 "I"),
+    ("spawn: refused readiness",        44 + 5 * 4,                 "I"),
+    ("spawn: refused budget",           44 + 6 * 4,                 "I"),
+    ("spawn: refused pool",             44 + 7 * 4,                 "I"),
+    ("spawn: refused reachability",     44 + 8 * 4,                 "I"),
+    ("spawn: created ambient",          80,                         "I"),
+    ("spawn: created mission",          80 + 4 * 4,                 "I"),
+    ("spawn: created far",              80 + 8 * 4,                 "I"),
+    ("spawn: removed ambient",          116,                        "I"),
+    ("spawn: removed far",              116 + 8 * 4,                "I"),
+    ("spawn: covered-fill creations",   152,                        "I"),
+    ("spawn: readiness waits",          156,                        "I"),
+    ("spawn: readiness wait ms",        160,                        "I"),
+    ("spawn: plan calls",               200,                        "I"),
+    ("spawn: plan candidates",          204,                        "I"),
+    ("spawn: plan placements",          208,                        "I"),
+    ("spawn: plan micros total",        216,                        "Q"),
+    ("spawn: conservation cell sum",    224,                        "I"),
+    ("spawn: conservation global",      228,                        "I"),
+    ("spawn: conservation breaches",    232,                        "I"),
+    ("spawn: ground rejections",        236,                        "I"),
+    ("spawn: air offset rejections",    240,                        "I"),
+    ("spawn: water rejections",         244,                        "I"),
+]
+# The population director (VICE-152): the one SSpawnDirectorTelemetry instance
+# the engine fills. The rows read the fields at the offsets pinned by the
+# static_asserts in SpawnDirector.cpp. The conservation rows repeat the car
+# track's pair (the service's own pair carries the same car numbers) and the
+# ped track's; the consistency rows are the metric: the cells below their
+# floor at the last tick, the defect events (a stay below the floor past the
+# fill bound) since the reset, and the worst per-cell minimum of the drive.
+# The request rows are the cells handed to the ambient calls and the calls
+# that found none; the release row counts the over-target removals the cull
+# took at the cells' far edges.
+DIRECTOR_STRUCT = "_ZN14CSpawnDirector12ms_TelemetryE"
+DIRECTOR = [
+    ("director: refreshes",             0,                         "I"),
+    ("director: active car cells",      4,                         "I"),
+    ("director: active ped cells",      8,                         "I"),
+    ("director: car target sum",        12,                        "I"),
+    ("director: car global target",     16,                        "I"),
+    ("director: car breaches",          20,                        "I"),
+    ("director: ped target sum",        24,                        "I"),
+    ("director: ped global target",     28,                        "I"),
+    ("director: ped breaches",          32,                        "I"),
+    ("director: requests issued",       36,                        "I"),
+    ("director: requests empty",        40,                        "I"),
+    ("director: releases",              44,                        "I"),
+    ("director: car starved cells",     48,                        "I"),
+    ("director: car defects",           52,                        "I"),
+    ("director: car worst min",         56,                        "I"),
+    ("director: ped starved cells",     60,                        "I"),
+    ("director: ped defects",           64,                        "I"),
+    ("director: ped worst min",         68,                        "I"),
 ]
 
 CONFIG = "src/core/config.h"
@@ -522,6 +559,18 @@ def main():
             values["spawn " + label.split(': ')[1]] = v
             print(f"  {label:44s} {v}")
 
+    # The population director (VICE-152): the conservation and the
+    # consistency rows of the same frame.
+    print()
+    director_base = sym.get(DIRECTOR_STRUCT)
+    if director_base is None:
+        print("  the director: symbol missing")
+    else:
+        for label, offset, fmt in DIRECTOR:
+            v = read(director_base + offset, fmt)
+            values["director " + label.split(': ')[1]] = v
+            print(f"  {label:44s} {v}")
+
     # The ring scale: ApplyPopulationCaps gives min(45 x the car density x
     # scale^2, 2400), so before the top binds, scale = sqrt(budget / (45 x the
     # density). The traffic uses the same scale, so one derivation covers both.
@@ -552,6 +601,41 @@ def main():
               f"created {spawn_created}, refusals {refusals}, "
               f"plan {per_call:.1f} us a call over "
               f"{values.get('spawn plan candidates', 0)} candidates")
+
+    # The director's verdict line: the conservation (the car and ped sums
+    # against their targets) and the consistency (no cell below its floor past
+    # the fill bound; the worst per-cell minimum is the drive's number).
+    d_car_sum = values.get("director car target sum")
+    d_car_global = values.get("director car global target")
+    d_ped_sum = values.get("director ped target sum")
+    d_ped_global = values.get("director ped global target")
+    if d_car_sum is None:
+        print("  the director: a symbol is missing (the conservation cannot be read)")
+    else:
+        car_ok = d_car_sum == d_car_global
+        ped_ok = d_ped_sum == d_ped_global
+        car_breaches = values.get("director car breaches", 0)
+        ped_breaches = values.get("director ped breaches", 0)
+        verdict = "PASS" if car_ok and ped_ok and car_breaches == 0 and ped_breaches == 0 else "FAIL"
+        print(f"  the director: the car target {d_car_sum} of {d_car_global}, "
+              f"the ped target {d_ped_sum} of {d_ped_global} -> {verdict}")
+    d_defects = values.get("director car defects")
+    if d_defects is not None:
+        verdict = "PASS" if d_defects == 0 else "FAIL"
+        print(f"  the director: the car cells below their floor now "
+              f"{values.get('director car starved cells', 0)}, the defects since the reset "
+              f"{d_defects}, the worst per-cell minimum {values.get('director car worst min', 0)} "
+              f"-> {verdict}")
+    d_ped_defects = values.get("director ped defects")
+    if d_ped_defects is not None:
+        print(f"  the director: the ped cells below their floor now "
+              f"{values.get('director ped starved cells', 0)}, the defects {d_ped_defects}, "
+              f"the worst per-cell minimum {values.get('director ped worst min', 0)} "
+              f"(the ped requests are the population's own until their migration)")
+    d_releases = values.get("director releases")
+    if d_releases is not None:
+        print(f"  the director: the requests issued {values.get('director requests issued', 0)} "
+              f"(none left {values.get('director requests empty', 0)}), the over-target releases {d_releases}")
 
     # The acceptance of the near bubble (VICE-127), as one line. The two
     # catchable-zone counters read the zone of VICE-146: in the frustum nearer

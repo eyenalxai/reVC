@@ -492,6 +492,10 @@ FarTrafficDeleteCar(int32 index)
 	CVehicle *pVehicle = ms_aFarCars[index].pVehicle;
 
 	CSpawnService::CountRemoval(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS, true);
+	/* The service's ledger (VICE-152): the far layer's removals are accounted
+	 * under SPAWN_PURPOSE_FAR, its own class. The note is taken before the
+	 * delete, exactly as the near cull's own. */
+	CSpawnService::NoteVehicleRemoval(pVehicle);
 	CWorld::Remove(pVehicle);
 	delete pVehicle;
 	CFarTraffic::ms_nFarTrafficRemovals++;
@@ -769,6 +773,10 @@ FarTrafficTrySite(const SFarTrafficBand &band, const CVector &playerPos, const C
 				playerSpeed, false, SPAWN_TIER_FAR, &pCar) == SPAWN_REFUSAL_NONE && pCar) {
 			FarTrafficAddEntry(pCar);
 			CFarTraffic::ms_nFarTrafficCreations++;
+			/* The service's ledger (VICE-152): the far layer's creations are
+			 * accounted under SPAWN_PURPOSE_FAR, its own class, until its
+			 * migration to a requester (VICE-190). */
+			CSpawnService::NoteVehicleCreation(pCar);
 			return true;
 		}
 		pResult->gated = true;

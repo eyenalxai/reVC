@@ -154,7 +154,10 @@ class CVector;
 /* --- The vocabulary of the request envelope ----------------------------- */
 
 /* The producer. Ambient is the traffic spawner (the first requester of
- * VICE-150); the rest name their tickets' migrations; debug is the probes. */
+ * VICE-150); the rest name their tickets' migrations; debug is the probes.
+ * FAR is the far layer's own ledger class (VICE-152): the layer is not a
+ * requester yet (its migration is VICE-190), but its creations and removals
+ * are accounted in the ledger now, by its own tag. */
 enum ESpawnPurpose
 {
 	SPAWN_PURPOSE_AMBIENT = 0,
@@ -165,6 +168,7 @@ enum ESpawnPurpose
 	SPAWN_PURPOSE_SCENARIO,
 	SPAWN_PURPOSE_SPECIAL,
 	SPAWN_PURPOSE_DEBUG,
+	SPAWN_PURPOSE_FAR,		/* the far layer (VICE-128): its ledger class */
 	SPAWN_PURPOSE_COUNT
 };
 
@@ -1020,9 +1024,12 @@ public:
 
 	/* The removal note: the near cull's deletions, by the removed car's own
 	 * class (RANDOM_VEHICLE -> ambient, MISSION_VEHICLE -> mission,
-	 * PARKED_VEHICLE -> parked, PERMANENT_VEHICLE -> special; a class the
-	 * map does not name counts as the ambient traffic's, the cull's own
-	 * subject). */
+	 * PARKED_VEHICLE -> parked, PERMANENT_VEHICLE -> special,
+	 * FAR_TRAFFIC_VEHICLE -> far; a class the map does not name counts as the
+	 * ambient traffic's, the cull's own subject). The creation note is the
+	 * far layer's own (VICE-152): its cars are built outside the service's
+	 * runs, and the ledger counts them under their own class. */
+	static void NoteVehicleCreation(CVehicle *pVehicle);
 	static void NoteVehicleRemoval(CVehicle *pVehicle);
 
 	/* The primitive's defect notes (the ground casts and the water casts). */
