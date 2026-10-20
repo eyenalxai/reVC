@@ -101,11 +101,18 @@ static constexpr uint32_t MOVE_ANY_STATE_MASK = (1u << MOVE_NUMSTATES) - 1u;
 // and the reference speed machinery goes away with VICE-184, which makes the
 // tier the intent's value and the ladder the source of the speed.
 static constexpr tMoveLadderRow moveLadder[] = {
-	{ TIER_WALK,		STANCE_STAND, MOVE_ANY_STATE_MASK, 1.0f, MOVE_REPORT_WALK },
-	{ TIER_RUN,		STANCE_STAND, MOVE_ANY_STATE_MASK, 1.5f, MOVE_REPORT_RUN },
-	{ TIER_SPRINT,		STANCE_STAND, MOVE_ANY_STATE_MASK, 2.0f, MOVE_REPORT_SPRINT },
-	{ TIER_SLIDE_ENTRY,	STANCE_STAND, 1u << MOVE_SLIDE,    2.25f, MOVE_REPORT_SPRINT },
-	{ TIER_SLIDE_JUMP,	STANCE_STAND, 1u << MOVE_SLIDE,    2.5f, MOVE_REPORT_SPRINT },
+	// The rungs are the shipped animations' own measured ground speed, in
+	// engine units per frame: WALK_player 0.786, run_player 6.439 and
+	// sprint_civi 14.668 units per second at 50 Hz. The ladder is the source:
+	// the adapter reads the rung with PlayerMoveLadderSpeed and the animation's
+	// playback follows the real speed (SetRealMoveAnim). The slide's two rungs
+	// are the shape's top; the live slide speed is the entry boost's, on top of
+	// the sprint (VICE-180).
+	{ TIER_WALK,		STANCE_STAND, MOVE_ANY_STATE_MASK, 0.786f / 50.0f, MOVE_REPORT_WALK },
+	{ TIER_RUN,		STANCE_STAND, MOVE_ANY_STATE_MASK, 6.439f / 50.0f, MOVE_REPORT_RUN },
+	{ TIER_SPRINT,		STANCE_STAND, MOVE_ANY_STATE_MASK, 14.668f / 50.0f, MOVE_REPORT_SPRINT },
+	{ TIER_SLIDE_ENTRY,	STANCE_STAND, 1u << MOVE_SLIDE,    16.0f / 50.0f, MOVE_REPORT_SPRINT },
+	{ TIER_SLIDE_JUMP,	STANCE_STAND, 1u << MOVE_SLIDE,    17.0f / 50.0f, MOVE_REPORT_SPRINT },
 };
 
 // The crawl's own speed (VICE-187): the content's crawl_fwd carries 0.443 units
@@ -348,10 +355,10 @@ static_assert(moveLadder[TIER_WALK].tier == TIER_WALK && moveLadder[TIER_RUN].ti
 	&& moveLadder[TIER_SLIDE_ENTRY].tier == TIER_SLIDE_ENTRY
 	&& moveLadder[TIER_SLIDE_JUMP].tier == TIER_SLIDE_JUMP,
 	"the ladder rows must be in the rung order");
-static_assert(moveLadder[TIER_WALK].speedScale < moveLadder[TIER_RUN].speedScale
-	&& moveLadder[TIER_RUN].speedScale < moveLadder[TIER_SPRINT].speedScale
-	&& moveLadder[TIER_SPRINT].speedScale < moveLadder[TIER_SLIDE_ENTRY].speedScale
-	&& moveLadder[TIER_SLIDE_ENTRY].speedScale < moveLadder[TIER_SLIDE_JUMP].speedScale,
+static_assert(moveLadder[TIER_WALK].speed < moveLadder[TIER_RUN].speed
+	&& moveLadder[TIER_RUN].speed < moveLadder[TIER_SPRINT].speed
+	&& moveLadder[TIER_SPRINT].speed < moveLadder[TIER_SLIDE_ENTRY].speed
+	&& moveLadder[TIER_SLIDE_ENTRY].speed < moveLadder[TIER_SLIDE_JUMP].speed,
 	"the ladder must strictly ascend: walk < run < sprint < the slide's entry < the slide jump");
 static_assert(MoveTransitionsInRange(moveTransitions, MOVE_TRANSITION_ROW_COUNT),
 	"every transition must name a state, a trigger and a guard in range, with a threshold when it is guarded");
@@ -364,8 +371,8 @@ static_assert(MoveStanceTransitionsInRange(moveStanceTransitions, MOVE_STANCE_TR
 // run time.
 static_assert(MOVE_SLIDE_EXIT_SPEED < MOVE_SLIDE_ENTRY_SPEED,
 	"the slide's exit speed must sit below its entry speed");
-static_assert(moveLadder[TIER_SPRINT].speedScale < moveLadder[TIER_SLIDE_ENTRY].speedScale
-	&& moveLadder[TIER_SPRINT].speedScale < moveLadder[TIER_SLIDE_JUMP].speedScale,
+static_assert(moveLadder[TIER_SPRINT].speed < moveLadder[TIER_SLIDE_ENTRY].speed
+	&& moveLadder[TIER_SPRINT].speed < moveLadder[TIER_SLIDE_JUMP].speed,
 	"the slide's rungs must sit above the sprint's");
 
 // The dive's own compile-time rules (VICE-181): the entry leaves the air, the
@@ -877,18 +884,18 @@ PlayerMoveTablesCheck(const SMoveTables &tables, const char **why)
 			return MoveTablesFail(why, "a ladder row names a state out of range");
 		if (report < 0 || report >= MOVE_REPORT_NUM)
 			return MoveTablesFail(why, "a ladder row names a report out of range");
-		if (!(row.speedScale > 0.0f))
+		if (!(row.speed > 0.0f))
 			return MoveTablesFail(why, "a ladder row out of range");
 	}
 	// The slide's two rungs sit above the sprint's (VICE-180): the slide is the
 	// fastest stride and the jump out of it is the fastest of all. The rule is
 	// named here, ahead of the general ascend below, because the slide's own
 	// ladder is what the top of it is for.
-	if (!(tables.ladder[TIER_SLIDE_ENTRY].speedScale > tables.ladder[TIER_SPRINT].speedScale)
-		|| !(tables.ladder[TIER_SLIDE_JUMP].speedScale > tables.ladder[TIER_SPRINT].speedScale))
+	if (!(tables.ladder[TIER_SLIDE_ENTRY].speed > tables.ladder[TIER_SPRINT].speed)
+		|| !(tables.ladder[TIER_SLIDE_JUMP].speed > tables.ladder[TIER_SPRINT].speed))
 		return MoveTablesFail(why, "a slide rung at or below the sprint's");
 	for (int i = 1; i < tables.numLadder; i++) {
-		if (!(tables.ladder[i - 1].speedScale < tables.ladder[i].speedScale))
+		if (!(tables.ladder[i - 1].speed < tables.ladder[i].speed))
 			return MoveTablesFail(why, "a ladder row that does not ascend");
 	}
 	for (int state = 0; state < MOVE_NUMSTATES; state++) {
@@ -1052,6 +1059,14 @@ PlayerMoveTablesCheck(const SMoveTables &tables, const char **why)
 	}
 
 	return true;
+}
+
+float
+PlayerMoveLadderSpeed(eMoveTier tier)
+{
+	if (tier < 0 || tier >= TIER_NUM)
+		return 0.0f;
+	return moveLadder[tier].speed;
 }
 
 // The check over the module's own tables, the harness's entry point (VICE-172).

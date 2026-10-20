@@ -2208,19 +2208,19 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 	// is measured in (CalculateNewVelocity turned it toward m_fRotationDest
 	// this frame)
 	intent.facing = m_fRotationCur;
-	// The ped moves at the ground speed of the animation it plays, so the legs
-	// stay with the movement in every direction and with every weapon
-	intent.targetSpeed = bMoving ? GetMoveAnimReferenceSpeed() : 0.0f;
 	// The speed tier the pad asks for: the sprint button raises it, and the pad
-	// magnitude splits the walk and the run (the split the walk/run blend of
-	// SetRealMoveAnim makes from the same ramp). VICE-175 owns the intent's own
-	// tier source.
+	// magnitude splits the walk and the run.
 	if (padUsed->GetSprint())
 		intent.tier = TIER_SPRINT;
 	else if (padMoveInGameUnit >= 1.0f)
 		intent.tier = TIER_RUN;
 	else
 		intent.tier = TIER_WALK;
+	// The ladder is the source of the stride (VICE-184): the rung's own speed
+	// is the target, and the animation the legs play follows the real speed
+	// (SetRealMoveAnim scales its playback), so the movement never waits for
+	// the animation to name a speed
+	intent.targetSpeed = bMoving ? PlayerMoveLadderSpeed(intent.tier) : 0.0f;
 	intent.surface = m_nSurfaceTouched;
 	intent.onGround = bIsStanding;
 	intent.steepCliff = bSteepCliff;

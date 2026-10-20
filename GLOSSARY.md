@@ -279,8 +279,10 @@ flag the animation sets.
 
 The explicit order of the on-foot speeds: walk < run < sprint < the slide entry
 boost < the slide jump, which carries the slide's speed. Every rung is a row in
-the solver's tables, so the feel is tuned in the tables and never in control
-flow.
+the solver's tables and carries the shipped animation's measured ground speed,
+so the feel is tuned in the tables and never in control flow. The adapter reads
+the rung the pad asks for and hands its speed to the solver, so the ladder is
+the source of the stride and the animation's playback follows the real speed.
 
 ## Animation lock
 

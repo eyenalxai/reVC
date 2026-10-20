@@ -1133,7 +1133,7 @@ PlantSet(void)
 		g_plantLadder[i].tier = (eMoveTier)i;
 		g_plantLadder[i].stance = STANCE_STAND;
 		g_plantLadder[i].stateMask = anyState;
-		g_plantLadder[i].speedScale = 1.0f + (float)i;
+		g_plantLadder[i].speed = 1.0f + (float)i;
 		g_plantLadder[i].reportMoveState = MOVE_REPORT_WALK;
 	}
 	for (int i = 0; i < STANCE_NUM; i++) {
@@ -1269,6 +1269,16 @@ CheckTables(void)
 		SMoveTables t = PlantSet();
 
 		Check(PlayerMoveTablesCheck(&why), "the module's own tables hold every invariant");
+
+		// the ladder is the source of the stride (VICE-184): the rungs carry the
+		// shipped animations' measured speeds, so the playback scale is 1.0 at
+		// each rung and the legs do not slide
+		Check(fabsf(PlayerMoveLadderSpeed(TIER_WALK) - 0.786f / 50.0f) < 1e-7f
+			&& fabsf(PlayerMoveLadderSpeed(TIER_RUN) - 6.439f / 50.0f) < 1e-7f
+			&& fabsf(PlayerMoveLadderSpeed(TIER_SPRINT) - 14.668f / 50.0f) < 1e-7f,
+			"the ladder's rungs carry the shipped animations' measured speeds");
+		Check(PlayerMoveLadderSpeed(TIER_NUM) == 0.0f,
+			"a rung out of range reads zero");
 		Check(PlayerMoveTablesCheck(t, &why), "the planted set holds before a defect is planted");
 
 		#define REJECTS(plant, text) do { \
@@ -1285,11 +1295,11 @@ CheckTables(void)
 			"a ladder without a rung is refused");
 		REJECTS(g_plantLadder[TIER_RUN].tier = TIER_WALK,
 			"a ladder row out of order is refused");
-		REJECTS(g_plantLadder[TIER_SPRINT].speedScale = g_plantLadder[TIER_RUN].speedScale,
+		REJECTS(g_plantLadder[TIER_SPRINT].speed = g_plantLadder[TIER_RUN].speed,
 			"a ladder row that does not ascend is refused");
 		REJECTS(g_plantLadder[TIER_WALK].stateMask = 1u << MOVE_AIR,
 			"a state without a rung is refused");
-		REJECTS(g_plantLadder[TIER_SPRINT].speedScale = g_plantLadder[TIER_SLIDE_ENTRY].speedScale,
+		REJECTS(g_plantLadder[TIER_SPRINT].speed = g_plantLadder[TIER_SLIDE_ENTRY].speed,
 			"a slide rung at or below the sprint's is refused");
 		REJECTS(broken.numStances = STANCE_NUM - 1,
 			"a stance without a row is refused");

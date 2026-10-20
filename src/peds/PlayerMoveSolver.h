@@ -162,7 +162,7 @@ struct tMoveLadderRow
 	eMoveTier tier;			// the rung
 	eStance stance;		// the stance the rung belongs to
 	uint32_t stateMask;		// the eMoveStateId bits the rung serves
-	float speedScale;		// the rung's target speed, a scale of the walk
+	float speed;		// the rung's target speed, engine units per frame (the animation's own measured stride)
 	eMoveReport reportMoveState;	// the eMoveState value the rung reports
 };
 
@@ -346,6 +346,11 @@ private:
 // true means every table holds. The first reads the module's own tables (the
 // harness's entry point, VICE-172), the second the set the caller passes, so
 // the harness can drive each rejection with a planted row.
+// The target speed of one rung, in engine units per frame: the ladder is the
+// source of the stride, and the adapter reads it to fill the intent. The
+// animation's playback follows the real speed in SetRealMoveAnim.
+float PlayerMoveLadderSpeed(eMoveTier tier);
+
 bool PlayerMoveTablesCheck(const char **why);
 bool PlayerMoveTablesCheck(const SMoveTables &tables, const char **why);
 
