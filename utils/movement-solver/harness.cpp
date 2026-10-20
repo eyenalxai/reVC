@@ -38,17 +38,17 @@
  *	   snapshots, and two solvers stepped interleaved equal the same two
  *	   stepped apart.
  *
- *	E. The tables. PlayerMoveTablesCheck (VICE-171, movement/p0-tables) is
- *	   not in the tree yet; until it lands, the check holds what exists: the
- *	   design's four states and three stances are named and distinct, the
- *	   phase 0 stream uses the ground and the air, and the slide and the dive
- *	   are unreachable in phase 0.
+ *	E. The tables. PlayerMoveTablesCheck holds every table to its invariants
+ *	   and drives each rejection with a planted row - the slide's, the dive's
+ *	   and the jump's rules included. The parity stream keeps the slide's
+ *	   pair, the dive's edge and the jump's edge off: the reference maths of
+ *	   VICE-172 has none of them, and each has its own section below.
  *
- *	F. The events. The event list is VICE-173 and the jump counter is
- *	   VICE-182; the module of phase 0 reports no edge. The check holds that
- *	   a landing in the stream raises no bit yet, that the state follows the
- *	   ground, and that the jump and dive edges change no output. It must be
- *	   extended when VICE-173 lands.
+ *	F. The events. The event bits are VICE-173's list: every landing raises
+ *	   EVENT_LANDED once, the dive's landing raises it once on its own frame,
+ *	   and the ground's jump raises EVENT_JUMP once, on the frame it leaves
+ *	   the ground. A press in the air raises nothing, and the state follows
+ *	   the ground and the air every step.
  *
  *	G. The finiteness. Every output is finite for dt in {0, 1/50, 1/10}, the
  *	   pad's extreme (the target speed at 2 engine units) and the zero input,
@@ -103,6 +103,16 @@
  *	   them arrive with the wall run), so the dive has no exit but the ground.
  *	   The parity stream leaves the dive's edge off: the reference maths of
  *	   VICE-172 has no dive.
+ *
+ *	K. The jump (VICE-182). The player's jump is the input's: the press leaves
+ *	   the ground state for the air on the frame it is read and reports the
+ *	   jump event, so the adapter writes the vertical impulse on that frame,
+ *	   not when the launch animation's finish callback used to. The impulse is
+ *	   the stock callback's 8.5 (MOVE_PLAYER_JUMP_IMPULSE), the horizontal
+ *	   velocity crosses the edge untouched, the landing clears the air state
+ *	   and the contact and leaves no state behind, and a press in the air is
+ *	   no second launch. The parity stream leaves the jump's edge off: the
+ *	   reference maths of VICE-172 has no ground jump row.
  *
  * Build and run (from the repository root; the structural check drives the
  * compiler and nm itself and writes its scratch files under /tmp/opencode):
@@ -214,7 +224,11 @@ MakeIntent(void)
 		intent.slopeNormal = SMoveVec3{ RngFloat(-1.0f, 1.0f), RngFloat(-1.0f, 1.0f), 0.0f };
 	intent.hasInput = RngChance(80);
 	intent.tier = !RngChance(40) ? TIER_WALK : RngChance(50) ? TIER_RUN : TIER_SPRINT;
-	intent.jumpRequested = RngChance(10);
+	/* The jump's own edge stays off: the reference maths of VICE-172 has no
+	 * ground jump row, so a stream that entered the air on the press could not
+	 * be compared. The jump's own checks drive the edge by hand (11, VICE-182),
+	 * and the finiteness sweep sets it for its own slice. */
+	intent.jumpRequested = false;
 	/* The dive's own edge stays off: the reference maths of VICE-172 has no
 	 * dive, so a stream that entered it could not be compared. The dive's own
 	 * checks drive the edge by hand (10, VICE-181), and the finiteness sweep
@@ -1132,7 +1146,7 @@ PlantSet(void)
 	g_plantTransitions[1].to = MOVE_GROUND; g_plantTransitions[1].onEntryEvent = EVENT_LANDED;
 	g_plantTransitions[1].guard = GUARD_NONE; g_plantTransitions[1].guardSpeed = 0.0f;
 	g_plantTransitions[2].from = MOVE_GROUND; g_plantTransitions[2].trigger = TRIGGER_JUMP;
-	g_plantTransitions[2].to = MOVE_AIR; g_plantTransitions[2].onEntryEvent = 0;
+	g_plantTransitions[2].to = MOVE_AIR; g_plantTransitions[2].onEntryEvent = EVENT_JUMP;
 	g_plantTransitions[2].guard = GUARD_NONE; g_plantTransitions[2].guardSpeed = 0.0f;
 	g_plantTransitions[3].from = MOVE_AIR; g_plantTransitions[3].trigger = TRIGGER_DIVE;
 	g_plantTransitions[3].to = MOVE_DIVE; g_plantTransitions[3].onEntryEvent = 0;
@@ -1232,7 +1246,7 @@ CheckTables(void)
 	Check(seen[MOVE_GROUND] > 0 && seen[MOVE_AIR] > 0,
 		"the phase 0 stream uses the ground and the air");
 	Check(seen[MOVE_SLIDE] == 0 && seen[MOVE_DIVE] == 0,
-		"the parity stream enters neither the slide (its pair is off, VICE-180) nor the dive (its edge is off, VICE-181)");
+		"the parity stream enters neither the slide (its pair is off, VICE-180), the dive (its edge is off, VICE-181) nor the jump (its edge is off, VICE-182)");
 	Check(bad == 0 && offStance == 0,
 		"the state is always one of the four and the stance is the one of phase 0");
 	printf("  the states of the sweep: ground %d, air %d, slide %d, dive %d\n",
@@ -1295,6 +1309,12 @@ CheckTables(void)
 			"a dive without its landing row is refused");
 		REJECTS(g_plantTransitions[7].to = MOVE_GROUND,
 			"a dive whose landing is not the slide-out is refused");
+		REJECTS(g_plantTransitions[2].to = MOVE_GROUND,
+			"a ground jump that does not leave for the air is refused");
+		REJECTS(g_plantTransitions[2].onEntryEvent = 0,
+			"a ground jump that raises no jump event is refused");
+		REJECTS(g_plantTransitions[2].from = MOVE_AIR,
+			"a jump without its ground row is refused");
 		REJECTS(g_plantStanceTransitions[3].to = STANCE_NUM,
 			"a stance move to a stance out of range is refused");
 		REJECTS(g_plantStanceTransitions[3].trigger = 0,
@@ -1311,11 +1331,11 @@ CheckTables(void)
 #define EVENT_STREAM_STEPS	60
 
 /*
- * The event bits are VICE-173's list and VICE-171's transition rows raise them:
- * a landing raises EVENT_LANDED once, the dive's landing raises it once too
- * (VICE-181, section 10), and no other bit fires. The row that carries the jump
- * event waits for the state it moves to (VICE-182), and the jump counter is
- * VICE-182's. The wall and the head bits wait for the tests that read them.
+ * The event bits are VICE-173's list and the transition rows raise them: a
+ * landing raises EVENT_LANDED once, the dive's landing raises it once too
+ * (VICE-181, section 10), and the ground's jump raises EVENT_JUMP once
+ * (VICE-182, section 11). No other bit fires: the wall and the head bits wait
+ * for the tests that read them.
  */
 static void
 CheckEvents(void)
@@ -1365,32 +1385,35 @@ CheckEvents(void)
 		Check(otherBits == 0, "no other event bit is raised in phase 0");
 	}
 
-	/* the jump edge: no row reads it yet, so it changes nothing over the mixed
-	 * ground and air stream (the gates, the impulse and the jump counter arrive
-	 * with VICE-182) */
+	/* The jump's own bit (VICE-182): the ground's press raises it on the step
+	 * that leaves the ground, a press in the air raises nothing (the double
+	 * jump is a later ticket), and the jump's landing raises the landing bit
+	 * once. The full jump story is section 11. */
 	{
-		CPlayerMoveSolver quiet, edged;
-		SMoveVec2 liveQuiet = { 0.7f, 0.2f };
-		SMoveVec2 liveEdged = { 0.7f, 0.2f };
-		int edgeDiffs = 0;
+		CPlayerMoveSolver solver;
+		SMoveVec2 live = { 0.0f, 0.2f };
+		int jumpEvents = 0;
+		int airPressEvents = 0;
+		int landings = 0;
 
-		for (int i = 0; i < EVENT_STREAM_STEPS; i++) {
-			SMoveIntent intentQuiet = WalkIntent(0.25f, 0.3f);
-			SMoveIntent intentEdged;
+		for (int i = 0; i < 30; i++) {
+			SMoveIntent intent = WalkIntent(0.0f, 0.3f);
 
-			intentQuiet.vel = liveQuiet;
-			intentQuiet.onGround = (i % 7) != 3;
-			intentEdged = intentQuiet;
-			intentEdged.vel = liveEdged;
-			intentEdged.jumpRequested = true;
-			const SMoveSnapshot &snapshotQuiet = quiet.Step(intentQuiet);
-			const SMoveSnapshot &snapshotEdged = edged.Step(intentEdged);
-			liveQuiet = snapshotQuiet.moved;
-			liveEdged = snapshotEdged.moved;
-			if (!SameSnapshot(snapshotQuiet, snapshotEdged))
-				edgeDiffs++;
+			intent.vel = live;
+			intent.onGround = i <= 3 || i >= 22;
+			intent.jumpRequested = (i == 3) || (i == 10);	/* the second press is in the air */
+			const SMoveSnapshot &snapshot = solver.Step(intent);
+			if (snapshot.events & EVENT_JUMP)
+				jumpEvents++;
+			if (i == 10 && (snapshot.events & EVENT_JUMP))
+				airPressEvents++;
+			if (snapshot.events & EVENT_LANDED)
+				landings++;
+			live = snapshot.moved;
 		}
-		Check(edgeDiffs == 0, "the jump edge changes no output: the row arrives with VICE-182");
+		Check(jumpEvents == 1, "the ground's press raises the jump event exactly once");
+		Check(airPressEvents == 0, "a press in the air raises no jump event: no second launch");
+		Check(landings == 1, "the jump's landing raises the landing event once");
 	}
 
 	/* the dive's edge is an air action (VICE-181): with the feet on the ground
@@ -1419,8 +1442,8 @@ CheckEvents(void)
 		Check(edgeDiffs == 0, "the dive's edge with the feet on the ground changes no output: the dive is an air action");
 	}
 
-	printf("  every landing raises the landing bit exactly once; the jump's own bit waits for VICE-182\n");
-	printf("  and the dive's edge is an air action: the ground reads nothing from it\n");
+	printf("  every landing raises the landing bit exactly once, the ground's press raises the jump\n");
+	printf("  bit once and the air's press raises nothing; the dive's edge is an air action\n");
 }
 
 /* ---------------------------------------------------------------------- *
@@ -1450,11 +1473,13 @@ CheckFiniteness(void)
 			// the slide's entry pair and the prone request, so the slide's
 			// own outputs and the low stances' rows are covered too
 			// (VICE-180, VICE-176, VICE-177), the dive's own edge as well
-			// (VICE-181): the dive and its slide-out are driven here
+			// (VICE-181) and the jump's (VICE-182): the dive, its slide-out
+			// and the jump's air are driven here
 			intent.tier = (i % 4) == 0 ? TIER_SPRINT : intent.tier;
 			intent.crouchRequested = (i % 4) == 0;
 			intent.proneRequested = (i % 8) == 0;
 			intent.diveRequested = (i % 8) == 4;
+			intent.jumpRequested = (i % 8) == 2;
 			const SMoveSnapshot &snapshot = solver.Step(intent);
 			if (!SnapshotIsFinite(snapshot)) {
 				if (bad < 3) {
@@ -1469,8 +1494,8 @@ CheckFiniteness(void)
 	Check(bad == 0, "every output is finite for dt {0, 1/50, 1/10}, the pad's extreme and the zero input");
 	printf("  %d steps: dt {0, 1/50, 1/10} x the targets {0, 2/60, 2, 0.3} x the input and its\n",
 		(int)ARRAY_COUNT(aDt) * FINITE_STEPS);
-	printf("  absence, over the ground, the air, the steep slope, the slide, the crouch, the prone\n");
-	printf("  and the dive: every velocity, moved, speed, heading, turn scale and capsule finite\n");
+	printf("  absence, over the ground, the air, the steep slope, the slide, the crouch, the prone,\n");
+	printf("  the dive and the jump: every velocity, moved, speed, heading, turn scale and capsule finite\n");
 }
 
 /* ---------------------------------------------------------------------- *
@@ -2355,8 +2380,9 @@ CheckDiveEntry(void)
 	}
 
 	/* (c) the dive holds while the feet are off the ground: a stream of falling
-	 *     frames, the look and the pad moving, the jump edge pressing (its rows
-	 *     are VICE-182's) - nothing moves the state but the ground */
+	 *     frames, the look and the pad moving, the jump edge pressing (the jump
+	 *     is the ground's own row since VICE-182, so the press is no double
+	 *     jump) - nothing moves the state but the ground */
 	{
 		CPlayerMoveSolver solver;
 		SMoveIntent intent = AirIntent(0.0f, 0.3f);
@@ -2707,6 +2733,161 @@ CheckDive(void)
 }
 
 /* ---------------------------------------------------------------------- *
+ * 11. the jump (VICE-182)
+ * ---------------------------------------------------------------------- */
+
+/*
+ * The jump is the input's, not the launch animation's. The stock player's
+ * impulse sat in the launch animation's finish callback (CPed::FinishLaunchCB:
+ * ApplyMoveForce(0, 0, 8.5) for the player), so the ped left the ground only
+ * when the animation reached the callback. VICE-182 moves the impulse to the
+ * adapter and gives the solver the ground's own jump row: the press leaves the
+ * ground on the frame it is read, the step reports EVENT_JUMP, and the adapter
+ * writes the impulse on that frame. The checks below prove the solver's half:
+ * the pressed frame is the air's, the event is raised once, the impulse is the
+ * stock 8.5, the landing clears the air facts and leaves no state behind, and a
+ * press in the air is no second launch.
+ *
+ * The adapter's half is the one write at the event
+ * (CPlayerPed::PlayerJumpOrDive, CPlayerPed::PlayerControlFighter):
+ *
+ *	ApplyMoveForce(0.0f, 0.0f, MOVE_PLAYER_JUMP_IMPULSE);
+ *	bIsStanding = false;
+ *	bIsInTheAir = true;
+ *
+ * The launch callback keeps no player impulse, so the player's jump has one
+ * source.
+ */
+
+#define STOCK_PLAYER_JUMP_IMPULSE	8.5f	/* CPed::FinishLaunchCB's player branch before VICE-182 */
+
+/* The press on the first frame leaves the ground on that frame, with the jump
+ * event and the horizontal velocity untouched (the impulse is vertical and the
+ * adapter's); the module's impulse is the stock callback's magnitude. */
+static void
+CheckJumpFrame(void)
+{
+	CPlayerMoveSolver solver;
+	SMoveIntent intent = WalkIntent(0.0f, 0.30f);
+	SMoveSnapshot snapshot;
+
+	intent.hasInput = false;
+	intent.vel = SMoveVec2{ 0.0f, 0.20f };
+	snapshot = solver.Step(intent);
+	Check(snapshot.state == MOVE_GROUND, "the ped stands on the ground before the jump");
+
+	intent.jumpRequested = true;
+	intent.vel = snapshot.moved;
+	snapshot = solver.Step(intent);
+	Check(snapshot.state == MOVE_AIR, "the jump edge leaves the ground on the frame it is pressed");
+	Check((snapshot.events & EVENT_JUMP) != 0,
+		"the pressed frame reports the jump event: the adapter writes the impulse there");
+	Check(snapshot.moved.x == intent.vel.x && snapshot.moved.y == intent.vel.y,
+		"the jump resets no velocity: the horizontal speed crosses the edge bit for bit");
+	Check(MOVE_PLAYER_JUMP_IMPULSE == STOCK_PLAYER_JUMP_IMPULSE,
+		"the player's jump impulse is the stock launch callback's 8.5, bit for bit");
+	printf("  the jump: the pressed frame is the air's, %.1f engine units of vertical impulse, no horizontal reset\n",
+		(double)MOVE_PLAYER_JUMP_IMPULSE);
+}
+
+/* The whole jump: one event on the press, the air for every frame in between,
+ * one landing on the frame the feet return, and the ground state with its
+ * contact after it - no air fact is left set. A press in the air is no launch:
+ * the state, the velocity and the events stay the quiet stream's. */
+static void
+CheckJumpLanding(void)
+{
+	{
+		CPlayerMoveSolver solver;
+		SMoveVec2 live = { 0.0f, 0.20f };
+		SMoveSnapshot landing = SMoveSnapshot{};
+		int jumpEvents = 0;
+		int jumpFrame = -1;
+		int landFrame = -1;
+		int airFrames = 0;
+		int airBad = 0;
+		int groundBad = 0;
+
+		for (int i = 0; i < 40; i++) {
+			SMoveIntent intent = WalkIntent(0.0f, 0.30f);
+			bool ground = i == 0 || i >= 20;
+
+			intent.hasInput = false;
+			intent.vel = live;
+			intent.onGround = ground;
+			intent.jumpRequested = i == 0;
+			const SMoveSnapshot &snapshot = solver.Step(intent);
+			if (snapshot.events & EVENT_JUMP) {
+				jumpEvents++;
+				jumpFrame = i;
+			}
+			if (snapshot.events & EVENT_LANDED) {
+				landFrame = i;
+				landing = snapshot;
+			}
+			if (i > 0 && i < 20) {
+				airFrames++;
+				if (snapshot.state != MOVE_AIR || snapshot.contacts != 0)
+					airBad++;
+			}
+			if (i >= 20 && (snapshot.state != MOVE_GROUND || (snapshot.contacts & CONTACT_GROUND) == 0))
+				groundBad++;
+			live = snapshot.moved;
+		}
+		Check(jumpEvents == 1 && jumpFrame == 0, "the jump fires once, on the input frame");
+		Check(airFrames == 19 && airBad == 0,
+			"every frame between the press and the landing is the air's, with no contact");
+		Check(landFrame == 20, "the landing fires on the frame the feet return, once");
+		Check(landing.state == MOVE_GROUND && (landing.contacts & CONTACT_GROUND) != 0,
+			"the landing clears the air state and reports the ground contact");
+		Check((landing.events & EVENT_JUMP) == 0,
+			"the landing raises no jump event: the launch is the press's, not the ground's");
+		Check(groundBad == 0, "the ground state holds after the landing: no air state is left set");
+	}
+
+	/* a press in the air: the same quiet stream, bit for bit - no second launch */
+	{
+		CPlayerMoveSolver quiet, edged;
+		SMoveIntent intent = AirIntent(0.0f, 0.30f);
+		SMoveVec2 quietLive = { 0.0f, 0.20f };
+		SMoveVec2 edgedLive = { 0.0f, 0.20f };
+		int diffs = 0;
+
+		intent.hasInput = false;
+		intent.vel = quietLive;
+		(void)quiet.Step(intent);
+		intent.vel = edgedLive;
+		(void)edged.Step(intent);
+		Check(quiet.GetSnapshot().state == MOVE_AIR && edged.GetSnapshot().state == MOVE_AIR,
+			"the ped is in the air before the air's press");
+
+		for (int i = 0; i < 20; i++) {
+			SMoveIntent q = intent;
+			SMoveIntent e = intent;
+			SMoveSnapshot a, b;
+
+			q.vel = quietLive;
+			e.vel = edgedLive;
+			e.jumpRequested = true;
+			a = quiet.Step(q);
+			b = edged.Step(e);
+			if (!SameSnapshot(a, b))
+				diffs++;
+			quietLive = a.moved;
+			edgedLive = b.moved;
+		}
+		Check(diffs == 0, "a press in the air changes nothing: the jump has no air row, no second launch");
+	}
+}
+
+static void
+CheckJump(void)
+{
+	CheckJumpFrame();
+	CheckJumpLanding();
+}
+
+/* ---------------------------------------------------------------------- *
  * main
  * ---------------------------------------------------------------------- */
 
@@ -2743,6 +2924,8 @@ main(void)
 	CheckProne();
 	printf("\n== 10. the dive (VICE-181): the entry, the spin, the landing and the slide-out\n");
 	CheckDive();
+	printf("\n== 11. the jump (VICE-182): the input frame, the impulse, the landing and the air's press\n");
+	CheckJump();
 
 	printf("\nRESULT: %s (%d checks, %d failures)\n",
 		g_failures == 0 ? "every check passed" : "FAILURES", g_checks, g_failures);

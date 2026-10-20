@@ -11,6 +11,9 @@
 // The controller in CPlayerPed::UpdatePlayerMovement (PlayerPed.cpp) is the
 // adapter: it turns the pad, the camera and the ped into one SMoveIntent, calls
 // Step and writes the snapshot back (see the Movement solver in GLOSSARY.md).
+// The vertical channel is the physics', not the solver's: a jump's impulse is
+// the adapter's write on the step the jump edge enters the air, and the module
+// carries only the edge and the state (VICE-182).
 //
 // The feel is data (VICE-171): one row per state (moveStateRows), one row per
 // rung of the speed ladder (moveLadder), one row per stance (moveStanceRows)
@@ -22,6 +25,14 @@
 // unit is 50 units per second. The reference speed of the adapter and the
 // telemetry readout convert with it (PlayerPed.cpp, MovementTelemetry.cpp).
 #define MOVE_ENGINE_UNITS_PER_SECOND	50.0f
+
+// The vertical impulse of the player's jump, engine units per step: the value
+// the launch animation's finish callback applied to the player before VICE-182
+// (CPed::FinishLaunchCB's ApplyMoveForce(0, 0, 8.5)). The solver owns the
+// player's horizontal velocity only - the vertical channel is the physics' -
+// so the adapter writes this impulse on the step that enters the air, and the
+// callback keeps no player impulse (CPlayerPed::PlayerJumpOrDive).
+#define MOVE_PLAYER_JUMP_IMPULSE	8.5f
 
 // The states of the solver: one row per state in moveStateRows
 // (PlayerMoveSolver.cpp). The ground, the air, the slide (VICE-180) and the
@@ -80,7 +91,7 @@ enum eMoveReport
 // (the wall run arrives later).
 enum eMoveTrigger
 {
-	TRIGGER_JUMP = 1,		// the jump action edge
+	TRIGGER_JUMP = 1,		// the jump action edge: the ground leaves for the air in its frame (VICE-182)
 	TRIGGER_DIVE = 2,		// the dive action edge: the prone action with the feet off the ground (VICE-181)
 	TRIGGER_SLIDE = 4,		// the slide's entry: the crouch action edge at the sprint tier (VICE-180)
 	TRIGGER_LAND = 8,		// the feet are on a surface this step
@@ -253,7 +264,7 @@ struct SMoveIntent
 	bool steepCliff;	// the touched surface is a steep cliff with a normal
 	bool hasInput;		// the pad moves the ped this frame (the controller's bMoving)
 	eMoveTier tier;		// the rung of the ladder the pad asks for
-	bool jumpRequested;	// the jump press: the jump action edge (VICE-182) and the stance's stand-up (VICE-176)
+	bool jumpRequested;	// the accepted jump press: the jump action edge (VICE-182) and the stance's stand-up (VICE-176)
 	bool diveRequested;	// the dive action edge: the prone action with the feet off the ground (VICE-181)
 	// The crouch action edge (the pad's momentary duck press, CPad::DuckJustDown).
 	// It toggles the crouch stance (VICE-176) and, with the sprint tier, it is

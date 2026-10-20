@@ -178,17 +178,24 @@ static constexpr tMoveStanceRow moveStanceRows[] = {
 // prone request, the feet leaving the surface and the exit speed end it.
 // VICE-181 adds the dive: the prone action in the air enters it, and its feet
 // touching the ground land it in the slide - the slide-out - whose own rows
-// then own it, the prone stance included (the stance rows below). The rows
-// that carry the jump from the ground and the wall run wait for their tickets
-// (VICE-182, the wall run).
+// then own it, the prone stance included (the stance rows below). VICE-182 adds
+// the ground's own jump: the input edge leaves the ground in its frame, so the
+// jump never waits for the launch animation. The wall run waits for its ticket.
 static constexpr tMoveTransitionRow moveTransitions[] = {
 	// MOVE_GROUND: the slide's entry, one frame: the crouch press at the
 	// sprint tier, at or above the speed a sprint holds. The entry boost then
 	// lifts the speed over the sprint's in the same frame (see Step).
 	{ MOVE_GROUND,	TRIGGER_SLIDE,		MOVE_SLIDE,	0, GUARD_SPEED_ABOVE, MOVE_SLIDE_ENTRY_SPEED },
-	// MOVE_GROUND: the feet leaving the ground. The jump row arrives with the
-	// tickets that own the impulse and the state (VICE-182): the ground moves
-	// on the world fact alone, exactly as the controller did.
+	// MOVE_GROUND: the jump's own edge (VICE-182). The press leaves the ground
+	// on the frame it is read, so the state is the air before the feet leave,
+	// the event tells the adapter to write the jump's impulse (the vertical
+	// channel is the physics', see MOVE_PLAYER_JUMP_IMPULSE), and the row sits
+	// above the feet-leaving row, so a press that also finds the feet off the
+	// ground takes the jump's event first.
+	{ MOVE_GROUND,	TRIGGER_JUMP,		MOVE_AIR,	EVENT_JUMP, GUARD_NONE, 0.0f },
+	// MOVE_GROUND: the feet leaving the ground. The ground moves on the world
+	// fact alone, exactly as the controller did; it takes no event, because a
+	// step off a ledge is not a jump.
 	{ MOVE_GROUND,	TRIGGER_AIRBORNE,	MOVE_AIR,	0, GUARD_NONE, 0.0f },
 	// MOVE_AIR: the feet touching the ground again. This row sits above the
 	// dive's entry, so a dive pressed on the frame the feet touch is the
@@ -382,6 +389,23 @@ static_assert(MoveHasTransition(MOVE_DIVE, MOVE_SLIDE, TRIGGER_LAND),
 	"the dive's landing must enter the slide: the slide-out is the slide's own machinery");
 static_assert((moveStateRows[MOVE_DIVE].flags & MOVEFLAG_KEEP_MOMENTUM) != 0,
 	"the dive must keep the momentum it was entered with");
+
+// The ground's own jump (VICE-182): the row leaves the ground for the air and
+// raises the jump event the adapter writes the impulse on. The runtime check
+// holds the same rule over every ground jump row of a planted set.
+static constexpr bool
+MoveGroundJumpIsTheAirWithTheEvent(void)
+{
+	for (int i = 0; i < MOVE_TRANSITION_ROW_COUNT; i++) {
+		const tMoveTransitionRow &row = moveTransitions[i];
+		if (row.from == MOVE_GROUND && (row.trigger & TRIGGER_JUMP) != 0)
+			return row.to == MOVE_AIR && (row.onEntryEvent & EVENT_JUMP) != 0;
+	}
+	return false;
+}
+
+static_assert(MoveGroundJumpIsTheAirWithTheEvent(),
+	"the ground's jump must leave for the air and raise the jump event");
 
 // The engine does not reach this module, so the few functions the maths needs
 // live here, with the engine's own implementations beside them.
@@ -802,16 +826,17 @@ MoveTablesFail(const char **why, const char *rule)
 	return false;
 }
 
-// The table check (VICE-171, VICE-180, VICE-181): every table to its
+// The table check (VICE-171, VICE-180, VICE-181, VICE-182): every table to its
 // invariants. The rules are the ones the harness (VICE-172) needs: a state
 // without a row, a transition to an id out of range or to a guard out of range,
 // a ladder row that does not ascend, a stance row out of range or one whose
 // capsule top sinks under the ground (VICE-177: the height is signed, the prone
 // body lies below the origin), the slide's own rules - an entry row, an exit
 // guard that names the exit speed, the exit speed below the entry's, and the
-// slide's rungs above the sprint's (VICE-180) - and the dive's (VICE-181): its
+// slide's rungs above the sprint's (VICE-180) - the dive's (VICE-181): its
 // entry from the air, its landing in the slide-out, and the prone the landing
-// enters.
+// enters, and the jump's (VICE-182): a ground row that leaves for the air and
+// raises the jump event.
 bool
 PlayerMoveTablesCheck(const SMoveTables &tables, const char **why)
 {
@@ -945,6 +970,28 @@ PlayerMoveTablesCheck(const SMoveTables &tables, const char **why)
 			if (!(exitSpeed < row.guardSpeed))
 				return MoveTablesFail(why, "a slide whose exit speed is not below its entry speed");
 		}
+	}
+
+	// The jump's rows (VICE-182): the ground's edge exists, it leaves the
+	// ground for the air, and it raises the jump event the adapter reads to
+	// write the impulse. A jump that stayed on the ground or reported no event
+	// would leave the state and the impulse disagreeing.
+	{
+		bool hasJump = false;
+
+		for (int i = 0; i < tables.numTransitions; i++) {
+			const tMoveTransitionRow &row = tables.transitions[i];
+
+			if (row.from != MOVE_GROUND || (row.trigger & TRIGGER_JUMP) == 0)
+				continue;
+			hasJump = true;
+			if (row.to != MOVE_AIR)
+				return MoveTablesFail(why, "a ground jump that does not leave for the air");
+			if ((row.onEntryEvent & EVENT_JUMP) == 0)
+				return MoveTablesFail(why, "a ground jump that raises no jump event");
+		}
+		if (!hasJump)
+			return MoveTablesFail(why, "a jump without its ground row");
 	}
 
 	// Every stance move names a stance and a trigger in range (VICE-176)

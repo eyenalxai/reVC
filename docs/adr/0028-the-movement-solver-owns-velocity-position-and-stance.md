@@ -73,6 +73,14 @@ between the states, and later a wall run and a double jump.
    upright body, the prone, dive and slide aim is the solver's yaw plus pose
    variants plus the correction, not the stock bone-derived reference. (ADR 0015
    holds the pose rule.)
+8. **The jump is an input edge (VICE-182).** The player's jump leaves the ground
+   state for the air in the frame the pad's jump is read, and the adapter writes
+   the vertical impulse on that frame (`MOVE_PLAYER_JUMP_IMPULSE`, the launch
+   callback's old 8.5). The solver owns the horizontal velocity, so a vertical
+   channel in the solver would be a second owner of the physics for one move.
+   The AI peds keep the launch callback's impulse and horizontal speed, because
+   their movement stays the animation's. The callback keeps no player impulse,
+   so the player's jump has one source.
 
 ## Considered alternatives
 
@@ -97,6 +105,8 @@ between the states, and later a wall run and a double jump.
 - The solver can be driven in a `utils/` harness with no engine: the intent and
   the snapshot are plain data, and the harness replays an input stream over the
   transitions.
+- A jump no longer waits for the launch animation: the launch presents it. The
+  AI keeps its animation-owned jump (Decision 8).
 - A new state (the wall run) or a new air move (the double jump) is a table row,
   a step function and an event. No control path changes.
 - The presentation sees the solver's state one frame late, the same latency the

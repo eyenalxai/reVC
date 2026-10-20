@@ -648,22 +648,56 @@ CPlayerPed::DoesTargetHaveToBeBroken(CVector target, CWeapon *weaponUsed)
 	return false;
 }
 
-// Cancels landing anim while running & jumping? I think
-void
-CPlayerPed::RunningLand(CPad *padUsed)
+// The player's jump impulse, written on the frame the jump is accepted. The
+// solver owns the horizontal velocity only, so the vertical force and the air
+// facts are the adapter's: the value is the launch callback's old player
+// impulse (MOVE_PLAYER_JUMP_IMPULSE), applied here on the input frame instead
+// of at the end of the launch animation (VICE-182). The launch keeps no player
+// impulse, so this is the one source of the player's jump.
+static void
+ApplyPlayerJumpImpulse(CPlayerPed *player)
 {
-	CAnimBlendAssociation *landAssoc = RpAnimBlendClumpGetAssociation(GetClump(), ANIM_STD_FALL_LAND);
-	if (landAssoc && landAssoc->currentTime == 0.0f && m_fMoveSpeed > 1.5f
-		&& padUsed && (padUsed->GetPedWalkLeftRight() != 0.0f || padUsed->GetPedWalkUpDown() != 0.0f)) {
+	player->ApplyMoveForce(0.0f, 0.0f, MOVE_PLAYER_JUMP_IMPULSE);
+	// The feet are off the ground from this frame: the solver reads the fact
+	// before the physics has moved the body, and the fall's landing path starts
+	// from the same frame (CPed::InTheAir)
+	player->bIsStanding = false;
+	player->bIsInTheAir = true;
+}
 
-		landAssoc->blendDelta = -1000.0f;
-		landAssoc->flags |= ASSOC_DELETEFADEDOUT;
+// Whether the player's jump press this frame is a jump. The gates are the
+// stock player jump's - not in the air, not already jumping, the heavy weapons
+// refuse it unless the aim is up (VICE-137) - plus the ground the solver's jump
+// row leaves from and the launch's own gate (a vehicle, a launch still
+// blending, a steep cliff the ped faces into; CPed::SetJump). The intent's jump
+// edge and the impulse read this one answer, so the solver's state and the
+// impulse cannot disagree (VICE-182).
+static bool
+JumpPressAccepted(CPlayerPed *player, CPad *padUsed)
+{
+	if (!padUsed->JumpJustDown() || player->bIsInTheAir || player->m_nPedState == PED_JUMP)
+		return false;
+	if (!player->bIsStanding || player->bInVehicle)
+		return false;
+	// The launch's own gate (CPed::SetJump): a launch that is still blending
+	// refuses the next one
+	if (RpAnimBlendClumpGetAssociation(player->GetClump(), ANIM_STD_JUMP_LAUNCH))
+		return false;
+	if (!player->m_bWeaponAimActive
+		&& CWeaponInfo::GetWeaponInfo(player->GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_HEAVY))
+		return false;
+	if (player->m_nSurfaceTouched == SURFACE_STEEP_CLIFF
+		&& DotProduct(player->GetForward(), player->m_vecDamageNormal) < 0.0f)
+		return false;
+	return true;
+}
 
-		CAnimManager::AddAnimation(GetClump(), ASSOCGRP_STD, ANIM_STD_JUMP_LAND)->SetFinishCallback(FinishJumpCB, this);
-
-		if (m_nPedState == PED_JUMP)
-			RestorePreviousState();
-	}
+// A pending evade dive takes the jump press instead of a jump, so the solver's
+// jump edge stays off that frame (the stock player's dodge)
+static bool
+EvadeDiveWanted(CPlayerPed *player)
+{
+	return player->m_nEvadeAmount != 0 && player->m_pEvadingFrom != nil;
 }
 
 bool
@@ -1157,8 +1191,11 @@ CPlayerPed::PlayerControlFighter(CPad *padUsed)
 			SetEvasiveDive((CPhysical*)m_pEvadingFrom, 1);
 			m_nEvadeAmount = 0;
 			m_pEvadingFrom = nil;
-		} else {
-			SetJump();
+		} else if (SetJump()) {
+			// The fight path runs no solver, so the jump's impulse is written
+			// here with the state: the one source of the player's jump
+			// (VICE-182)
+			ApplyPlayerJumpImpulse(this);
 		}
 	}
 
@@ -1201,29 +1238,32 @@ CPlayerPed::PlayerControl1stPersonRunAround(CPad *padUsed)
 // controls. The aim gates the heavy weapons: a heavy weapon refuses the jump,
 // except while the aim is up, where the aim keeps the whole control (VICE-137).
 // The dive owns the whole body, so the aim goes with it; the jump keeps the aim
-// and the pose through the air.
+// and the pose through the air, and its impulse leaves the ground on this frame
+// with the state, not at the launch animation's end (VICE-182).
 void
 CPlayerPed::PlayerJumpOrDive(CPad *padUsed)
 {
-	if (bIsInTheAir || m_nPedState == PED_JUMP || !padUsed->JumpJustDown())
-		return;
-	if (!m_bWeaponAimActive && CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_HEAVY))
+	if (!JumpPressAccepted(this, padUsed))
 		return;
 
 	ClearAttack();
-	if (m_nEvadeAmount != 0 && m_pEvadingFrom) {
+	if (EvadeDiveWanted(this)) {
 		// The dive owns the whole body: the aim and the lock-on go with it
 		StopWeaponAim();
 		ClearWeaponTarget();
 		SetEvasiveDive((CPhysical*)m_pEvadingFrom, 1);
 		m_nEvadeAmount = 0;
 		m_pEvadingFrom = nil;
-	} else {
-		// The lock-on target goes with the jump; the aim stays
-		if (!m_bWeaponAimActive)
-			ClearWeaponTarget();
-		SetJump();
+		return;
 	}
+
+	// The lock-on target goes with the jump; the aim stays
+	if (!m_bWeaponAimActive)
+		ClearWeaponTarget();
+	// The jump starts and its impulse is written on this frame: the launch
+	// animation presents the jump and owns no movement of it (VICE-182)
+	if (SetJump())
+		ApplyPlayerJumpImpulse(this);
 }
 
 // The sprint request of the on-foot player. The heavy weapons refuse it, except
@@ -2185,11 +2225,11 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 	intent.onGround = bIsStanding;
 	intent.steepCliff = bSteepCliff;
 	intent.hasInput = bMoving;
-	// The jump press is the jump's action edge and the crouch's stand-up
-	// trigger alike: the state rows have no row on it yet - the gates, the
-	// impulse and the state are VICE-182's - and the stance table reads it
-	// (VICE-176).
-	intent.jumpRequested = padUsed->JumpJustDown();
+	// The jump edge is the press the jump itself accepts: the solver's ground
+	// row leaves the ground on this frame and reports the jump event, and the
+	// impulse is written with the jump state (VICE-182). The evade dive takes
+	// the press instead of a jump, so the solver's edge stays off then.
+	intent.jumpRequested = JumpPressAccepted(this, padUsed) && !EvadeDiveWanted(this);
 	// The dive's edge is the prone action with the feet off the ground
 	// (VICE-181): the one press lies the ped down on a surface (VICE-177) and
 	// dives with the feet off it. The check is the pad's own edge against the
@@ -2485,8 +2525,6 @@ CPlayerPed::ProcessControl(void)
 	}
 	if (m_objective == OBJECTIVE_NONE)
 		m_nMoveState = PEDMOVE_STILL;
-	if (bIsLanding)
-		RunningLand(padUsed);
 
 	if (padUsed && padUsed->WeaponJustDown() && !TheCamera.Using1stPersonWeaponMode()) {
 		// ...Really?
