@@ -7,12 +7,18 @@
 #include "Automobile.h"
 #include "Bike.h"
 #include "Boat.h"
+#include "General.h"
 #include "ModelIndices.h"
 #include "ModelInfo.h"
+#include "PlayerInfo.h"
 #include "Pools.h"
+#include "PopulationBudget.h"
 #include "SpawnReadiness.h"
 #include "Streaming.h"
 #include "Timer.h"
+#include "TrafficRings.h"
+#include "Vehicle.h"
+#include "VisibilityPlugins.h"
 #include "World.h"
 #include "Zones.h"
 
@@ -48,22 +54,26 @@ SSpawnServiceTelemetry CSpawnService::ms_Telemetry;
 
 /* The live reader's offsets (utils/caps-audit/live-counters.py). The layout
  * is the header's field order; a field move breaks the build here before it
- * can misread the live rows. */
+ * can misread the live rows. The kind array grew with the parked kind
+ * (VICE-155), so the rows behind it moved by four bytes. */
 static_assert(offsetof(SSpawnServiceTelemetry, m_nRequestsByPurpose) == 0, "the live reader reads the request rows at offset 0");
 static_assert(offsetof(SSpawnServiceTelemetry, m_nRequestsByKind) == 32, "the live reader reads the kind rows at offset 32");
-static_assert(offsetof(SSpawnServiceTelemetry, m_nRefusalsByReason) == 40, "the live reader reads the refusal rows at offset 40");
-static_assert(offsetof(SSpawnServiceTelemetry, m_nCreatedByPurpose) == 76, "the live reader reads the created rows at offset 76");
-static_assert(offsetof(SSpawnServiceTelemetry, m_nRemovedByPurpose) == 108, "the live reader reads the removed rows at offset 108");
-static_assert(offsetof(SSpawnServiceTelemetry, m_nCoveredFillCreations) == 140, "the live reader reads the covered-fill row at offset 140");
-static_assert(offsetof(SSpawnServiceTelemetry, m_nReadinessWaits) == 144, "the live reader reads the wait rows at offset 144");
-static_assert(offsetof(SSpawnServiceTelemetry, m_nPlanMicros) == 200, "the live reader reads the plan rows at offset 184 and the micros at 200");
+static_assert(offsetof(SSpawnServiceTelemetry, m_nRefusalsByReason) == 44, "the live reader reads the refusal rows at offset 44");
+static_assert(offsetof(SSpawnServiceTelemetry, m_nCreatedByPurpose) == 80, "the live reader reads the created rows at offset 80");
+static_assert(offsetof(SSpawnServiceTelemetry, m_nRemovedByPurpose) == 112, "the live reader reads the removed rows at offset 112");
+static_assert(offsetof(SSpawnServiceTelemetry, m_nCoveredFillCreations) == 144, "the live reader reads the covered-fill row at offset 144");
+static_assert(offsetof(SSpawnServiceTelemetry, m_nReadinessWaits) == 148, "the live reader reads the wait rows at offset 148");
+static_assert(offsetof(SSpawnServiceTelemetry, m_nPlanMicros) == 200, "the live reader reads the plan rows at offset 188 and the micros at 200");
 static_assert(offsetof(SSpawnServiceTelemetry, m_nConservationCellSum) == 208, "the live reader reads the conservation rows at offset 208");
 static_assert(offsetof(SSpawnServiceTelemetry, m_nGroundRejections) == 220, "the live reader reads the defect rows at offset 220");
 static_assert(sizeof(SSpawnServiceTelemetry) == 232, "the telemetry's size is the live reader's contract");
 
 /* The vehicle tag the core names (SPAWN_VEHICLE_TAG_RANDOM) is the engine's
- * own RANDOM_VEHICLE: the driver contract of SetUpDriver reads the tag. */
+ * own RANDOM_VEHICLE: the driver contract of SetUpDriver reads the tag. The
+ * parked tag is the engine's PARKED_VEHICLE: the game counts the car in
+ * NumParkedCars and the parked path never calls SetUpDriver. */
 static_assert(SPAWN_VEHICLE_TAG_RANDOM == RANDOM_VEHICLE, "the random tag must be the engine's own");
+static_assert(SPAWN_VEHICLE_TAG_PARKED == PARKED_VEHICLE, "the parked tag must be the engine's own");
 
 /*
  * The zone compatibility of one class: the live info zone of the position
@@ -420,6 +430,263 @@ CSpawnService::RequestExplicit(const SSpawnExplicitRequest &request, CVehicle **
 	if (ppCreated)
 		*ppCreated = pVehicle;
 	return true;
+}
+
+/* --- The parked kind (VICE-155) ------------------------------------------ */
+
+/*
+ * The engine side of the parked path. The generator's policy (the timer, the
+ * range gate, the uses, the handle, the save state) stays in CarGen.cpp; this
+ * is the placement: the target gate and the model resolution (the core's
+ * SpawnRunParked), the world work of the stages (the spot's blockage, the
+ * model request, the ground casts and the car, the ladder) and the creation's
+ * setup.
+ *
+ * The order of the world work is the old DoInternalProcessing's, and it
+ * matters for the RNG stream: a car's constructor draws its colours, so the
+ * cars resolve the ground before their constructor runs (a ground failure
+ * spends no constructor dice); the boats create first and keep the water the
+ * generator gave. The alarm and lock rolls are the parked kind's policy, with
+ * the generator's thresholds passed in, in the old position of the stream.
+ *
+ * The readiness the path checks is CStreaming::HasModelLoaded, the old
+ * generator's own: the parked ticket is the placement's migration, and the
+ * map generator's car must appear exactly when the old code made it. The
+ * ambient's stricter rule (CSpawnReadiness::IsModelReady: the model with its
+ * txd and its animation block, VICE-151) is the request gate's; the parked
+ * path prewarms nothing and holds no pin.
+ */
+
+/* The model policy of a dynamic generator: the old call, verbatim - the zone
+ * of the player's own position, ChooseCarRating, ChooseCarModel (which draws
+ * from the loaded class arrays and answers -1 when the class is empty). */
+static int32_t
+SpawnParkedChooseModel(void *user)
+{
+	CZoneInfo zone;
+	CVector pos = FindPlayerCoors();
+
+	(void)user;
+	CTheZones::GetZoneInfoForTimeOfDay(&pos, &zone);
+	return CCarCtrl::ChooseCarModel(CCarCtrl::ChooseCarRating(&zone));
+}
+
+/* The spot's blockage: the entities near the generator's position whose boxes
+ * overlap the model's box with a metre of slack. The generator's own
+ * CheckForBlockage, moved into the parked path (the ticket's own validity);
+ * the OCCUPANCY refusal is what its flag and timer policy read. */
+static bool
+SpawnParkedSpotIsBlocked(int32_t model, const CVector &pos)
+{
+	int16 entities;
+	CEntity *pEntities[8];
+	CColModel *pColModel = CModelInfo::GetColModel(model);
+
+	CWorld::FindObjectsKindaColliding(pos, pColModel->boundingSphere.radius, 1, &entities, 8, pEntities,
+		false, true, true, false, false);
+	for (int i = 0; i < entities; i++) {
+		if (pos.z + pColModel->boundingBox.min.z < pEntities[i]->GetPosition().z + pEntities[i]->GetColModel()->boundingBox.max.z + 1.0f &&
+		    pos.z + pColModel->boundingBox.max.z > pEntities[i]->GetPosition().z + pEntities[i]->GetColModel()->boundingBox.min.z - 1.0f)
+			return true;
+	}
+	return false;
+}
+
+struct SSpawnParkedAttempt
+{
+	const SSpawnParkedRequest *pRequest;
+	const SSpawnParkedDecision *pDecision;
+	CVector pos;
+	CVehicle *pVehicle;
+	bool poolRefused;	/* the constructor found the pool full */
+};
+
+/* The world work of one stage, from the live world. */
+static void
+SpawnParkedResolveStage(void *user, ESpawnParkedStage stage, int32_t model, SSpawnParkedFacts *facts)
+{
+	SSpawnParkedAttempt *pAttempt = (SSpawnParkedAttempt *)user;
+	const SSpawnParkedRequest &request = *pAttempt->pRequest;
+
+	switch (stage) {
+	case SPAWN_PARKED_STAGE_MODEL:
+		/* The stored dynamic model's residency (the field is the negative
+		 * of the model; -1 is the empty field, never a model). */
+		facts->storedModelLoaded = request.modelIndex < -1 && CStreaming::HasModelLoaded(-request.modelIndex);
+		break;
+	case SPAWN_PARKED_STAGE_BLOCKAGE:
+		facts->blocked = SpawnParkedSpotIsBlocked(model, CVector(request.x, request.y, request.z));
+		break;
+	case SPAWN_PARKED_STAGE_READINESS:
+		/* The fixed model is requested here, after the blockage check: the
+		 * old call's order (the request is what loads it for a later
+		 * frame; the dynamic policy draws from the loaded arrays). */
+		if (request.modelIndex >= 0)
+			CStreaming::RequestModel(model, STREAMFLAGS_DEPENDENCY);
+		facts->modelLoaded = CStreaming::HasModelLoaded(model);
+		break;
+	case SPAWN_PARKED_STAGE_GROUND:
+	{
+		CVector pos(request.x, request.y, request.z);
+		CVehicle *pVehicle;
+		bool groundFound;
+
+		if (CModelInfo::IsBoatModel(model)) {
+			pVehicle = new CBoat(model, pAttempt->pDecision->createdBy);
+			if (pos.z <= -100.0f)
+				pos.z = CWorld::FindGroundZForCoord(pos.x, pos.y);
+			((CBoat *)pVehicle)->bExtendedRange = true;
+			groundFound = true;
+		} else {
+			if (pos.z > -100.0f) {
+				pos.z = CWorld::FindGroundZFor3DCoord(pos.x, pos.y, pos.z, &groundFound);
+			} else {
+				CColPoint cp;
+				CEntity *pEntity;
+				groundFound = CWorld::ProcessVerticalLine(CVector(pos.x, pos.y, 1000.0f), -1000.0f,
+					cp, pEntity, true, false, false, false, false, false, nil);
+				if (groundFound)
+					pos.z = cp.point.z;
+			}
+			if (!groundFound) {
+				debug("CSpawnService::RequestParked - can't find ground z for new car x = %f y = %f \n", request.x, request.y);
+				facts->groundFound = false;
+				return;
+			}
+			if (((CVehicleModelInfo *)CModelInfo::GetModelInfo(model))->m_vehicleType == VEHICLE_TYPE_BIKE) {
+				CBike *pBike = new CBike(model, pAttempt->pDecision->createdBy);
+				pBike->bIsStanding = true;
+				pVehicle = pBike;
+			} else {
+				pVehicle = new CAutomobile(model, pAttempt->pDecision->createdBy);
+			}
+			pVehicle->bLightsOn = false;
+		}
+		if (pVehicle == nil) {
+			/* The constructor's own pool refusal (the request's free-space
+			 * check passed, so the last slot went to another path in
+			 * between): the attempt records it, the ground was found, and
+			 * the request refuses POOL (the explicit kind's own guard). The
+			 * placement fact stays the request's own; the request returns
+			 * before anything reads it. */
+			pAttempt->poolRefused = true;
+			facts->groundFound = true;
+			facts->x = request.x;
+			facts->y = request.y;
+			facts->z = request.z;
+			return;
+		}
+		pVehicle->bIsStatic = false;
+		pVehicle->bEngineOn = false;
+		pos.z += pVehicle->GetDistanceFromCentreOfMassToBaseOfModel();
+		pVehicle->SetPosition(pos);
+		pVehicle->SetOrientation(0.0f, 0.0f, DEGTORAD(request.angle));
+		pVehicle->SetStatus(STATUS_ABANDONED);
+		pVehicle->m_nDoorLock = CARLOCK_UNLOCKED;
+		pAttempt->pos = pos;
+		pAttempt->pVehicle = pVehicle;
+		facts->groundFound = true;
+		facts->x = pos.x;
+		facts->y = pos.y;
+		facts->z = pos.z;
+		break;
+	}
+	case SPAWN_PARKED_STAGE_BUBBLE:
+	{
+		/* The ladder at the final position, rays off: the gate resolves the
+		 * arm and counts its own refusal, the core maps the arm. */
+		ENearBubbleArm arm = NEAR_BUBBLE_ARM_NONE;
+
+		CSpawnService::AllowsCreation(pAttempt->pos, FindPlayerCentreOfWorld(CWorld::PlayerInFocus),
+			NEAR_BUBBLE_ENTITY_RADIUS, false, &arm);
+		facts->arm = (uint8_t)arm;
+		break;
+	}
+	default:
+		break;
+	}
+}
+
+ESpawnRefusal
+CSpawnService::RequestParked(const SSpawnParkedRequest &request, SSpawnParkedDecision *pDecision, CVehicle **ppCreated)
+{
+	SSpawnParkedAttempt attempt;
+	SSpawnParkedBudget budget;
+	SSpawnParkedDecision decision;
+	ESpawnRefusal refusal;
+	CVehicle *pVehicle;
+
+	SpawnRequestBegin(&ms_Telemetry, request.purpose, SPAWN_KIND_PARKED);
+
+	/* The decision carries the request's own state before the first gate, so
+	 * a refusal that returns early still hands the caller a sane model
+	 * field. */
+	SpawnParkedDecisionBegin(request, &decision);
+
+	if (CPools::GetVehiclePool()->GetNoOfFreeSpaces() <= 0) {
+		/* The pool's last slots are physical, not a reserve: even the parked
+		 * path cannot put a car in a full pool (the explicit kind's check). */
+		if (pDecision)
+			*pDecision = decision;
+		SpawnNoteRefusal(&ms_Telemetry, SPAWN_REFUSAL_POOL);
+		return SPAWN_REFUSAL_POOL;
+	}
+
+	attempt.pRequest = &request;
+	attempt.pDecision = &decision;
+	attempt.pos = CVector(request.x, request.y, request.z);
+	attempt.pVehicle = nil;
+	attempt.poolRefused = false;
+
+	/* The parked target and the car budget: the generator's own first check
+	 * (PopulationBudget.h, ParkedCarTarget). */
+	budget.parkedCars = CCarCtrl::NumParkedCars;
+	budget.parkedTarget = ParkedCarTarget(CurrentTrafficRings().scale);
+	budget.carsInUse = CCarCtrl::NumCarsInUse();
+	budget.carBudget = CCarCtrl::MaxNumberOfCarsInUse;
+
+	refusal = SpawnRunParked(request, budget, CTimer::GetTimeInMilliseconds(),
+		SpawnParkedChooseModel, nil, SpawnParkedResolveStage, &attempt, &decision, &ms_Telemetry);
+	if (pDecision)
+		*pDecision = decision;
+
+	if (attempt.poolRefused) {
+		/* The constructor's own pool refusal (the free-space check above
+		 * passed, so the pool's last slot went to another path in
+		 * between): the pool's reason, counted. */
+		SpawnNoteRefusal(&ms_Telemetry, SPAWN_REFUSAL_POOL);
+		return SPAWN_REFUSAL_POOL;
+	}
+	if (refusal != SPAWN_REFUSAL_NONE) {
+		/* A car a stage made is deleted when a later gate refuses: the
+		 * parked path's own cleanup. */
+		if (attempt.pVehicle)
+			delete attempt.pVehicle;
+		return refusal;
+	}
+
+	/* The creation's own setup: the fresh-spawn grace, the world, the
+	 * counters, the alarm and lock rolls (the generator's policy numbers,
+	 * rolled here) and the colours the decision carries (the request's own,
+	 * or the model's when a re-choice cleared them). The parked tag carries
+	 * no driver. */
+	pVehicle = attempt.pVehicle;
+	pVehicle->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + decision.protectMs;
+	CWorld::Add(pVehicle);
+	CountCreation(pVehicle->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
+	if (CGeneral::GetRandomNumberInRange(0, 100) < request.alarm)
+		pVehicle->m_nAlarmState = -1;
+	if (CGeneral::GetRandomNumberInRange(0, 100) < request.doorlock)
+		pVehicle->m_nDoorLock = CARLOCK_LOCKED;
+	if (decision.color1 != -1 && decision.color2 != -1) {
+		pVehicle->m_currentColour1 = decision.color1;
+		pVehicle->m_currentColour2 = decision.color2;
+	}
+	CVisibilityPlugins::SetClumpAlpha(pVehicle->GetClump(), 0);
+	SpawnNoteCreated(&ms_Telemetry, request.purpose);
+	if (ppCreated)
+		*ppCreated = pVehicle;
+	return SPAWN_REFUSAL_NONE;
 }
 
 /* --- The ladder's API ---------------------------------------------------- */
