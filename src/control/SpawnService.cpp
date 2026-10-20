@@ -13,6 +13,7 @@
 #include "PlayerInfo.h"
 #include "Pools.h"
 #include "PopulationBudget.h"
+#include "SpawnReadiness.h"
 #include "Streaming.h"
 #include "Timer.h"
 #include "TrafficRings.h"
@@ -299,9 +300,17 @@ CSpawnService::RequestCar(const SSpawnCarRequest &request, CVehicle **ppCreated)
 	if (SpawnFunctionGate(budget, request.force, &ms_Telemetry) != SPAWN_REFUSAL_NONE)
 		return false;
 
-	/* The request's own readiness: the model the requester chose must be
-	 * resident. The wait clock of the purpose runs until a request passes. */
-	if (request.carModel < 0 || !CStreaming::HasModelLoaded(request.carModel)) {
+	/* The request's own readiness (VICE-151): the model the requester chose
+	 * must be resident with its txd and its animation block (IsModelReady:
+	 * a "loaded" model can have an evicted anim block, so HasModelLoaded
+	 * alone can lie). The wait clock of the purpose runs until a request
+	 * passes. The prewarm's pins hold the class catalogue's own models,
+	 * txds and anim blocks, so the ambient traffic's models (the class
+	 * arrays and the police sets, whose anims are the pinned van block or
+	 * none) never defer on the strict rule; a model outside the prewarm
+	 * whose anim block was evicted has no healer yet - a follow-up
+	 * decision, stated in SpawnReadiness.h. */
+	if (request.carModel < 0 || !CSpawnReadiness::IsModelReady(request.carModel)) {
 		SpawnReadinessDefer(&ms_Telemetry, request.purpose, CTimer::GetTimeInMilliseconds());
 		return false;
 	}

@@ -31,6 +31,7 @@
 #include "MBlur.h"
 #include "screendroplets.h"
 #include "SaveBuf.h"
+#include "SpawnReadiness.h"
 
 uint8 CGameLogic::ActivePlayers;
 uint8 CGameLogic::ShortCutState;
@@ -92,6 +93,10 @@ CGameLogic::SortOutStreamingAndMemory(const CVector &pos)
 	CWorld::Players[CWorld::PlayerInFocus].m_pPed->Undress("player");
 	CStreaming::LoadSceneCollision(pos);
 	CStreaming::LoadScene(pos);
+	/* The spawn readiness (VICE-151): the death/arrest fade is a cover - the
+	 * scene was just loaded with the blocking path, and the prewarm of the
+	 * restart zone's sets takes the same one before the fade lifts. */
+	CSpawnReadiness::PrewarmInCover(pos);
 	CWorld::Players[CWorld::PlayerInFocus].m_pPed->Dress();
 	CTimer::Update();
 }
@@ -515,6 +520,11 @@ CGameLogic::UpdateShortCut()
 			CColStore::RequestCollision(ShortCutDestination);
 			CStreaming::LoadSceneCollision(ShortCutDestination);
 			CStreaming::LoadScene(ShortCutDestination);
+			/* The spawn readiness (VICE-151): the shortcut transition is a
+			 * cover - the screen is faded out - so the destination zone's
+			 * sets are prewarmed with the blocking path before the fade
+			 * lifts. */
+			CSpawnReadiness::PrewarmInCover(ShortCutDestination);
 			CTheScripts::ClearSpaceForMissionEntity(ShortCutDestination, pShortCutTaxi);
 			pShortCutTaxi->Teleport(ShortCutDestination);
 			pShortCutTaxi->SetHeading(DEGTORAD(ShortCutDestinationOrientation));

@@ -2574,7 +2574,7 @@ CVehicle::UpdateDriverWeaponAim(void)
 		(playerInfo == nil || playerInfo->m_bDriveByAllowed) &&
 		!IsRealHeli() && !IsRealPlane() &&
 		IsAimableWeapon(player->GetWeapon()->m_eWeaponType) &&
-		(TheCamera.UsingCarAds() || CPad::GetPad(0)->GetCarAim());
+		CPad::GetPad(0)->GetCarAim();
 
 	if (!aiming) {
 		if (player->IsAimingWeapon())

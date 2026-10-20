@@ -92,6 +92,13 @@ public:
 	static int16 FindNextZoneByLabelAndReturnIndex(char *name, eZoneType type);
 	static CZoneInfo *GetZoneInfo(const CVector *v, uint8 day);
 	static void GetZoneInfoForTimeOfDay(const CVector *pos, CZoneInfo *info);
+	/* The gangs a zone's own thresholds select for the pedestrians and for
+	 * the cars: the shipped rule StreamZoneModels and the spawn readiness
+	 * prewarm (VICE-151) both read. The mask's bit g is set when the gang's
+	 * threshold is the first that differs from the cops' threshold, or
+	 * differs from its predecessor's. */
+	static uint16 GetZoneGangPedMask(const CZoneInfo &info);
+	static uint16 GetZoneGangCarMask(const CZoneInfo &info);
 	static void SetZoneCarInfo(uint16 zoneid, uint8 day, int16 carDensity,
 		int16 copCarDensity, const int16 *gangCarDensities /*[NUMGANGS]*/);
 	static void SetZoneCivilianCarInfo(uint16 zoneid, uint8 day,

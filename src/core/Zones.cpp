@@ -3,6 +3,7 @@
 #include <ctype.h>
 
 #include "Zones.h"
+#include "SpawnReadiness.h"
 
 #include "Clock.h"
 #include "Text.h"
@@ -488,6 +489,25 @@ CTheZones::GetZoneInfoForTimeOfDay(const CVector *pos, CZoneInfo *info)
 		info->pedGroup = day->pedGroup;
 	else
 		info->pedGroup = night->pedGroup;
+}
+
+/*
+ * The gang masks of a zone (VICE-151): the rule StreamZoneModels loaded by,
+ * which the spawn readiness prewarm needed too. The rule itself lives in
+ * SpawnReadiness.h (SpawnReadyGangMask), where the evidence program drives
+ * it; the two overloads there are the pedestrian thresholds (uint16) and the
+ * car thresholds (int16).
+ */
+uint16
+CTheZones::GetZoneGangPedMask(const CZoneInfo &info)
+{
+	return SpawnReadyGangMask(info.gangPedThreshold, info.copPedThreshold, NUM_GANGS);
+}
+
+uint16
+CTheZones::GetZoneGangCarMask(const CZoneInfo &info)
+{
+	return SpawnReadyGangMask(info.gangThreshold, info.copThreshold, NUM_GANGS);
 }
 
 void

@@ -33,6 +33,7 @@
 #include "SetPieces.h"
 #include "Stats.h"
 #include "Streaming.h"
+#include "SpawnReadiness.h"
 #include "Timer.h"
 #include "TimeStep.h"
 #include "Weather.h"
@@ -487,6 +488,12 @@ DoGameSpecificStuffAfterSucessLoad()
 	CCollision::SortOutCollisionAfterLoad();
 	CStreaming::LoadSceneCollision(TheCamera.GetPosition());
 	CStreaming::LoadScene(TheCamera.GetPosition());
+	/* The spawn readiness (VICE-151): a save load rebuilds the prewarm state
+	 * - the plan was reset by ReInitGameObjectVariables and the sets are
+	 * requested again here, with the blocking path, under the load's own
+	 * fade. */
+	CSpawnReadiness::Reset();
+	CSpawnReadiness::PrewarmInCover(TheCamera.GetPosition());
 	CGame::TidyUpMemory(true, false);
 	StillToFadeOut = true;
 	JustLoadedDontFadeInYet = true;
