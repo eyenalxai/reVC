@@ -4,6 +4,7 @@
 #include "Timer.h"
 #include "PlayerMoveSolver.h"
 #include "MovementTelemetry.h"
+#include "MovementTelemetryFormat.h"
 #include "VarConsole.h"
 
 #ifdef USE_OUR_VERSIONING
@@ -12,7 +13,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdarg.h>
 #include <string.h>
 #include <time.h>
 #include <thread>
@@ -29,12 +29,11 @@
 #define MovementTelemetryGetCwd getcwd
 #endif
 
-// All telemetry tuning lives in this block.
+// All telemetry tuning lives in this block. The row format and its longest
+// line live in MovementTelemetryFormat.h, which the harness shares.
 #define MOVEMENT_TELEMETRY_FILE		"movement-telemetry.csv"
-#define MOVEMENT_TELEMETRY_ROW_MS	50	// game ms between two live rows
 #define MOVEMENT_TELEMETRY_FLUSH_MS	250	// writer wake and flush period
 #define MOVEMENT_TELEMETRY_BACKLOG	(64*1024)	// backlog cap, bytes
-#define MOVEMENT_TELEMETRY_LINE		256	// one CSV row fits here
 #define MOVEMENT_TELEMETRY_JUMP		1	// the jump of phase 0: the air extensions count from 2
 
 // The readout: the DebugMenu page (re3.cpp) and the VarConsole rows show these,
@@ -63,7 +62,7 @@ struct tMovementTelemetry
 	uint32 nDropped;	// rows dropped on overflow, written out as a comment
 	uint32 nRows;		// rows appended, the readout's counter (game thread only)
 	uint32 nDroppedTotal;	// the same drops, kept for the readout (game thread only)
-	uint32 nNextRowMs;	// game ms when the next live row is due
+	uint32 nStep;		// the solver step of the rows being written
 	bool bTerminate;
 	bool bDisabled;	// no file: drop the rows and do not count them
 	bool bFirstCall;	// no previous state to compare the state edges against
@@ -101,11 +100,13 @@ MovementTelemetryAddConsoleRows(void)
 }
 
 // The header block, one line at a time. The column order is fixed; every
-// reader of the log depends on it.
+// reader of the log depends on it. The row itself is one solver step: the
+// snapshot columns, then the intent columns, then the event token
+// (MovementTelemetryFormat.h).
 static std::string
 MovementTelemetryHeaders(void)
 {
-	char line[MOVEMENT_TELEMETRY_LINE];
+	char line[MOVEMENT_TELEMETRY_MAX_ROW];
 	std::string headers;
 	time_t now = time(nil);
 	struct tm *local = localtime(&now);
@@ -119,7 +120,13 @@ MovementTelemetryHeaders(void)
 	}
 	headers += "# speed and target are units per second, spin and slope degrees, surface an eSurfaceType\n";
 	headers += "# fwd and side are the input direction in the body frame: +1 is forward, +1 is right\n";
-	headers += "ms,state,stance,speed,target,tier,fwd,side,spin,surface,slope,event\n";
+	headers += "# contacts is the eMoveContact mask: 1 ground, 2 wall, 4 head\n";
+	headers += "# flags is the intent mask: 1 onGround, 2 steepCliff, 4 hasInput, 8 jump, 16 dive,\n";
+	headers += "#   32 crouch, 64 sprint, 128 exitVehicle, 256 headroomClear, 512 prone\n";
+	headers += "# the intent velocities and speeds are engine units, one unit per 1/50 second\n";
+	headers += "# dt is seconds; heading, facing and the slope normal are radians\n";
+	headers += "# one row is one solver step; the edge rows of a step share its step number\n";
+	headers += MOVEMENT_TELEMETRY_COLUMNS "\n";
 	return headers;
 }
 
@@ -169,46 +176,22 @@ MovementTelemetryAppend(const char *line)
 		state->cv.notify_one();
 }
 
-// Formats one CSV row into the stack buffer, then appends it.
+// Writes one row of the passed step, with the event token when there is one.
+// The values are the solver's snapshot and the intent the step consumed, the
+// same ones the on-screen readout shows, so the row and the readout cannot
+// disagree.
 static void
-MovementTelemetryFormat(const char *format, ...)
-{
-	char line[MOVEMENT_TELEMETRY_LINE];
-	va_list args;
-
-	va_start(args, format);
-	vsnprintf(line, sizeof(line), format, args);
-	va_end(args);
-
-	MovementTelemetryAppend(line);
-}
-
-// Writes one row of the passed snapshot, with the event token when there is
-// one. The values are the solver's snapshot only (see SMoveSnapshot), so the
-// row and the on-screen readout cannot disagree.
-static void
-MovementTelemetryRow(const SMoveSnapshot &snap, const char *event)
+MovementTelemetryRow(const SMoveIntent &intent, const SMoveSnapshot &snap, const char *event)
 {
 	tMovementTelemetry *state = ms_pTelemetry;
+	char line[MOVEMENT_TELEMETRY_MAX_ROW];
 
 	if(state == nil)
 		return;
 
-	MovementTelemetryFormat("%u,%s,%s,%.3f,%.3f,%s,%.3f,%.3f,%.2f,%u,%.1f,%s",
-		(uint32)CTimer::GetTimeInMilliseconds(),
-		CPlayerMoveSolver::GetStateName(snap.state),
-		CPlayerMoveSolver::GetStanceName(snap.stance),
-		snap.speed*MOVE_ENGINE_UNITS_PER_SECOND,	// m_vecMoveSpeed is per 1/50 second
-		snap.targetSpeed*MOVE_ENGINE_UNITS_PER_SECOND,
-		CPlayerMoveSolver::GetTierName(snap.tier),
-		snap.facingDir.x,
-		snap.facingDir.y,
-		RADTODEG(snap.spin),
-		(uint32)snap.surface,
-		RADTODEG(snap.slope),
-		event != nil ? event : "");
-
-	state->nNextRowMs = (uint32)CTimer::GetTimeInMilliseconds() + MOVEMENT_TELEMETRY_ROW_MS;
+	MoveTelemetryFormatRow(line, sizeof(line),
+		(uint32)CTimer::GetTimeInMilliseconds(), state->nStep, intent, snap, event);
+	MovementTelemetryAppend(line);
 }
 
 // The token of one event bit (see eMoveEvent). A jump carries its index once
@@ -327,7 +310,7 @@ MovementTelemetryInit(void)
 	state->nDropped = 0;
 	state->nRows = 0;
 	state->nDroppedTotal = 0;
-	state->nNextRowMs = 0;
+	state->nStep = 0;
 	state->bTerminate = false;
 	state->bDisabled = false;
 	state->bFirstCall = true;
@@ -341,7 +324,7 @@ MovementTelemetryInit(void)
 }
 
 void
-CMovementTelemetry::Tick(const SMoveSnapshot &snap)
+CMovementTelemetry::Tick(const SMoveIntent &intent, const SMoveSnapshot &snap)
 {
 	static const uint32 events[] = {
 		EVENT_LANDED, EVENT_JUMP, EVENT_HEAD_HIT, EVENT_WALL_CONTACT, EVENT_WALL_LEFT
@@ -356,6 +339,10 @@ CMovementTelemetry::Tick(const SMoveSnapshot &snap)
 	state = ms_pTelemetry;
 	if(state == nil)
 		state = MovementTelemetryInit();
+
+	// One Tick is one solver step, and every row of the step carries its
+	// number: the edge rows below and the live row.
+	state->nStep++;
 
 	// The readout: the DebugMenu page (re3.cpp) and the console rows. The two
 	// counters are the game thread's own, so they need no lock.
@@ -374,9 +361,9 @@ CMovementTelemetry::Tick(const SMoveSnapshot &snap)
 		// side of it.
 		if(state->ePrevState != snap.state){
 			sprintf(token, "EXIT_%s", CPlayerMoveSolver::GetStateName(state->ePrevState));
-			MovementTelemetryRow(snap, token);
+			MovementTelemetryRow(intent, snap, token);
 			sprintf(token, "ENTER_%s", CPlayerMoveSolver::GetStateName(snap.state));
-			MovementTelemetryRow(snap, token);
+			MovementTelemetryRow(intent, snap, token);
 		}
 		// One row per event bit the step reports, in the order the rows list
 		// them above.
@@ -384,15 +371,14 @@ CMovementTelemetry::Tick(const SMoveSnapshot &snap)
 			if((snap.events & events[i]) == 0)
 				continue;
 			MovementTelemetryEventToken(events[i], MOVEMENT_TELEMETRY_JUMP, token);
-			MovementTelemetryRow(snap, token);
+			MovementTelemetryRow(intent, snap, token);
 		}
 	}
 	state->bFirstCall = false;
 	state->ePrevState = snap.state;
 
-	// The live rows run while the debug readout is on, at most every 50 ms of
-	// game time. An edge row above pushes the next live row out by the same
-	// amount, so a single frame never writes two copies of the same state.
-	if(CTimer::GetTimeInMilliseconds() >= state->nNextRowMs)
-		MovementTelemetryRow(snap, "");
+	// The live row of every step: the session is a regression stream, so no
+	// step may be missing from the file. The edge rows above share this row's
+	// step number and snapshot.
+	MovementTelemetryRow(intent, snap, "");
 }

@@ -104,16 +104,27 @@
  *	   The parity stream leaves the dive's edge off: the reference maths of
  *	   VICE-172 has no dive.
  *
+ *	K. The replay (VICE-193). The telemetry row now carries the intent the
+ *	   step consumed beside the snapshot it returned, and one row records every
+ *	   solver step. The harness writes a scripted session to a CSV in the
+ *	   shared telemetry format, reads it back through the replay, and both must
+ *	   match row for row, bit for bit. The same replay is the binary's mode
+ *	   when it is given a CSV path: it steps a reset solver once per distinct
+ *	   step number and compares the state, the stance, the speed and the target
+ *	   with the CSV's snapshot columns, reporting the first divergent row.
+ *
  * Build and run (from the repository root; the structural check drives the
  * compiler and nm itself and writes its scratch files under /tmp/opencode):
  *
  *	c++ -std=c++17 -O2 -o /tmp/opencode/movement-solver src/peds/PlayerMoveSolver.cpp utils/movement-solver/harness.cpp
  *	/tmp/opencode/movement-solver
+ *	/tmp/opencode/movement-solver movement-telemetry.csv
  *
  * The exit code is 0 when every check passes.
  */
 
 #include "../../src/peds/PlayerMoveSolver.h"
+#include "../../src/peds/MovementTelemetryFormat.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -2707,12 +2718,516 @@ CheckDive(void)
 }
 
 /* ---------------------------------------------------------------------- *
+ * 11. the telemetry replay (VICE-193)
+ * ---------------------------------------------------------------------- */
+
+/*
+ * The movement telemetry row is one solver step: the snapshot the step
+ * returned and the intent the step consumed (MovementTelemetryFormat.h). A
+ * state change and the step's events write extra rows with the same step
+ * number, so the replay steps a reset solver once per distinct step and
+ * compares every row of that step with the same snapshot.
+ *
+ * The replay starts at the solver's reset state (ground, standing): a session
+ * recorded from a standing start replays exactly. The intent columns are read
+ * back with the same floats the writer printed (%.9g), so the comparison is
+ * bit for bit. A step number that jumps means the writer dropped rows, and the
+ * replay reports the gap instead of comparing a stream with a hole in it.
+ */
+
+#define REPLAY_MAX_FIELDS	64
+#define REPLAY_CSV		"/tmp/opencode/vice193-movement-replay.csv"
+#define REPLAY_COLUMN_COUNT	28
+
+struct SReplayColumns
+{
+	int ms, step, state, stance, speed, target, tier;
+	int contacts, surface, slope, event;
+	int dt, vel_x, vel_y, surf_x, surf_y;
+	int heading, facing, target_in, tier_in, surface_in, flags;
+	int slope_x, slope_y, slope_z;
+};
+
+/* Split one CSV line in place, keeping empty fields (the event token is often
+ * empty). */
+static int
+ReplaySplit(char *line, char **fields, int max)
+{
+	int count = 0;
+	char *p = line;
+
+	if (max <= 0)
+		return 0;
+	fields[count++] = p;
+	for (; *p != '\0'; p++) {
+		if (*p != ',')
+			continue;
+		*p = '\0';
+		if (count < max)
+			fields[count++] = p + 1;
+	}
+	return count;
+}
+
+static void
+ReplayStripEol(char *line)
+{
+	size_t n = strlen(line);
+
+	while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r'))
+		line[--n] = '\0';
+}
+
+static int
+ReplayColumn(char **names, int count, const char *name)
+{
+	for (int i = 0; i < count; i++)
+		if (strcmp(names[i], name) == 0)
+			return i;
+	return -1;
+}
+
+static bool
+ReplayNeed(int index, const char *name)
+{
+	if (index >= 0)
+		return true;
+	printf("    missing column %s\n", name);
+	return false;
+}
+
+/* Map the header by name, so a column may move without breaking the replay;
+ * a missing column is an error, because the row cannot be read without it. */
+static bool
+ReplayMapColumns(char **names, int count, SReplayColumns *c)
+{
+	c->ms = ReplayColumn(names, count, "ms");
+	c->step = ReplayColumn(names, count, "step");
+	c->state = ReplayColumn(names, count, "state");
+	c->stance = ReplayColumn(names, count, "stance");
+	c->speed = ReplayColumn(names, count, "speed");
+	c->target = ReplayColumn(names, count, "target");
+	c->tier = ReplayColumn(names, count, "tier");
+	c->contacts = ReplayColumn(names, count, "contacts");
+	c->surface = ReplayColumn(names, count, "surface");
+	c->slope = ReplayColumn(names, count, "slope");
+	c->event = ReplayColumn(names, count, "event");
+	c->dt = ReplayColumn(names, count, "dt");
+	c->vel_x = ReplayColumn(names, count, "vel_x");
+	c->vel_y = ReplayColumn(names, count, "vel_y");
+	c->surf_x = ReplayColumn(names, count, "surf_x");
+	c->surf_y = ReplayColumn(names, count, "surf_y");
+	c->heading = ReplayColumn(names, count, "heading");
+	c->facing = ReplayColumn(names, count, "facing");
+	c->target_in = ReplayColumn(names, count, "target_in");
+	c->tier_in = ReplayColumn(names, count, "tier_in");
+	c->surface_in = ReplayColumn(names, count, "surface_in");
+	c->flags = ReplayColumn(names, count, "flags");
+	c->slope_x = ReplayColumn(names, count, "slope_x");
+	c->slope_y = ReplayColumn(names, count, "slope_y");
+	c->slope_z = ReplayColumn(names, count, "slope_z");
+
+	return ReplayNeed(c->step, "step") &&
+		ReplayNeed(c->state, "state") &&
+		ReplayNeed(c->stance, "stance") &&
+		ReplayNeed(c->speed, "speed") &&
+		ReplayNeed(c->target, "target") &&
+		ReplayNeed(c->dt, "dt") &&
+		ReplayNeed(c->vel_x, "vel_x") &&
+		ReplayNeed(c->vel_y, "vel_y") &&
+		ReplayNeed(c->surf_x, "surf_x") &&
+		ReplayNeed(c->surf_y, "surf_y") &&
+		ReplayNeed(c->heading, "heading") &&
+		ReplayNeed(c->facing, "facing") &&
+		ReplayNeed(c->target_in, "target_in") &&
+		ReplayNeed(c->tier_in, "tier_in") &&
+		ReplayNeed(c->surface_in, "surface_in") &&
+		ReplayNeed(c->flags, "flags") &&
+		ReplayNeed(c->slope_x, "slope_x") &&
+		ReplayNeed(c->slope_y, "slope_y") &&
+		ReplayNeed(c->slope_z, "slope_z");
+}
+
+static int
+ReplayStateFromName(const char *name)
+{
+	for (int i = 0; i < MOVE_NUMSTATES; i++)
+		if (strcmp(name, CPlayerMoveSolver::GetStateName((eMoveStateId)i)) == 0)
+			return i;
+	return -1;
+}
+
+static int
+ReplayStanceFromName(const char *name)
+{
+	for (int i = 0; i < STANCE_NUM; i++)
+		if (strcmp(name, CPlayerMoveSolver::GetStanceName((eStance)i)) == 0)
+			return i;
+	return -1;
+}
+
+static int
+ReplayTierFromName(const char *name)
+{
+	for (int i = 0; i < TIER_NUM; i++)
+		if (strcmp(name, CPlayerMoveSolver::GetTierName((eMoveTier)i)) == 0)
+			return i;
+	return -1;
+}
+
+/* Read one CSV and replay it. The return value is false on the first
+ * divergence, with the row number printed. */
+static bool
+ReplayCsv(const char *path, int *pRows, int *pSteps)
+{
+	FILE *file;
+	char line[MOVEMENT_TELEMETRY_MAX_ROW * 2];
+	char *fields[REPLAY_MAX_FIELDS];
+	SReplayColumns columns;
+	CPlayerMoveSolver solver;
+	const SMoveSnapshot *snapshot = NULL;
+	uint32_t currentStep = 0;
+	bool haveHeader = false;
+	bool ok = true;
+	int rows = 0;
+	int steps = 0;
+
+	*pRows = 0;
+	*pSteps = 0;
+	file = fopen(path, "r");
+	if (file == NULL) {
+		printf("    cannot open %s\n", path);
+		return false;
+	}
+
+	while (fgets(line, sizeof(line), file) != NULL) {
+		int count;
+
+		ReplayStripEol(line);
+		if (line[0] == '\0' || line[0] == '#')
+			continue;
+		count = ReplaySplit(line, fields, REPLAY_MAX_FIELDS);
+		if (!haveHeader) {
+			if (!ReplayMapColumns(fields, count, &columns)) {
+				ok = false;
+				break;
+			}
+			haveHeader = true;
+			continue;
+		}
+		rows++;
+		if (count < REPLAY_COLUMN_COUNT) {
+			printf("  row %d: %d fields, want %d\n", rows, count, REPLAY_COLUMN_COUNT);
+			ok = false;
+			break;
+		}
+
+		int wantState = ReplayStateFromName(fields[columns.state]);
+		int wantStance = ReplayStanceFromName(fields[columns.stance]);
+		int wantTier = ReplayTierFromName(fields[columns.tier_in]);
+		uint32_t step;
+		uint32_t flags;
+		SMoveIntent intent;
+		float wantSpeed;
+		float wantTarget;
+
+		if (wantState < 0 || wantStance < 0 || wantTier < 0) {
+			printf("  row %d: unknown state %s, stance %s or tier %s\n", rows,
+				fields[columns.state], fields[columns.stance], fields[columns.tier_in]);
+			ok = false;
+			break;
+		}
+		step = (uint32_t)strtoul(fields[columns.step], NULL, 10);
+		memset(&intent, 0, sizeof(intent));
+		intent.dt = strtof(fields[columns.dt], NULL);
+		intent.vel = SMoveVec2{ strtof(fields[columns.vel_x], NULL), strtof(fields[columns.vel_y], NULL) };
+		intent.surfaceSpeed = SMoveVec2{ strtof(fields[columns.surf_x], NULL), strtof(fields[columns.surf_y], NULL) };
+		intent.slopeNormal = SMoveVec3{ strtof(fields[columns.slope_x], NULL),
+			strtof(fields[columns.slope_y], NULL), strtof(fields[columns.slope_z], NULL) };
+		intent.moveHeading = strtof(fields[columns.heading], NULL);
+		intent.facing = strtof(fields[columns.facing], NULL);
+		intent.targetSpeed = strtof(fields[columns.target_in], NULL);
+		intent.surface = (uint8_t)strtoul(fields[columns.surface_in], NULL, 10);
+		intent.tier = (eMoveTier)wantTier;
+		flags = (uint32_t)strtoul(fields[columns.flags], NULL, 10);
+		intent.onGround = (flags & MOVE_TELEM_ON_GROUND) != 0;
+		intent.steepCliff = (flags & MOVE_TELEM_STEEP_CLIFF) != 0;
+		intent.hasInput = (flags & MOVE_TELEM_HAS_INPUT) != 0;
+		intent.jumpRequested = (flags & MOVE_TELEM_JUMP) != 0;
+		intent.diveRequested = (flags & MOVE_TELEM_DIVE) != 0;
+		intent.crouchRequested = (flags & MOVE_TELEM_CROUCH) != 0;
+		intent.sprintRequested = (flags & MOVE_TELEM_SPRINT) != 0;
+		intent.exitVehiclePressed = (flags & MOVE_TELEM_EXIT_VEHICLE) != 0;
+		intent.headroomClear = (flags & MOVE_TELEM_HEADROOM_CLEAR) != 0;
+		intent.proneRequested = (flags & MOVE_TELEM_PRONE) != 0;
+		wantSpeed = strtof(fields[columns.speed], NULL);
+		wantTarget = strtof(fields[columns.target], NULL);
+
+		if (snapshot == NULL) {
+			currentStep = step;
+			snapshot = &solver.Step(intent);
+			steps++;
+		} else if (step != currentStep) {
+			if (step != currentStep + 1) {
+				printf("  row %d: the step jumped from %u to %u: the CSV has a gap\n",
+					rows, currentStep, step);
+				ok = false;
+				break;
+			}
+			currentStep = step;
+			snapshot = &solver.Step(intent);
+			steps++;
+		}
+
+		if (snapshot->state != wantState || snapshot->stance != wantStance ||
+		    snapshot->speed * MOVE_ENGINE_UNITS_PER_SECOND != wantSpeed ||
+		    snapshot->targetSpeed * MOVE_ENGINE_UNITS_PER_SECOND != wantTarget) {
+			printf("  row %d (step %u): state %s want %s, stance %s want %s, speed %.9g want %.9g, target %.9g want %.9g\n",
+				rows, step,
+				CPlayerMoveSolver::GetStateName(snapshot->state), fields[columns.state],
+				CPlayerMoveSolver::GetStanceName(snapshot->stance), fields[columns.stance],
+				snapshot->speed * MOVE_ENGINE_UNITS_PER_SECOND, wantSpeed,
+				snapshot->targetSpeed * MOVE_ENGINE_UNITS_PER_SECOND, wantTarget);
+			ok = false;
+			break;
+		}
+	}
+
+	fclose(file);
+	if (ok && !haveHeader) {
+		printf("    no header line\n");
+		ok = false;
+	}
+	if (ok && rows == 0) {
+		printf("    no data rows\n");
+		ok = false;
+	}
+	*pRows = rows;
+	*pSteps = steps;
+	return ok;
+}
+
+/* The round-trip writer: a scripted session over the real solver, written in
+ * the game's own format. The script covers every movement state and every
+ * stance, the flat and the steep slope, the stance edges, the slide, the dive
+ * and its slide-out, so the replay proves more than one row. */
+struct SReplayScript
+{
+	FILE *file;
+	CPlayerMoveSolver solver;
+	SMoveVec2 live;
+	eMoveStateId prevState;
+	uint32_t step;
+	int rows;
+	int stateCount[MOVE_NUMSTATES];
+	int stanceCount[STANCE_NUM];
+};
+
+static void
+ReplayWriteRow(SReplayScript *script, const SMoveIntent &intent, const SMoveSnapshot &snap, const char *event)
+{
+	char line[MOVEMENT_TELEMETRY_MAX_ROW];
+
+	MoveTelemetryFormatRow(line, sizeof(line), script->step * 20, script->step, intent, snap, event);
+	fprintf(script->file, "%s\n", line);
+	script->rows++;
+}
+
+static void
+ReplayScriptStep(SReplayScript *script, const SMoveIntent &base)
+{
+	SMoveIntent intent = base;
+
+	intent.vel = script->live;
+	const SMoveSnapshot &snap = script->solver.Step(intent);
+	script->live = snap.moved;
+	script->step++;
+	script->stateCount[snap.state]++;
+	script->stanceCount[snap.stance]++;
+	ReplayWriteRow(script, intent, snap, "");
+	if (snap.state != script->prevState) {
+		char token[32];
+
+		snprintf(token, sizeof(token), "EXIT_%s", CPlayerMoveSolver::GetStateName(script->prevState));
+		ReplayWriteRow(script, intent, snap, token);
+		snprintf(token, sizeof(token), "ENTER_%s", CPlayerMoveSolver::GetStateName(snap.state));
+		ReplayWriteRow(script, intent, snap, token);
+	}
+	if (snap.events & EVENT_LANDED)
+		ReplayWriteRow(script, intent, snap, "LAND");
+	if (snap.events & EVENT_JUMP)
+		ReplayWriteRow(script, intent, snap, "JUMP");
+	script->prevState = snap.state;
+}
+
+static void
+ReplayScriptSession(SReplayScript *script)
+{
+	/* the walk, standing on flat ground */
+	for (int i = 0; i < 30; i++)
+		ReplayScriptStep(script, WalkIntent(0.3f, 0.30f));
+	/* the run */
+	for (int i = 0; i < 20; i++) {
+		SMoveIntent intent = WalkIntent(0.6f, 0.50f);
+
+		intent.tier = TIER_RUN;
+		ReplayScriptStep(script, intent);
+	}
+	/* the sprint */
+	for (int i = 0; i < 20; i++) {
+		SMoveIntent intent = WalkIntent(0.9f, SLIDE_SPRINT_SPEED);
+
+		intent.tier = TIER_SPRINT;
+		ReplayScriptStep(script, intent);
+	}
+	/* the slide's entry, its decay and the crouch it ends in */
+	{
+		SMoveIntent intent = WalkIntent(0.9f, SLIDE_SPRINT_SPEED);
+
+		intent.tier = TIER_SPRINT;
+		intent.crouchRequested = true;
+		ReplayScriptStep(script, intent);
+	}
+	for (int i = 0; i < 12; i++) {
+		SMoveIntent intent = WalkIntent(0.9f, SLIDE_SPRINT_SPEED);
+
+		intent.tier = TIER_SPRINT;
+		ReplayScriptStep(script, intent);
+	}
+	/* the crouch walk and the stand-up */
+	for (int i = 0; i < 10; i++)
+		ReplayScriptStep(script, WalkIntent(0.0f, 0.30f));
+	ReplayScriptStep(script, CrouchIntent(0.0f, 0.30f));
+	/* the prone and the stand-up */
+	ReplayScriptStep(script, ProneIntent(0.0f, 0.30f));
+	for (int i = 0; i < 5; i++)
+		ReplayScriptStep(script, WalkIntent(0.0f, 0.30f));
+	ReplayScriptStep(script, ProneIntent(0.0f, 0.30f));
+	/* the fall and the landing */
+	for (int i = 0; i < 10; i++) {
+		SMoveIntent intent = WalkIntent(0.2f, 0.30f);
+
+		intent.onGround = false;
+		intent.hasInput = (i % 2) == 0;
+		ReplayScriptStep(script, intent);
+	}
+	ReplayScriptStep(script, WalkIntent(0.2f, 0.30f));
+	/* the dive and the slide-out */
+	{
+		SMoveIntent intent = WalkIntent(0.2f, 0.30f);
+
+		intent.onGround = false;
+		intent.hasInput = false;
+		ReplayScriptStep(script, intent);
+	}
+	{
+		SMoveIntent intent = WalkIntent(0.2f, 0.30f);
+
+		intent.onGround = false;
+		intent.hasInput = false;
+		intent.diveRequested = true;
+		intent.proneRequested = true;
+		ReplayScriptStep(script, intent);
+	}
+	for (int i = 0; i < 5; i++) {
+		SMoveIntent intent = WalkIntent(0.2f, 0.30f);
+
+		intent.onGround = false;
+		intent.hasInput = false;
+		ReplayScriptStep(script, intent);
+	}
+	for (int i = 0; i < 15; i++)
+		ReplayScriptStep(script, WalkIntent(0.2f, 0.30f));
+	/* the stand-up from the slide-out's prone */
+	ReplayScriptStep(script, ProneIntent(0.0f, 0.30f));
+	/* the steep slide and the slope normal */
+	{
+		SMoveIntent intent = WalkIntent(0.0f, SLIDE_SPRINT_SPEED);
+
+		intent.tier = TIER_SPRINT;
+		intent.steepCliff = true;
+		intent.slopeNormal = SMoveVec3{ 0.6f, -0.8f, 0.0f };
+		intent.crouchRequested = true;
+		ReplayScriptStep(script, intent);
+	}
+	for (int i = 0; i < 8; i++) {
+		SMoveIntent intent = WalkIntent(0.0f, SLIDE_SPRINT_SPEED);
+
+		intent.tier = TIER_SPRINT;
+		intent.steepCliff = true;
+		intent.slopeNormal = SMoveVec3{ 0.6f, -0.8f, 0.0f };
+		ReplayScriptStep(script, intent);
+	}
+	/* the flat walk back */
+	for (int i = 0; i < 5; i++)
+		ReplayScriptStep(script, WalkIntent(0.0f, 0.30f));
+}
+
+static void
+CheckReplay(void)
+{
+	SReplayScript script;
+	int rows = 0;
+	int steps = 0;
+	bool closed;
+
+	script.file = NULL;
+	script.live = SMoveVec2{ 0.0f, 0.0f };
+	script.prevState = MOVE_GROUND;
+	script.step = 0;
+	script.rows = 0;
+	memset(script.stateCount, 0, sizeof(script.stateCount));
+	memset(script.stanceCount, 0, sizeof(script.stanceCount));
+	script.file = fopen(REPLAY_CSV, "w");
+	Check(script.file != NULL, "the harness opens the round-trip CSV");
+	if (script.file == NULL)
+		return;
+	fprintf(script.file, "# reVC movement telemetry\n");
+	fprintf(script.file, "# build the VICE-193 harness round trip\n");
+	fprintf(script.file, "# speed and target are units per second, the intent's speeds are engine units\n");
+	fprintf(script.file, MOVEMENT_TELEMETRY_COLUMNS "\n");
+	ReplayScriptSession(&script);
+	closed = fclose(script.file) == 0;
+	Check(closed, "the harness closes the round-trip CSV");
+	Check(script.rows > (int)script.step && script.step > 0,
+		"the scripted session writes more rows than steps: the edge rows share a step");
+	for (int i = 0; i < MOVE_NUMSTATES; i++)
+		Check(script.stateCount[i] > 0, "the scripted session covers every movement state");
+	for (int i = 0; i < STANCE_NUM; i++)
+		Check(script.stanceCount[i] > 0, "the scripted session covers every stance");
+
+	Check(ReplayCsv(REPLAY_CSV, &rows, &steps),
+		"the CSV the harness wrote replays into the solver, row for row");
+	Check(rows == script.rows && steps == (int)script.step,
+		"the replay reads every row and every step the script wrote");
+	printf("  %d rows in %u steps, every state and every stance: the states", script.rows, (unsigned)script.step);
+	for (int i = 0; i < MOVE_NUMSTATES; i++)
+		printf(" %s %d", CPlayerMoveSolver::GetStateName((eMoveStateId)i), script.stateCount[i]);
+	printf("; the stances");
+	for (int i = 0; i < STANCE_NUM; i++)
+		printf(" %s %d", CPlayerMoveSolver::GetStanceName((eStance)i), script.stanceCount[i]);
+	printf("\n");
+}
+
+/* ---------------------------------------------------------------------- *
  * main
  * ---------------------------------------------------------------------- */
 
 int
-main(void)
+main(int argc, char **argv)
 {
+	if (argc > 1) {
+		int rows = 0;
+		int steps = 0;
+		bool ok;
+
+		printf("== the movement telemetry replay (VICE-193): %s\n\n", argv[1]);
+		ok = ReplayCsv(argv[1], &rows, &steps);
+		printf("\nRESULT: %s (%d rows, %d steps)\n",
+			ok ? "the replay matches the CSV" : "FAILURES", rows, steps);
+		return ok ? 0 : 1;
+	}
+
 	printf("== the movement solver (VICE-172): the harness and the no-animation-lock invariant\n\n");
 
 	printf("== 1. the parity against the pre-rework maths (ef9b65f5)\n");
@@ -2743,6 +3258,8 @@ main(void)
 	CheckProne();
 	printf("\n== 10. the dive (VICE-181): the entry, the spin, the landing and the slide-out\n");
 	CheckDive();
+	printf("\n== 11. the replay (VICE-193): the telemetry CSV round trip\n");
+	CheckReplay();
 
 	printf("\nRESULT: %s (%d checks, %d failures)\n",
 		g_failures == 0 ? "every check passed" : "FAILURES", g_checks, g_failures);
