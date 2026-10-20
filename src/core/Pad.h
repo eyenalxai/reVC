@@ -27,7 +27,7 @@ public:
 	int16 LeftShock, RightShock;
 	int16 NetworkTalk;
 	int16 Reload;
-	int16 VehicleCycleWeaponLeft, VehicleCycleWeaponRight;
+	int16 CycleWeaponLeft, CycleWeaponRight;
 	float GetLeftStickX(void) { return LeftStickX/32767.0f; };
 	float GetLeftStickY(void) { return LeftStickY/32767.0f; };
 	float GetRightStickX(void) { return RightStickX/32767.0f; };
@@ -44,7 +44,7 @@ public:
 			LeftShoulder1 || LeftShoulder2 ||
 			RightShoulder1 || RightShoulder2 ||
 			LeftShock || RightShock || Reload ||
-			VehicleCycleWeaponLeft || VehicleCycleWeaponRight;
+			CycleWeaponLeft || CycleWeaponRight;
 	}
 };
 VALIDATE_SIZE(CControllerState, 0x30);
@@ -261,8 +261,8 @@ public:
 	int16 GetAccelerate(void);
 	bool CameraViewToggleJustDown(void);
 	bool ChangeStationJustDown(void);
-	bool CycleWeaponLeftJustDown(bool inCar);
-	bool CycleWeaponRightJustDown(bool inCar);
+	bool CycleWeaponLeftJustDown(void);
+	bool CycleWeaponRightJustDown(void);
 	bool GetTarget(void);
 	bool TargetJustDown(void);
 	bool DuckJustDown(void);

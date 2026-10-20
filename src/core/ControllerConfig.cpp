@@ -184,7 +184,6 @@ void CControllerConfigManager::LoadSettings(int32 file)
 	bool skipVehicleFireWeapon = false;
 #endif
 	bool skipPedReload = false;
-	bool skipVehicleCycleWeapon = false;
 
 	if (file)
 	{
@@ -216,10 +215,6 @@ void CControllerConfigManager::LoadSettings(int32 file)
 		// Set the default settings of PED_RELOAD
 		if (skipPedReload)
 			SetControllerKeyAssociatedWithAction(PED_RELOAD, 'R', KEYBOARD);
-		skipVehicleCycleWeapon = nVersion < CONTROLS_VERSION_VEHICLE_CYCLE_WEAPON;
-		// Set the default settings of the car weapon cycle keys
-		if (skipVehicleCycleWeapon)
-			SetDefaultVehicleCycleWeaponKeys();
 
 		for (int32 i = 0; i < MAX_CONTROLLERTYPES; i++)
 		{
@@ -233,21 +228,10 @@ void CControllerConfigManager::LoadSettings(int32 file)
 				// Skip file read
 				if (skipPedReload && j == PED_RELOAD)
 					continue;
-				// Skip file read
-				if (skipVehicleCycleWeapon && (j == VEHICLE_CYCLE_WEAPON_RIGHT || j == VEHICLE_CYCLE_WEAPON_LEFT))
-					continue;
 				CFileMgr::Read(file, (char *)&ControlsManager.m_aSettings[j][i], sizeof(tControllerConfigBind));
 			}
 		}
 	}
-}
-
-// The car weapon cycle takes the on-foot cycle keys. No car action binds them,
-// so the car cycle never shares a key with a car action.
-void CControllerConfigManager::SetDefaultVehicleCycleWeaponKeys()
-{
-	SetControllerKeyAssociatedWithAction(VEHICLE_CYCLE_WEAPON_LEFT,  rsPADDEL,  KEYBOARD);
-	SetControllerKeyAssociatedWithAction(VEHICLE_CYCLE_WEAPON_RIGHT, rsPADENTER, OPTIONAL_EXTRA);
 }
 
 void CControllerConfigManager::InitDefaultControlConfiguration()
@@ -313,7 +297,6 @@ void CControllerConfigManager::InitDefaultControlConfiguration()
 	SetControllerKeyAssociatedWithAction    (PED_CYCLE_WEAPON_LEFT,               rsPADDEL,   KEYBOARD);
 
 	SetControllerKeyAssociatedWithAction    (PED_CYCLE_WEAPON_RIGHT,              rsPADENTER, OPTIONAL_EXTRA); // BUG: must be KEYBOARD ?
-	SetDefaultVehicleCycleWeaponKeys();
 																		          
 	SetControllerKeyAssociatedWithAction    (PED_LOCK_TARGET,                     rsDEL,      KEYBOARD);
 																		          
@@ -392,7 +375,6 @@ static const tDefaultMouseBinding aDefaultMouseBindings[] = {
 	// the right mouse aims, and in a car it aims the car ADS (VICE-110).
 	{ VEHICLE_LOOKBEHIND,           2 },
 	{ PED_LOOKBEHIND,               2 },
-	{ PED_CYCLE_WEAPON_LEFT,        4 },
 	{ PED_CYCLE_WEAPON_RIGHT,       5 },
 	{ VEHICLE_CHANGE_RADIO_STATION, 4 },
 	{ PED_SNIPER_ZOOM_IN,           4 },
@@ -489,10 +471,8 @@ void CControllerConfigManager::InitDefaultControlConfigJoyPad(uint32 buttons)
 			SetControllerKeyAssociatedWithAction(PED_ANSWER_PHONE,                   7, JOYSTICK);
 			SetControllerKeyAssociatedWithAction(VEHICLE_CHANGE_RADIO_STATION,       7, JOYSTICK);
 		IF_BTN_IN_RANGE(6)
-			SetControllerKeyAssociatedWithAction(PED_CYCLE_WEAPON_RIGHT,             6, JOYSTICK);
 			SetControllerKeyAssociatedWithAction(VEHICLE_LOOKRIGHT,                  6, JOYSTICK);
 		IF_BTN_IN_RANGE(5)
-			SetControllerKeyAssociatedWithAction(PED_CYCLE_WEAPON_LEFT,              5, JOYSTICK);
 			SetControllerKeyAssociatedWithAction(VEHICLE_LOOKLEFT,                   5, JOYSTICK);
 		/*******************************************************************************************/
 		IF_BTN_IN_RANGE(4)
@@ -541,10 +521,8 @@ void CControllerConfigManager::InitDefaultControlConfigJoyPad(uint32 buttons)
 			SetControllerKeyAssociatedWithAction(PED_ANSWER_PHONE,                   7, JOYSTICK);
 			SetControllerKeyAssociatedWithAction(VEHICLE_CHANGE_RADIO_STATION,       7, JOYSTICK);
 		IF_BTN_IN_RANGE(6)
-			SetControllerKeyAssociatedWithAction(PED_CYCLE_WEAPON_RIGHT,             6, JOYSTICK);
 			SetControllerKeyAssociatedWithAction(VEHICLE_LOOKRIGHT,                  6, JOYSTICK);
 		IF_BTN_IN_RANGE(5)
-			SetControllerKeyAssociatedWithAction(PED_CYCLE_WEAPON_LEFT,              5, JOYSTICK);
 			SetControllerKeyAssociatedWithAction(VEHICLE_LOOKLEFT,                   5, JOYSTICK);
 		/*******************************************************************************************/
 		IF_BTN_IN_RANGE(4)
@@ -598,8 +576,6 @@ void CControllerConfigManager::InitDefaultControlConfigJoyPad(uint32 buttons)
 	NAME(VEHICLE_ACCELERATE) \
 	NAME(VEHICLE_BRAKE) \
 	NAME(VEHICLE_CHANGE_RADIO_STATION) \
-	NAME(VEHICLE_CYCLE_WEAPON_LEFT) \
-	NAME(VEHICLE_CYCLE_WEAPON_RIGHT) \
 	NAME(TOGGLE_SUBMISSIONS) \
 	NAME(PED_SNIPER_ZOOM_IN) \
 	NAME(PED_SNIPER_ZOOM_OUT) \
@@ -875,10 +851,10 @@ void CControllerConfigManager::AffectControllerStateOn_ButtonDown_Driving(int32 
 	}
 	if (!isReloadKey && button == GetControllerKeyAssociatedWithAction(VEHICLE_CHANGE_RADIO_STATION, type))
 		state.LeftShoulder1 = 255;
-	if (button == GetControllerKeyAssociatedWithAction(VEHICLE_CYCLE_WEAPON_LEFT, type))
-		state.VehicleCycleWeaponLeft = 255;
-	if (button == GetControllerKeyAssociatedWithAction(VEHICLE_CYCLE_WEAPON_RIGHT, type))
-		state.VehicleCycleWeaponRight = 255;
+	if (button == GetControllerKeyAssociatedWithAction(PED_CYCLE_WEAPON_LEFT, type))
+		state.CycleWeaponLeft = 255;
+	if (button == GetControllerKeyAssociatedWithAction(PED_CYCLE_WEAPON_RIGHT, type))
+		state.CycleWeaponRight = 255;
 	if (button == GetControllerKeyAssociatedWithAction(VEHICLE_BRAKE, type))
 		state.Square = 255;
 	if (button == GetControllerKeyAssociatedWithAction(TOGGLE_SUBMISSIONS, type))
@@ -985,10 +961,16 @@ void CControllerConfigManager::AffectControllerStateOn_ButtonDown_ThirdPersonOnl
 		state.Square = 255;
 	if (button == GetControllerKeyAssociatedWithAction(PED_ANSWER_PHONE, type))
 		state.LeftShoulder1 = 255;
-	if (button == GetControllerKeyAssociatedWithAction(PED_CYCLE_WEAPON_LEFT, type))
+	// The shoulder fields stay for the lock-on shift. The cycle edges have their
+	// own fields, because the car look reads the shoulder fields.
+	if (button == GetControllerKeyAssociatedWithAction(PED_CYCLE_WEAPON_LEFT, type)) {
 		state.LeftShoulder2 = 255;
-	if (button == GetControllerKeyAssociatedWithAction(PED_CYCLE_WEAPON_RIGHT, type))
+		state.CycleWeaponLeft = 255;
+	}
+	if (button == GetControllerKeyAssociatedWithAction(PED_CYCLE_WEAPON_RIGHT, type)) {
 		state.RightShoulder2 = 255;
+		state.CycleWeaponRight = 255;
+	}
 	if (button == GetControllerKeyAssociatedWithAction(PED_SPRINT, type))
 		state.Cross = 255;
 	if (button == GetControllerKeyAssociatedWithAction(PED_DUCK, type))
@@ -1905,8 +1887,6 @@ void CControllerConfigManager::DeleteMatchingVehicleControls(e_ControllerAction 
 		CLEAR_ACTION_IF_NEEDED(VEHICLE_TURRETRIGHT);
 		CLEAR_ACTION_IF_NEEDED(VEHICLE_TURRETUP);
 		CLEAR_ACTION_IF_NEEDED(VEHICLE_TURRETDOWN);
-		CLEAR_ACTION_IF_NEEDED(VEHICLE_CYCLE_WEAPON_LEFT);
-		CLEAR_ACTION_IF_NEEDED(VEHICLE_CYCLE_WEAPON_RIGHT);
 	}
 }
 
@@ -1950,8 +1930,8 @@ bool CControllerConfigManager::IsAnyVehicleActionAssignedToMouseKey(int32 key)
 		CHECK_ACTION(VEHICLE_ACCELERATE);
 		CHECK_ACTION(VEHICLE_BRAKE);
 		CHECK_ACTION(VEHICLE_CHANGE_RADIO_STATION);
-		CHECK_ACTION(VEHICLE_CYCLE_WEAPON_LEFT);
-		CHECK_ACTION(VEHICLE_CYCLE_WEAPON_RIGHT);
+		CHECK_ACTION(PED_CYCLE_WEAPON_LEFT);
+		CHECK_ACTION(PED_CYCLE_WEAPON_RIGHT);
 		CHECK_ACTION(TOGGLE_SUBMISSIONS);
 		CHECK_ACTION(VEHICLE_TURRETLEFT);
 		CHECK_ACTION(VEHICLE_TURRETRIGHT);
@@ -2067,8 +2047,6 @@ e_ControllerActionType CControllerConfigManager::GetActionType(e_ControllerActio
 		return ACTIONTYPE_COMMON;
 		break;
 
-	case PED_CYCLE_WEAPON_RIGHT:
-	case PED_CYCLE_WEAPON_LEFT:
 	case PED_JUMPING:
 	case PED_SPRINT:
 	case PED_LOOKBEHIND:
@@ -2097,11 +2075,11 @@ e_ControllerActionType CControllerConfigManager::GetActionType(e_ControllerActio
 	case VEHICLE_TURRETRIGHT:
 	case VEHICLE_TURRETUP:
 	case VEHICLE_TURRETDOWN:
-	case VEHICLE_CYCLE_WEAPON_LEFT:
-	case VEHICLE_CYCLE_WEAPON_RIGHT:
 		return ACTIONTYPE_VEHICLE;
 		break;
 
+	case PED_CYCLE_WEAPON_RIGHT:
+	case PED_CYCLE_WEAPON_LEFT:
 	case VEHICLE_ENTER_EXIT:
 		return ACTIONTYPE_VEHICLE_3RDPERSON;
 		break;
@@ -2632,8 +2610,6 @@ int32 CControllerConfigManager::GetNumOfSettingsForAction(e_ControllerAction act
 	     nil,    /* TAKE_SCREEN_SHOT */                                                                                                                        \
 	     nil,    /* SHOW_MOUSE_POINTER_TOGGLE */                                                                                                               \
 	     nil,    /* PED_RELOAD */                                                                                                                              \
-	     nil,    /* VEHICLE_CYCLE_WEAPON_RIGHT */                                                                                                              \
-	     nil,    /* VEHICLE_CYCLE_WEAPON_LEFT */                                                                                                               \
 	     nil,    /* UNKNOWN_ACTION */                                                                                                                          \
 	 },                                                                                                                                                        \
 	 {                                                                                                                                                         \
@@ -2682,8 +2658,6 @@ int32 CControllerConfigManager::GetNumOfSettingsForAction(e_ControllerAction act
 	     nil,    /* TAKE_SCREEN_SHOT */                                                                                                                        \
 	     nil,    /* SHOW_MOUSE_POINTER_TOGGLE */                                                                                                               \
 	     nil,    /* PED_RELOAD */                                                                                                                              \
-	     nil,    /* VEHICLE_CYCLE_WEAPON_RIGHT */                                                                                                              \
-	     nil,    /* VEHICLE_CYCLE_WEAPON_LEFT */                                                                                                               \
 	     nil,    /* UNKNOWN_ACTION */                                                                                                                          \
 	 },                                                                                                                                                        \
 	 {                                                                                                                                                         \
@@ -2732,8 +2706,6 @@ int32 CControllerConfigManager::GetNumOfSettingsForAction(e_ControllerAction act
 	     nil,    /* TAKE_SCREEN_SHOT */                                                                                                                        \
 	     nil,    /* SHOW_MOUSE_POINTER_TOGGLE */                                                                                                               \
 	     nil,    /* PED_RELOAD */                                                                                                                              \
-	     nil,    /* VEHICLE_CYCLE_WEAPON_RIGHT */                                                                                                              \
-	     nil,    /* VEHICLE_CYCLE_WEAPON_LEFT */                                                                                                               \
 	     nil,    /* UNKNOWN_ACTION */                                                                                                                          \
 	 },                                                                                                                                                        \
 	 {                                                                                                                                                         \
@@ -2782,8 +2754,6 @@ int32 CControllerConfigManager::GetNumOfSettingsForAction(e_ControllerAction act
 	     nil,    /* TAKE_SCREEN_SHOT */                                                                                                                        \
 	     nil,    /* SHOW_MOUSE_POINTER_TOGGLE */                                                                                                               \
 	     nil,    /* PED_RELOAD */                                                                                                                              \
-	     nil,    /* VEHICLE_CYCLE_WEAPON_RIGHT */                                                                                                              \
-	     nil,    /* VEHICLE_CYCLE_WEAPON_LEFT */                                                                                                               \
 	     nil,    /* UNKNOWN_ACTION */                                                                                                                          \
 	 }}
 

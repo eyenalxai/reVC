@@ -92,7 +92,7 @@ CControllerState::CheckForInput(void)
 		|| !!Start || !!Select
 		|| !!LeftShoulder1 || !!LeftShoulder2 || !!RightShoulder1 || !!RightShoulder2
 		|| !!LeftShock || !!RightShock || !!Reload
-		|| !!VehicleCycleWeaponLeft || !!VehicleCycleWeaponRight;
+		|| !!CycleWeaponLeft || !!CycleWeaponRight;
 }
 
 void
@@ -106,7 +106,7 @@ CControllerState::Clear(void)
 	LeftShock = RightShock = 0;
 	NetworkTalk = 0;
 	Reload = 0;
-	VehicleCycleWeaponLeft = VehicleCycleWeaponRight = 0;
+	CycleWeaponLeft = CycleWeaponRight = 0;
 }
 
 void CKeyboardState::Clear()
@@ -464,8 +464,8 @@ CControllerState CPad::ReconcileTwoControllersInput(CControllerState const &Stat
 	_RECONCILE_BUTTON(RightShock);
 	_RECONCILE_BUTTON(NetworkTalk);
 	_RECONCILE_BUTTON(Reload);
-	_RECONCILE_BUTTON(VehicleCycleWeaponLeft);
-	_RECONCILE_BUTTON(VehicleCycleWeaponRight);
+	_RECONCILE_BUTTON(CycleWeaponLeft);
+	_RECONCILE_BUTTON(CycleWeaponRight);
 	_RECONCILE_AXIS(LeftStickX);
 	_RECONCILE_AXIS(LeftStickY);
 	_FIX_AXIS_DIR(LeftStickX);
@@ -1980,26 +1980,20 @@ bool CPad::ChangeStationJustDown(void)
 	return false;
 }
 
-bool CPad::CycleWeaponLeftJustDown(bool inCar)
+bool CPad::CycleWeaponLeftJustDown(void)
 {
 	if ( ArePlayerControlsDisabled() )
 		return false;
 
-	if (inCar)
-		return !!(NewState.VehicleCycleWeaponLeft && !OldState.VehicleCycleWeaponLeft);
-
-	return !!(NewState.LeftShoulder2 && !OldState.LeftShoulder2);
+	return !!(NewState.CycleWeaponLeft && !OldState.CycleWeaponLeft);
 }
 
-bool CPad::CycleWeaponRightJustDown(bool inCar)
+bool CPad::CycleWeaponRightJustDown(void)
 {
 	if ( ArePlayerControlsDisabled() )
 		return false;
 
-	if (inCar)
-		return !!(NewState.VehicleCycleWeaponRight && !OldState.VehicleCycleWeaponRight);
-
-	return !!(NewState.RightShoulder2 && !OldState.RightShoulder2);
+	return !!(NewState.CycleWeaponRight && !OldState.CycleWeaponRight);
 }
 
 bool CPad::GetTarget(void)

@@ -717,8 +717,9 @@ player's own car. The stock sideways drive-by of the look keys is gone
 
 ## Car weapon cycle
 
-The driver's switch to the next or the previous aimable weapon with the car
-cycle keys (`VEHICLE_CYCLE_WEAPON_LEFT` and `VEHICLE_CYCLE_WEAPON_RIGHT`). Only
+The driver's switch to the next or the previous aimable weapon with the on-foot
+cycle keys (`PED_CYCLE_WEAPON_LEFT` and `PED_CYCLE_WEAPON_RIGHT`, one pair for
+both states). Only
 the guns and the photo camera with ammo count (`IsAimableWeapon`). When the seat
 stored the weapon of the foot, the choice replaces the stored weapon, so the
 exit brings back the weapon the driver last chose.
