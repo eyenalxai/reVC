@@ -247,6 +247,10 @@ static constexpr tMoveStanceTransitionRow moveStanceTransitions[] = {
 	{ STANCE_STAND,		TRIGGER_SPRINT,			STANCE_STAND },
 	{ STANCE_STAND,		TRIGGER_CROUCH,			STANCE_CROUCH },
 	{ STANCE_STAND,		TRIGGER_PRONE,			STANCE_PRONE },
+	// the slide ran out on the ground: the ped holds the crouch, below the
+	// explicit edges above and below the held sprint, so a player who keeps
+	// the sprint stands up at once instead of crouching for a frame (VICE-192)
+	{ STANCE_STAND,		TRIGGER_SLIDE_END,		STANCE_CROUCH },
 	// STANCE_CROUCH: the dive's own landing lies the ped down from the crouch
 	// as well (a dive off a crouch fall), then no headroom keeps the crouch
 	// (lying down is always allowed), the crouch's own edge stands the ped up,
@@ -284,7 +288,7 @@ static constexpr int MOVE_STANCE_TRANSITION_ROW_COUNT =
 static constexpr uint32_t MOVE_TRIGGER_ALL = TRIGGER_JUMP | TRIGGER_DIVE | TRIGGER_SLIDE | TRIGGER_LAND
 	| TRIGGER_AIRBORNE | TRIGGER_WALL_CONTACT | TRIGGER_WALL_LEFT | TRIGGER_HEAD_HIT
 	| TRIGGER_CROUCH | TRIGGER_SPRINT | TRIGGER_EXIT_VEHICLE | TRIGGER_HEADROOM_BLOCKED
-	| TRIGGER_PRONE | TRIGGER_DIVE_LAND;
+	| TRIGGER_PRONE | TRIGGER_DIVE_LAND | TRIGGER_SLIDE_END;
 
 // Every transition of the table names a state and a trigger in range, and its
 // guard is one of the guards: an unguarded row carries no threshold and a
@@ -624,6 +628,7 @@ CPlayerMoveSolver::Step(const SMoveIntent &intent)
 	// rows. The air reaches the ground and the dive (VICE-181), and the dive
 	// lands in the slide, whose own rows end it (VICE-180).
 	uint32_t events = 0;
+	eMoveStateId prevState = m_State;
 	const tMoveTransitionRow *transition = MoveTransitionFor(m_State, triggers, ownSpeed);
 	if (transition != NULL) {
 		m_State = transition->to;
@@ -632,6 +637,13 @@ CPlayerMoveSolver::Step(const SMoveIntent &intent)
 		m_fEntryBoost = 0.0f;
 		events = transition->onEntryEvent;
 	}
+
+	// The slide's natural end (VICE-192): the state left the slide for the
+	// ground, so the ped holds the crouch the slide was entered from. A slide
+	// jump leaves for the air and keeps the standing stance, and a dive's
+	// slide-out ends prone - its own landing row lies the ped down.
+	if (prevState == MOVE_SLIDE && m_State == MOVE_GROUND)
+		triggers |= TRIGGER_SLIDE_END;
 
 	// The stance move: the same scan over the stance's own rows, on the same
 	// mask, before the rows are read, so a stance the step enters already

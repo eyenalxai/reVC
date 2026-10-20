@@ -1618,6 +1618,8 @@ CheckSlide(void)
 		Check(snapshot.state == MOVE_SLIDE, "a slide at the exit speed runs on: the guard reads below it");
 		snapshot = StepSlideAt(&solver, SLIDE_EXIT_SPEED - 0.01f);
 		Check(snapshot.state == MOVE_GROUND, "a slide below the exit speed ends on the ground");
+		Check(snapshot.stance == STANCE_CROUCH,
+			"the slide's natural end leaves the ped in the crouch (VICE-192)");
 
 		// the entry refuses inside the hysteresis band, and at any tier but
 		// the sprint's
@@ -1674,6 +1676,8 @@ CheckSlide(void)
 		}
 		Check(snapshot.state == MOVE_AIR && fabsf(snapshot.speed - slideSpeed) < 1e-6f,
 			"the air keeps the slide jump's momentum, bit for bit");
+		Check(snapshot.stance == STANCE_STAND,
+			"a slide jump keeps the standing stance (VICE-192)");
 	}
 
 	/* (e) the two other exits the design names: a prone request ends the slide

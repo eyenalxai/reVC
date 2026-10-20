@@ -94,6 +94,7 @@ enum eMoveTrigger
 	TRIGGER_HEADROOM_BLOCKED = 2048,	// the body cannot rise here: every stand-up holds (VICE-178's test)
 	TRIGGER_PRONE = 4096,		// the prone action edge: a ground action, it toggles the prone and ends the slide
 	TRIGGER_DIVE_LAND = 8192,	// the dive's feet touching the ground: the dive's own prone entry (VICE-181)
+	TRIGGER_SLIDE_END = 16384,	// the slide ended on the ground: the ped holds the crouch (VICE-192)
 };
 
 // The flags of one state row: what the shared step does for the state.
