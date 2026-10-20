@@ -7,7 +7,6 @@
 #include "BulletInfo.h"
 #include "CarAI.h"
 #include "CarCtrl.h"
-#include "CivilianPed.h"
 #include "Cranes.h"
 #include "DMAudio.h"
 #include "Darkel.h"
@@ -1040,22 +1039,27 @@ int8 CRunningScript::ProcessCommands800To899(int32 command)
 			mi = MI_MALE01;
 			pedtype = ((CPedModelInfo*)(CModelInfo::GetModelInfo(mi)))->m_pedType;
 		}
-		CPed* ped = new CCivilianPed(pedtype, mi);
-		ped->CharCreatedBy = MISSION_CHAR;
-		ped->bRespondsToThreats = false;
-		ped->bAllowMedicsToReviveMe = false;
-		ped->bIsPlayerFriend = false;
+		SSpawnScriptPedArgs args;
+		SSpawnExplicitPedRequest request;
+		CPed* ped = nil;
 		CVector pos = *(CVector*)&ScriptParams[0];
-		if (pos.z <= MAP_Z_LOW_LIMIT)
-			pos.z = CWorld::FindGroundZForCoord(pos.x, pos.y);
-		pos.z += 1.0f;
-		ped->SetPosition(pos);
-		ped->SetOrientation(0.0f, 0.0f, 0.0f);
-		CTheScripts::ClearSpaceForMissionEntity(pos, ped);
+
+		args.pedType = pedtype;
+		args.pedModel = mi;
+		args.place = SPAWN_PED_PLACE_STANDING;
+		args.x = pos.x;
+		args.y = pos.y;
+		args.z = pos.z;
+		args.missionScript = m_bIsMissionScript;
+		SpawnScriptPedRequest(args, &request);
+		if (!CSpawnService::RequestExplicitPed(request, &ped)) {
+			ScriptParams[0] = -1;
+			StoreParameters(&m_nIp, 1);
+			return 0;
+		}
 		if (m_bIsMissionScript)
 			ped->bIsStaticWaitingForCollision = true;
-		CWorld::Add(ped);
-		ped->m_nZoneLevel = CTheZones::GetLevelFromPosition(&pos);
+		ped->m_nZoneLevel = CTheZones::GetLevelFromPosition(&ped->GetPosition());
 		CPopulation::ms_nTotalMissionPeds++;
 		ScriptParams[0] = CPools::GetPedPool()->GetIndex(ped);
 		StoreParameters(&m_nIp, 1);
@@ -1808,9 +1812,10 @@ int8 CRunningScript::ProcessCommands900To999(int32 command)
 	case COMMAND_CREATE_RANDOM_CAR_FOR_CAR_PARK:
 	{
 		CollectParameters(&m_nIp, 4);
-		// Keep in sync with the NumRandomCars cap in CCarCtrl::GenerateRandomCars().
-		if (CCarCtrl::NumRandomCars >= MAX_RANDOM_CARS)
-			return 0;
+		/* The random car budget is the service's gate now (VICE-157): the
+		 * old NumRandomCars cap here was the pool's own number, never the
+		 * traffic target, so the script's force covers it and the pool's
+		 * last slot is the only refusal. */
 		int attempts;
 		int model = -1;
 		int index = CGeneral::GetRandomNumberInRange(0, MAXVEHICLESLOADED);
@@ -1945,19 +1950,27 @@ int8 CRunningScript::ProcessCommands900To999(int32 command)
 		}
 		if (model == -1)
 			return 0;
-		CVehicle* car;
-		if (CModelInfo::IsBikeModel(model)) {
-			car = new CBike(model, RANDOM_VEHICLE);
-			((CBike*)(car))->bIsStanding = true;
-		}
-		else
-			car = new CAutomobile(model, RANDOM_VEHICLE);
+		SSpawnScriptCarArgs args;
+		SSpawnExplicitRequest request;
+		CVehicle* car = nil;
 		CVector pos = *(CVector*)&ScriptParams[0];
-		pos.z += car->GetDistanceFromCentreOfMassToBaseOfModel();
-		car->SetPosition(pos);
-		car->SetHeading(DEGTORAD(*(float*)&ScriptParams[3]));
-		CTheScripts::ClearSpaceForMissionEntity(pos, car);
-		car->SetStatus(STATUS_ABANDONED);
+
+		/* The car park's z is the script's, plus the model's own
+		 * centre-to-base offset; the service sets it unchanged (VICE-157). */
+		pos.z += -CModelInfo::GetColModel(model)->boundingBox.min.z;
+		args.carModel = model;
+		args.x = pos.x;
+		args.y = pos.y;
+		args.z = pos.z;
+		args.headingDegrees = *(float*)&ScriptParams[3];
+		args.hasHeading = true;
+		args.parked = true;
+		args.missionScript = m_bIsMissionScript;
+		SpawnScriptCarRequest(args, &request);
+		if (!CSpawnService::RequestExplicit(request, &car))
+			return 0;
+		if (CModelInfo::IsBikeModel(model))
+			((CBike*)car)->bIsStanding = true;
 		car->bIsLocked = false;
 		car->bIsCarParkVehicle = true;
 		CCarCtrl::JoinCarWithRoadSystem(car);
@@ -1968,10 +1981,6 @@ int8 CRunningScript::ProcessCommands900To999(int32 command)
 		car->AutoPilot.m_nCurrentLane = car->AutoPilot.m_nNextLane = 0;
 		car->bEngineOn = false;
 		car->m_nZoneLevel = CTheZones::GetLevelFromPosition(&pos);
-		CWorld::Add(car);
-		/* The scripted car park puts the car there (VICE-127): counted apart
-		 * and never in the traffic's fill. */
-		CSpawnService::CountOtherCreation(car->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
 		return 0;
 	}
 	/*

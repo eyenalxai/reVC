@@ -1181,15 +1181,26 @@ int8 CRunningScript::ProcessCommands1300To1399(int32 command)
 	{
 		CollectParameters(&m_nIp, 1);
 		CVehicle* pVehicle = CPools::GetVehiclePool()->GetAt(ScriptParams[0]);
-		CPed* pPed = CPopulation::AddPedInCar(pVehicle, true);
-		pPed->CharCreatedBy = MISSION_CHAR;
-		pPed->bRespondsToThreats = false;
-		pPed->bAllowMedicsToReviveMe = false;
-		pPed->bIsPlayerFriend = false;
-		if (pVehicle->bIsBus)
-			pPed->bRenderPedInCar = false;
-		pPed->SetPosition(pVehicle->GetPosition());
-		pPed->SetOrientation(0.0f, 0.0f, 0.0f);
+		SSpawnScriptPedArgs args;
+		SSpawnExplicitPedRequest request;
+		CPed* pPed = nil;
+
+		/* The population chooses the model (VICE-157: the service asks its
+		 * own AddPedInCar; the model is not named by the opcode). */
+		args.pedType = PEDTYPE_CIVMALE;
+		args.pedModel = -1;
+		args.place = SPAWN_PED_PLACE_DRIVER;
+		args.x = pVehicle->GetPosition().x;
+		args.y = pVehicle->GetPosition().y;
+		args.z = pVehicle->GetPosition().z;
+		args.missionScript = m_bIsMissionScript;
+		SpawnScriptPedRequest(args, &request);
+		request.vehicle = pVehicle;
+		if (!CSpawnService::RequestExplicitPed(request, &pPed)) {
+			ScriptParams[0] = -1;
+			StoreParameters(&m_nIp, 1);
+			return 0;
+		}
 		pPed->SetPedState(PED_DRIVING);
 		pPed->m_pMyVehicle = pVehicle;
 		pPed->m_pMyVehicle->RegisterReference((CEntity**)&pPed->m_pMyVehicle);
@@ -1212,15 +1223,24 @@ int8 CRunningScript::ProcessCommands1300To1399(int32 command)
 	{
 		CollectParameters(&m_nIp, 2);
 		CVehicle* pVehicle = CPools::GetVehiclePool()->GetAt(ScriptParams[0]);
-		CPed* pPed = CPopulation::AddPedInCar(pVehicle, false);
-		pPed->CharCreatedBy = MISSION_CHAR;
-		pPed->bRespondsToThreats = false;
-		pPed->bAllowMedicsToReviveMe = false;
-		pPed->bIsPlayerFriend = false;
-		if (pVehicle->bIsBus)
-			pPed->bRenderPedInCar = false;
-		pPed->SetPosition(pVehicle->GetPosition());
-		pPed->SetOrientation(0.0f, 0.0f, 0.0f);
+		SSpawnScriptPedArgs args;
+		SSpawnExplicitPedRequest request;
+		CPed* pPed = nil;
+
+		args.pedType = PEDTYPE_CIVMALE;
+		args.pedModel = -1;
+		args.place = SPAWN_PED_PLACE_PASSENGER;
+		args.x = pVehicle->GetPosition().x;
+		args.y = pVehicle->GetPosition().y;
+		args.z = pVehicle->GetPosition().z;
+		args.missionScript = m_bIsMissionScript;
+		SpawnScriptPedRequest(args, &request);
+		request.vehicle = pVehicle;
+		if (!CSpawnService::RequestExplicitPed(request, &pPed)) {
+			ScriptParams[0] = -1;
+			StoreParameters(&m_nIp, 1);
+			return 0;
+		}
 		CPopulation::ms_nTotalMissionPeds++;
 		pVehicle->m_nZoneLevel = CTheZones::GetLevelFromPosition(&pVehicle->GetPosition());
 		if (ScriptParams[1] >= 0)

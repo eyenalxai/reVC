@@ -6,11 +6,9 @@
 #include "Camera.h"
 #include "CarCtrl.h"
 #include "CarGen.h"
-#include "CivilianPed.h"
 #include "CopPed.h"
 #include "Cranes.h"
 #include "DMAudio.h"
-#include "EmergencyPed.h"
 #include "Garages.h"
 #include "General.h"
 #include "Messages.h"
@@ -1126,23 +1124,25 @@ int8 CRunningScript::ProcessCommands400To499(int32 command)
 		default:
 			break;
 		}
-		CPed* pPed;
-		if (ScriptParams[1] == PEDTYPE_COP)
-			pPed = new CCopPed((eCopType)ScriptParams[2]);
-		else if (ScriptParams[1] == PEDTYPE_EMERGENCY || ScriptParams[1] == PEDTYPE_FIREMAN)
-			pPed = new CEmergencyPed(ScriptParams[2]);
-		else
-			pPed = new CCivilianPed((ePedType)ScriptParams[1], ScriptParams[2]);
-		pPed->CharCreatedBy = MISSION_CHAR;
-		pPed->bRespondsToThreats = false;
-		pPed->bAllowMedicsToReviveMe = false;
-		pPed->bIsPlayerFriend = false;
-		if (pVehicle->bIsBus)
-			pPed->bRenderPedInCar = false;
-		pPed->SetPosition(pVehicle->GetPosition());
-		pPed->SetOrientation(0.0f, 0.0f, 0.0f);
+		SSpawnScriptPedArgs args;
+		SSpawnExplicitPedRequest request;
+		CPed* pPed = nil;
+
+		args.pedType = ScriptParams[1];
+		args.pedModel = ScriptParams[2];
+		args.place = SPAWN_PED_PLACE_PASSENGER;
+		args.x = pVehicle->GetPosition().x;
+		args.y = pVehicle->GetPosition().y;
+		args.z = pVehicle->GetPosition().z;
+		args.missionScript = m_bIsMissionScript;
+		SpawnScriptPedRequest(args, &request);
+		request.vehicle = pVehicle;
+		if (!CSpawnService::RequestExplicitPed(request, &pPed)) {
+			ScriptParams[0] = -1;
+			StoreParameters(&m_nIp, 1);
+			return 0;
+		}
 		CPopulation::ms_nTotalMissionPeds++;
-		CWorld::Add(pPed);
 		if (ScriptParams[3] >= 0)
 			pVehicle->AddPassenger(pPed, ScriptParams[3]);
 		else

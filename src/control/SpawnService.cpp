@@ -7,9 +7,15 @@
 #include "Automobile.h"
 #include "Bike.h"
 #include "Boat.h"
+#include "CivilianPed.h"
+#include "CopPed.h"
+#include "EmergencyPed.h"
 #include "ModelIndices.h"
 #include "ModelInfo.h"
+#include "Ped.h"
 #include "Pools.h"
+#include "Population.h"
+#include "Script.h"
 #include "SpawnReadiness.h"
 #include "Streaming.h"
 #include "Timer.h"
@@ -64,6 +70,7 @@ static_assert(sizeof(SSpawnServiceTelemetry) == 232, "the telemetry's size is th
 /* The vehicle tag the core names (SPAWN_VEHICLE_TAG_RANDOM) is the engine's
  * own RANDOM_VEHICLE: the driver contract of SetUpDriver reads the tag. */
 static_assert(SPAWN_VEHICLE_TAG_RANDOM == RANDOM_VEHICLE, "the random tag must be the engine's own");
+static_assert(SPAWN_VEHICLE_TAG_MISSION == MISSION_VEHICLE, "the mission tag must be the engine's own");
 
 /*
  * The zone compatibility of one class: the live info zone of the position
@@ -349,36 +356,24 @@ bool
 CSpawnService::RequestExplicit(const SSpawnExplicitRequest &request, CVehicle **ppCreated)
 {
 	SSpawnExplicitDecision decision;
-	SSpawnBudgetFacts budget;
+	SSpawnExplicitFacts facts;
 	CVehicle *pVehicle;
 	float dirX, dirY, len;
 
-	SpawnRequestBegin(&ms_Telemetry, request.purpose, SPAWN_KIND_EXPLICIT);
-
-	/* The force bypass covers the budgets and the reserves. The pool's last
-	 * slots are physical, not a reserve: even a mission cannot put a vehicle
-	 * in a full pool, and the request refuses with the pool's reason. */
-	budget.randomCars = CCarCtrl::NumRandomCars;
-	budget.randomTarget = CCarCtrl::GetRandomCarTarget();
-	budget.carsInUse = CCarCtrl::NumCarsInUse();
-	budget.carBudget = CCarCtrl::MaxNumberOfCarsInUse;
-	budget.pedFreeSpaces = CPools::GetPedPool()->GetNoOfFreeSpaces();
-	if (SpawnFunctionGate(budget, request.force, &ms_Telemetry) != SPAWN_REFUSAL_NONE)
+	/* The admission: the request row, the function gate (the force bypass
+	 * covers the budgets and the reserves) and the vehicle pool's last slot,
+	 * which is physical and refuses even a mission. A model only not
+	 * resident is not refused here - the force bypass's own contract is
+	 * that the streaming cannot fail a mission, so the creation asks for
+	 * it. */
+	facts.budget.randomCars = CCarCtrl::NumRandomCars;
+	facts.budget.randomTarget = CCarCtrl::GetRandomCarTarget();
+	facts.budget.carsInUse = CCarCtrl::NumCarsInUse();
+	facts.budget.carBudget = CCarCtrl::MaxNumberOfCarsInUse;
+	facts.budget.pedFreeSpaces = CPools::GetPedPool()->GetNoOfFreeSpaces();
+	facts.poolHasSpace = CPools::GetVehiclePool()->GetNoOfFreeSpaces() > 0;
+	if (!SpawnExplicitCarAdmit(request, facts, &decision, &ms_Telemetry))
 		return false;
-	if (CPools::GetVehiclePool()->GetNoOfFreeSpaces() <= 0) {
-		SpawnNoteRefusal(&ms_Telemetry, SPAWN_REFUSAL_POOL);
-		return false;
-	}
-	if (request.carModel < 0) {
-		/* No model is a bad request, not a streaming wait: NO_SITE (there
-		 * is no car to place); a model that is merely not resident is not
-		 * refused here - the force bypass's own contract is that the
-		 * streaming cannot fail a mission, so the creation asks for it. */
-		SpawnNoteRefusal(&ms_Telemetry, SPAWN_REFUSAL_NO_SITE);
-		return false;
-	}
-
-	SpawnDecideExplicit(request, &decision);
 
 	if (CModelInfo::IsBoatModel(request.carModel))
 		pVehicle = new CBoat(request.carModel, decision.createdBy);
@@ -412,6 +407,10 @@ CSpawnService::RequestExplicit(const SSpawnExplicitRequest &request, CVehicle **
 	pVehicle->GetUp() = CVector(0.0f, 0.0f, 1.0f);
 	pVehicle->SetStatus(STATUS_ABANDONED);
 	pVehicle->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + decision.protectMs;
+	/* The script's own rule: a mission car takes the spot from the world
+	 * before it joins it (the old opcode cleared the space first). */
+	if (request.clearSpace)
+		CTheScripts::ClearSpaceForMissionEntity(pVehicle->GetPosition(), pVehicle);
 	CWorld::Add(pVehicle);
 	/* The live numbers of the pop-in ticket carry the scripted cars apart:
 	 * the explicit kind is one of them. */
@@ -419,6 +418,80 @@ CSpawnService::RequestExplicit(const SSpawnExplicitRequest &request, CVehicle **
 	SpawnNoteCreated(&ms_Telemetry, request.purpose);
 	if (ppCreated)
 		*ppCreated = pVehicle;
+	return true;
+}
+
+bool
+CSpawnService::RequestExplicitPed(const SSpawnExplicitPedRequest &request, CPed **ppCreated)
+{
+	SSpawnExplicitFacts facts;
+	CPed *pPed;
+	CVector pos;
+	bool inCar;
+
+	facts.budget.randomCars = CCarCtrl::NumRandomCars;
+	facts.budget.randomTarget = CCarCtrl::GetRandomCarTarget();
+	facts.budget.carsInUse = CCarCtrl::NumCarsInUse();
+	facts.budget.carBudget = CCarCtrl::MaxNumberOfCarsInUse;
+	facts.budget.pedFreeSpaces = CPools::GetPedPool()->GetNoOfFreeSpaces();
+	facts.poolHasSpace = CPools::GetPedPool()->GetNoOfFreeSpaces() > 0;
+	if (!SpawnExplicitPedAdmit(request, facts, &ms_Telemetry))
+		return false;
+
+	inCar = request.place != SPAWN_PED_PLACE_STANDING;
+	if (inCar && request.pedModel < 0) {
+		/* The random in-car opcodes: the population chooses the model, the
+		 * occupation and the ped type (its own path, not duplicated here).
+		 * AddPedInCar sets the position and adds the ped to the world. */
+		pPed = CPopulation::AddPedInCar(request.vehicle, request.place == SPAWN_PED_PLACE_DRIVER);
+	} else {
+		/* The script's own constructor, verbatim: a cop takes its cop type,
+		 * an emergency ped its ped type (the medic/fireman marker), and a
+		 * civilian its ped type and model. */
+		if (request.pedType == PEDTYPE_COP)
+			pPed = new CCopPed((eCopType)request.pedModel);
+		else if (request.pedType == PEDTYPE_EMERGENCY || request.pedType == PEDTYPE_FIREMAN)
+			pPed = new CEmergencyPed(request.pedModel);
+		else
+			pPed = new CCivilianPed((ePedType)request.pedType, request.pedModel);
+		if (pPed) {
+			if (inCar) {
+				pos = request.vehicle->GetPosition();
+			} else {
+				pos = CVector(request.x, request.y, request.z);
+				if (pos.z <= MAP_Z_LOW_LIMIT)
+					pos.z = CWorld::FindGroundZForCoord(pos.x, pos.y);
+				pos.z += 1.0f;
+			}
+			pPed->SetPosition(pos);
+			pPed->SetOrientation(0.0f, 0.0f, 0.0f);
+			/* The mission entity takes the spot from the world before it
+			 * joins it, the script's own order. */
+			if (request.clearSpace)
+				CTheScripts::ClearSpaceForMissionEntity(pos, pPed);
+			CWorld::Add(pPed);
+		}
+	}
+	if (pPed == nil) {
+		/* The constructor's own pool refusal (the free-space check above
+		 * passed, so this is the pool's last slot going to another path in
+		 * between): the pool's reason, counted. */
+		SpawnNoteRefusal(&ms_Telemetry, SPAWN_REFUSAL_POOL);
+		return false;
+	}
+
+	/* The mission ped's own setup, the one every script opcode after this
+	 * point relied on. The seat wiring and the opcode's counters stay with
+	 * the opcode: the clean-up paths and the counters are untouched. */
+	pPed->CharCreatedBy = MISSION_CHAR;
+	pPed->bRespondsToThreats = false;
+	pPed->bAllowMedicsToReviveMe = false;
+	pPed->bIsPlayerFriend = false;
+	if (inCar && request.vehicle->bIsBus)
+		pPed->bRenderPedInCar = false;
+	SpawnNoteCreated(&ms_Telemetry, request.purpose);
+	if (ppCreated)
+		*ppCreated = pPed;
 	return true;
 }
 

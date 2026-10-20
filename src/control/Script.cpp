@@ -5,15 +5,12 @@
 
 #include "AnimBlendAssociation.h"
 #include "AudioManager.h"
-#include "Boat.h"
 #include "Camera.h"
 #include "CarCtrl.h"
-#include "CivilianPed.h"
 #include "Clock.h"
 #include "CopPed.h"
 #include "Debug.h"
 #include "DMAudio.h"
-#include "EmergencyPed.h"
 #include "FileMgr.h"
 #include "Frontend.h"
 #include "General.h"
@@ -2122,28 +2119,29 @@ int8 CRunningScript::ProcessCommands100To199(int32 command)
 		default:
 			break;
 		}
-		CPed* ped;
-		if (ScriptParams[0] == PEDTYPE_COP)
-			ped = new CCopPed((eCopType)ScriptParams[1]);
-		else if (ScriptParams[0] == PEDTYPE_EMERGENCY || ScriptParams[0] == PEDTYPE_FIREMAN)
-			ped = new CEmergencyPed(ScriptParams[1]);
-		else
-			ped = new CCivilianPed((ePedType)ScriptParams[0], ScriptParams[1]);
-		ped->CharCreatedBy = MISSION_CHAR;
-		ped->bRespondsToThreats = false;
-		ped->bAllowMedicsToReviveMe = false;
-		ped->bIsPlayerFriend = false;
+		SSpawnScriptPedArgs args;
+		SSpawnExplicitPedRequest request;
+		CPed* ped = nil;
 		CVector pos = *(CVector*)&ScriptParams[2];
-		if (pos.z <= MAP_Z_LOW_LIMIT)
-			pos.z = CWorld::FindGroundZForCoord(pos.x, pos.y);
-		pos.z += 1.0f;
-		ped->SetPosition(pos);
-		ped->SetOrientation(0.0f, 0.0f, 0.0f);
-		CTheScripts::ClearSpaceForMissionEntity(pos, ped);
+
+		args.pedType = ScriptParams[0];
+		args.pedModel = ScriptParams[1];
+		args.place = SPAWN_PED_PLACE_STANDING;
+		args.x = pos.x;
+		args.y = pos.y;
+		args.z = pos.z;
+		args.missionScript = m_bIsMissionScript;
+		SpawnScriptPedRequest(args, &request);
+		if (!CSpawnService::RequestExplicitPed(request, &ped)) {
+			/* Only the pool's last slot refuses a mission ped; the script
+			 * sees no handle then. */
+			ScriptParams[0] = -1;
+			StoreParameters(&m_nIp, 1);
+			return 0;
+		}
 		if (m_bIsMissionScript)
 			ped->bIsStaticWaitingForCollision = true;
-		CWorld::Add(ped);
-		ped->m_nZoneLevel = CTheZones::GetLevelFromPosition(&pos);
+		ped->m_nZoneLevel = CTheZones::GetLevelFromPosition(&ped->GetPosition());
 		CPopulation::ms_nTotalMissionPeds++;
 		ScriptParams[0] = CPools::GetPedPool()->GetIndex(ped);
 		StoreParameters(&m_nIp, 1);
@@ -2325,44 +2323,46 @@ int8 CRunningScript::ProcessCommands100To199(int32 command)
 	case COMMAND_CREATE_CAR:
 	{
 		CollectParameters(&m_nIp, 4);
-		int32 handle;
+		SSpawnScriptCarArgs args;
+		SSpawnExplicitRequest request;
+		CVehicle* car = nil;
+		CVector pos = *(CVector*)&ScriptParams[1];
+
+		/* The script's placement is resolved to its final z here - the
+		 * ground when the script's z is below the map, then the model's
+		 * centre-to-base offset (the old opcode's own order) - and the
+		 * service sets it unchanged (VICE-157). */
+		if (pos.z <= MAP_Z_LOW_LIMIT)
+			pos.z = CWorld::FindGroundZForCoord(pos.x, pos.y);
+		pos.z += -CModelInfo::GetColModel(ScriptParams[0])->boundingBox.min.z;
+		args.carModel = ScriptParams[0];
+		args.x = pos.x;
+		args.y = pos.y;
+		args.z = pos.z;
+		args.headingDegrees = 0.0f;
+		args.hasHeading = false;
+		args.parked = false;
+		args.missionScript = m_bIsMissionScript;
+		SpawnScriptCarRequest(args, &request);
+		if (!CSpawnService::RequestExplicit(request, &car)) {
+			/* Only the pool's last slot refuses a mission car; the script
+			 * sees no handle then. */
+			ScriptParams[0] = -1;
+			StoreParameters(&m_nIp, 1);
+			return 0;
+		}
+
 		if (CModelInfo::IsBoatModel(ScriptParams[0])) {
-			CBoat* boat = new CBoat(ScriptParams[0], MISSION_VEHICLE);
-			CVector pos = *(CVector*)&ScriptParams[1];
-			if (pos.z <= MAP_Z_LOW_LIMIT)
-				pos.z = CWorld::FindGroundZForCoord(pos.x, pos.y);
-			pos.z += boat->GetDistanceFromCentreOfMassToBaseOfModel();
-			boat->SetPosition(pos);
-			CTheScripts::ClearSpaceForMissionEntity(pos, boat);
-			boat->SetStatus(STATUS_ABANDONED);
-			boat->bIsLocked = true;
-			boat->AutoPilot.m_nCarMission = MISSION_NONE;
-			boat->AutoPilot.m_nTempAction = TEMPACT_NONE;
-			boat->AutoPilot.m_nCruiseSpeed = boat->AutoPilot.m_fMaxTrafficSpeed = 20.0f;
-			if (m_bIsMissionScript)
-				boat->bIsStaticWaitingForCollision = true;
-			CWorld::Add(boat);
-			CSpawnService::CountOtherCreation(boat->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
-			handle = CPools::GetVehiclePool()->GetIndex(boat);
+			car->bIsLocked = true;
+			car->AutoPilot.m_nCarMission = MISSION_NONE;
+			car->AutoPilot.m_nTempAction = TEMPACT_NONE;
+			car->AutoPilot.m_nCruiseSpeed = car->AutoPilot.m_fMaxTrafficSpeed = 20.0f;
 		}
 		else {
-			CVehicle* car;
-
-			if (!CModelInfo::IsBikeModel(ScriptParams[0]))
-				car = new CAutomobile(ScriptParams[0], MISSION_VEHICLE);
-			else {
-				car = new CBike(ScriptParams[0], MISSION_VEHICLE);
-				((CBike*)(car))->bIsStanding = true;
-			}
-			CVector pos = *(CVector*)&ScriptParams[1];
-			if (pos.z <= MAP_Z_LOW_LIMIT)
-				pos.z = CWorld::FindGroundZForCoord(pos.x, pos.y);
-			pos.z += car->GetDistanceFromCentreOfMassToBaseOfModel();
-			car->SetPosition(pos);
-			CTheScripts::ClearSpaceForMissionEntity(pos, car);
-			car->SetStatus(STATUS_ABANDONED);
-			car->bIsLocked = true;
+			if (CModelInfo::IsBikeModel(ScriptParams[0]))
+				((CBike*)car)->bIsStanding = true;
 			CCarCtrl::JoinCarWithRoadSystem(car);
+			car->bIsLocked = true;
 			car->AutoPilot.m_nCarMission = MISSION_NONE;
 			car->AutoPilot.m_nTempAction = TEMPACT_NONE;
 			car->AutoPilot.m_nDrivingStyle = DRIVINGSTYLE_STOP_FOR_CARS;
@@ -2371,12 +2371,10 @@ int8 CRunningScript::ProcessCommands100To199(int32 command)
 			car->bEngineOn = false;
 			car->m_nZoneLevel = CTheZones::GetLevelFromPosition(&pos);
 			car->bHasBeenOwnedByPlayer = true;
-			if (m_bIsMissionScript)
-				car->bIsStaticWaitingForCollision = true;
-			CWorld::Add(car);
-			CSpawnService::CountOtherCreation(car->GetPosition(), NEAR_BUBBLE_ENTITY_RADIUS);
-			handle = CPools::GetVehiclePool()->GetIndex(car);
 		}
+		if (m_bIsMissionScript)
+			car->bIsStaticWaitingForCollision = true;
+		int32 handle = CPools::GetVehiclePool()->GetIndex(car);
 		ScriptParams[0] = handle;
 		StoreParameters(&m_nIp, 1);
 		if (m_bIsMissionScript)
@@ -3146,21 +3144,24 @@ int8 CRunningScript::ProcessCommands200To299(int32 command)
 		default:
 			break;
 		}
-		CPed* pPed;
-		if (ScriptParams[1] == PEDTYPE_COP)
-			pPed = new CCopPed((eCopType)ScriptParams[2]);
-		else if (ScriptParams[1] == PEDTYPE_EMERGENCY || ScriptParams[1] == PEDTYPE_FIREMAN)
-			pPed = new CEmergencyPed(ScriptParams[2]);
-		else
-			pPed = new CCivilianPed((ePedType)ScriptParams[1], ScriptParams[2]);
-		pPed->CharCreatedBy = MISSION_CHAR;
-		pPed->bRespondsToThreats = false;
-		pPed->bAllowMedicsToReviveMe = false;
-		pPed->bIsPlayerFriend = false;
-		if (pVehicle->bIsBus)
-			pPed->bRenderPedInCar = false;
-		pPed->SetPosition(pVehicle->GetPosition());
-		pPed->SetOrientation(0.0f, 0.0f, 0.0f);
+		SSpawnScriptPedArgs args;
+		SSpawnExplicitPedRequest request;
+		CPed* pPed = nil;
+
+		args.pedType = ScriptParams[1];
+		args.pedModel = ScriptParams[2];
+		args.place = SPAWN_PED_PLACE_DRIVER;
+		args.x = pVehicle->GetPosition().x;
+		args.y = pVehicle->GetPosition().y;
+		args.z = pVehicle->GetPosition().z;
+		args.missionScript = m_bIsMissionScript;
+		SpawnScriptPedRequest(args, &request);
+		request.vehicle = pVehicle;
+		if (!CSpawnService::RequestExplicitPed(request, &pPed)) {
+			ScriptParams[0] = -1;
+			StoreParameters(&m_nIp, 1);
+			return 0;
+		}
 		pPed->SetPedState(PED_DRIVING);
 		CPopulation::ms_nTotalMissionPeds++;
 		script_assert(!pVehicle->pDriver);
@@ -3176,7 +3177,6 @@ int8 CRunningScript::ProcessCommands200To299(int32 command)
 		pPed->bUsesCollision = false;
 		pPed->AddInCarAnims(pVehicle, true);
 		pPed->m_nZoneLevel = CTheZones::GetLevelFromPosition(&pPed->GetPosition());
-		CWorld::Add(pPed);
 		ScriptParams[0] = CPools::GetPedPool()->GetIndex(pPed);
 		StoreParameters(&m_nIp, 1);
 		if (m_bIsMissionScript)

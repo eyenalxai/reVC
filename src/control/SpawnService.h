@@ -22,7 +22,11 @@
  *				visibility and no ring; the force bypass
  *				covers the budgets and the reserves too, so a
  *				mission never fails on a scheduling decision.
- *				The caller gets the vehicle in the same frame.
+ *				The caller gets the actor in the same frame.
+ *				The ped arm (VICE-157) creates the standing
+ *				and in-car script peds; every script opcode
+ *				forces, because a mission cannot fail on a
+ *				scheduling decision.
  *
  * Both kinds are counted, and every refusal is counted by its reason. The
  * ambient traffic is the first requester (CCarCtrl::GenerateOneRandomCar ->
@@ -150,6 +154,7 @@
 
 class CVehicle;
 class CVector;
+class CPed;
 
 /* --- The vocabulary of the request envelope ----------------------------- */
 
@@ -214,6 +219,14 @@ enum ESpawnSiteWater
 /* The vehicle tag the driver contract needs (Vehicle.h: RANDOM_VEHICLE).
  * SpawnService.cpp pins it to the engine's own value. */
 #define SPAWN_VEHICLE_TAG_RANDOM 1
+
+/* The mission tag the script car opcode names (Vehicle.h: MISSION_VEHICLE).
+ * SpawnService.cpp pins it to the engine's own value too. */
+#define SPAWN_VEHICLE_TAG_MISSION 2
+
+/* The script's headings are degrees; the core is engine-free, so the
+ * conversion is its own (common.h's DEGTORAD is the engine's). */
+#define SPAWN_SCRIPT_PI 3.14159265358979323846f
 
 /* --- The telemetry ------------------------------------------------------ */
 
@@ -863,6 +876,7 @@ struct SSpawnExplicitRequest
 	float dirX, dirY;
 	uint32_t lifetimeMs;	/* 0: the fresh-spawn grace */
 	uint8_t createdBy;	/* 0: SPAWN_VEHICLE_TAG_RANDOM */
+	bool clearSpace;	/* the script's ClearSpaceForMissionEntity before the add */
 };
 
 /* The engine's placement of an explicit car: the position is the request's,
@@ -887,6 +901,207 @@ SpawnDecideExplicit(const SSpawnExplicitRequest &request, SSpawnExplicitDecision
 	decision->dirY = request.dirY;
 	decision->protectMs = request.lifetimeMs < NEAR_BUBBLE_GRACE_MS ? NEAR_BUBBLE_GRACE_MS : request.lifetimeMs;
 	decision->createdBy = request.createdBy ? request.createdBy : SPAWN_VEHICLE_TAG_RANDOM;
+}
+
+/* --- The explicit pedestrian arm (VICE-157) ------------------------------ */
+
+/*
+ * The script and mission opcodes are explicit requests (VICE-157): the model
+ * and the placement are the caller's, the call is synchronous and the handle
+ * comes back in the same frame. Every one of them forces - a mission cannot
+ * fail on a scheduling decision - while the ledger counts them by the MISSION
+ * or SPECIAL purpose (a mission script's actor is the mission's; the idle
+ * scripts' is a special actor). The service owns the creation and the world
+ * insert; the opcode keeps its own wiring after the handle returns (the seat,
+ * the autopilot, the mission list and the mission counters), so the clean-up
+ * paths and the counters are untouched.
+ *
+ * The ped arm exists because the script opcodes create peds as well as cars:
+ * a standing ped (COMMAND_CREATE_CHAR, COMMAND_CREATE_RANDOM_CHAR) and an
+ * in-car ped (the inside-car and passenger opcodes). The random in-car
+ * opcodes do not name a model by design - the population chooses it - so
+ * `pedModel` -1 asks the service for CPopulation::AddPedInCar, the
+ * population's own path, instead of duplicating its choice here.
+ */
+
+/* Where an explicit ped is created: standing at the request's position, or in
+ * the request's vehicle as its driver or a passenger. */
+enum ESpawnPedPlace
+{
+	SPAWN_PED_PLACE_STANDING = 0,
+	SPAWN_PED_PLACE_DRIVER,
+	SPAWN_PED_PLACE_PASSENGER
+};
+
+/* The explicit ped request: the exact position or vehicle, the type and the
+ * model the script gave. The standing arm's `clearSpace` is the script's
+ * ClearSpaceForMissionEntity, which must run before the world insert; the
+ * service owns that order. The mission flags and the world insert are the
+ * service's; the opcode keeps the seat wiring and its counters. */
+struct SSpawnExplicitPedRequest
+{
+	ESpawnPurpose purpose;
+	bool force;
+	uint8_t place;		/* ESpawnPedPlace */
+	int32_t pedType;	/* the constructor's selector (ePedType/eCopType) */
+	int32_t pedModel;	/* the model or cop type; -1: the population's in-car choice */
+	CVehicle *vehicle;	/* the in-car arms */
+	float x, y, z;		/* the standing arm */
+	bool clearSpace;
+};
+
+/* The facts the explicit admission needs from the frame: the budget counts
+ * and the actor pool's own free space (the vehicle pool for a car, the ped
+ * pool for a ped). */
+struct SSpawnExplicitFacts
+{
+	SSpawnBudgetFacts budget;
+	bool poolHasSpace;
+};
+
+/*
+ * The car arm's admission, the one path CSpawnService::RequestExplicit takes:
+ * the request is counted by its purpose and kind, the function gate runs (the
+ * force arm steps over the budgets and the reserve), the pool's last slot
+ * refuses (physical, even for force), and a request without a model is a bad
+ * request. The placement decision is resolved only for an admitted request,
+ * so a refused request never reaches the creation.
+ */
+static inline bool
+SpawnExplicitCarAdmit(const SSpawnExplicitRequest &request, const SSpawnExplicitFacts &facts,
+	SSpawnExplicitDecision *decision, SSpawnServiceTelemetry *tel)
+{
+	SpawnRequestBegin(tel, request.purpose, SPAWN_KIND_EXPLICIT);
+	if (SpawnFunctionGate(facts.budget, request.force, tel) != SPAWN_REFUSAL_NONE)
+		return false;
+	if (!facts.poolHasSpace) {
+		SpawnNoteRefusal(tel, SPAWN_REFUSAL_POOL);
+		return false;
+	}
+	if (request.carModel < 0) {
+		SpawnNoteRefusal(tel, SPAWN_REFUSAL_NO_SITE);
+		return false;
+	}
+	SpawnDecideExplicit(request, decision);
+	return true;
+}
+
+/* The ped arm's admission: the same rows and the same force bypass. A
+ * standing request without a model is a bad request; an in-car request
+ * without its vehicle is one too. */
+static inline bool
+SpawnExplicitPedAdmit(const SSpawnExplicitPedRequest &request, const SSpawnExplicitFacts &facts,
+	SSpawnServiceTelemetry *tel)
+{
+	bool inCar;
+
+	SpawnRequestBegin(tel, request.purpose, SPAWN_KIND_EXPLICIT);
+	if (SpawnFunctionGate(facts.budget, request.force, tel) != SPAWN_REFUSAL_NONE)
+		return false;
+	if (!facts.poolHasSpace) {
+		SpawnNoteRefusal(tel, SPAWN_REFUSAL_POOL);
+		return false;
+	}
+	if (request.place > SPAWN_PED_PLACE_PASSENGER) {
+		SpawnNoteRefusal(tel, SPAWN_REFUSAL_NO_SITE);
+		return false;
+	}
+	inCar = request.place != SPAWN_PED_PLACE_STANDING;
+	if (inCar ? request.vehicle == 0 : request.pedModel < 0) {
+		SpawnNoteRefusal(tel, SPAWN_REFUSAL_NO_SITE);
+		return false;
+	}
+	return true;
+}
+
+/* --- The script opcodes' argument sets ----------------------------------- */
+
+/*
+ * The script opcodes' argument sets, mapped to the explicit requests (the one
+ * construction the engine and the offline harness share):
+ *
+ *	COMMAND_CREATE_CAR		the model and the position; no heading
+ *					(the opcode's own orientation)
+ *	CREATE_RANDOM_CAR_FOR_CAR_PARK	the model, the position and the heading;
+ *					the traffic's tag (a car park car is not
+ *					a mission car)
+ *	COMMAND_CREATE_CHAR		the type, the model and the position
+ *	CREATE_RANDOM_CHAR		the population's chosen civilian and the
+ *					position
+ *	CREATE_CHAR_INSIDE_CAR		the type, the model and the vehicle (the
+ *					driver's seat)
+ *	CREATE_CHAR_AS_PASSENGER	the type, the model and the vehicle
+ *	CREATE_RANDOM_CHAR_AS_DRIVER	the population's model, the vehicle
+ *	CREATE_RANDOM_CHAR_AS_PASSENGER	the population's model, the vehicle
+ *
+ * The car position below is the final one: the opcode resolves the ground and
+ * the model's centre-to-base offset before the request, so the service sets
+ * the request's z unchanged (the explicit kind's contract). The heading is
+ * the request's direction; the identity is the default. The ped position is
+ * the script's own; the service resolves its ground, exactly as the old
+ * opcodes did.
+ */
+
+struct SSpawnScriptCarArgs
+{
+	int32_t carModel;
+	float x, y, z;
+	float headingDegrees;	/* the car park opcode's heading */
+	bool hasHeading;
+	bool parked;		/* the car park's traffic tag */
+	bool missionScript;
+};
+
+static inline void
+SpawnScriptCarRequest(const SSpawnScriptCarArgs &args, SSpawnExplicitRequest *request)
+{
+	request->purpose = args.missionScript ? SPAWN_PURPOSE_MISSION : SPAWN_PURPOSE_SPECIAL;
+	/* Every script creator forces: a mission cannot fail on a scheduling
+	 * decision. The car park's old NumRandomCars cap was the pool's own
+	 * number (MAX_RANDOM_CARS), never the traffic target, so the force
+	 * keeps its behaviour and the pool's last slot stays the only refusal. */
+	request->force = true;
+	request->carModel = args.carModel;
+	request->x = args.x;
+	request->y = args.y;
+	request->z = args.z;
+	if (args.hasHeading) {
+		float radians = args.headingDegrees * (SPAWN_SCRIPT_PI / 180.0f);
+		request->dirX = cosf(radians);
+		request->dirY = sinf(radians);
+	} else {
+		request->dirX = 1.0f;
+		request->dirY = 0.0f;
+	}
+	request->lifetimeMs = 0;
+	request->createdBy = args.parked ? SPAWN_VEHICLE_TAG_RANDOM : SPAWN_VEHICLE_TAG_MISSION;
+	request->clearSpace = true;	/* both car opcodes clear the spot first */
+}
+
+struct SSpawnScriptPedArgs
+{
+	int32_t pedType;
+	int32_t pedModel;	/* -1: the population's in-car choice */
+	uint8_t place;		/* ESpawnPedPlace */
+	float x, y, z;
+	bool missionScript;
+};
+
+static inline void
+SpawnScriptPedRequest(const SSpawnScriptPedArgs &args, SSpawnExplicitPedRequest *request)
+{
+	request->purpose = args.missionScript ? SPAWN_PURPOSE_MISSION : SPAWN_PURPOSE_SPECIAL;
+	request->force = true;
+	request->place = args.place;
+	request->pedType = args.pedType;
+	request->pedModel = args.pedModel;
+	request->vehicle = 0;	/* the in-car opcode sets its own */
+	request->x = args.x;
+	request->y = args.y;
+	request->z = args.z;
+	/* The standing peds clear the spot before the world insert; the in-car
+	 * peds take the car's own place and never clear it. */
+	request->clearSpace = args.place == SPAWN_PED_PLACE_STANDING;
 }
 
 /* --- The primitive's own decisions --------------------------------------- */
@@ -1004,6 +1219,11 @@ public:
 	 * the force bypass covers the budgets and the reserves. True and the
 	 * vehicle in the same frame when it was created. */
 	static bool RequestExplicit(const SSpawnExplicitRequest &request, CVehicle **ppCreated);
+
+	/* The explicit ped arm (VICE-157): the standing and in-car script peds,
+	 * synchronous and exact, with the same force bypass. True and the ped in
+	 * the same frame when it was created. */
+	static bool RequestExplicitPed(const SSpawnExplicitPedRequest &request, CPed **ppCreated);
 
 	/* The ladder's API (NearBubble.cpp's gates, behavior preserved): the
 	 * creation and removal gates and the acceptance counters. Every caller

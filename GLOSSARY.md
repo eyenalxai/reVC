@@ -1030,6 +1030,19 @@ behind the service's ladder API (`CSpawnService::AllowsCreation`,
 `SpawnService.cpp` asks them directly. The ambient traffic is the first
 requester (`CCarCtrl::GenerateOneRandomCar`).
 
+The script and mission opcodes are explicit requesters (VICE-157): the
+vehicle creators (`COMMAND_CREATE_CAR`, `COMMAND_CREATE_RANDOM_CAR_FOR_CAR_PARK`)
+and the pedestrian creators (`COMMAND_CREATE_CHAR`, `COMMAND_CREATE_RANDOM_CHAR`,
+the inside-car and passenger opcodes) build an explicit request from their
+argument set, and the service creates the actor at the exact position and
+model in the same frame. Every one of them passes the force: a mission cannot
+fail on a scheduling decision, and the car park's old random-car cap was the
+pool's own number, never the traffic target. The random in-car opcodes name no
+model - the service asks `CPopulation::AddPedInCar` for the population's own
+choice. The opcode keeps its wiring after the handle returns (the seat, the
+autopilot, the mission list and the mission counters), so the clean-up paths
+and the counters stay the game's own.
+
 The service states its deltas from the old spawner, rather than hiding them:
 the plan's candidates are the sites whose **midpoint** is in the ring band,
 not the node pairs that bracket the ring (the index carries no per-node
