@@ -5,7 +5,7 @@ struct SMoveIntent;
 struct SMoveSnapshot;
 
 // File telemetry for the movement solver (see the Movement telemetry in
-// GLOSSARY.md and docs/adr/0028-the-movement-solver-owns-velocity-position-and-stance.md).
+// GLOSSARY.md, and the solver's header holds the intent and the snapshot).
 // It records the state the on-screen readout shows into movement-telemetry.csv,
 // so a played session can be read back and replayed into the solver harness
 // (VICE-172, VICE-193). It changes no movement, and it is inert while

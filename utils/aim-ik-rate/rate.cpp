@@ -105,7 +105,7 @@ AtLimb(int limb)
 	snprintf(g_where, sizeof(g_where), "[%s] ", aLimbNames[limb]);
 }
 
-static LimbMovementInfo *apRows[7] = {
+static const LimbMovementInfo *apRows[7] = {
 	&ms_torsoInfo, &ms_seatTorsoInfo, &ms_leanInfo, &ms_headInfo,
 	&ms_headRestoreInfo, &ms_upperArmInfo, &ms_lowerArmInfo
 };
@@ -221,7 +221,7 @@ main(void)
 	float maxRateDeviation = 0.0f;
 	for (limb = 0; limb < 7; limb++) {
 		LimbMovementInfo stock = StockRow(limb);
-		LimbMovementInfo *row = apRows[limb];
+		const LimbMovementInfo *row = apRows[limb];
 		AtLimb(limb);
 
 		Check(row->maxYaw == stock.maxYaw && row->minYaw == stock.minYaw &&
@@ -263,7 +263,7 @@ main(void)
 
 	for (limb = 0; limb < 7; limb++) {
 		LimbMovementInfo stock = StockRow(limb);
-		LimbMovementInfo *row = apRows[limb];
+		const LimbMovementInfo *row = apRows[limb];
 		AtLimb(limb);
 
 		LimbOrientation lastModule = { 0.0f, 0.0f };
@@ -329,7 +329,7 @@ main(void)
 
 	/* C. The frame rate */
 
-	LimbMovementInfo *head = &ms_headInfo;
+	const LimbMovementInfo *head = &ms_headInfo;
 	LimbMovementInfo stockHead = StockRow(3);
 	float target = 1.5f;
 	float exactTime = target / (DegToRad(aStockDegrees[3][2]) * STOCK_HZ);
@@ -363,7 +363,7 @@ main(void)
 	float aSteps[5] = { 0.0f, 1.0f/200.0f, referenceDt, 1.0f/10.0f, 0.1f };
 	int limitSteps = 0;
 	for (limb = 0; limb < 7; limb++) {
-		LimbMovementInfo *row = apRows[limb];
+		const LimbMovementInfo *row = apRows[limb];
 		AtLimb(limb);
 		for (i = 0; i < 5; i++) {
 			LimbOrientation limbState = { 0.0f, 0.0f };

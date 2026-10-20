@@ -32,14 +32,14 @@ public:
 	bool PointGunAtPosition(CVector const& position);
 	void GetComponentPosition(RwV3d &pos, uint32 node);
 	void RotateTorso(AnimBlendFrameData* animBlend, LimbOrientation* limb, bool changeRoll);
-	LimbMovementInfo &TorsoInfo(void);
+	const LimbMovementInfo &TorsoInfo(void);
 	bool SeatedInCar(void);
 	void GetTorsoBendAxis(RwV3d &axis);
 	void RotateLean(RtQuat *q, const RwV3d &bendAxis);
 	void ExtractYawAndPitchLocal(RwMatrix *mat, float *yaw, float *pitch);
 	void ExtractYawAndPitchLocalSkinned(AnimBlendFrameData *node, float *yaw, float *pitch);
 	void ExtractYawAndPitchWorld(RwMatrix *mat, float *yaw, float *pitch);
-	LimbMoveStatus MoveLimb(LimbOrientation &limb, float targetYaw, float targetPitch, LimbMovementInfo &moveInfo);
+	LimbMoveStatus MoveLimb(LimbOrientation &limb, float targetYaw, float targetPitch, const LimbMovementInfo &moveInfo);
 	bool RestoreGunPosn(void);
 	bool LookInDirection(float targetYaw, float targetPitch);
 	bool LookAtPosition(CVector const& pos);

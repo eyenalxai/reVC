@@ -48,12 +48,12 @@ LimbMoveStatus MoveLimbStep(LimbOrientation &limb, float targetYaw, float target
 
 // The rows, one per limb of the aim (LimbRate.cpp). ms_ is the module scope,
 // the same prefix the rest of the tree uses for one.
-extern LimbMovementInfo ms_torsoInfo;
-extern LimbMovementInfo ms_seatTorsoInfo;
-extern LimbMovementInfo ms_leanInfo;
-extern LimbMovementInfo ms_headInfo;
-extern LimbMovementInfo ms_headRestoreInfo;
-extern LimbMovementInfo ms_upperArmInfo;
-extern LimbMovementInfo ms_lowerArmInfo;
+extern const LimbMovementInfo ms_torsoInfo;
+extern const LimbMovementInfo ms_seatTorsoInfo;
+extern const LimbMovementInfo ms_leanInfo;
+extern const LimbMovementInfo ms_headInfo;
+extern const LimbMovementInfo ms_headRestoreInfo;
+extern const LimbMovementInfo ms_upperArmInfo;
+extern const LimbMovementInfo ms_lowerArmInfo;
 
 #endif // __GTA_LIMBRATE_H__

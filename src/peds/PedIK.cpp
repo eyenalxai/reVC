@@ -52,7 +52,7 @@ CPedIK::RotateTorso(AnimBlendFrameData *node, LimbOrientation *limb, bool change
 	m_ped->bDontAcceptIKLookAts = true;
 }
 
-LimbMovementInfo &
+const LimbMovementInfo &
 CPedIK::TorsoInfo(void)
 {
 	return SeatedInCar() ? ms_seatTorsoInfo : ms_torsoInfo;
@@ -105,7 +105,7 @@ CPedIK::GetComponentPosition(RwV3d &pos, uint32 node)
 // cannot change inside a frame - CTimer sets the step once - so reading it per
 // call is reading the one step of the frame.
 LimbMoveStatus
-CPedIK::MoveLimb(LimbOrientation &limb, float targetYaw, float targetPitch, LimbMovementInfo &moveInfo)
+CPedIK::MoveLimb(LimbOrientation &limb, float targetYaw, float targetPitch, const LimbMovementInfo &moveInfo)
 {
 	return MoveLimbStep(limb, targetYaw, targetPitch, moveInfo, CTimer::GetTimeStepInSeconds());
 }

@@ -26,6 +26,11 @@
 // telemetry readout convert with it (PlayerPed.cpp, MovementTelemetry.cpp).
 #define MOVE_ENGINE_UNITS_PER_SECOND	50.0f
 
+// The one pi of the movement family, and the radian-to-degree factor the
+// telemetry's rows print with.
+#define MOVE_PI			3.14159265358979323846f
+#define MOVE_RAD_TO_DEG		(180.0f / MOVE_PI)
+
 // The vertical impulse of the player's jump, engine units per step: the value
 // the launch animation's finish callback applied to the player before VICE-182
 // (CPed::FinishLaunchCB's ApplyMoveForce(0, 0, 8.5)). The solver owns the
@@ -336,6 +341,11 @@ private:
 	SMoveSnapshot m_Snapshot;	// written only by Step
 };
 
+// The target speed of one rung, in engine units per frame: the ladder is the
+// source of the stride, and the adapter reads it to fill the intent. The
+// animation's playback follows the real speed in SetRealMoveAnim.
+float PlayerMoveLadderSpeed(eMoveTier tier);
+
 // The table check (VICE-171, PlayerMoveSolver.cpp): every state has a row,
 // every transition names a state in range and carries an in-range guard, the
 // ladder ascends with the slide's rungs above the sprint's, the slide has an
@@ -346,11 +356,6 @@ private:
 // true means every table holds. The first reads the module's own tables (the
 // harness's entry point, VICE-172), the second the set the caller passes, so
 // the harness can drive each rejection with a planted row.
-// The target speed of one rung, in engine units per frame: the ladder is the
-// source of the stride, and the adapter reads it to fill the intent. The
-// animation's playback follows the real speed in SetRealMoveAnim.
-float PlayerMoveLadderSpeed(eMoveTier tier);
-
 bool PlayerMoveTablesCheck(const char **why);
 bool PlayerMoveTablesCheck(const SMoveTables &tables, const char **why);
 

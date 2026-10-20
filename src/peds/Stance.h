@@ -14,4 +14,12 @@ enum eStance
 	STANCE_NUM,
 };
 
+// A stance low enough that the body is off the standing height. The crouch and
+// the prone share the exits, the headroom rule and the camera offsets.
+static inline bool
+IsLowStance(eStance stance)
+{
+	return stance == STANCE_CROUCH || stance == STANCE_PRONE;
+}
+
 #endif // __GTA_STANCE_H__

@@ -1501,7 +1501,7 @@ CPlayerPed::FindWeaponLockOnTarget(void)
 // The views in which the body keeps facing the camera: the first person view
 // and the mouse third person camera. The pad moves the ped sideways and
 // backwards there, so the strafe and back animation groups are the correct ones
-// and the legs follow the movement direction. The classic camera turns the body
+// and the legs follow the movement direction. The body faces the camera in every
 // toward the movement direction, so the forward cycle holds there.
 bool
 CPlayerPed::BodyFacesCamera(void)
@@ -1533,11 +1533,11 @@ struct tStanceAnimSet
 	const char *back;	// the group of an input behind the body
 };
 
-static const tStanceAnimSet aCrouchAnimSet = {
+static const tStanceAnimSet crouchAnimSet = {
 	CROUCH_ANIM_BLOCK, "crouch", "crouchleft", "crouchright", "crouchback"
 };
 
-static const tStanceAnimSet aProneAnimSet = {
+static const tStanceAnimSet proneAnimSet = {
 	PRONE_ANIM_BLOCK, "prone", "proneleft", "proneright", "proneback"
 };
 
@@ -1616,7 +1616,7 @@ StanceAnimGroupForWalkAngle(const tStanceAnimSet &set, float walkAngle)
 // degrees, the side pose to 130, the back pose beyond it, with the torso
 // lifting further the further behind the aim is. The pose rides over the crawl
 // as a partial, and its lower body keys are dropped, so the legs keep the
-// crawl while the torso and the arms hold the aim (ADR 0015's rule for a
+// crawl while the torso and the arms hold the aim (the pose drives the
 // moving stance). The aim IK's torso correction turns the pose onto the
 // target (CPedIK).
 #define PRONE_AIM_GROUP	"proneaim"
@@ -1821,8 +1821,8 @@ CPlayerPed::ProcessAnimGroups(void)
 	{
 		eStance stance = m_MoveSolver.GetSnapshot().stance;
 
-		if (stance == STANCE_CROUCH || stance == STANCE_PRONE) {
-			const tStanceAnimSet &set = stance == STANCE_CROUCH ? aCrouchAnimSet : aProneAnimSet;
+		if (IsLowStance(stance)) {
+			const tStanceAnimSet &set = stance == STANCE_CROUCH ? crouchAnimSet : proneAnimSet;
 			AssocGroupId stanceGroup = StanceAnimGroupForWalkAngle(set, m_fWalkAngle);
 
 			if (stanceGroup != (AssocGroupId)-1) {
@@ -2290,7 +2290,7 @@ CPlayerPed::UpdatePlayerMovement(CPad *padUsed)
 void
 CPlayerPed::PlayerControlZelda(CPad *padUsed)
 {
-	// The classic camera turns the body toward the movement direction; the
+	// The body faces the camera in every view (VICE-191); the
 	// controller owns the velocity
 	UpdatePlayerMovement(padUsed);
 

@@ -77,10 +77,10 @@ static const char *moveTierNames[TIER_NUM] = {
 //	* the input scale is 1: the input's target speed is the air's own air
 //	  control, and the row's flag keeps the momentum above it.
 static constexpr tMoveStateRow moveStateRows[] = {
-	{ 20.0f / 50.0f, 20.0f / 50.0f, 12.0f, 0.0f, 0.0f, 1.0f, MOVEFLAG_STEER_INPUT },	// MOVE_GROUND
-	{ 4.0f / 50.0f, 0.0f, 1.6f, 0.0f, 0.0f, 1.0f, MOVEFLAG_STEER_INPUT | MOVEFLAG_KEEP_MOMENTUM },	// MOVE_AIR
-	{ 2.0f / 50.0f, 8.0f / 50.0f, 16.0f, 2.0f / 50.0f, 8.0f / 50.0f, 0.0f, MOVEFLAG_STEER_INPUT },	// MOVE_SLIDE
-	{ 2.0f / 50.0f, 0.0f, 3.2f, 0.0f, 0.0f, 1.0f, MOVEFLAG_STEER_INPUT | MOVEFLAG_KEEP_MOMENTUM },	// MOVE_DIVE
+	{ 20.0f / MOVE_ENGINE_UNITS_PER_SECOND, 20.0f / MOVE_ENGINE_UNITS_PER_SECOND, 12.0f, 0.0f, 0.0f, 1.0f, MOVEFLAG_STEER_INPUT },	// MOVE_GROUND
+	{ 4.0f / MOVE_ENGINE_UNITS_PER_SECOND, 0.0f, 1.6f, 0.0f, 0.0f, 1.0f, MOVEFLAG_STEER_INPUT | MOVEFLAG_KEEP_MOMENTUM },	// MOVE_AIR
+	{ 2.0f / MOVE_ENGINE_UNITS_PER_SECOND, 8.0f / MOVE_ENGINE_UNITS_PER_SECOND, 16.0f, 2.0f / MOVE_ENGINE_UNITS_PER_SECOND, 8.0f / MOVE_ENGINE_UNITS_PER_SECOND, 0.0f, MOVEFLAG_STEER_INPUT },	// MOVE_SLIDE
+	{ 2.0f / MOVE_ENGINE_UNITS_PER_SECOND, 0.0f, 3.2f, 0.0f, 0.0f, 1.0f, MOVEFLAG_STEER_INPUT | MOVEFLAG_KEEP_MOMENTUM },	// MOVE_DIVE
 };
 
 // The mask of every eMoveStateId bit; the ladder rows use it for the states a
@@ -108,11 +108,11 @@ static constexpr tMoveLadderRow moveLadder[] = {
 	// playback follows the real speed (SetRealMoveAnim). The slide's two rungs
 	// are the shape's top; the live slide speed is the entry boost's, on top of
 	// the sprint (VICE-180).
-	{ TIER_WALK,		STANCE_STAND, MOVE_ANY_STATE_MASK, 0.786f / 50.0f, MOVE_REPORT_WALK },
-	{ TIER_RUN,		STANCE_STAND, MOVE_ANY_STATE_MASK, 6.439f / 50.0f, MOVE_REPORT_RUN },
-	{ TIER_SPRINT,		STANCE_STAND, MOVE_ANY_STATE_MASK, 14.668f / 50.0f, MOVE_REPORT_SPRINT },
-	{ TIER_SLIDE_ENTRY,	STANCE_STAND, 1u << MOVE_SLIDE,    16.0f / 50.0f, MOVE_REPORT_SPRINT },
-	{ TIER_SLIDE_JUMP,	STANCE_STAND, 1u << MOVE_SLIDE,    17.0f / 50.0f, MOVE_REPORT_SPRINT },
+	{ TIER_WALK,		STANCE_STAND, MOVE_ANY_STATE_MASK, 0.786f / MOVE_ENGINE_UNITS_PER_SECOND, MOVE_REPORT_WALK },
+	{ TIER_RUN,		STANCE_STAND, MOVE_ANY_STATE_MASK, 6.439f / MOVE_ENGINE_UNITS_PER_SECOND, MOVE_REPORT_RUN },
+	{ TIER_SPRINT,		STANCE_STAND, MOVE_ANY_STATE_MASK, 14.668f / MOVE_ENGINE_UNITS_PER_SECOND, MOVE_REPORT_SPRINT },
+	{ TIER_SLIDE_ENTRY,	STANCE_STAND, 1u << MOVE_SLIDE,    16.0f / MOVE_ENGINE_UNITS_PER_SECOND, MOVE_REPORT_SPRINT },
+	{ TIER_SLIDE_JUMP,	STANCE_STAND, 1u << MOVE_SLIDE,    17.0f / MOVE_ENGINE_UNITS_PER_SECOND, MOVE_REPORT_SPRINT },
 };
 
 // The crawl's own speed (VICE-187): the content's crawl_fwd carries 0.443 units
@@ -177,7 +177,7 @@ static constexpr tMoveStanceRow moveStanceRows[] = {
 // 20 units per second squared). The downhill direction of a slope is the
 // horizontal part of its surface normal, which the intent carries, so a slide
 // down a slope gains speed and one up it loses faster than the friction.
-#define MOVE_SLIDE_SLOPE_ACCEL	(20.0f / 50.0f)
+#define MOVE_SLIDE_SLOPE_ACCEL	(20.0f / MOVE_ENGINE_UNITS_PER_SECOND)
 
 // The transition table, in priority order: Step collects the step's trigger
 // bits once and the first row whose state, trigger and guard match fires.
@@ -416,9 +416,6 @@ static_assert(MoveGroundJumpIsTheAirWithTheEvent(),
 
 // The engine does not reach this module, so the few functions the maths needs
 // live here, with the engine's own implementations beside them.
-
-// PI as the engine's PI is (common.h: #define PI (float)M_PI).
-#define MOVE_PI		3.14159265358979323846f
 
 // The engine's Clamp (common.h), in the float domain.
 static float

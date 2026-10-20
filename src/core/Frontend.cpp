@@ -1697,7 +1697,8 @@ static const int controllerSetupVehicleFire = PED_FIREWEAPON;
 
 // The rows of the setup screen, one table line per row, in screen order. A new
 // row is one line here: the row count, the labels and both action columns come
-// from the same table. STANDARD keeps 29 rows and CLASSIC 34.
+// from the same table. The standard set keeps 29 rows; the classic scheme
+// is gone (VICE-191).
 static const tControllerSetupRow controllerSetupRowsStandard[] = {
 	{ "FEC_FIR", PED_FIREWEAPON,                     controllerSetupVehicleFire },
 	{ "FEC_NWE", PED_CYCLE_WEAPON_RIGHT,             VEHICLE_CYCLE_WEAPON_RIGHT },
@@ -1742,13 +1743,6 @@ static const tControllerSetup controllerSetupStandard = { controllerSetupRowsSta
 
 // The rows of a control method. Any other value keeps the STANDARD rows, and a
 // third method is one case here.
-// The one control setup (VICE-191)
-static const tControllerSetup *
-GetControllerSetup(void)
-{
-	return &controllerSetupStandard;
-}
-
 int
 CMenuManager::GetNumOptionsCntrlConfigScreens(void)
 {
@@ -1763,7 +1757,7 @@ CMenuManager::GetNumOptionsCntrlConfigScreens(void)
 			break;
 #endif
 		case MENUPAGE_KEYBOARD_CONTROLS:
-			number = GetControllerSetup()->numRows;
+			number = controllerSetupStandard.numRows;
 			break;
 	}
 	return number;
@@ -1774,7 +1768,7 @@ CMenuManager::DrawControllerBound(int32 yStart, int32 xStart, int32 unused, int8
 {
 	int controllerAction = PED_FIREWEAPON;
 	// GetStartOptionsCntrlConfigScreens();
-	const tControllerSetup *setup = GetControllerSetup();
+	const tControllerSetup *setup = &controllerSetupStandard;
 	int numOptions = GetNumOptionsCntrlConfigScreens();
 	int nextY = MENU_Y(yStart);
 	int bindingMargin = MENU_X(3.0f);
@@ -1992,7 +1986,7 @@ CMenuManager::DrawControllerSetupScreen()
 
 	CFont::PrintString(SCREEN_STRETCH_FROM_RIGHT(MENUHEADER_POS_X), SCREEN_SCALE_Y(MENUHEADER_POS_Y), TheText.Get("FET_STI"));
 
-	const tControllerSetup *setup = GetControllerSetup();
+	const tControllerSetup *setup = &controllerSetupStandard;
 
 	// Blue panel background
 	CSprite2d::DrawRect(CRect(MENU_X_LEFT_ALIGNED(CONTSETUP_LIST_LEFT), MENU_Y(CONTSETUP_LIST_TOP),
@@ -3879,7 +3873,7 @@ CMenuManager::ProcessList(bool &optionSelected, bool &goBack)
 		m_nTotalListRow = m_nSkinsTotal;
 	}
 	if (m_nCurrScreen == MENUPAGE_KEYBOARD_CONTROLS) {
-		m_nTotalListRow = GetControllerSetup()->numRows;
+		m_nTotalListRow = controllerSetupStandard.numRows;
 		if (m_nSelectedListRow > m_nTotalListRow)
 			m_nSelectedListRow = m_nTotalListRow - 1;
 	}

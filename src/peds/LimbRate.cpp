@@ -55,14 +55,14 @@ Clamp(float value, float low, float high)
 	return value < low ? low : value > high ? high : value;
 }
 
-LimbMovementInfo ms_torsoInfo = { DegToRad(50.0f), DegToRad(-50.0f), DegToRad(8.0f) * LIMB_RATE_REFERENCE_HZ, DegToRad(45.0f), DegToRad(-45.0f), DegToRad(5.0f) * LIMB_RATE_REFERENCE_HZ };
+const LimbMovementInfo ms_torsoInfo = { DegToRad(50.0f), DegToRad(-50.0f), DegToRad(8.0f) * LIMB_RATE_REFERENCE_HZ, DegToRad(45.0f), DegToRad(-45.0f), DegToRad(5.0f) * LIMB_RATE_REFERENCE_HZ };
 // The seated player turns the torso further: the body heading is pinned to the seat
-LimbMovementInfo ms_seatTorsoInfo = { DegToRad(90.0f), DegToRad(-90.0f), DegToRad(8.0f) * LIMB_RATE_REFERENCE_HZ, DegToRad(45.0f), DegToRad(-45.0f), DegToRad(5.0f) * LIMB_RATE_REFERENCE_HZ };
-LimbMovementInfo ms_leanInfo = { DegToRad(20.0f), DegToRad(-20.0f), DegToRad(3.0f) * LIMB_RATE_REFERENCE_HZ, 0.0f, 0.0f, DegToRad(1.0f) * LIMB_RATE_REFERENCE_HZ };
-LimbMovementInfo ms_headInfo = { DegToRad(90.0f), DegToRad(-90.0f), DegToRad(15.0f) * LIMB_RATE_REFERENCE_HZ, DegToRad(45.0f), DegToRad(-45.0f), DegToRad(8.0f) * LIMB_RATE_REFERENCE_HZ };
-LimbMovementInfo ms_headRestoreInfo = { DegToRad(90.0f), DegToRad(-90.0f), DegToRad(10.0f) * LIMB_RATE_REFERENCE_HZ, DegToRad(45.0f), DegToRad(-45.0f), DegToRad(5.0f) * LIMB_RATE_REFERENCE_HZ };
-LimbMovementInfo ms_upperArmInfo = { DegToRad(5.0f), DegToRad(-120.0f), DegToRad(20.0f) * LIMB_RATE_REFERENCE_HZ, DegToRad(70.0f), DegToRad(-70.0f), DegToRad(20.0f) * LIMB_RATE_REFERENCE_HZ };
-LimbMovementInfo ms_lowerArmInfo = { DegToRad(60.0f), DegToRad(0.0f), DegToRad(15.0f) * LIMB_RATE_REFERENCE_HZ, DegToRad(90.0f), DegToRad(-90.0f), DegToRad(10.0f) * LIMB_RATE_REFERENCE_HZ };
+const LimbMovementInfo ms_seatTorsoInfo = { DegToRad(90.0f), DegToRad(-90.0f), DegToRad(8.0f) * LIMB_RATE_REFERENCE_HZ, DegToRad(45.0f), DegToRad(-45.0f), DegToRad(5.0f) * LIMB_RATE_REFERENCE_HZ };
+const LimbMovementInfo ms_leanInfo = { DegToRad(20.0f), DegToRad(-20.0f), DegToRad(3.0f) * LIMB_RATE_REFERENCE_HZ, 0.0f, 0.0f, DegToRad(1.0f) * LIMB_RATE_REFERENCE_HZ };
+const LimbMovementInfo ms_headInfo = { DegToRad(90.0f), DegToRad(-90.0f), DegToRad(15.0f) * LIMB_RATE_REFERENCE_HZ, DegToRad(45.0f), DegToRad(-45.0f), DegToRad(8.0f) * LIMB_RATE_REFERENCE_HZ };
+const LimbMovementInfo ms_headRestoreInfo = { DegToRad(90.0f), DegToRad(-90.0f), DegToRad(10.0f) * LIMB_RATE_REFERENCE_HZ, DegToRad(45.0f), DegToRad(-45.0f), DegToRad(5.0f) * LIMB_RATE_REFERENCE_HZ };
+const LimbMovementInfo ms_upperArmInfo = { DegToRad(5.0f), DegToRad(-120.0f), DegToRad(20.0f) * LIMB_RATE_REFERENCE_HZ, DegToRad(70.0f), DegToRad(-70.0f), DegToRad(20.0f) * LIMB_RATE_REFERENCE_HZ };
+const LimbMovementInfo ms_lowerArmInfo = { DegToRad(60.0f), DegToRad(0.0f), DegToRad(15.0f) * LIMB_RATE_REFERENCE_HZ, DegToRad(90.0f), DegToRad(-90.0f), DegToRad(10.0f) * LIMB_RATE_REFERENCE_HZ };
 
 // The step of one frame: the rate over dt seconds. A zero step (a paused
 // frame) moves nothing, where the stock call moved a fixed angle whatever the

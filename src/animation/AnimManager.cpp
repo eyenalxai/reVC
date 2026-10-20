@@ -1067,7 +1067,7 @@ const AnimAssocDefinition CAnimManager::ms_aAnimAssocDefinitions[NUM_ANIM_ASSOC_
 	// The crouch and prone movement sets (VICE-186, VICE-187): the forward and
 	// back sets move the ped along y, the side sets along x, so the side sets
 	// carry aStdAnimDescsSide's lateral translation flag, exactly as the strafe
-	// groups above do. The prone block does not exist until VICE-187 ships it,
+	// groups above do. The prone block ships with VICE-187's content;
 	// so those five groups stay unloaded until then.
 	{ "crouch", "crouch", MI_COP, awc(aCrouchAnimations), aStdAnimDescs },
 	{ "crouchback", "crouch", MI_COP, awc(aCrouchBackAnimations), aStdAnimDescs },
