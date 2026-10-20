@@ -2061,7 +2061,20 @@ CPlayerPed::ProcessPlayerWeapon(CPad *padUsed)
 bool
 CPlayerPed::MovementDisabledBecauseOfTargeting(void)
 {
-	return m_pPointGunAt && !CWeaponInfo::GetWeaponInfo(GetWeapon()->m_eWeaponType)->IsFlagSet(WEAPONFLAG_CANAIM_WITHARM);
+	// The stationary sights hold the ped still: the scope, the rocket sight and
+	// the viewfinder. Every other weapon aims on the move (the one aim system),
+	// so it never gates the movement. Naming the three sights keeps a weapon
+	// that lacks an aim flag from freezing the ped by accident.
+	if (m_pPointGunAt == nil)
+		return false;
+	switch (GetWeapon()->m_eWeaponType) {
+	case WEAPONTYPE_SNIPERRIFLE:
+	case WEAPONTYPE_ROCKETLAUNCHER:
+	case WEAPONTYPE_CAMERA:
+		return true;
+	default:
+		return false;
+	}
 }
 
 // The movement controller owns the player's horizontal velocity whenever the

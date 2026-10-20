@@ -1,4 +1,4 @@
-# ADR 0028: The movement solver owns velocity, position and stance
+# ADR 0031: The movement solver owns velocity, position and stance
 
 Date: 2026-10-18
 Status: Accepted

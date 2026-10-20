@@ -1658,6 +1658,22 @@ CheckSlide(void)
 		Check(snapshot.stance == STANCE_CROUCH,
 			"the slide's natural end leaves the ped in the crouch (VICE-192)");
 
+		// a held sprint stands the ped up instead of crouching him (VICE-192):
+		// the sprint's stance row sits above the slide's end, so a player who
+		// keeps the sprint goes straight to the stand
+		{
+			CPlayerMoveSolver sprinting;
+			SMoveIntent held = WalkIntent(0.0f, SLIDE_SPRINT_SPEED);
+
+			StepIntoSlide(&sprinting);
+			held.tier = TIER_SPRINT;
+			held.sprintRequested = true;
+			held.vel = SMoveVec2{ 0.0f, SLIDE_EXIT_SPEED - 0.01f };
+			snapshot = sprinting.Step(held);
+			Check(snapshot.state == MOVE_GROUND && snapshot.stance == STANCE_STAND,
+				"a held sprint stands the ped up at the slide's end (VICE-192)");
+		}
+
 		// the entry refuses inside the hysteresis band, and at any tier but
 		// the sprint's
 		{

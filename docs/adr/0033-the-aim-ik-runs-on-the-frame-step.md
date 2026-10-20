@@ -1,4 +1,4 @@
-# ADR 0030: The aim IK runs on the frame step and on the frame's own matrices
+# ADR 0033: The aim IK runs on the frame step and on the frame's own matrices
 
 Date: 2026-10-19
 Status: Accepted
@@ -21,7 +21,7 @@ rules:
 - Every limiter row advanced a fixed angle per call of `MoveLimb`, so the IK's
   angular speed followed the frame rate: at 100 fps a limb closed twice as fast
   as at 50, and it reached its limits and its `GUN_POINTED_SUCCESSFULLY` sooner.
-  The movement solver's tables are per second (ADR 0028); the aim's were not.
+  The movement solver's tables are per second (ADR 0031); the aim's were not.
 - The matrix array is rebuilt only by `UpdateRpHAnim`. Inside
   `CPed::ProcessControl` it still held the previous frame's pose - the camera
   refreshes its target before its own reads - so the arm pitch and the IK's

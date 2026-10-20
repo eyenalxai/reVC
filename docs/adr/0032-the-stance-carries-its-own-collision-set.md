@@ -1,4 +1,4 @@
-# ADR 0029: The stance carries its own collision set
+# ADR 0032: The stance carries its own collision set
 
 Date: 2026-10-18
 Status: Accepted

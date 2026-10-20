@@ -169,7 +169,9 @@ static constexpr tMoveStanceRow moveStanceRows[] = {
 // when the ped is no faster than a run. The exit is below the entry - the
 // hysteresis that keeps a slide from ending on the frame it starts - and the
 // table check holds the two in that order.
-#define MOVE_SLIDE_ENTRY_SPEED	0.18f
+// Just below the sprint rung (14.668 units a second), so a slide starts
+// from a full sprint and is never slower than the sprint it replaces
+#define MOVE_SLIDE_ENTRY_SPEED	(14.0f / MOVE_ENGINE_UNITS_PER_SECOND)
 #define MOVE_SLIDE_EXIT_SPEED	0.13f
 
 // The part of the free fall that runs along a slope, in engine units: the
@@ -229,6 +231,8 @@ static constexpr tMoveTransitionRow moveTransitions[] = {
 	// table lands the ped in the prone on the same edge (VICE-177): this row
 	// only leaves the slide.
 	{ MOVE_SLIDE,	TRIGGER_PRONE,		MOVE_GROUND,	0, GUARD_NONE, 0.0f },
+	// a crouch or stand press ends the slide on the ground (VICE-180's cancels)
+	{ MOVE_SLIDE,	TRIGGER_CROUCH,		MOVE_GROUND,	0, GUARD_NONE, 0.0f },
 	// MOVE_SLIDE: the feet leaving the surface end the slide into the fall,
 	// with the speed the slide had.
 	{ MOVE_SLIDE,	TRIGGER_AIRBORNE,	MOVE_AIR,	0, GUARD_NONE, 0.0f },

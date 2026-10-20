@@ -903,7 +903,6 @@ float fMiniGunBetaOffset = 0.3f;
 struct tStanceCamOffset
 {
 	float bodyHeight;	// the follow cameras' target height
-	float eyeHeight;	// the first person and sight cameras' anchor height
 };
 
 // The stance's collision set, in eStance order: the set the world collides the
@@ -915,15 +914,14 @@ static const CColModel *const StanceCamColModels[STANCE_NUM] = {
 	&CTempColModels::ms_colModelPedProne,	// STANCE_PRONE
 };
 
-// The stance's two heights, both measured from the standing row: the top of the
-// collision set's box is the body's height, and the eye rides the head, whose
-// top the same box is, so the eye drops with it. The one drop is read under the
-// two names their readers use (FollowCamStanceHeight and StanceEyeHeight); the
-// columns are separate because a later stance that carries its head differently
-// moves the eye row alone. The prone is that stance: its pose puts the head on
-// the ground, so the eye rides the posed head bone and the stance adds nothing
-// to it - the box-top drop stays the body column, which is the follow camera's
-// target.
+// The stance's height, measured from the standing row: the top of the collision
+// set's box is the body's height, which is the follow cameras' target.
+//
+// The eye is not here. The first person and sight cameras anchor on the head
+// bone, and the stance's own pose already carries the head down - the crouch
+// bends the body, the prone lays it on the ground - so adding the box-top drop
+// to the eye would drop it twice (the crouch did, until the review caught it).
+// A stance whose pose does not carry the head would need its own eye row.
 static tStanceCamOffset
 StanceCamOffset(eStance stance)
 {
@@ -933,9 +931,6 @@ StanceCamOffset(eStance stance)
 
 	tStanceCamOffset offset;
 	offset.bodyHeight = drop;
-	offset.eyeHeight = drop;
-	if (stance == STANCE_PRONE)
-		offset.eyeHeight = 0.0f;
 	return offset;
 }
 
@@ -946,16 +941,6 @@ FollowCamStanceHeight(CEntity *entity)
 {
 	if(entity->IsPed())
 		return StanceCamOffset(((CPed*)entity)->GetStance()).bodyHeight;
-	return 0.0f;
-}
-
-// The eye height offset of the ped a first person or sight camera follows; zero
-// for a vehicle's own camera (the seat view reads no stance).
-static float
-StanceEyeHeight(CEntity *entity)
-{
-	if(entity->IsPed())
-		return StanceCamOffset(((CPed*)entity)->GetStance()).eyeHeight;
 	return 0.0f;
 }
 
@@ -2070,7 +2055,6 @@ CCam::Process_Rocket(const CVector &CameraTarget, float, float, float)
 	Source.z += 0.1f;
 	// The stance's eye height, so the scope looks through the eye of the
 	// stance's own body (VICE-179; see StanceCamOffset)
-	Source.z += StanceEyeHeight(CamTargetEntity);
 	Source.x -= BackOffset*Cos(m_fInitialPlayerOrientation);
 	Source.y -= BackOffset*Sin(m_fInitialPlayerOrientation);
 
@@ -2304,7 +2288,6 @@ CCam::Process_M16_1stPerson(const CVector &CameraTarget, float, float, float)
 		// The stance's eye height, so the sight looks through the eye of the
 		// stance's own body (VICE-179; see StanceCamOffset). The back offsets
 		// below stay the camera's own.
-		Source.z += StanceEyeHeight(CamTargetEntity);
 		if(((CPed*)CamTargetEntity)->bIsDucking){
 			Source.x -= fDuckingBackOffset*CamTargetEntity->GetForward().x;
 			Source.y -= fDuckingBackOffset*CamTargetEntity->GetForward().y;
@@ -2457,7 +2440,6 @@ CCam::Process_1stPerson(const CVector &CameraTarget, float TargetOrientation, fl
 		// own body (VICE-179; see StanceCamOffset). The fork's first person
 		// view already sits at the eyes (VICE-47), so the offset is this one
 		// height, and the head bone keeps the pose the animation gives it.
-		Source.z += StanceEyeHeight(CamTargetEntity);
 		// The first person view sits at the eyes: the head bone plus a small
 		// forward offset. The stock back offsets would sit inside the neck.
 		if(TheCamera.FirstPersonViewEnabled()){
@@ -2898,7 +2880,6 @@ CCam::Process_Sniper(const CVector &CameraTarget, float TargetOrientation, float
 	// The stance's eye height, so the scope looks through the eye of the
 	// stance's own body (VICE-179; see StanceCamOffset). The back offsets below
 	// stay the camera's own, and the duck flag keeps its own pair.
-	Source.z += StanceEyeHeight(target);
 	if(target->bIsDucking){
 		Source.x -= fDuckingBackOffset*target->GetForward().x;
 		Source.y -= fDuckingBackOffset*target->GetForward().y;

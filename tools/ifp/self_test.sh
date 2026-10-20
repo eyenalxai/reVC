@@ -71,6 +71,17 @@ else
 fi
 
 echo
+echo "== the prone block (VICE-187)"
+PRONE="$ROOT/gamefiles/anim/prone.ifp"
+if "$IFP" check "$PRONE" --movement > "$D/prone-check.txt" 2>&1 &&
+   "$IFP" check "$PRONE" --require-root >> "$D/prone-check.txt" 2>&1; then
+	ok "$(head -1 "$D/prone-check.txt")"
+	ok "$(tail -1 "$D/prone-check.txt")"
+else
+	bad "the prone block does not check out"; cat "$D/prone-check.txt"
+fi
+
+echo
 echo "== the crouch block from the shipped cycles (VICE-186)"
 CROUCH="$ROOT/gamefiles/anim/crouch.ifp"
 if "$IFP" crouch "$GAME" "$D/crouch.ifp" > "$D/crouch.txt" 2>&1; then
