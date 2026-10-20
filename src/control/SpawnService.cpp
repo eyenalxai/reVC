@@ -439,6 +439,13 @@ CSpawnService::RequestExplicit(const SSpawnExplicitRequest &request, CVehicle **
  * spends no constructor dice); the boats create first and keep the water the
  * generator gave. The alarm and lock rolls are the parked kind's policy, with
  * the generator's thresholds passed in, in the old position of the stream.
+ *
+ * The readiness the path checks is CStreaming::HasModelLoaded, the old
+ * generator's own: the parked ticket is the placement's migration, and the
+ * map generator's car must appear exactly when the old code made it. The
+ * ambient's stricter rule (CSpawnReadiness::IsModelReady: the model with its
+ * txd and its animation block, VICE-151) is the request gate's; the parked
+ * path prewarms nothing and holds no pin.
  */
 
 /* The model policy of a dynamic generator: the old call, verbatim - the zone
@@ -479,8 +486,10 @@ SpawnParkedSpotIsBlocked(int32_t model, const CVector &pos)
 struct SSpawnParkedAttempt
 {
 	const SSpawnParkedRequest *pRequest;
+	const SSpawnParkedDecision *pDecision;
 	CVector pos;
 	CVehicle *pVehicle;
+	bool poolRefused;	/* the constructor found the pool full */
 };
 
 /* The world work of one stage, from the live world. */
@@ -499,7 +508,7 @@ SpawnParkedResolveStage(void *user, ESpawnParkedStage stage, int32_t model, SSpa
 	case SPAWN_PARKED_STAGE_BLOCKAGE:
 		facts->blocked = SpawnParkedSpotIsBlocked(model, CVector(request.x, request.y, request.z));
 		break;
-	case SPAWN_PARKED_STAGE_READY:
+	case SPAWN_PARKED_STAGE_READINESS:
 		/* The fixed model is requested here, after the blockage check: the
 		 * old call's order (the request is what loads it for a later
 		 * frame; the dynamic policy draws from the loaded arrays). */
@@ -514,7 +523,7 @@ SpawnParkedResolveStage(void *user, ESpawnParkedStage stage, int32_t model, SSpa
 		bool groundFound;
 
 		if (CModelInfo::IsBoatModel(model)) {
-			pVehicle = new CBoat(model, SPAWN_VEHICLE_TAG_PARKED);
+			pVehicle = new CBoat(model, pAttempt->pDecision->createdBy);
 			if (pos.z <= -100.0f)
 				pos.z = CWorld::FindGroundZForCoord(pos.x, pos.y);
 			((CBoat *)pVehicle)->bExtendedRange = true;
@@ -536,13 +545,27 @@ SpawnParkedResolveStage(void *user, ESpawnParkedStage stage, int32_t model, SSpa
 				return;
 			}
 			if (((CVehicleModelInfo *)CModelInfo::GetModelInfo(model))->m_vehicleType == VEHICLE_TYPE_BIKE) {
-				CBike *pBike = new CBike(model, SPAWN_VEHICLE_TAG_PARKED);
+				CBike *pBike = new CBike(model, pAttempt->pDecision->createdBy);
 				pBike->bIsStanding = true;
 				pVehicle = pBike;
 			} else {
-				pVehicle = new CAutomobile(model, SPAWN_VEHICLE_TAG_PARKED);
+				pVehicle = new CAutomobile(model, pAttempt->pDecision->createdBy);
 			}
 			pVehicle->bLightsOn = false;
+		}
+		if (pVehicle == nil) {
+			/* The constructor's own pool refusal (the request's free-space
+			 * check passed, so the last slot went to another path in
+			 * between): the attempt records it, the ground was found, and
+			 * the request refuses POOL (the explicit kind's own guard). The
+			 * placement fact stays the request's own; the request returns
+			 * before anything reads it. */
+			pAttempt->poolRefused = true;
+			facts->groundFound = true;
+			facts->x = request.x;
+			facts->y = request.y;
+			facts->z = request.z;
+			return;
 		}
 		pVehicle->bIsStatic = false;
 		pVehicle->bEngineOn = false;
@@ -586,9 +609,25 @@ CSpawnService::RequestParked(const SSpawnParkedRequest &request, SSpawnParkedDec
 
 	SpawnRequestBegin(&ms_Telemetry, request.purpose, SPAWN_KIND_PARKED);
 
+	/* The decision carries the request's own state before the first gate, so
+	 * a refusal that returns early still hands the caller a sane model
+	 * field. */
+	SpawnParkedDecisionBegin(request, &decision);
+
+	if (CPools::GetVehiclePool()->GetNoOfFreeSpaces() <= 0) {
+		/* The pool's last slots are physical, not a reserve: even the parked
+		 * path cannot put a car in a full pool (the explicit kind's check). */
+		if (pDecision)
+			*pDecision = decision;
+		SpawnNoteRefusal(&ms_Telemetry, SPAWN_REFUSAL_POOL);
+		return SPAWN_REFUSAL_POOL;
+	}
+
 	attempt.pRequest = &request;
+	attempt.pDecision = &decision;
 	attempt.pos = CVector(request.x, request.y, request.z);
 	attempt.pVehicle = nil;
+	attempt.poolRefused = false;
 
 	/* The parked target and the car budget: the generator's own first check
 	 * (PopulationBudget.h, ParkedCarTarget). */
@@ -597,11 +636,18 @@ CSpawnService::RequestParked(const SSpawnParkedRequest &request, SSpawnParkedDec
 	budget.carsInUse = CCarCtrl::NumCarsInUse();
 	budget.carBudget = CCarCtrl::MaxNumberOfCarsInUse;
 
-	refusal = SpawnRunParked(request, budget, SpawnParkedChooseModel, nil,
-		SpawnParkedResolveStage, &attempt, &decision, &ms_Telemetry);
+	refusal = SpawnRunParked(request, budget, CTimer::GetTimeInMilliseconds(),
+		SpawnParkedChooseModel, nil, SpawnParkedResolveStage, &attempt, &decision, &ms_Telemetry);
 	if (pDecision)
 		*pDecision = decision;
 
+	if (attempt.poolRefused) {
+		/* The constructor's own pool refusal (the free-space check above
+		 * passed, so the pool's last slot went to another path in
+		 * between): the pool's reason, counted. */
+		SpawnNoteRefusal(&ms_Telemetry, SPAWN_REFUSAL_POOL);
+		return SPAWN_REFUSAL_POOL;
+	}
 	if (refusal != SPAWN_REFUSAL_NONE) {
 		/* A car a stage made is deleted when a later gate refuses: the
 		 * parked path's own cleanup. */
@@ -612,7 +658,9 @@ CSpawnService::RequestParked(const SSpawnParkedRequest &request, SSpawnParkedDec
 
 	/* The creation's own setup: the fresh-spawn grace, the world, the
 	 * counters, the alarm and lock rolls (the generator's policy numbers,
-	 * rolled here) and the colours. The parked tag carries no driver. */
+	 * rolled here) and the colours the decision carries (the request's own,
+	 * or the model's when a re-choice cleared them). The parked tag carries
+	 * no driver. */
 	pVehicle = attempt.pVehicle;
 	pVehicle->m_nRemovalProtectedUntil = CTimer::GetTimeInMilliseconds() + decision.protectMs;
 	CWorld::Add(pVehicle);
@@ -621,9 +669,9 @@ CSpawnService::RequestParked(const SSpawnParkedRequest &request, SSpawnParkedDec
 		pVehicle->m_nAlarmState = -1;
 	if (CGeneral::GetRandomNumberInRange(0, 100) < request.doorlock)
 		pVehicle->m_nDoorLock = CARLOCK_LOCKED;
-	if (request.color1 != -1 && request.color2 != -1) {
-		pVehicle->m_currentColour1 = request.color1;
-		pVehicle->m_currentColour2 = request.color2;
+	if (decision.color1 != -1 && decision.color2 != -1) {
+		pVehicle->m_currentColour1 = decision.color1;
+		pVehicle->m_currentColour2 = decision.color2;
 	}
 	CVisibilityPlugins::SetClumpAlpha(pVehicle->GetClump(), 0);
 	SpawnNoteCreated(&ms_Telemetry, request.purpose);

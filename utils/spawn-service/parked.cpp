@@ -17,9 +17,11 @@
  *	B. The model resolution. The fixed model passes through; a dynamic
  *	   generator reuses its stored model while it is resident; the empty
  *	   field (-1) and an evicted stored model draw a fresh one from the
- *	   policy; the re-choice stores -model and asks for the colour reset; a
- *	   policy with nothing refuses READINESS and leaves the field standing;
- *	   the stages after the resolution work with the resolved model.
+ *	   policy; the re-choice stores -model and clears the decision's
+ *	   colours (the old car's paint does not follow a new model); a policy
+ *	   with nothing refuses READINESS and leaves the field standing; the
+ *	   stages after the resolution work with the resolved model; the
+ *	   readiness refusals and passes move the purpose's wait clock.
  *
  *	C. The placement gates. The blockage (OCCUPANCY), the readiness
  *	   (READINESS), the ground (NO_SITE plus the primitive's defect row) and
@@ -176,7 +178,7 @@ WorldStage(void *user, ESpawnParkedStage stage, int32_t model, SSpawnParkedFacts
 		w->modelOfLastStage = model;
 		facts->blocked = w->blocked;
 		break;
-	case SPAWN_PARKED_STAGE_READY:
+	case SPAWN_PARKED_STAGE_READINESS:
 		facts->modelLoaded = w->modelResident;
 		break;
 	case SPAWN_PARKED_STAGE_GROUND:
@@ -242,14 +244,26 @@ MakeBudget(int32_t parkedCars, int32_t parkedTarget)
 	return b;
 }
 
-/* One request through the whole parked path, over the scripted world. */
+/* The scripted clock: the readiness waits read it (the engine passes the
+ * game's milliseconds; the soak passes its frame clock). */
+static uint32_t g_nowMs = 1000;
+
 static ESpawnRefusal
-RunParked(const SSpawnParkedRequest &request, const SSpawnParkedBudget &budget,
+RunParkedAt(const SSpawnParkedRequest &request, const SSpawnParkedBudget &budget, uint32_t nowMs,
 	SWorld *w, SPolicy *p, SSpawnParkedDecision *decision, SSpawnServiceTelemetry *tel)
 {
 	WorldDefaults(w, &request);
 	p->calls = 0;
-	return SpawnRunParked(request, budget, PolicyChoose, p, WorldStage, w, decision, tel);
+	return SpawnRunParked(request, budget, nowMs, PolicyChoose, p, WorldStage, w, decision, tel);
+}
+
+/* One request through the whole parked path, over the scripted world, at the
+ * scripted clock. */
+static ESpawnRefusal
+RunParked(const SSpawnParkedRequest &request, const SSpawnParkedBudget &budget,
+	SWorld *w, SPolicy *p, SSpawnParkedDecision *decision, SSpawnServiceTelemetry *tel)
+{
+	return RunParkedAt(request, budget, g_nowMs, w, p, decision, tel);
 }
 
 /* ------------------------------------------------------------------ section A */
@@ -348,7 +362,7 @@ SectionModel(void)
 	p.calls = 0;
 	WorldDefaults(&w, &r);
 	w.storedModelResident = false;
-	CheckInt((int)SpawnRunParked(r, b, PolicyChoose, &p, WorldStage, &w, &d, &tel), (int)SPAWN_REFUSAL_NONE, "B16: an evicted stored model draws");
+	CheckInt((int)SpawnRunParked(r, b, g_nowMs, PolicyChoose, &p, WorldStage, &w, &d, &tel), (int)SPAWN_REFUSAL_NONE, "B16: an evicted stored model draws");
 	CheckInt(p.calls, 1, "B17: the policy is called once");
 	CheckInt(d.modelIndex, -501, "B18: the new field stores the drawn model");
 
@@ -368,9 +382,70 @@ SectionModel(void)
 	p.calls = 0;
 	WorldDefaults(&w, &r);
 	w.modelResident = false;
-	CheckInt((int)SpawnRunParked(r, b, PolicyChoose, &p, WorldStage, &w, &d, &tel), (int)SPAWN_REFUSAL_READINESS, "B24: a non-resident model refuses READINESS");
-	Check(w.stageSeen[SPAWN_PARKED_STAGE_READY], "B25: the ready stage ran");
+	CheckInt((int)SpawnRunParked(r, b, g_nowMs, PolicyChoose, &p, WorldStage, &w, &d, &tel), (int)SPAWN_REFUSAL_READINESS, "B24: a non-resident model refuses READINESS");
+	Check(w.stageSeen[SPAWN_PARKED_STAGE_READINESS], "B25: the readiness stage ran");
 	Check(!w.stageSeen[SPAWN_PARKED_STAGE_GROUND], "B26: the ground stage did not run");
+
+	/* The colours: the request's own ride with the decision; a re-choice
+	 * clears them (the review's defect: the old car's paint must not follow
+	 * a new model). */
+	SpawnTelemetryReset(&tel);
+	r = MakeRequest(400);
+	r.color1 = 12;
+	r.color2 = 34;
+	p.model = 500;
+	CheckInt((int)RunParked(r, b, &w, &p, &d, &tel), (int)SPAWN_REFUSAL_NONE, "B27: a fixed model with colours passes");
+	CheckInt(d.color1, 12, "B28: the decision carries the request's colour 1");
+	CheckInt(d.color2, 34, "B29: the decision carries the request's colour 2");
+
+	SpawnTelemetryReset(&tel);
+	r = MakeRequest(-400);
+	r.color1 = 12;
+	r.color2 = 34;
+	p.model = 500;
+	CheckInt((int)RunParked(r, b, &w, &p, &d, &tel), (int)SPAWN_REFUSAL_NONE, "B30: a stored model with colours passes");
+	Check(d.modelRechosen == false, "B31: no re-choice");
+	CheckInt(d.color1, 12, "B32: the stored model keeps the request's colours");
+
+	SpawnTelemetryReset(&tel);
+	r = MakeRequest(-1);
+	r.color1 = 12;
+	r.color2 = 34;
+	p.model = 500;
+	CheckInt((int)RunParked(r, b, &w, &p, &d, &tel), (int)SPAWN_REFUSAL_NONE, "B33: the empty field with colours draws");
+	Check(d.modelRechosen == true, "B34: the re-choice is flagged");
+	CheckInt(d.color1, -1, "B35: the re-choice clears colour 1");
+	CheckInt(d.color2, -1, "B36: the re-choice clears colour 2");
+
+	SpawnTelemetryReset(&tel);
+	r = MakeRequest(-400);
+	r.color1 = 12;
+	r.color2 = 34;
+	p.model = 501;
+	WorldDefaults(&w, &r);
+	w.storedModelResident = false;
+	p.calls = 0;
+	CheckInt((int)SpawnRunParked(r, b, g_nowMs, PolicyChoose, &p, WorldStage, &w, &d, &tel), (int)SPAWN_REFUSAL_NONE, "B37: an evicted stored model with colours draws");
+	Check(d.modelRechosen == true, "B38: the re-choice is flagged");
+	CheckInt(d.color1, -1, "B39: the evicted re-choice clears colour 1");
+	CheckInt(d.color2, -1, "B40: the evicted re-choice clears colour 2");
+
+	/* The readiness wait rows: a deferral opens the purpose's clock, the
+	 * next pass closes it with the milliseconds spent. */
+	SpawnTelemetryReset(&tel);
+	r = MakeRequest(400);
+	p.calls = 0;
+	WorldDefaults(&w, &r);
+	w.modelResident = false;
+	SpawnRunParked(r, b, 1000, PolicyChoose, &p, WorldStage, &w, &d, &tel);
+	CheckInt((int)tel.m_nReadinessWaits, 1, "B41: the deferral counts on the wait row");
+	CheckInt((int)tel.m_aReadinessSinceMs[SPAWN_PURPOSE_PARKED], 1000, "B42: the wait clock opens at the first deferral");
+
+	WorldDefaults(&w, &r);
+	p.calls = 0;
+	SpawnRunParked(r, b, 1250, PolicyChoose, &p, WorldStage, &w, &d, &tel);
+	CheckInt((int)tel.m_nReadinessWaitMs, 250, "B43: the pass adds the wait's milliseconds");
+	CheckInt((int)tel.m_aReadinessSinceMs[SPAWN_PURPOSE_PARKED], 0, "B44: the clock clears on the pass");
 }
 
 /* ------------------------------------------------------------------ section C */
@@ -415,7 +490,7 @@ SectionGates(void)
 			w.arm = kArms[i];
 			p.calls = 0;
 			sprintf(what, "C1: the %s arm answers its own row", kNames[i]);
-			CheckInt((int)SpawnRunParked(r, b, PolicyChoose, &p, WorldStage, &w, &d, &tel),
+			CheckInt((int)SpawnRunParked(r, b, g_nowMs, PolicyChoose, &p, WorldStage, &w, &d, &tel),
 				kAllowed[i] ? (int)SPAWN_REFUSAL_NONE : (int)SPAWN_REFUSAL_VISIBILITY, what);
 			if (!kAllowed[i]) {
 				sprintf(what, "C2: the %s arm refuses VISIBILITY once", kNames[i]);
@@ -430,17 +505,17 @@ SectionGates(void)
 	WorldDefaults(&w, &r);
 	w.blocked = true;
 	p.calls = 0;
-	CheckInt((int)SpawnRunParked(r, b, PolicyChoose, &p, WorldStage, &w, &d, &tel), (int)SPAWN_REFUSAL_OCCUPANCY, "C3: a blocked spot refuses OCCUPANCY");
+	CheckInt((int)SpawnRunParked(r, b, g_nowMs, PolicyChoose, &p, WorldStage, &w, &d, &tel), (int)SPAWN_REFUSAL_OCCUPANCY, "C3: a blocked spot refuses OCCUPANCY");
 	CheckInt((int)tel.m_nRefusalsByReason[SPAWN_REFUSAL_OCCUPANCY], 1, "C4: the refusal is counted once");
 	Check(w.stageSeen[SPAWN_PARKED_STAGE_BLOCKAGE], "C5: the blockage stage ran");
-	Check(!w.stageSeen[SPAWN_PARKED_STAGE_READY], "C6: the ready stage did not run");
+	Check(!w.stageSeen[SPAWN_PARKED_STAGE_READINESS], "C6: the ready stage did not run");
 
 	/* The ground: NO_SITE and the primitive's defect row. */
 	SpawnTelemetryReset(&tel);
 	WorldDefaults(&w, &r);
 	w.groundFound = false;
 	p.calls = 0;
-	CheckInt((int)SpawnRunParked(r, b, PolicyChoose, &p, WorldStage, &w, &d, &tel), (int)SPAWN_REFUSAL_NO_SITE, "C7: no ground refuses NO_SITE");
+	CheckInt((int)SpawnRunParked(r, b, g_nowMs, PolicyChoose, &p, WorldStage, &w, &d, &tel), (int)SPAWN_REFUSAL_NO_SITE, "C7: no ground refuses NO_SITE");
 	CheckInt((int)tel.m_nRefusalsByReason[SPAWN_REFUSAL_NO_SITE], 1, "C8: the refusal is counted once");
 	CheckInt((int)tel.m_nGroundRejections, 1, "C9: the defect row counts the ground failure");
 	Check(!w.stageSeen[SPAWN_PARKED_STAGE_BUBBLE], "C10: the bubble stage did not run");
@@ -452,27 +527,27 @@ SectionGates(void)
 	w.groundFound = false;
 	w.arm = NEAR_BUBBLE_ARM_NONE;
 	p.calls = 0;
-	CheckInt((int)SpawnRunParked(r, b, PolicyChoose, &p, WorldStage, &w, &d, &tel), (int)SPAWN_REFUSAL_OCCUPANCY, "C11: the blockage answers before the ground");
+	CheckInt((int)SpawnRunParked(r, b, g_nowMs, PolicyChoose, &p, WorldStage, &w, &d, &tel), (int)SPAWN_REFUSAL_OCCUPANCY, "C11: the blockage answers before the ground");
 
 	SpawnTelemetryReset(&tel);
 	WorldDefaults(&w, &r);
 	w.modelResident = false;
 	w.groundFound = false;
 	p.calls = 0;
-	CheckInt((int)SpawnRunParked(r, b, PolicyChoose, &p, WorldStage, &w, &d, &tel), (int)SPAWN_REFUSAL_READINESS, "C12: the readiness answers before the ground");
+	CheckInt((int)SpawnRunParked(r, b, g_nowMs, PolicyChoose, &p, WorldStage, &w, &d, &tel), (int)SPAWN_REFUSAL_READINESS, "C12: the readiness answers before the ground");
 
 	SpawnTelemetryReset(&tel);
 	WorldDefaults(&w, &r);
 	w.groundFound = false;
 	w.arm = NEAR_BUBBLE_ARM_NONE;
 	p.calls = 0;
-	CheckInt((int)SpawnRunParked(r, b, PolicyChoose, &p, WorldStage, &w, &d, &tel), (int)SPAWN_REFUSAL_NO_SITE, "C13: the ground answers before the bubble");
+	CheckInt((int)SpawnRunParked(r, b, g_nowMs, PolicyChoose, &p, WorldStage, &w, &d, &tel), (int)SPAWN_REFUSAL_NO_SITE, "C13: the ground answers before the bubble");
 
 	/* The stage order is the path's own: every stage runs once, in order. */
 	SpawnTelemetryReset(&tel);
 	WorldDefaults(&w, &r);
 	p.calls = 0;
-	CheckInt((int)SpawnRunParked(r, b, PolicyChoose, &p, WorldStage, &w, &d, &tel), (int)SPAWN_REFUSAL_NONE, "C14: the passing path creates");
+	CheckInt((int)SpawnRunParked(r, b, g_nowMs, PolicyChoose, &p, WorldStage, &w, &d, &tel), (int)SPAWN_REFUSAL_NONE, "C14: the passing path creates");
 	CheckInt(w.stagesRun, SPAWN_PARKED_STAGE_COUNT, "C15: every stage runs once");
 	for (i = 0; i < SPAWN_PARKED_STAGE_COUNT; i++)
 		Check(w.stageSeen[i], "C16: every stage ran");
@@ -496,7 +571,7 @@ SectionLedger(void)
 	SpawnRequestBegin(&tel, SPAWN_PURPOSE_PARKED, SPAWN_KIND_PARKED);
 	p.calls = 0;
 	WorldDefaults(&w, &r);
-	CheckInt((int)SpawnRunParked(r, b, PolicyChoose, &p, WorldStage, &w, &d, &tel), (int)SPAWN_REFUSAL_NONE, "D1: the request creates");
+	CheckInt((int)SpawnRunParked(r, b, g_nowMs, PolicyChoose, &p, WorldStage, &w, &d, &tel), (int)SPAWN_REFUSAL_NONE, "D1: the request creates");
 	CheckInt((int)tel.m_nRequestsByPurpose[SPAWN_PURPOSE_PARKED], 1, "D2: the request counts by purpose");
 	CheckInt((int)tel.m_nRequestsByKind[SPAWN_KIND_PARKED], 1, "D3: the request counts by kind");
 
@@ -560,6 +635,8 @@ struct SSoakGen
 	bool modelEvicted;		/* the scripted world: the fixed model is not resident */
 	uint8_t arm;
 	bool everRechosen;
+	int32_t storedModel;		/* the car whose colours the store took, -1: none */
+	int16_t storedColor1, storedColor2;	/* the colours the store took */
 };
 
 struct SSoakCar
@@ -567,6 +644,7 @@ struct SSoakCar
 	float x, y, z;
 	int32_t model;
 	uint8_t createdBy;
+	int16_t color1, color2;		/* the effective colours (the decision's or the model's own) */
 	bool live;
 };
 
@@ -590,6 +668,21 @@ SoakPolicyModel(int32_t i)
 	return 500 + (i % 4);
 }
 
+/* The model's own colours (the constructor's draw, scripted): collision-free
+ * across the set's model ranges, so the soak's colour check can tell an old
+ * car's paint from the model's own. */
+static int16_t
+SoakModelColour1(int32_t model)
+{
+	return (int16_t)(1000 + model);
+}
+
+static int16_t
+SoakModelColour2(int32_t model)
+{
+	return (int16_t)(3000 + model);
+}
+
 static void
 SoakBuildSet(void)
 {
@@ -606,10 +699,12 @@ SoakBuildSet(void)
 		SSoakGen *g = &g_gens[i];
 
 		if (i < SOAK_IN_BAND) {
-			/* The dense quarter: a 60-point ring at 210..225 m around
-			 * the player, inside the generator band. */
+			/* The dense quarter: a 60-point ring at 212..227 m around the
+			 * player, inside the generator band and clear of both clips
+			 * (the near clip is 210, the far ring 230): the boundary is not
+			 * a float tie, so the soak reads the same on every libm. */
 			float a = kTwoPi * (float)i / (float)SOAK_IN_BAND;
-			float r = 210.0f + (float)(i % 4) * 5.0f;
+			float r = 212.0f + (float)(i % 4) * 5.0f;
 			g->x = r * cosf(a);
 			g->y = r * sinf(a);
 		} else {
@@ -642,6 +737,9 @@ SoakBuildSet(void)
 		g->arm = (i % 11 == 0) ? NEAR_BUBBLE_ARM_OCCLUDER :
 			((i % 5 == 0) ? NEAR_BUBBLE_ARM_ONSCREEN_BAND : NEAR_BUBBLE_ARM_SOFT);
 		g->everRechosen = false;
+		g->storedModel = -1;
+		g->storedColor1 = -1;
+		g->storedColor2 = -1;
 	}
 }
 
@@ -715,7 +813,7 @@ SoakGenerator(int32_t i, uint32_t now, const STrafficRings &rings,
 	/* The engine's own intake rows: RequestParked makes these two calls
 	 * (SpawnRequestBegin, and SpawnNoteCreated on a creation). */
 	SpawnRequestBegin(tel, SPAWN_PURPOSE_PARKED, SPAWN_KIND_PARKED);
-	refusal = SpawnRunParked(request, budget, PolicyChoose, &p, WorldStage, &w, &decision, tel);
+	refusal = SpawnRunParked(request, budget, now, PolicyChoose, &p, WorldStage, &w, &decision, tel);
 
 	/* The generator's own state, the same order CarGen.cpp applies it. */
 	if (decision.modelRechosen) {
@@ -733,10 +831,28 @@ SoakGenerator(int32_t i, uint32_t now, const STrafficRings &rings,
 		return;
 	SpawnNoteCreated(tel, SPAWN_PURPOSE_PARKED);
 
-	/* The creation: the handle, the uses, the next timer, the colours. */
-	if ((g->color1 == -1 || g->color2 == -1) && g->modelIndex < -1) {
-		g->color1 = (int16_t)(100 + (decision.modelIndex < 0 ? -decision.modelIndex : 0) % 50);
-		g->color2 = (int16_t)(150 + (decision.modelIndex < 0 ? -decision.modelIndex : 0) % 50);
+	/* The creation's effective colours: the decision's (the service applies
+	 * them) or the model's own; then the dynamic generator remembers its
+	 * first car's colours, read from the car the creation made (the old
+	 * policy). */
+	{
+		int32_t model = decision.modelIndex >= 0 ? decision.modelIndex : -decision.modelIndex;
+
+		if (decision.color1 != -1 && decision.color2 != -1) {
+			g_cars[g_numCars].color1 = decision.color1;
+			g_cars[g_numCars].color2 = decision.color2;
+		} else {
+			g_cars[g_numCars].color1 = SoakModelColour1(model);
+			g_cars[g_numCars].color2 = SoakModelColour2(model);
+		}
+		if ((g->color1 == -1 || g->color2 == -1) && g->modelIndex < -1) {
+			g->color1 = g_cars[g_numCars].color1;
+			g->color2 = g_cars[g_numCars].color2;
+			g->storedModel = model;
+			g->storedColor1 = g_cars[g_numCars].color1;
+			g->storedColor2 = g_cars[g_numCars].color2;
+		}
+		g_cars[g_numCars].model = model;
 	}
 	g->handle = g_numCars;
 	if (g->usesRemaining < UINT16_MAX)
@@ -745,7 +861,6 @@ SoakGenerator(int32_t i, uint32_t now, const STrafficRings &rings,
 	g_cars[g_numCars].x = decision.x;
 	g_cars[g_numCars].y = decision.y;
 	g_cars[g_numCars].z = decision.z;
-	g_cars[g_numCars].model = decision.modelIndex >= 0 ? decision.modelIndex : -decision.modelIndex;
 	g_cars[g_numCars].createdBy = decision.createdBy;
 	g_cars[g_numCars].live = true;
 	g_numCars++;
@@ -903,6 +1018,21 @@ SectionSoak(void)
 		printf("  the policy state: the re-choice moved %d generators' model fields; every other field stands\n", moved);
 	}
 
+	/* The colour store: every paint the store took belongs to the model of
+	 * the car it came from - the review's defect (a re-choice painting the
+	 * new model with the old car's colours) fails here. */
+	{
+		int32_t stored = 0;
+		for (i = 0; i < SOAK_GENERATORS; i++) {
+			if (g_gens[i].storedModel < 0)
+				continue;
+			stored++;
+			CheckInt(g_gens[i].storedColor1, SoakModelColour1(g_gens[i].storedModel), "E22: the stored colour 1 belongs to the car's model");
+			CheckInt(g_gens[i].storedColor2, SoakModelColour2(g_gens[i].storedModel), "E23: the stored colour 2 belongs to the car's model");
+		}
+		printf("  the colour store: %d generators remembered a car's paint; every one is its car's model's own\n", stored);
+	}
+
 	/* The save/load rebuild's own property: the parked path reads the
 	 * request alone, so the same generator state answers the same - the
 	 * state a save carries is everything the path reads. */
@@ -921,7 +1051,7 @@ SectionSoak(void)
 				break;
 			}
 		}
-		Check(holder >= 0 && slot >= 0, "E22: a generator holds a car");
+		Check(holder >= 0 && slot >= 0, "E24: a generator holds a car");
 		r1 = MakeRequest(g_gens[holder].modelIndex);
 		r2 = r1;
 		budget = MakeBudget(g_numLive, target);
@@ -929,9 +1059,9 @@ SectionSoak(void)
 		p2.model = SoakPolicyModel(holder);
 		WorldDefaults(&w1, &r1);
 		WorldDefaults(&w2, &r2);
-		CheckInt((int)SpawnRunParked(r1, budget, PolicyChoose, &p1, WorldStage, &w1, &d1, &tel), (int)SPAWN_REFUSAL_BUDGET, "E23: the same state answers the same");
-		CheckInt((int)SpawnRunParked(r2, budget, PolicyChoose, &p2, WorldStage, &w2, &d2, &tel), (int)SPAWN_REFUSAL_BUDGET, "E24: the same state answers the same");
-		CheckInt(d1.modelIndex, d2.modelIndex, "E25: the decisions match");
+		CheckInt((int)SpawnRunParked(r1, budget, g_nowMs, PolicyChoose, &p1, WorldStage, &w1, &d1, &tel), (int)SPAWN_REFUSAL_BUDGET, "E25: the same state answers the same");
+		CheckInt((int)SpawnRunParked(r2, budget, g_nowMs, PolicyChoose, &p2, WorldStage, &w2, &d2, &tel), (int)SPAWN_REFUSAL_BUDGET, "E26: the same state answers the same");
+		CheckInt(d1.modelIndex, d2.modelIndex, "E27: the decisions match");
 	}
 }
 
@@ -967,7 +1097,7 @@ PrintCost(void)
 		w.arm = kArms[iter & 3];
 		w.blocked = (iter & 31) == 0;
 		p.calls = 0;
-		g_costSink += (uint64_t)(uint32_t)SpawnRunParked(r, b, PolicyChoose, &p, WorldStage, &w, &d, &tel);
+		g_costSink += (uint64_t)(uint32_t)SpawnRunParked(r, b, g_nowMs, PolicyChoose, &p, WorldStage, &w, &d, &tel);
 		g_costSink += (uint64_t)(uint32_t)d.modelIndex;
 	}
 	elapsed = NowSeconds() - start;

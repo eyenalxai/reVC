@@ -397,11 +397,15 @@ static inline ENearBubbleAnswer
 NearBubbleAnswerFor(const SNearBubbleCandidate &c)
 {
 	ENearBubbleArm arm = NearBubbleArmFor(c);
+
+	/* The one classification of the arms: the ray-free arms allow, the
+	 * refusal refuses, and what is left is the two arms the confirmation
+	 * ray decides. */
+	if (NearBubbleArmAllowsWithoutRay(arm))
+		return NEAR_BUBBLE_ALLOWED;
 	if (arm == NEAR_BUBBLE_ARM_NONE)
 		return NEAR_BUBBLE_REFUSED;
-	if (arm == NEAR_BUBBLE_ARM_OCCLUDER || arm == NEAR_BUBBLE_ARM_RAY)
-		return NEAR_BUBBLE_SEEK_LOS;
-	return NEAR_BUBBLE_ALLOWED;
+	return NEAR_BUBBLE_SEEK_LOS;
 }
 
 /* The bubble's share of a budget: the cars the ring holds over its area, times

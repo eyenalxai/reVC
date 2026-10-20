@@ -854,7 +854,10 @@ SpawnReadinessReady(SSpawnServiceTelemetry *tel, ESpawnPurpose purpose, uint32_t
 	if (purpose < 0 || purpose >= SPAWN_PURPOSE_COUNT)
 		return;
 	if (tel->m_aReadinessSinceMs[purpose] != 0) {
-		tel->m_nReadinessWaitMs += nowMs - tel->m_aReadinessSinceMs[purpose];
+		/* The same convention as the deferral: a zero clock reads as 1, so
+		 * a request that passed in the boot millisecond cannot wrap the
+		 * difference. */
+		tel->m_nReadinessWaitMs += (nowMs ? nowMs : 1) - tel->m_aReadinessSinceMs[purpose];
 		tel->m_aReadinessSinceMs[purpose] = 0;
 	}
 }
@@ -914,14 +917,24 @@ SpawnDecideExplicit(const SSpawnExplicitRequest &request, SSpawnExplicitDecision
  * draw and the alarm and lock rolls are here, the parked kind's own policy,
  * with the generator's numbers passed in.
  *
- * The model state is the one thing the request moves: a dynamic generator
- * (modelIndex < 0) names a model to reuse; when the field is -1 or the stored
- * model is not resident, the requester's policy draws a fresh one (the
- * engine's call: CCarCtrl::ChooseCarModel(CCarCtrl::ChooseCarRating(zone)),
+ * The model state and the colours are what the request may move: a dynamic
+ * generator (modelIndex < 0) names a model to reuse; when the field is -1 or
+ * the stored model is not resident, the requester's policy draws a fresh one
+ * (the engine's call: CCarCtrl::ChooseCarModel(CCarCtrl::ChooseCarRating(zone)),
  * the old one). The decision carries the new field back (modelIndex =
- * -chosen) and the re-choice flag; the generator stores it and resets its
- * colours, the old policy. Every other field of the request is read-only: the
- * service cannot move the state the save file carries.
+ * -chosen), the re-choice flag and the colours the creation applies; on a
+ * re-choice the decision's colours are -1, because the old car's paint belongs
+ * to the old model and the new model takes its own. The generator stores the
+ * field and resets its colours, the old policy. Every other field of the
+ * request is read-only: the service cannot move the state the save file
+ * carries.
+ *
+ * The readiness is CStreaming::HasModelLoaded, the old generator's own check,
+ * kept for the parked path's equivalence (the parked ticket is the placement's
+ * migration: the map generator's car must appear exactly when the old code
+ * made it). The ambient's stricter rule - CSpawnReadiness::IsModelReady, the
+ * model with its txd and its animation block (VICE-151) - is the request
+ * gate's, not the parked path's. The parked path prewarms nothing.
  */
 
 /* One parked request. */
@@ -942,14 +955,15 @@ struct SSpawnParkedRequest
 typedef int32_t (*SpawnParkedModelFn)(void *user);
 
 /* The parked path's own answer beyond the created car: the model state the
- * dynamic resolution moved, and the placement's contract (the position, the
- * angle, the parked tag, the fresh-spawn grace). The generator stores the
- * model state back into its fields on every call; the placement is the
- * service's. */
+ * dynamic resolution moved, the colours the creation applies, and the
+ * placement's contract (the position, the angle, the parked tag, the
+ * fresh-spawn grace). The generator stores the model state back into its
+ * fields on every call; the placement and the colours are the service's. */
 struct SSpawnParkedDecision
 {
 	int32_t modelIndex;	/* the generator's new m_nModelIndex */
-	bool modelRechosen;	/* a fresh dynamic model was chosen: the colours reset */
+	bool modelRechosen;	/* a fresh dynamic model was chosen: the field and the colours reset */
+	int16_t color1, color2;	/* the colours the creation applies (-1: the model's own) */
 	float x, y, z;		/* the placement (the ground plus the base offset) */
 	float angle;
 	uint8_t createdBy;	/* SPAWN_VEHICLE_TAG_PARKED */
@@ -1004,7 +1018,7 @@ enum ESpawnParkedStage
 {
 	SPAWN_PARKED_STAGE_MODEL = 0,
 	SPAWN_PARKED_STAGE_BLOCKAGE,
-	SPAWN_PARKED_STAGE_READY,
+	SPAWN_PARKED_STAGE_READINESS,
 	SPAWN_PARKED_STAGE_GROUND,
 	SPAWN_PARKED_STAGE_BUBBLE,
 	SPAWN_PARKED_STAGE_COUNT
@@ -1012,13 +1026,15 @@ enum ESpawnParkedStage
 
 typedef void (*SpawnParkedStageFn)(void *user, ESpawnParkedStage stage, int32_t model, SSpawnParkedFacts *facts);
 
-/* The request's start: the decision carries the request's own state until a
- * gate moves it. */
+/* The request's start: the decision carries the request's own state (the
+ * model field, the colours, the placement) until a gate moves it. */
 static inline void
 SpawnParkedDecisionBegin(const SSpawnParkedRequest &request, SSpawnParkedDecision *decision)
 {
 	decision->modelIndex = request.modelIndex;
 	decision->modelRechosen = false;
+	decision->color1 = request.color1;
+	decision->color2 = request.color2;
 	decision->x = request.x;
 	decision->y = request.y;
 	decision->z = request.z;
@@ -1027,8 +1043,12 @@ SpawnParkedDecisionBegin(const SSpawnParkedRequest &request, SSpawnParkedDecisio
 	decision->protectMs = NEAR_BUBBLE_GRACE_MS;
 }
 
-/* The facts' start: every gate's fact at its refusing side, so a stage that
- * does not fill one cannot pass it by accident. */
+/* The facts' start: the values a nil stage leaves for its gate. The engine's
+ * stage always fills the fact before the gate that reads it (the blockage,
+ * the readiness, the ground, the ladder, the stored model's residency), so
+ * these defaults only serve a caller that drives the path without world work:
+ * the readiness, the ground and the arm refuse, the blockage passes, and the
+ * empty field draws a fresh dynamic model. */
 static inline void
 SpawnParkedFactsBegin(SSpawnParkedFacts *facts)
 {
@@ -1057,13 +1077,16 @@ SpawnParkedBudgetGate(const SSpawnParkedBudget &budget, SSpawnServiceTelemetry *
  * The model resolution: the fixed model passes through; a dynamic generator
  * reuses its stored model while it is resident (the field is not -1 and the
  * fact says so), else the policy draws a fresh one. The re-choice stores the
- * new field and asks the caller to reset the colours; a policy with nothing
- * to place refuses READINESS (the old `if (mi < 0) return`).
+ * new field and clears the decision's colours - the old car's paint belongs
+ * to the old model - and the generator resets its own fields on the flag. A
+ * policy with nothing to place is a readiness refusal (the old
+ * `if (mi < 0) return`), counted on the purpose's wait clock; the decision's
+ * model field stands.
  */
 static inline ESpawnRefusal
 SpawnParkedResolveModel(const SSpawnParkedRequest &request, bool storedModelLoaded,
 	SpawnParkedModelFn chooseModel, void *chooseUser,
-	SSpawnParkedDecision *decision, SSpawnServiceTelemetry *tel)
+	SSpawnParkedDecision *decision, uint32_t nowMs, SSpawnServiceTelemetry *tel)
 {
 	if (request.modelIndex >= 0)
 		return SPAWN_REFUSAL_NONE;
@@ -1073,13 +1096,15 @@ SpawnParkedResolveModel(const SSpawnParkedRequest &request, bool storedModelLoad
 	{
 		int32_t model = chooseModel ? chooseModel(chooseUser) : -1;
 		if (model < 0) {
-			/* Nothing to place: the field stands (the caller must not store
-			 * the decision's model on a refusal). */
-			SpawnNoteRefusal(tel, SPAWN_REFUSAL_READINESS);
+			/* Nothing to place: the decision's field stands, and the wait
+			 * clock of the purpose counts the deferral. */
+			SpawnReadinessDefer(tel, request.purpose, nowMs);
 			return SPAWN_REFUSAL_READINESS;
 		}
 		decision->modelIndex = -model;
 		decision->modelRechosen = true;
+		decision->color1 = -1;
+		decision->color2 = -1;
 	}
 	return SPAWN_REFUSAL_NONE;
 }
@@ -1096,16 +1121,20 @@ SpawnParkedBlockageGate(bool blocked, SSpawnServiceTelemetry *tel)
 	return SPAWN_REFUSAL_NONE;
 }
 
-/* The readiness: the resolved model is resident. The fixed path requests it
- * in the stage first (the old call's order: the request is what loads it for
- * a later frame). */
+/* The readiness: the resolved model is resident. The check is
+ * HasModelLoaded, the old generator's own (the section's comment states why
+ * the parked path keeps it instead of VICE-151's strict IsModelReady). The
+ * fixed path requests the model in the stage first (the old call's order: the
+ * request is what loads it for a later frame). A refusal is the purpose's
+ * readiness wait; a pass ends it. */
 static inline ESpawnRefusal
-SpawnParkedReadinessGate(bool modelLoaded, SSpawnServiceTelemetry *tel)
+SpawnParkedReadinessGate(bool modelLoaded, ESpawnPurpose purpose, uint32_t nowMs, SSpawnServiceTelemetry *tel)
 {
 	if (!modelLoaded) {
-		SpawnNoteRefusal(tel, SPAWN_REFUSAL_READINESS);
+		SpawnReadinessDefer(tel, purpose, nowMs);
 		return SPAWN_REFUSAL_READINESS;
 	}
+	SpawnReadinessReady(tel, purpose, nowMs);
 	return SPAWN_REFUSAL_NONE;
 }
 
@@ -1165,10 +1194,12 @@ SpawnDecideParked(const SSpawnParkedRequest &request, const SSpawnParkedFacts &f
  * Every stage's world work runs between the gates (the stage callback), so a
  * refusal costs exactly the work the old path spent before it. The return is
  * NONE on a creation, else the first gate's reason; the decision is filled on
- * every call (a budget refusal leaves it at the request's own state).
+ * every call (a budget refusal leaves it at the request's own state). The
+ * readiness refusals and waits go on the purpose's clock (nowMs, the game's
+ * milliseconds; the evidence program scripts the same clock).
  */
 static inline ESpawnRefusal
-SpawnRunParked(const SSpawnParkedRequest &request, const SSpawnParkedBudget &budget,
+SpawnRunParked(const SSpawnParkedRequest &request, const SSpawnParkedBudget &budget, uint32_t nowMs,
 	SpawnParkedModelFn chooseModel, void *chooseUser,
 	SpawnParkedStageFn stage, void *stageUser,
 	SSpawnParkedDecision *decision, SSpawnServiceTelemetry *tel)
@@ -1186,7 +1217,7 @@ SpawnRunParked(const SSpawnParkedRequest &request, const SSpawnParkedBudget &bud
 
 	if (stage)
 		stage(stageUser, SPAWN_PARKED_STAGE_MODEL, request.modelIndex, &facts);
-	refusal = SpawnParkedResolveModel(request, facts.storedModelLoaded, chooseModel, chooseUser, decision, tel);
+	refusal = SpawnParkedResolveModel(request, facts.storedModelLoaded, chooseModel, chooseUser, decision, nowMs, tel);
 	if (refusal != SPAWN_REFUSAL_NONE)
 		return refusal;
 	model = decision->modelIndex >= 0 ? decision->modelIndex : -decision->modelIndex;
@@ -1198,8 +1229,8 @@ SpawnRunParked(const SSpawnParkedRequest &request, const SSpawnParkedBudget &bud
 		return refusal;
 
 	if (stage)
-		stage(stageUser, SPAWN_PARKED_STAGE_READY, model, &facts);
-	refusal = SpawnParkedReadinessGate(facts.modelLoaded, tel);
+		stage(stageUser, SPAWN_PARKED_STAGE_READINESS, model, &facts);
+	refusal = SpawnParkedReadinessGate(facts.modelLoaded, request.purpose, nowMs, tel);
 	if (refusal != SPAWN_REFUSAL_NONE)
 		return refusal;
 
